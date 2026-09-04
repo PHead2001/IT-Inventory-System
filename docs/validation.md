@@ -15,8 +15,9 @@ package.json is the canonical command source. Iterate cheaply; certify the final
 | npm run test:db            | pgTAP and local-Supabase integration contracts                       |
 | npm run validate:db        | Clean reset → DB tests → type comparison                             |
 | npm run build              | Production build without a live database                             |
+| npm run test:e2e:list      | Discover browser tests without a running backend                     |
 | npm run test:e2e           | Local fictional users, backend-specific production build, Playwright |
-| npm run validate:app       | Static checks, unit/components, production build                     |
+| npm run validate:app       | Static checks, unit/components, E2E discovery, production build      |
 | npm run validate           | App gate, clean DB gate and critical E2E                             |
 
 Start Supabase before database/full validation. Final certification runs fresh `npm ci` then `npm run validate`. E2E rebuilds with local public backend values because they are build inputs.

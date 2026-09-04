@@ -97,4 +97,3 @@ updated_at?: string;
 Relationships: [{"foreignKeyName":"locations_parent_id_fkey","columns":["parent_id"],"isOneToOne":false,"referencedRelation":"locations","referencedColumns":["id"]}];
 };
 }; Views: { [_ in never]: never }; Functions: { [_ in never]: never }; Enums: { [_ in never]: never }; CompositeTypes: { [_ in never]: never }; } };
-

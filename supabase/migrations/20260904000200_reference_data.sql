@@ -44,4 +44,3 @@ insert into public.locations(code,name,parent_id,kind,can_hold_inventory,sort_or
 insert into public.locations(code,name,parent_id,kind,can_hold_inventory,sort_order) values ('ITC-RED','Red Container',(select id from public.locations where code='ITC'),'container',true,4);
 insert into public.locations(code,name,parent_id,kind,can_hold_inventory,sort_order) values ('ITC-BLACK','Black Container',(select id from public.locations where code='ITC'),'container',true,5);
 insert into public.locations(code,name,parent_id,kind,can_hold_inventory,sort_order) values ('ITC-CLEAR','Clear Container',(select id from public.locations where code='ITC'),'container',true,6);
-

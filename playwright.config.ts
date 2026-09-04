@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
+  // Keep database-type drift artifacts outside Playwright's cleaned directory.
+  outputDir: 'test-results/playwright',
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

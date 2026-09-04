@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import fixture from '../fixtures/auth.json';
+import fixture from '../fixtures/auth.json' with { type: 'json' };
 const fixtureEmails = fixture.emails,
   fixturePassword = fixture.password;
 const admin = () =>

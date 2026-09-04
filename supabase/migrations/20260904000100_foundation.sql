@@ -123,4 +123,3 @@ revoke all on all functions in schema private from public, anon, authenticated;
 -- Supabase administration/fixtures may update location records; triggers use invoker rights.
 grant usage on schema private to service_role;
 grant select, update on private.location_hierarchy_guard to service_role;
-
