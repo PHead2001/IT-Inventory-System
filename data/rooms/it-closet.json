@@ -1,0 +1,685 @@
+{
+  "schemaVersion": 1,
+  "roomId": "it-closet",
+  "locationCode": "ITC",
+  "units": "in",
+  "coordinateSystem": "x-right-y-back-z-up",
+  "dimensions": [84, 126, 102],
+  "geometryBasis": {
+    "room": "measured",
+    "doorOpening": "measured",
+    "rack": "measured",
+    "shelving": "measured",
+    "sections": "measured",
+    "drawers": "measured",
+    "containerDimensions": "measured",
+    "containerXY": "visual-default",
+    "doorHinge": "visual-default",
+    "shelfThickness": "visual-default",
+    "drawerOrdering": "assumption"
+  },
+  "visualDefaults": {
+    "shelfThickness": 1
+  },
+  "assumptions": {
+    "drawerOrdering": "Drawer numbers follow shelf A/B/C order on each side: left nearest door first; right nearest back wall first."
+  },
+  "envelope": {
+    "wallThickness": 2,
+    "showCeiling": false,
+    "frontWallMode": "cutaway"
+  },
+  "openings": [
+    {
+      "id": "entry-door",
+      "wall": "front",
+      "offset": 42,
+      "width": 36,
+      "height": 100,
+      "door": {
+        "hinge": "right",
+        "swing": "inward",
+        "openAngleDegrees": 90
+      }
+    }
+  ],
+  "rackFaceProfiles": [
+    {
+      "id": "double-switch-patch",
+      "width": 19,
+      "height": 3
+    },
+    {
+      "id": "unifi-switch",
+      "width": 19,
+      "height": 2
+    },
+    {
+      "id": "single-switch-patch",
+      "width": 19,
+      "height": 2
+    }
+  ],
+  "camera": {
+    "projection": "orthographic",
+    "target": [42, 63, 35],
+    "azimuthDegrees": 20,
+    "elevationDegrees": 55,
+    "azimuthLimitsDegrees": [-45, 45],
+    "elevationLimitsDegrees": [35, 70],
+    "zoomLimits": [0.75, 3],
+    "fitPadding": 1.15
+  },
+  "nodes": [
+    {
+      "id": "left-storage",
+      "kind": "group",
+      "position": [0, 0, 0],
+      "rotationZDegrees": 0,
+      "locationCode": "ITC-L",
+      "children": [
+        {
+          "id": "shelf-1",
+          "kind": "group",
+          "position": [0, 0, 0],
+          "rotationZDegrees": 0,
+          "locationCode": "ITC-S1",
+          "children": [
+            {
+              "id": "shelf-1a",
+              "kind": "box",
+              "position": [8, 18, 80.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S1A",
+              "measuredTopElevation": 81,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "1A",
+                "focusPoint": [8, 18, 80.5]
+              }
+            },
+            {
+              "id": "shelf-1b",
+              "kind": "box",
+              "position": [8, 42, 80.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S1B",
+              "measuredTopElevation": 81,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "1B",
+                "focusPoint": [8, 42, 80.5]
+              }
+            },
+            {
+              "id": "shelf-1c",
+              "kind": "box",
+              "position": [8, 66, 80.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S1C",
+              "measuredTopElevation": 81,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "1C",
+                "focusPoint": [8, 66, 80.5]
+              }
+            }
+          ]
+        },
+        {
+          "id": "shelf-2",
+          "kind": "group",
+          "position": [0, 0, 0],
+          "rotationZDegrees": 0,
+          "locationCode": "ITC-S2",
+          "children": [
+            {
+              "id": "shelf-2a",
+              "kind": "box",
+              "position": [8, 18, 48.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S2A",
+              "measuredTopElevation": 49,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "2A",
+                "focusPoint": [8, 18, 48.5]
+              }
+            },
+            {
+              "id": "shelf-2b",
+              "kind": "box",
+              "position": [8, 42, 48.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S2B",
+              "measuredTopElevation": 49,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "2B",
+                "focusPoint": [8, 42, 48.5]
+              }
+            },
+            {
+              "id": "shelf-2c",
+              "kind": "box",
+              "position": [8, 66, 48.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S2C",
+              "measuredTopElevation": 49,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "2C",
+                "focusPoint": [8, 66, 48.5]
+              }
+            }
+          ]
+        },
+        {
+          "id": "drawer-1",
+          "kind": "box",
+          "position": [8, 18, 43.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D01",
+          "measuredTopElevation": 45,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 1",
+            "focusPoint": [8, 18, 43.5]
+          }
+        },
+        {
+          "id": "drawer-2",
+          "kind": "box",
+          "position": [8, 42, 43.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D02",
+          "measuredTopElevation": 45,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 2",
+            "focusPoint": [8, 42, 43.5]
+          }
+        },
+        {
+          "id": "drawer-3",
+          "kind": "box",
+          "position": [8, 66, 43.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D03",
+          "measuredTopElevation": 45,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 3",
+            "focusPoint": [8, 66, 43.5]
+          }
+        },
+        {
+          "id": "drawer-4",
+          "kind": "box",
+          "position": [8, 18, 37.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D04",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 4",
+            "focusPoint": [8, 18, 37.5]
+          }
+        },
+        {
+          "id": "drawer-5",
+          "kind": "box",
+          "position": [8, 42, 37.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D05",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 5",
+            "focusPoint": [8, 42, 37.5]
+          }
+        },
+        {
+          "id": "drawer-6",
+          "kind": "box",
+          "position": [8, 66, 37.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D06",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 6",
+            "focusPoint": [8, 66, 37.5]
+          }
+        }
+      ]
+    },
+    {
+      "id": "right-storage",
+      "kind": "group",
+      "position": [0, 0, 0],
+      "rotationZDegrees": 0,
+      "locationCode": "ITC-R",
+      "children": [
+        {
+          "id": "shelf-3",
+          "kind": "group",
+          "position": [0, 0, 0],
+          "rotationZDegrees": 0,
+          "locationCode": "ITC-S3",
+          "children": [
+            {
+              "id": "shelf-3a",
+              "kind": "box",
+              "position": [76, 98, 61.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S3A",
+              "measuredTopElevation": 62,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "3A",
+                "focusPoint": [76, 98, 61.5]
+              }
+            },
+            {
+              "id": "shelf-3b",
+              "kind": "box",
+              "position": [76, 74, 61.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S3B",
+              "measuredTopElevation": 62,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "3B",
+                "focusPoint": [76, 74, 61.5]
+              }
+            },
+            {
+              "id": "shelf-3c",
+              "kind": "box",
+              "position": [76, 50, 61.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S3C",
+              "measuredTopElevation": 62,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "3C",
+                "focusPoint": [76, 50, 61.5]
+              }
+            }
+          ]
+        },
+        {
+          "id": "shelf-4",
+          "kind": "group",
+          "position": [0, 0, 0],
+          "rotationZDegrees": 0,
+          "locationCode": "ITC-S4",
+          "children": [
+            {
+              "id": "shelf-4a",
+              "kind": "box",
+              "position": [76, 98, 43.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S4A",
+              "measuredTopElevation": 44,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "4A",
+                "focusPoint": [76, 98, 43.5]
+              }
+            },
+            {
+              "id": "shelf-4b",
+              "kind": "box",
+              "position": [76, 74, 43.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S4B",
+              "measuredTopElevation": 44,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "4B",
+                "focusPoint": [76, 74, 43.5]
+              }
+            },
+            {
+              "id": "shelf-4c",
+              "kind": "box",
+              "position": [76, 50, 43.5],
+              "rotationZDegrees": 0,
+              "size": [16, 24, 1],
+              "locationCode": "ITC-S4C",
+              "measuredTopElevation": 44,
+              "visual": {
+                "color": "#475569",
+                "opacity": 1,
+                "edges": true
+              },
+              "interaction": {
+                "selectable": true,
+                "primaryBinding": true,
+                "label": "4C",
+                "focusPoint": [76, 50, 43.5]
+              }
+            }
+          ]
+        },
+        {
+          "id": "drawer-7",
+          "kind": "box",
+          "position": [76, 98, 39.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D07",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 7",
+            "focusPoint": [76, 98, 39.5]
+          }
+        },
+        {
+          "id": "drawer-8",
+          "kind": "box",
+          "position": [76, 74, 39.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D08",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 8",
+            "focusPoint": [76, 74, 39.5]
+          }
+        },
+        {
+          "id": "drawer-9",
+          "kind": "box",
+          "position": [76, 50, 39.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 3],
+          "locationCode": "ITC-D09",
+          "measuredTopElevation": 41,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 9",
+            "focusPoint": [76, 50, 39.5]
+          }
+        },
+        {
+          "id": "drawer-10",
+          "kind": "box",
+          "position": [76, 98, 33.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D10",
+          "measuredTopElevation": 37,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 10",
+            "focusPoint": [76, 98, 33.5]
+          }
+        },
+        {
+          "id": "drawer-11",
+          "kind": "box",
+          "position": [76, 74, 33.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D11",
+          "measuredTopElevation": 37,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 11",
+            "focusPoint": [76, 74, 33.5]
+          }
+        },
+        {
+          "id": "drawer-12",
+          "kind": "box",
+          "position": [76, 50, 33.5],
+          "rotationZDegrees": 0,
+          "size": [16, 24, 7],
+          "locationCode": "ITC-D12",
+          "measuredTopElevation": 37,
+          "visual": {
+            "color": "#334155",
+            "opacity": 1,
+            "edges": true
+          },
+          "interaction": {
+            "selectable": true,
+            "primaryBinding": true,
+            "label": "Drawer 12",
+            "focusPoint": [76, 50, 33.5]
+          }
+        }
+      ]
+    },
+    {
+      "id": "server-rack",
+      "kind": "box",
+      "position": [30, 96, 40.5],
+      "rotationZDegrees": 0,
+      "size": [22, 24, 81],
+      "locationCode": "ITC-RACK",
+      "visual": {
+        "color": "#1e293b",
+        "opacity": 1,
+        "edges": true
+      },
+      "interaction": {
+        "selectable": true,
+        "primaryBinding": true,
+        "label": "Server Rack",
+        "focusPoint": [30, 96, 40.5]
+      }
+    },
+    {
+      "id": "red-container",
+      "kind": "box",
+      "position": [9.5, 24, 6],
+      "rotationZDegrees": 0,
+      "size": [19, 24, 12],
+      "locationCode": "ITC-RED",
+      "visual": {
+        "color": "#b91c1c",
+        "opacity": 1,
+        "edges": true
+      },
+      "interaction": {
+        "selectable": true,
+        "primaryBinding": true,
+        "label": "Red Container",
+        "focusPoint": [9.5, 24, 6]
+      }
+    },
+    {
+      "id": "black-container",
+      "kind": "box",
+      "position": [74, 111, 7],
+      "rotationZDegrees": 0,
+      "size": [20, 30, 14],
+      "locationCode": "ITC-BLACK",
+      "visual": {
+        "color": "#171717",
+        "opacity": 1,
+        "edges": true
+      },
+      "interaction": {
+        "selectable": true,
+        "primaryBinding": true,
+        "label": "Black Container",
+        "focusPoint": [74, 111, 7]
+      }
+    },
+    {
+      "id": "clear-container",
+      "kind": "box",
+      "position": [75, 52.5, 6],
+      "rotationZDegrees": 0,
+      "size": [18, 25, 12],
+      "locationCode": "ITC-CLEAR",
+      "visual": {
+        "color": "#cbd5e1",
+        "opacity": 1,
+        "edges": true
+      },
+      "interaction": {
+        "selectable": true,
+        "primaryBinding": true,
+        "label": "Clear Container",
+        "focusPoint": [75, 52.5, 6]
+      }
+    }
+  ]
+}

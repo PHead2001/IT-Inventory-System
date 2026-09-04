@@ -1,0 +1,3 @@
+-- Required categories and locations are migrations, not disposable fixtures.
+-- Fictional Auth users are created only by scripts/fixtures.mjs against local Supabase.
+
