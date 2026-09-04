@@ -27,7 +27,7 @@ Commit placeholders only. Public values are build inputs; do not reuse an artifa
 
 ## Auth provisioning
 
-Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Configure exact hosted site/redirect URLs, and set custom SMTP before real invitations. Apply the checked-in invite/recovery templates. Avoid broad redirect wildcards. Invitations do not grant data access until the owner creates an active viewer/staff membership.
+Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Configure exact hosted site/redirect URLs, and set custom SMTP before real invitations. Apply the checked-in invite/recovery templates. APP_ORIGIN is the deployment origin; allowlist its exact /auth/confirm URL. Templates honor that requested callback and fall back to Site URL + /auth/confirm when no override is supplied. Use an origin without a trailing slash for Site URL. When inviting into a preview explicitly, supply its full /auth/confirm callback. Avoid broad redirect wildcards. Invitations do not grant data access until the owner creates an active viewer/staff membership.
 
 ## Production migrations and release
 

@@ -13,6 +13,8 @@ The requested IT Inventory Management folder is the working checkout. Diagnose O
 5. Set APP_ORIGIN=http://localhost:3000 and APP_ENV=local.
 6. Run `npm run dev`.
 
+Local SMTP permits 100 captured messages/hour for repeatable email tests; this is not a hosted SMTP configuration recommendation.
+
 Local ports: app 3000, API 54321, PostgreSQL 54322, Studio 54323, email capture 54324. CLI status contains local administrative credentials: never publish its full output. The deployed application needs no service-role key.
 
 Production compilation can use nonsecret URL/key placeholders without Supabase running. Runtime authentication needs a working backend.

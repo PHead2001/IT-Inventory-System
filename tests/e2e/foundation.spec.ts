@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 const fixtureEmails = fixture.emails,
@@ -15,6 +15,38 @@ const localClient = (key: string) => {
   });
 };
 const admin = () => localClient(process.env.LOCAL_SERVICE_ROLE_KEY!);
+async function capturedEmailLink(request: APIRequestContext, email: string) {
+  const mailpit = 'http://127.0.0.1:54324/api/v1';
+  let messageId: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get(mailpit + '/messages');
+        expect(response.ok()).toBe(true);
+        const inbox = (await response.json()) as {
+          messages: { ID: string; To: { Address: string }[] }[];
+        };
+        messageId = inbox.messages.find((message) =>
+          message.To.some((recipient) => recipient.Address === email),
+        )?.ID;
+        return messageId;
+      },
+      { timeout: 10_000 },
+    )
+    .toBeTruthy();
+  const response = await request.get(
+    mailpit + '/message/' + encodeURIComponent(messageId!),
+  );
+  expect(response.ok()).toBe(true);
+  const message = (await response.json()) as { HTML: string };
+  const href = /href="([^"]+)"/.exec(message.HTML)?.[1];
+  expect(
+    href,
+    'captured application email contains a confirmation link',
+  ).toBeTruthy();
+  return new URL(href!.replaceAll('&amp;', '&'));
+}
+
 async function signIn(page: import('@playwright/test').Page, email: string) {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(email);
@@ -108,30 +140,92 @@ test('phone navigation remains usable and has no horizontal overflow', async ({
     page.getByRole('heading', { name: 'Room navigation' }),
   ).toBeVisible();
 });
-test('invitation GET does not consume token; POST sets password without granting membership', async ({
+for (const destination of ['default', 'preview'] as const)
+  test(
+    'invitation email uses ' +
+      destination +
+      ' destination without consuming on GET',
+    async ({ page, request }) => {
+      const email = 'invite-' + crypto.randomUUID() + '@example.test';
+      const client = admin();
+      const origin =
+        destination === 'preview'
+          ? process.env.APP_ORIGIN!
+          : 'http://localhost:3000';
+      const invited = await client.auth.admin.inviteUserByEmail(
+        email,
+        destination === 'preview'
+          ? { redirectTo: origin + '/auth/confirm' }
+          : {},
+      );
+      if (invited.error) throw invited.error;
+      const link = await capturedEmailLink(request, email);
+      expect(link.origin).toBe(origin);
+      expect(link.pathname).toBe('/auth/confirm');
+      expect(link.searchParams.get('type')).toBe('invite');
+      await page.goto(link.href);
+      await page.reload();
+      await page.getByRole('button', { name: 'Continue securely' }).click();
+      await expect(page).toHaveURL(origin + '/set-password');
+      await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
+      await page
+        .getByLabel('Confirm password', { exact: true })
+        .fill(fixturePassword);
+      await page.getByRole('button', { name: 'Set password' }).click();
+      await expect(page).toHaveURL(origin + '/access-denied');
+    },
+  );
+
+test('recovery email returns to the requesting deployment and changes the password', async ({
   page,
+  request,
 }) => {
-  const email = 'invite-' + crypto.randomUUID() + '@example.test';
   const client = admin();
-  const generated = await client.auth.admin.generateLink({
-    type: 'invite',
+  const email = 'recover-' + crypto.randomUUID() + '@example.test';
+  const created = await client.auth.admin.createUser({
     email,
+    password: fixturePassword,
+    email_confirm: true,
   });
-  if (generated.error) throw generated.error;
-  const token = generated.data.properties.hashed_token;
-  const url =
-    '/auth/confirm?type=invite&token_hash=' + encodeURIComponent(token);
-  await page.goto(url);
+  if (created.error) throw created.error;
+  const membership = await client.from('app_members').insert({
+    user_id: created.data.user.id,
+    display_name: 'Recovery Test',
+    role: 'viewer',
+    active: true,
+  });
+  expect(membership.error).toBeNull();
+  await page.goto('/forgot-password');
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByRole('button', { name: 'Send reset email' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'If this address has an account',
+  );
+  const link = await capturedEmailLink(request, email);
+  expect(process.env.APP_ORIGIN).not.toBe('http://localhost:3000');
+  expect(link.origin).toBe(process.env.APP_ORIGIN);
+  expect(link.pathname).toBe('/auth/confirm');
+  expect(link.searchParams.get('type')).toBe('recovery');
+  await page.goto(link.href);
   await page.reload();
   await page.getByRole('button', { name: 'Continue securely' }).click();
-  await expect(page).toHaveURL(/\/set-password$/);
-  await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
-  await page
-    .getByLabel('Confirm password', { exact: true })
-    .fill(fixturePassword);
+  await expect(page).toHaveURL(process.env.APP_ORIGIN + '/set-password');
+  const password = fixturePassword + '-reset';
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByLabel('Confirm password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Set password' }).click();
-  await expect(page).toHaveURL(/\/access-denied$/);
+  await expect(
+    page.getByRole('heading', { name: 'Inventory workspace' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Inventory workspace' }),
+  ).toBeVisible();
 });
+
 test('recovery exchanges token once and keeps a fixed destination', async ({
   page,
 }) => {

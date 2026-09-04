@@ -7,7 +7,8 @@ try {
     ...process.env,
     NEXT_PUBLIC_SUPABASE_URL: status.API_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: status.ANON_KEY,
-    APP_ORIGIN: 'http://localhost:3000',
+    // Deliberately differs from Supabase Site URL to exercise preview email redirects.
+    APP_ORIGIN: 'http://127.0.0.1:3000',
     APP_ENV: 'local',
     LOCAL_API_URL: status.API_URL,
     LOCAL_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY,

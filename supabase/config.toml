@@ -37,6 +37,9 @@ refresh_token_reuse_interval = 10
 enable_signup = false
 enable_anonymous_sign_ins = false
 minimum_password_length = 12
+# Local-only captured email allowance supports repeatable invitation/recovery tests.
+[auth.rate_limit]
+email_sent = 100
 [auth.email]
 # This enables the email provider. The global auth.enable_signup=false still blocks registration.
 enable_signup = true

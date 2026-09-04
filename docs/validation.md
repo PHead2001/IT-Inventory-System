@@ -28,7 +28,7 @@ Unit/component tests cover strict room parsing, measured/default classifications
 
 pgTAP proves counts/categories, immutable identity, hierarchy integrity, role-based reads, direct-write denial and immediate deactivation. A separate real database integration test checks the exact 35-location fixture, room bindings/parents/capabilities, and concurrent hierarchy writers.
 
-Playwright uses real local Supabase and the production Next server for login/logout, membership denial/deactivation, phone layout, invitation and recovery exchange. Do not substitute mocked Auth for this proof.
+Playwright uses real local Supabase and the production Next server for login/logout, membership denial/deactivation, phone layout, captured invitation/recovery emails (including a deployment origin different from Site URL), password updates and token replay rejection. Do not substitute mocked Auth for this proof.
 
 ## Efficient iteration
 
