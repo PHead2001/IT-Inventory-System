@@ -1,6 +1,6 @@
 # Local development
 
-Use Node 24.19.0 and npm 11.11.0, matching .nvmrc, package engines and CI. Windows requires Git and Docker Desktop with a working WSL2/Linux-container backend; WSL2 without a distribution/container runtime is insufficient.
+Use Node 24.19.0 and npm 11.11.0, matching .nvmrc and CI. package engines permit the Vercel-managed Node 24.x runtime; the local/CI certification version remains exact. Windows requires Git and Docker Desktop with a working WSL2/Linux-container backend; WSL2 without a distribution/container runtime is insufficient.
 
 The requested IT Inventory Management folder is the working checkout. Diagnose OneDrive locking/sync problems before changing its location.
 
@@ -19,7 +19,7 @@ Production compilation can use nonsecret URL/key placeholders without Supabase r
 
 ## Local accounts
 
-Public signup is disabled. Invite a fictional user in Studio, follow the captured local email, explicitly confirm and set a password. Then provision membership through the local SQL editor:
+Public signup is disabled globally with auth.enable_signup=false. Keep auth.email.enable_signup=true: the pinned CLI maps this provider switch to email login availability, not just registration. Invite a fictional user in Studio, follow the captured local email, explicitly confirm and set a password. Then provision membership through the local SQL editor:
 
 ```sql
 insert into public.app_members(user_id, display_name, role, active)

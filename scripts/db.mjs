@@ -4,20 +4,23 @@ const command = process.argv[2];
 const cli = (...args) => npm(['exec', '--', 'supabase', ...args]);
 const types = (check) => {
   localStatus();
-  const generated = npm(
-    [
-      'exec',
-      '--',
-      'supabase',
-      'gen',
-      'types',
-      'typescript',
-      '--local',
-      '--schema',
-      'public',
-    ],
-    { capture: true },
-  ).replace(/\r\n/g, '\n');
+  const generated =
+    npm(
+      [
+        'exec',
+        '--',
+        'supabase',
+        'gen',
+        'types',
+        'typescript',
+        '--local',
+        '--schema',
+        'public',
+      ],
+      { capture: true },
+    )
+      .replace(/\r\n/g, '\n')
+      .trimEnd() + '\n';
   const target = 'src/lib/supabase/database.types.ts';
   if (!check) {
     writeFileSync(target, generated);

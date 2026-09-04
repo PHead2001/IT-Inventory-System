@@ -3,18 +3,35 @@ import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 const fixtureEmails = fixture.emails,
   fixturePassword = fixture.password;
-const admin = () =>
-  createClient(
-    process.env.LOCAL_API_URL!,
-    process.env.LOCAL_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
-  );
+const localClient = (key: string) => {
+  const url = new URL(process.env.LOCAL_API_URL!);
+  if (
+    !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+    url.port !== '54321'
+  )
+    throw new Error('Refusing nonlocal Auth test target');
+  return createClient(url.href, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+};
+const admin = () => localClient(process.env.LOCAL_SERVICE_ROLE_KEY!);
 async function signIn(page: import('@playwright/test').Page, email: string) {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
+test('public registration remains disabled with email sign-in enabled', async () => {
+  const client = localClient(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!);
+  const result = await client.auth.signUp({
+    email: 'uninvited-' + crypto.randomUUID() + '@example.test',
+    password: fixturePassword,
+  });
+  expect(result.error?.code).toBe('signup_disabled');
+  expect(result.data.session).toBeNull();
+  expect(result.data.user).toBeNull();
+});
+
 test('anonymous navigation cannot browse the application', async ({ page }) => {
   await page.goto('/inventory');
   await expect(page).toHaveURL(/\/login$/);
@@ -132,7 +149,7 @@ test('recovery exchanges token once and keeps a fixed destination', async ({
   await expect(page).toHaveURL(/\/set-password$/);
   await page.goto(url);
   await page.getByRole('button', { name: 'Continue securely' }).click();
-  await expect(page.getByRole('alert')).toContainText(
-    'expired or has already been used',
-  );
+  await expect(
+    page.getByRole('form', { name: 'Continue securely' }).getByRole('alert'),
+  ).toContainText('expired or has already been used');
 });

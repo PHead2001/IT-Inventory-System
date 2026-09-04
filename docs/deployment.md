@@ -6,6 +6,8 @@ Feature branch → PR → required checks → preview when configured → human 
 
 Do not suppress main deployment or add a custom manual promotion pipeline. Agents do not merge or initiate production actions without explicit authorization. The owner connects GitHub/Vercel and enables main protection with the required aggregate check and review requirements.
 
+Local development and CI pin Node 24.19.0 in .nvmrc. package.json allows Node 24.x because [Vercel manages minor and patch updates](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions). The Vercel install command explicitly runs npm 11.11.0 before installing the lockfile; packageManager alone does not select npm without Corepack.
+
 ## Environments
 
 Development/CI use disposable local Supabase. Previews use a separate hosted nonproduction project with fictional data. Production uses its own project and real inventory.
@@ -25,7 +27,7 @@ Commit placeholders only. Public values are build inputs; do not reuse an artifa
 
 ## Auth provisioning
 
-Disable signup and anonymous sign-in, configure exact hosted site/redirect URLs, and set custom SMTP before real invitations. Apply the checked-in invite/recovery templates. Avoid broad redirect wildcards. Invitations do not grant data access until the owner creates an active viewer/staff membership.
+Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Configure exact hosted site/redirect URLs, and set custom SMTP before real invitations. Apply the checked-in invite/recovery templates. Avoid broad redirect wildcards. Invitations do not grant data access until the owner creates an active viewer/staff membership.
 
 ## Production migrations and release
 

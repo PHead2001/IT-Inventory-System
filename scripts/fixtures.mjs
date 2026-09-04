@@ -26,6 +26,26 @@ export async function seedUsers(status) {
       });
       if (updated.error) throw updated.error;
     }
+    // Prove real password Auth before browser assertions obscure fixture failures.
+    const reader = createClient(status.API_URL, status.ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const signedIn = await reader.auth.signInWithPassword({
+      email,
+      password: fixturePassword,
+    });
+    if (signedIn.error)
+      throw new Error(
+        'Local ' +
+          kind +
+          ' fixture cannot sign in: ' +
+          signedIn.error.code +
+          ' (HTTP ' +
+          signedIn.error.status +
+          ')',
+      );
+    const signedOut = await reader.auth.signOut({ scope: 'local' });
+    if (signedOut.error) throw new Error('Local fixture sign-out failed');
     if (kind !== 'nonmember') {
       const result = await admin.from('app_members').upsert({
         user_id: user.id,
