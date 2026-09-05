@@ -132,6 +132,12 @@ export const roomSchema = z
             code: 'custom',
             message: 'Groups require children and cannot have size',
           });
+        if (node.kind === 'group' && node.interaction?.selectable)
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Groups cannot be directly selectable; select aggregate locations through the location picker',
+          });
         if (node.interaction && !node.locationCode)
           ctx.addIssue({
             code: 'custom',

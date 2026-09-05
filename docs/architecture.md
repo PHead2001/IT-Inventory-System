@@ -23,6 +23,7 @@ The strict Zod schema in `src/features/room/schema.ts` is the type source; TypeS
 - Inches: X left→right, Y door→back, Z floor→ceiling.
 - Box positions are centers; sizes are full extents. Groups define parent-local origins.
 - Children inherit transforms; rotationZDegrees is vertical yaw.
+- Box nodes may define interaction targets. Groups may bind aggregate location codes for picker selection, focus and descendant highlighting; the schema rejects selectable group targets while allowing nonselectable group focus metadata.
 - interaction.focusPoint is **parent-local**.
 - interaction.hitBox.center is **node-local**, rotating with its node.
 - The renderer maps positions [x,y,z]→[x,z,-y] and sizes [x,y,z]→[x,z,y].
