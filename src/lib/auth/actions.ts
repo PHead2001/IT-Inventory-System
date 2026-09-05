@@ -1,6 +1,6 @@
 'use server';
 import { redirect } from 'next/navigation';
-import { z } from 'zod';
+import { getAppOrigin } from './origin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   confirmationSchema,
@@ -37,7 +37,7 @@ export async function recover(
 ): Promise<AuthState> {
   const email = emailSchema.safeParse(form.get('email'));
   if (!email.success) return { error: 'Enter a valid email address.' };
-  const origin = z.url().parse(process.env.APP_ORIGIN);
+  const origin = getAppOrigin();
   const supabase = await createSupabaseServerClient(true);
   await supabase.auth.resetPasswordForEmail(email.data, {
     redirectTo: new URL('/auth/confirm', origin).href,

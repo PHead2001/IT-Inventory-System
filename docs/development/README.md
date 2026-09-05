@@ -10,7 +10,7 @@ The requested IT Inventory Management folder is the working checkout. Diagnose O
 2. Run `npm run db:start` and `npm run db:reset`.
 3. Copy .env.example to ignored .env.local.
 4. Obtain URL/public key from `npx supabase status`.
-5. Set APP_ORIGIN=http://localhost:3000 and APP_ENV=local.
+5. Set APP_ENV=local. APP_ORIGIN is optional and defaults to http://localhost:3000 when VERCEL_BRANCH_URL is absent; set it explicitly for another local origin/port.
 6. Run `npm run dev`.
 
 Local SMTP permits 100 captured messages/hour for repeatable email tests; this is not a hosted SMTP configuration recommendation.
@@ -18,6 +18,8 @@ Local SMTP permits 100 captured messages/hour for repeatable email tests; this i
 Local ports: app 3000, API 54321, PostgreSQL 54322, Studio 54323, email capture 54324. CLI status contains local administrative credentials: never publish its full output. The deployed application needs no service-role key.
 
 Production compilation can use nonsecret URL/key placeholders without Supabase running. Runtime authentication needs a working backend.
+
+Vercel previews derive their HTTPS origin from VERCEL_BRANCH_URL when APP_ORIGIN is unset. Do not copy the local APP_ORIGIN into Vercel Preview settings. See [deployment](../deployment.md) for the one-time Supabase preview wildcard and exact production redirects.
 
 ## Local accounts
 

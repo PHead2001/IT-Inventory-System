@@ -18,7 +18,7 @@ One shared preview database is sufficient initially, but incompatible schema-cha
 | --------------------------------------------------------- | ---------------------------------------- |
 | NEXT_PUBLIC_SUPABASE_URL                                  | Environment-specific public backend URL  |
 | NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY                      | Public key; RLS remains mandatory        |
-| APP_ORIGIN                                                | Server-only canonical app origin         |
+| APP_ORIGIN                                                | Optional server-only origin override     |
 | APP_ENV                                                   | Server-only environment label            |
 | Supabase access token/project reference/database password | Owner migration tooling only             |
 | Service-role credential                                   | Owner administration/local fixtures only |
@@ -27,7 +27,13 @@ Commit placeholders only. Public values are build inputs; do not reuse an artifa
 
 ## Auth provisioning
 
-Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Configure exact hosted site/redirect URLs, and set custom SMTP before real invitations. Apply the checked-in invite/recovery templates. APP_ORIGIN is the deployment origin; allowlist its exact /auth/confirm URL. Templates honor that requested callback and fall back to Site URL + /auth/confirm when no override is supplied. Use an origin without a trailing slash for Site URL. When inviting into a preview explicitly, supply its full /auth/confirm callback. Avoid broad redirect wildcards. Invitations do not grant data access until the owner creates an active viewer/staff membership.
+Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Set custom SMTP before real invitations and apply the checked-in invite/recovery templates. Invitations do not grant data access until the owner creates an active viewer/staff membership.
+
+Origin precedence is explicit APP_ORIGIN → VERCEL_BRANCH_URL → http://localhost:3000. The branch hostname is normalized to HTTPS with no trailing slash; commit-specific VERCEL_URL is not used. Enable access to [Vercel system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables). Leave APP_ORIGIN unset in the Preview environment so every Git branch resolves automatically; remove any inherited localhost or production override there. Set APP_ORIGIN explicitly for the production custom domain and non-Vercel hosted deployments.
+
+In the separate nonproduction Supabase project's Auth redirect allowlist, configure a Vercel preview wildcard once: `https://<project-slug>-git-*-<team-or-account-slug>.vercel.app/auth/confirm`. Replace the placeholders using the actual stable branch hostname and verify that it matches; do not include literal angle brackets. This scopes the wildcard to this project's branch previews and the exact callback path. Supabase supports [preview redirect wildcards](https://supabase.com/docs/guides/auth/redirect-urls). Keep production's Site URL and redirect allowlist exact (for example, `https://inventory.example.com` and `https://inventory.example.com/auth/confirm`); do not add preview wildcards to the production project.
+
+Templates honor the requested full /auth/confirm callback and fall back to Site URL + /auth/confirm when no override is supplied. Use an origin without a trailing slash for Site URL. When inviting into a preview explicitly, supply its stable branch origin + /auth/confirm as redirectTo. Local development keeps the exact localhost callback configured in supabase/config.toml.
 
 ## Production migrations and release
 

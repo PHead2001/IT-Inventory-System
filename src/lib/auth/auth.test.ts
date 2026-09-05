@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { confirmationSchema, passwordSchema } from './schemas';
 import { isActiveMember, mayMutateInventory } from './membership';
 const mocks = vi.hoisted(() => ({
@@ -25,7 +25,9 @@ const form = (data: Record<string, string>) => {
 };
 beforeEach(() => {
   vi.resetAllMocks();
-  process.env.APP_ORIGIN = 'http://localhost:3000';
+  vi.stubEnv('APP_ORIGIN', 'http://localhost:3000');
+  vi.stubEnv('VERCEL_BRANCH_URL', undefined);
+  vi.stubEnv('VERCEL_URL', undefined);
   mocks.signInWithPassword.mockResolvedValue({ error: null });
   mocks.signOut.mockResolvedValue({ error: null });
   mocks.verifyOtp.mockResolvedValue({ error: null });
@@ -36,7 +38,63 @@ beforeEach(() => {
   });
   mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
 });
+afterEach(() => vi.unstubAllEnvs());
 describe('auth boundaries', () => {
+  it.each([
+    [
+      'explicit override',
+      'https://inventory.example.com/',
+      'inventory-git-feature-team.vercel.app',
+      'https://inventory.example.com',
+    ],
+    [
+      'branch hostname',
+      undefined,
+      'inventory-git-feature-team.vercel.app',
+      'https://inventory-git-feature-team.vercel.app',
+    ],
+    [
+      'branch HTTPS and trailing slash',
+      undefined,
+      'https://inventory-git-feature-team.vercel.app/',
+      'https://inventory-git-feature-team.vercel.app',
+    ],
+    [
+      'branch forced HTTPS',
+      undefined,
+      'http://inventory-git-feature-team.vercel.app/',
+      'https://inventory-git-feature-team.vercel.app',
+    ],
+    ['localhost fallback', undefined, undefined, 'http://localhost:3000'],
+    [
+      'explicit local port',
+      'http://localhost:4000/',
+      undefined,
+      'http://localhost:4000',
+    ],
+  ])(
+    'uses %s for the recovery callback',
+    async (_name, override, branch, expected) => {
+      vi.stubEnv('APP_ORIGIN', override);
+      vi.stubEnv('VERCEL_BRANCH_URL', branch);
+      vi.stubEnv('VERCEL_URL', 'inventory-commit123-team.vercel.app');
+      await recover({}, form({ email: 'staff@example.test' }));
+      expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith(
+        'staff@example.test',
+        {
+          redirectTo: expected + '/auth/confirm',
+        },
+      );
+    },
+  );
+  it('rejects an invalid explicit origin rather than falling back', async () => {
+    vi.stubEnv('APP_ORIGIN', 'not-a-url');
+    vi.stubEnv('VERCEL_BRANCH_URL', 'inventory-git-feature-team.vercel.app');
+    await expect(
+      recover({}, form({ email: 'staff@example.test' })),
+    ).rejects.toThrow();
+    expect(mocks.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
   it('limits member access to active approved roles', () => {
     const base = {
       user_id: 'u',

@@ -14,7 +14,7 @@ npm run db:start
 npm run db:reset
 ```
 
-Copy `.env.example` to ignored `.env.local`. Obtain the local API URL and public/anon key from `npx supabase status`; never put a service-role key in public variables. Set `APP_ORIGIN=http://localhost:3000`, then run `npm run dev`.
+Copy `.env.example` to ignored `.env.local`. Obtain the local API URL and public/anon key from `npx supabase status`; never put a service-role key in public variables. The origin defaults to `http://localhost:3000`; override `APP_ORIGIN` only if needed, then run `npm run dev`.
 
 Invite a local user through Supabase Studio and provision membership as described in [local development](docs/development/README.md). There is no public signup or administrator UI.
 
