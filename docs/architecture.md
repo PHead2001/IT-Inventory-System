@@ -25,7 +25,7 @@ The strict Zod schema in `src/features/room/schema.ts` is the type source; TypeS
 - Children inherit transforms; rotationZDegrees is vertical yaw.
 - interaction.focusPoint is **parent-local**.
 - interaction.hitBox.center is **node-local**, rotating with its node.
-- The future renderer maps positions [x,y,z]→[x,z,-y] and sizes [x,y,z]→[x,z,y].
+- The renderer maps positions [x,y,z]→[x,z,-y] and sizes [x,y,z]→[x,z,y].
 - Node IDs have no persistence meaning. locationCode is the logical bridge.
 - Every destination has one primary binding; aggregate bindings preserve ancestry.
 - JSON contains neither inventory state nor generated database UUIDs.
@@ -98,15 +98,15 @@ Stable SQLSTATEs P1001–P1012 map respectively to forbidden, stale_version, ins
 
 Request-scoped server queries verify Auth/current membership and use the user's Supabase credentials. There is no application administrator client. Security-invoker views preserve caller RLS. inventory_search and inventory_history return bounded JSON pages; inventory_serial_matches returns at most twenty contextual exact serial matches.
 
-Search uses case-insensitive literal substring matching over name, description, manufacturer/model, category, tag/serial and location code/name/breadcrumb. Percent, underscore and backslash are literal characters. Quantity search emits a row per positive location balance, or one unlocated row for a zero-stock definition. Active is the default; archived/retired inventory requires the historical or all filter. Location filters include descendants. Results carry UUID, stable code and breadcrumb for PR3.
+Search uses case-insensitive literal substring matching over name, description, manufacturer/model, category, tag/serial and location code/name/breadcrumb. Percent, underscore and backslash are literal characters. Quantity search emits a row per positive location balance, or one unlocated row for a zero-stock definition. Active is the default; archived/retired inventory requires the historical or all filter. Location filters include descendants. Results carry UUID, stable code and breadcrumb for conventional and room navigation.
 
 Search ordering is lower(name), kind, entity UUID, location code. History orders newest timestamp, kind, event UUID. Page size defaults to 25 and database functions cap it at 100; the application fixes it at 25. History displays human event labels, actor snapshots, reasons, location links, quantity before/after/delta and descriptive metadata changes. JSON is not the primary history UI.
 
-Routes are /inventory, /inventory/quantity/new, /inventory/quantity/[id], /inventory/assets/new, /inventory/assets/[id], /locations, /locations/[code], /history. Existing /room remains a placeholder for PR3. Search/filter/page state lives in the URL. Server pages own reads; controlled client forms own pending input and confirmation; Server Actions validate and call the RPC. Viewer pages omit mutation controls and create routes enforce staff membership.
+Routes are /inventory, /inventory/quantity/new, /inventory/quantity/[id], /inventory/assets/new, /inventory/assets/[id], /locations, /locations/[code], /history. The /room route provides interactive location navigation and inventory context. Search/filter/page state lives in the URL. Server pages own reads; controlled client forms own pending input and confirmation; Server Actions validate and call the RPC. Viewer pages omit mutation controls and create routes enforce staff membership.
 
 Consequential actions require before/after review. Recoverable errors preserve input. A form's editable values and expected_version share a captured baseline: unrelated prop refreshes must not silently advance its version. Explicit stale refresh adopts the latest baseline, preserves pending input, and requires renewed before/after review. Database version checks remain authoritative.
 
-The conventional responsive UI works without WebGL. Future scene components will emit stable location codes and receive selection/focus state; neither room JSON nor meshes own inventory persistence.
+The conventional responsive UI works without WebGL. Scene components emit stable location codes and receive selection/focus state; neither room JSON nor meshes own inventory persistence.
 
 ## Interactive room
 
