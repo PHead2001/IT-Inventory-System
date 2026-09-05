@@ -1,10 +1,10 @@
 # Application architecture
 
-The approved v0.1 plan and amendments govern Foundation and Inventory Core. The R3F renderer belongs to PR3.
+The approved v0.1 plan and amendments govern Foundation and Inventory Core. PR3 implements the R3F room navigation surface.
 
 ## System boundaries
 
-Next.js App Router serves the operational dashboard. Request-scoped Supabase clients use the signed-in user's credentials. PostgreSQL owns logical data; Git owns geometry. The future scene emits location codes and receives selection/focus state; it never owns persistence. Conventional workflows remain independent of 3D.
+Next.js App Router serves the operational dashboard. Request-scoped Supabase clients use the signed-in user's credentials. PostgreSQL owns logical data; Git owns geometry. The scene emits location codes and receives selection/focus state; it never owns persistence. Conventional workflows remain independent of 3D.
 
 ## Reference model
 
@@ -107,3 +107,7 @@ Routes are /inventory, /inventory/quantity/new, /inventory/quantity/[id], /inven
 Consequential actions require before/after review. Recoverable errors preserve input. A form's editable values and expected_version share a captured baseline: unrelated prop refreshes must not silently advance its version. Explicit stale refresh adopts the latest baseline, preserves pending input, and requires renewed before/after review. Database version checks remain authoritative.
 
 The conventional responsive UI works without WebGL. Future scene components will emit stable location codes and receive selection/focus state; neither room JSON nor meshes own inventory persistence.
+
+## Interactive room
+
+PR3 adds the client-loaded room as a navigation layer over the existing inventory reads. Selection lives in `/room?location=CODE`; aggregate highlighting uses the database hierarchy. See [room navigation](room-navigation.md) for geometry, camera, lifecycle and application contracts.

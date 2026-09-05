@@ -49,3 +49,7 @@ Use focused Vitest tests while iterating; run formatting and relevant complete g
 The local reset applies Foundation followed by additive Inventory Core/read migrations. Use fictional data only. Staff can create a zero-stock quantity definition or a located asset through /inventory; viewers can browse search, details, locations and history. Required reasons and optimistic version conflicts are enforced by the mutation RPCs as well as the forms.
 
 After migration changes, run the local database gate and regenerate types. tests/integration/inventory.ts uses real signed-in local clients plus loopback PostgreSQL for invariant/concurrency checks. Browser tests use the same disposable backend and verify persisted workflows after reload. No production service is needed for local certification.
+
+## Interactive room iteration
+
+Use `/room` after local sign-in. Geometry lives in the validated Git JSON, with no database running needed for schema tests. Reuse local Supabase while iterating on visuals; no reset is needed for materials, camera or labels. Use `npm run test:e2e -- tests/e2e/room.spec.ts` for the real browser surface. See [room navigation](../room-navigation.md) for selection, coordinate and fallback contracts.

@@ -1,8 +1,8 @@
 # IT Inventory System
 
-Internal IT inventory software with conventional workflows and planned 2.5D room navigation.
+Internal IT inventory software with conventional workflows and interactive 2.5D room navigation.
 
-Inventory Core adds conventional quantity and serialized-asset workflows, multi-location stock, receiving, partial/Move All transfers, count/location corrections, archive/retire/restore, search and auditable history. Active viewers have read-only access; staff mutations are enforced in PostgreSQL. The graphical room renderer remains planned for PR3.
+Inventory Core adds conventional quantity and serialized-asset workflows, multi-location stock, receiving, partial/Move All transfers, count/location corrections, archive/retire/restore, search and auditable history. Active viewers have read-only access; staff mutations are enforced in PostgreSQL. The graphical room provides location selection, inventory context and search-to-room focus, with conventional controls available without WebGL.
 
 ## Quick start
 
@@ -21,6 +21,7 @@ Invite a local user through Supabase Studio and provision membership as describe
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Room navigation](docs/room-navigation.md)
 - [Local development](docs/development/README.md)
 - [Validation](docs/validation.md)
 - [Deployment](docs/deployment.md)

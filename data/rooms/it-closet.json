@@ -96,7 +96,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -116,7 +117,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -136,7 +138,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -165,7 +168,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -185,7 +189,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -205,7 +210,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -227,13 +233,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 1",
-            "focusPoint": [8, 18, 43.5]
+            "focusPoint": [8, 18, 43.5],
+            "labelAnchor": [8.01, 6, 0]
           }
         },
         {
@@ -247,13 +255,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 2",
-            "focusPoint": [8, 42, 43.5]
+            "focusPoint": [8, 42, 43.5],
+            "labelAnchor": [8.01, 6, 0]
           }
         },
         {
@@ -267,13 +277,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 3",
-            "focusPoint": [8, 66, 43.5]
+            "focusPoint": [8, 66, 43.5],
+            "labelAnchor": [8.01, 6, 0]
           }
         },
         {
@@ -287,13 +299,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 4",
-            "focusPoint": [8, 18, 37.5]
+            "focusPoint": [8, 18, 37.5],
+            "labelAnchor": [8.01, -6, 0]
           }
         },
         {
@@ -307,13 +321,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 5",
-            "focusPoint": [8, 42, 37.5]
+            "focusPoint": [8, 42, 37.5],
+            "labelAnchor": [8.01, -6, 0]
           }
         },
         {
@@ -327,16 +343,72 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 6",
-            "focusPoint": [8, 66, 37.5]
+            "focusPoint": [8, 66, 37.5],
+            "labelAnchor": [8.01, -6, 0]
+          }
+        },
+        {
+          "id": "left-storage-visual-post-0",
+          "kind": "box",
+          "position": [0.7, 6.7, 40.5],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 81],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "left-storage-visual-post-1",
+          "kind": "box",
+          "position": [0.7, 77.3, 40.5],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 81],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "left-storage-visual-post-2",
+          "kind": "box",
+          "position": [15.3, 6.7, 40.5],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 81],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "left-storage-visual-post-3",
+          "kind": "box",
+          "position": [15.3, 77.3, 40.5],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 81],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
           }
         }
-      ]
+      ],
+      "visual": {
+        "style": "shelving",
+        "color": "#475569",
+        "opacity": 1,
+        "edges": false
+      }
     },
     {
       "id": "right-storage",
@@ -363,7 +435,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -383,7 +456,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -403,7 +477,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -432,7 +507,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -452,7 +528,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -472,7 +549,8 @@
               "visual": {
                 "color": "#475569",
                 "opacity": 1,
-                "edges": true
+                "edges": true,
+                "style": "shelf-section"
               },
               "interaction": {
                 "selectable": true,
@@ -494,13 +572,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 7",
-            "focusPoint": [76, 98, 39.5]
+            "focusPoint": [76, 98, 39.5],
+            "labelAnchor": [-8.01, 6, 0]
           }
         },
         {
@@ -514,13 +594,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 8",
-            "focusPoint": [76, 74, 39.5]
+            "focusPoint": [76, 74, 39.5],
+            "labelAnchor": [-8.01, 6, 0]
           }
         },
         {
@@ -534,13 +616,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 9",
-            "focusPoint": [76, 50, 39.5]
+            "focusPoint": [76, 50, 39.5],
+            "labelAnchor": [-8.01, 6, 0]
           }
         },
         {
@@ -554,13 +638,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 10",
-            "focusPoint": [76, 98, 33.5]
+            "focusPoint": [76, 98, 33.5],
+            "labelAnchor": [-8.01, -6, 0]
           }
         },
         {
@@ -574,13 +660,15 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 11",
-            "focusPoint": [76, 74, 33.5]
+            "focusPoint": [76, 74, 33.5],
+            "labelAnchor": [-8.01, -6, 0]
           }
         },
         {
@@ -594,16 +682,72 @@
           "visual": {
             "color": "#334155",
             "opacity": 1,
-            "edges": true
+            "edges": true,
+            "style": "drawer"
           },
           "interaction": {
             "selectable": true,
             "primaryBinding": true,
             "label": "Drawer 12",
-            "focusPoint": [76, 50, 33.5]
+            "focusPoint": [76, 50, 33.5],
+            "labelAnchor": [-8.01, -6, 0]
+          }
+        },
+        {
+          "id": "right-storage-visual-post-0",
+          "kind": "box",
+          "position": [68.7, 38.7, 31],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 62],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "right-storage-visual-post-1",
+          "kind": "box",
+          "position": [68.7, 109.3, 31],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 62],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "right-storage-visual-post-2",
+          "kind": "box",
+          "position": [83.3, 38.7, 31],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 62],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
+          }
+        },
+        {
+          "id": "right-storage-visual-post-3",
+          "kind": "box",
+          "position": [83.3, 109.3, 31],
+          "rotationZDegrees": 0,
+          "size": [1.4, 1.4, 62],
+          "visual": {
+            "color": "#64748b",
+            "opacity": 1,
+            "edges": false
           }
         }
-      ]
+      ],
+      "visual": {
+        "style": "shelving",
+        "color": "#475569",
+        "opacity": 1,
+        "edges": false
+      }
     },
     {
       "id": "server-rack",
@@ -615,7 +759,8 @@
       "visual": {
         "color": "#1e293b",
         "opacity": 1,
-        "edges": true
+        "edges": true,
+        "style": "rack"
       },
       "interaction": {
         "selectable": true,
@@ -634,7 +779,8 @@
       "visual": {
         "color": "#b91c1c",
         "opacity": 1,
-        "edges": true
+        "edges": true,
+        "style": "container"
       },
       "interaction": {
         "selectable": true,
@@ -653,7 +799,8 @@
       "visual": {
         "color": "#171717",
         "opacity": 1,
-        "edges": true
+        "edges": true,
+        "style": "container"
       },
       "interaction": {
         "selectable": true,
@@ -672,7 +819,8 @@
       "visual": {
         "color": "#cbd5e1",
         "opacity": 1,
-        "edges": true
+        "edges": true,
+        "style": "container"
       },
       "interaction": {
         "selectable": true,

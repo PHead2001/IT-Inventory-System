@@ -1,3 +1,4 @@
+import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
@@ -41,6 +42,7 @@ export default async function LocationPage({
             ? 'Inventory destination'
             : 'Includes child locations'}
       </p>
+      <ShowInRoom code={code} />
       {children.length > 0 && (
         <section className={panel + ' mb-5'}>
           <h2 className="mb-3 font-semibold">Child locations</h2>

@@ -87,7 +87,7 @@ for (const role of ['staff', 'viewer'] as const)
       ).toBeVisible();
       await page.getByRole('link', { name: 'Room', exact: true }).click();
       await expect(
-        page.getByRole('heading', { name: 'Room viewer not yet available' }),
+        page.getByRole('heading', { name: 'Room navigation' }),
       ).toBeVisible();
       await page.getByRole('button', { name: 'Sign out' }).click();
       await expect(page).toHaveURL(/\/login$/);

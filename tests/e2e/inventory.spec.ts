@@ -124,7 +124,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
     page.getByRole('link', { name: name + ' updated', exact: true }),
   ).toHaveCount(2);
   await page
-    .getByRole('link', { name: /ITC-S1C/ })
+    .getByRole('link', { name: /IT Closet.*ITC-S1C/ })
     .first()
     .click();
   await expect(

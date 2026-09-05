@@ -20,6 +20,9 @@ export const roomNodeSchema = z.strictObject({
   measuredTopElevation: finite.nonnegative().optional(),
   visual: z
     .strictObject({
+      style: z
+        .enum(['shelf-section', 'drawer', 'rack', 'container', 'shelving'])
+        .optional(),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
       opacity: finite.min(0).max(1),
       edges: z.boolean(),
@@ -31,6 +34,7 @@ export const roomNodeSchema = z.strictObject({
       primaryBinding: z.boolean(),
       label: z.string().trim().min(1),
       focusPoint: vector,
+      labelAnchor: vector.optional(),
       hitBox: z.strictObject({ center: vector, size }).optional(),
     })
     .optional(),

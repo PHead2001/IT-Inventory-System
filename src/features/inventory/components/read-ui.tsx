@@ -1,3 +1,4 @@
+import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
 import type {
   HistoryEvent,
@@ -10,12 +11,15 @@ export const field =
   'min-h-11 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm';
 export function LocationLink({ location }: { location: LocationRef }) {
   return (
-    <Link
-      className="break-words text-cyan-300 underline"
-      href={'/locations/' + encodeURIComponent(location.code)}
-    >
-      {location.breadcrumb} <span className="text-xs">({location.code})</span>
-    </Link>
+    <span className="inline-flex flex-wrap items-center gap-x-3">
+      <Link
+        className="break-words text-cyan-300 underline"
+        href={'/locations/' + encodeURIComponent(location.code)}
+      >
+        {location.breadcrumb} <span className="text-xs">({location.code})</span>
+      </Link>
+      <ShowInRoom code={location.code} />
+    </span>
   );
 }
 export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
