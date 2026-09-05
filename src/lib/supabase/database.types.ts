@@ -36,6 +36,80 @@ export type Database = {
         }
         Relationships: []
       }
+      asset_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          after_metadata: Json | null
+          asset_id: string
+          before_metadata: Json | null
+          created_at: string
+          from_location_id: string | null
+          id: string
+          kind: string
+          reason: string | null
+          to_location_id: string | null
+          version: number
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          after_metadata?: Json | null
+          asset_id: string
+          before_metadata?: Json | null
+          created_at?: string
+          from_location_id?: string | null
+          id?: string
+          kind: string
+          reason?: string | null
+          to_location_id?: string | null
+          version: number
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          after_metadata?: Json | null
+          asset_id?: string
+          before_metadata?: Json | null
+          created_at?: string
+          from_location_id?: string | null
+          id?: string
+          kind?: string
+          reason?: string | null
+          to_location_id?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "asset_events_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "serialized_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_events_from_location_id_fkey"
+            columns: ["from_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_events_to_location_id_fkey"
+            columns: ["to_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           active: boolean
@@ -113,12 +187,387 @@ export type Database = {
           },
         ]
       }
+      quantity_event_lines: {
+        Row: {
+          after_quantity: number
+          before_quantity: number
+          delta: number
+          event_id: string
+          location_id: string
+        }
+        Insert: {
+          after_quantity: number
+          before_quantity: number
+          delta: number
+          event_id: string
+          location_id: string
+        }
+        Update: {
+          after_quantity?: number
+          before_quantity?: number
+          delta?: number
+          event_id?: string
+          location_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quantity_event_lines_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quantity_event_lines_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quantity_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          after_metadata: Json | null
+          before_metadata: Json | null
+          created_at: string
+          id: string
+          item_id: string
+          kind: string
+          reason: string | null
+          version: number
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          after_metadata?: Json | null
+          before_metadata?: Json | null
+          created_at?: string
+          id?: string
+          item_id: string
+          kind: string
+          reason?: string | null
+          version: number
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          after_metadata?: Json | null
+          before_metadata?: Json | null
+          created_at?: string
+          id?: string
+          item_id?: string
+          kind?: string
+          reason?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quantity_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "quantity_events_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quantity_items: {
+        Row: {
+          archived: boolean
+          category_id: string
+          created_at: string
+          description: string | null
+          id: string
+          manufacturer: string | null
+          model: string | null
+          name: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          archived?: boolean
+          category_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          manufacturer?: string | null
+          model?: string | null
+          name: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          archived?: boolean
+          category_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          manufacturer?: string | null
+          model?: string | null
+          name?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quantity_items_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      serialized_assets: {
+        Row: {
+          asset_tag: string | null
+          category_id: string
+          created_at: string
+          description: string | null
+          id: string
+          location_id: string
+          manufacturer: string | null
+          model: string | null
+          name: string
+          serial_number: string | null
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          asset_tag?: string | null
+          category_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          location_id: string
+          manufacturer?: string | null
+          model?: string | null
+          name: string
+          serial_number?: string | null
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          asset_tag?: string | null
+          category_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          location_id?: string
+          manufacturer?: string | null
+          model?: string | null
+          name?: string
+          serial_number?: string | null
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "serialized_assets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "serialized_assets_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_balances: {
+        Row: {
+          item_id: string
+          location_id: string
+          quantity: number
+        }
+        Insert: {
+          item_id: string
+          location_id: string
+          quantity: number
+        }
+        Update: {
+          item_id?: string
+          location_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_balances_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_balances_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      inventory_history_rows: {
+        Row: {
+          actor_name: string | null
+          after_metadata: Json | null
+          before_metadata: Json | null
+          created_at: string | null
+          entity_id: string | null
+          entity_name: string | null
+          event_type: string | null
+          from_location_id: string | null
+          id: string | null
+          kind: string | null
+          lines: Json | null
+          location_ids: string[] | null
+          reason: string | null
+          to_location_id: string | null
+        }
+        Relationships: []
+      }
+      inventory_locations: {
+        Row: {
+          active: boolean | null
+          ancestor_codes: string[] | null
+          breadcrumb: string | null
+          can_hold_inventory: boolean | null
+          code: string | null
+          created_at: string | null
+          id: string | null
+          kind: string | null
+          name: string | null
+          parent_id: string | null
+          sort_order: number | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
+      inventory_search_rows: {
+        Row: {
+          ancestor_codes: string[] | null
+          asset_tag: string | null
+          breadcrumb: string | null
+          category_id: string | null
+          category_name: string | null
+          description: string | null
+          entity_id: string | null
+          kind: string | null
+          location_code: string | null
+          location_id: string | null
+          location_name: string | null
+          manufacturer: string | null
+          model: string | null
+          name: string | null
+          quantity: number | null
+          serial_number: string | null
+          status: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      asset_correct_location: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_move: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_restore: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_retire: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      inventory_history: {
+        Args: {
+          p_entity_id?: string
+          p_location_code?: string
+          p_page?: number
+          p_page_size?: number
+          p_type?: string
+        }
+        Returns: Json
+      }
+      inventory_search: {
+        Args: {
+          p_category_id?: string
+          p_location_code?: string
+          p_page?: number
+          p_page_size?: number
+          p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
+      inventory_serial_matches: {
+        Args: { p_exclude_id?: string; p_serial: string }
+        Returns: {
+          asset_tag: string
+          id: string
+          name: string
+          status: string
+        }[]
+      }
+      quantity_adjust: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_archive: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_move: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_receive: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_restore: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

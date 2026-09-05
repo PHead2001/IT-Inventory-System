@@ -1,6 +1,6 @@
 # Local development
 
-Use Node 24.19.0 and npm 11.11.0, matching .nvmrc and CI. package engines permit the Vercel-managed Node 24.x runtime; the local/CI certification version remains exact. Windows requires Git and Docker Desktop with a working WSL2/Linux-container backend; WSL2 without a distribution/container runtime is insufficient.
+Use Node 24.19.0 and npm 11.11.0, matching .nvmrc and CI. package engines permit the Vercel-managed Node 24.x runtime; the local/CI certification version remains exact. Windows requires Git and a Docker-compatible Linux-container backend. Rancher Desktop with its Moby engine and WSL2 is supported; WSL2 alone is insufficient. Reopen terminal sessions after installing Node/npm or the container tools so PATH is refreshed.
 
 The requested IT Inventory Management folder is the working checkout. Diagnose OneDrive locking/sync problems before changing its location.
 
@@ -43,3 +43,9 @@ Required reference data is migration-controlled. supabase/seed.sql is reserved f
 Run `npm run validate:db` after persistence/security changes. Regenerate and commit types with `npm run db:types`. CI publishes regenerated output on drift. Reset/test helpers use explicit local operations and reject nonlocal targets.
 
 Use focused Vitest tests while iterating; run formatting and relevant complete gates before certification. Room parsing needs no Docker; room-to-database contracts do.
+
+## Inventory Core iteration
+
+The local reset applies Foundation followed by additive Inventory Core/read migrations. Use fictional data only. Staff can create a zero-stock quantity definition or a located asset through /inventory; viewers can browse search, details, locations and history. Required reasons and optimistic version conflicts are enforced by the mutation RPCs as well as the forms.
+
+After migration changes, run the local database gate and regenerate types. tests/integration/inventory.ts uses real signed-in local clients plus loopback PostgreSQL for invariant/concurrency checks. Browser tests use the same disposable backend and verify persisted workflows after reload. No production service is needed for local certification.

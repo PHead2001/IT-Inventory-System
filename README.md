@@ -2,7 +2,7 @@
 
 Internal IT inventory software with conventional workflows and planned 2.5D room navigation.
 
-Foundation PR 1 establishes Next.js, Supabase Auth, active viewer/staff memberships, reference categories/locations, measured room data, and validation. Inventory CRUD, quantities, serialized assets, search, movement history, and the room renderer are **not implemented yet**.
+Inventory Core adds conventional quantity and serialized-asset workflows, multi-location stock, receiving, partial/Move All transfers, count/location corrections, archive/retire/restore, search and auditable history. Active viewers have read-only access; staff mutations are enforced in PostgreSQL. The graphical room renderer remains planned for PR3.
 
 ## Quick start
 
