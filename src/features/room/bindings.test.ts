@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { expectedLocations } from '../../../tests/fixtures/reference';
-import { buildRoomBindings } from './bindings';
+import {
+  buildRoomBindings,
+  findFocusBinding,
+  type RoomBinding,
+} from './bindings';
 import { loadItCloset } from './load';
 import { roomSchema, type RoomNode } from './schema';
 
@@ -139,5 +143,46 @@ describe('world-space room bindings', () => {
     bindings[0].focusPoint[0] += 100;
     bindings[0].bounds.max[0] += 100;
     expect(room).toEqual(before);
+  });
+});
+
+describe('focus binding preference', () => {
+  const primary: RoomBinding = {
+    code: 'ITC-S1A',
+    nodeId: 'primary',
+    label: '1A',
+    primary: true,
+    focusPoint: [8, 18, 80.5],
+    bounds: { min: [0, 6, 80], max: [16, 30, 81] },
+  };
+  const secondary: RoomBinding = {
+    ...primary,
+    nodeId: 'secondary-decoration',
+    primary: false,
+    focusPoint: [1, 2, 3],
+  };
+  it.each([
+    [secondary, primary],
+    [primary, secondary],
+  ])('prefers the primary regardless of traversal order %#', (...bindings) => {
+    expect(findFocusBinding(bindings, 'ITC-S1A')).toBe(primary);
+  });
+  it('falls back to aggregate and room bindings that have no primary', () => {
+    const bindings = buildRoomBindings(loadItCloset());
+    for (const code of ['ITC', 'ITC-L', 'ITC-S1']) {
+      const expected = bindings.find((binding) => binding.code === code)!;
+      expect(expected.primary).toBe(false);
+      expect(findFocusBinding(bindings, code)).toBe(expected);
+    }
+  });
+  it('keeps a secondary-only binding usable and does not match unrelated primary locations', () => {
+    expect(
+      findFocusBinding([{ ...primary, code: 'ITC-S1B' }, secondary], 'ITC-S1A'),
+    ).toBe(secondary);
+  });
+  it('returns undefined for cleared, missing, and empty bindings', () => {
+    expect(findFocusBinding([primary], null)).toBeUndefined();
+    expect(findFocusBinding([primary], 'UNKNOWN')).toBeUndefined();
+    expect(findFocusBinding([], 'ITC-S1A')).toBeUndefined();
   });
 });

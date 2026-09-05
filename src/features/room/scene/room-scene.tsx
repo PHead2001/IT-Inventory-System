@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { MathUtils, OrthographicCamera, Vector3 } from 'three';
 import { Button } from '@/components/ui/button';
 import type { RoomDefinition, RoomNode } from '../schema';
-import type { RoomBinding } from '../bindings';
+import { findFocusBinding, type RoomBinding } from '../bindings';
 import { toScenePosition, toSceneSize } from '../coordinates';
 import { rotatedOffset } from './camera-math';
 import { openingTransform } from './opening-transform';
@@ -422,7 +422,7 @@ function CameraRig({
   ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
-    const binding = bindings.find((entry) => entry.code === focusRequest.code);
+    const binding = findFocusBinding(bindings, focusRequest.code);
     if (focusRequest.code && !binding) {
       onFocusComplete(null);
       return;

@@ -117,3 +117,14 @@ export function buildRoomBindings(room: RoomDefinition): RoomBinding[] {
     ...bindings,
   ];
 }
+
+/** Resolve camera focus without relying on visual traversal order. */
+export function findFocusBinding(
+  bindings: RoomBinding[],
+  code: string | null,
+): RoomBinding | undefined {
+  return (
+    bindings.find((binding) => binding.code === code && binding.primary) ??
+    bindings.find((binding) => binding.code === code)
+  );
+}
