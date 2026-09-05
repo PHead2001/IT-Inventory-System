@@ -9,6 +9,7 @@ import type { RoomDefinition, RoomNode } from '../schema';
 import type { RoomBinding } from '../bindings';
 import { toScenePosition, toSceneSize } from '../coordinates';
 import { rotatedOffset } from './camera-math';
+import { openingTransform } from './opening-transform';
 import { SafeCanvas as Canvas } from './safe-canvas';
 
 export type RoomSceneProps = {
@@ -87,24 +88,16 @@ function Envelope({ room }: { room: RoomDefinition }) {
         />
       )}
       {room.openings.map((opening) => {
-        const frontBack = opening.wall === 'front' || opening.wall === 'back';
-        const origin: [number, number, number] = frontBack
-          ? [opening.offset, opening.wall === 'front' ? 0 : depth, 0]
-          : [opening.wall === 'left' ? 0 : width, opening.offset, 0];
-        // The opening stays measured; its floor outline avoids a tall slab occluding inventory.
-        const angle =
-          opening.wall === 'front'
-            ? 0
-            : opening.wall === 'back'
-              ? Math.PI
-              : opening.wall === 'left'
-                ? -Math.PI / 2
-                : Math.PI / 2;
+        // Keep measured intervals while preserving outward-facing labels on every wall.
+        const { origin, rotationY } = openingTransform(
+          opening,
+          room.dimensions,
+        );
         return (
           <group
             key={opening.id}
             position={toScenePosition(origin)}
-            rotation={[0, angle, 0]}
+            rotation={[0, rotationY, 0]}
           >
             <mesh position={[opening.width / 2, 0.5, 0]}>
               <boxGeometry args={[opening.width, 1, 2]} />
