@@ -1,0 +1,103 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { requireMember } from '@/lib/auth/session.server';
+import {
+  getQuantityDetail,
+  getCategories,
+  getLocations,
+} from '@/features/inventory/queries.server';
+import { OperationPanel } from '@/features/inventory/components/mutation-form';
+import {
+  HistoryList,
+  LocationLink,
+  panel,
+} from '@/features/inventory/components/read-ui';
+export default async function QuantityPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { member } = await requireMember();
+  const { id } = await params;
+  const detail = await getQuantityDetail(id);
+  if (!detail) notFound();
+  const { item, balances, history } = detail;
+  const [categories, locations] = await Promise.all([
+    getCategories(),
+    getLocations(),
+  ]);
+  return (
+    <>
+      <Link href="/inventory" className="text-sm text-cyan-300 underline">
+        Back to inventory
+      </Link>
+      <h1 className="mt-4 break-words text-3xl font-semibold">{item.name}</h1>
+      <p className="mt-2 text-slate-400">
+        {item.categoryName} · Quantity inventory ·{' '}
+        {item.archived ? 'Archived' : 'Active'} · Version {item.version}
+      </p>
+      <section className={panel + ' my-5'}>
+        <h2 className="font-semibold">Item details</h2>
+        <p className="mt-2 whitespace-pre-wrap break-words">
+          {item.description || 'No description'}
+        </p>
+        <p className="mt-2 break-words text-sm text-slate-400">
+          Manufacturer: {item.manufacturer || 'Not set'} · Model:{' '}
+          {item.model || 'Not set'}
+        </p>
+      </section>
+      <section className="my-6">
+        <h2 className="mb-3 text-xl font-semibold">
+          Current stock — {balances.reduce((sum, b) => sum + b.quantity, 0)}{' '}
+          units total
+        </h2>
+        {balances.some((b) => b.quantity > 0) ? (
+          <ul className="space-y-3">
+            {balances
+              .filter((b) => b.quantity > 0)
+              .map((b) => (
+                <li className={panel} key={b.location.id}>
+                  <LocationLink location={b.location} />
+                  <p className="mt-2">{b.quantity} units</p>
+                </li>
+              ))}
+          </ul>
+        ) : (
+          <p className={panel}>No positive stock at any location.</p>
+        )}
+      </section>
+      {member.role === 'staff' && (
+        <section aria-label="Quantity actions" className="mb-8 space-y-3">
+          <h2 className="text-xl font-semibold">Manage quantity inventory</h2>
+          {(item.archived
+            ? (['quantity_restore'] as const)
+            : ([
+                'quantity_update',
+                'quantity_receive',
+                'quantity_move',
+                'quantity_adjust',
+                'quantity_archive',
+              ] as const)
+          ).map((operation) => (
+            <OperationPanel
+              key={operation}
+              operation={operation}
+              item={item}
+              balances={balances}
+              categories={categories}
+              locations={locations}
+            />
+          ))}
+        </section>
+      )}
+      <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
+      <HistoryList events={history} />
+      <Link
+        className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"
+        href={'/history?type=quantity&entityId=' + item.id}
+      >
+        View all item history
+      </Link>
+    </>
+  );
+}

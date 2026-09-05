@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Boxes, Map } from 'lucide-react';
+import { Boxes, Map, MapPin, History } from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
 import { logout } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
@@ -43,7 +43,10 @@ export default async function ApplicationLayout({
         </div>
       </header>
       <div className="mx-auto grid max-w-7xl gap-8 px-5 py-6 md:grid-cols-[190px_1fr] sm:px-8">
-        <nav aria-label="Main navigation" className="flex gap-2 md:flex-col">
+        <nav
+          aria-label="Main navigation"
+          className="flex flex-wrap gap-2 md:flex-col"
+        >
           <Link
             className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
             href="/inventory"
@@ -57,6 +60,20 @@ export default async function ApplicationLayout({
           >
             <Map size={18} />
             Room
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/locations"
+          >
+            <MapPin size={18} />
+            Locations
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/history"
+          >
+            <History size={18} />
+            History
           </Link>
         </nav>
         <main id="main-content" className="min-w-0">

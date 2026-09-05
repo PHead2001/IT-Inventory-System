@@ -45,6 +45,10 @@ const test = () => {
     ['--import', 'tsx', 'tests/integration/foundation.ts'],
     localTestEnv(status),
   );
+  node(
+    ['--import', 'tsx', 'tests/integration/inventory.ts'],
+    localTestEnv(status),
+  );
 };
 try {
   if (command === 'start') cli('start');

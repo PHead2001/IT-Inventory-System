@@ -10,9 +10,9 @@ Local development and CI pin Node 24.19.0 in .nvmrc. package.json allows Node 24
 
 ## Environments
 
-Development/CI use disposable local Supabase. Previews use a separate hosted nonproduction project with fictional data. Production uses its own project and real inventory.
+Development/CI use disposable local Supabase. Previews use the already-configured Supabase nonproduction/preview branching integration with fictional data. Production uses its own project and real inventory.
 
-One shared preview database is sufficient initially, but incompatible schema-changing previews cannot be certified concurrently. Record the preview schema revision.
+Record the preview branch and applied repository migration revision when certifying a schema-changing preview. Do not reuse a production database or create replacement hosted projects.
 
 | Variable                                                  | Boundary                                 |
 | --------------------------------------------------------- | ---------------------------------------- |
@@ -37,7 +37,7 @@ Templates honor the requested full /auth/confirm callback and fall back to Site 
 
 ## Production migrations and release
 
-Production migrations remain explicit and owner-controlled.
+Production migrations remain explicit and owner-controlled. Repository-controlled migration files are the canonical schema history. Do not use Supabase dashboard schema-diff or preview-branch merge output as the production migration path, and do not commit generated branch_merge_* substitutes. PR2 migrations are additive from the existing Foundation schema; do not recreate the private schema or rewrite applied Foundation migrations.
 
 **Any production migration applied before an application merge must remain backward-compatible with the currently deployed application. Breaking schema changes require an expand/migrate/contract sequence.**
 
@@ -49,4 +49,4 @@ Application rollback returns to a compatible previous deployment. Database recov
 
 ## External prerequisites
 
-Hosted projects, SMTP, Vercel connection/environment setup, branch protection, initial members, DNS and production authorization require owner setup. They are separate from repository/local code work. This foundation task does not modify billing, hosted configuration or production.
+Hosted projects, SMTP, Vercel connection/environment setup, branch protection, initial members, DNS and production authorization require owner setup. They are separate from repository/local code work. Inventory Core PR2 does not modify billing, production configuration/data or production migrations. An owner-only preview configuration issue must be reported separately after independent local/CI validation.

@@ -73,14 +73,18 @@ test('anonymous navigation cannot browse the application', async ({ page }) => {
 });
 for (const role of ['staff', 'viewer'] as const)
   test(
-    role + ' can read the foundation shell and sign out',
+    role + ' can read the inventory workspace and sign out',
     async ({ page }) => {
       await signIn(page, fixtureEmails[role]);
       await expect(
         page.getByRole('heading', { name: 'Inventory workspace' }),
       ).toBeVisible();
-      await expect(page.getByText('28', { exact: true })).toBeVisible();
-      await expect(page.getByText('8', { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('form', { name: 'Search inventory' }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('link', { name: 'Locations', exact: true }),
+      ).toBeVisible();
       await page.getByRole('link', { name: 'Room', exact: true }).click();
       await expect(
         page.getByRole('heading', { name: 'Room viewer not yet available' }),
