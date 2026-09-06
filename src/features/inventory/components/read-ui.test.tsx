@@ -10,7 +10,7 @@ const location = {
   can_hold_inventory: true,
   parentId: null,
 };
-it('exposes stable location links on search results without any room dependency', () => {
+it('exposes stable location links on search results with independent conventional and room destinations', () => {
   render(
     <InventoryRows
       rows={[
@@ -28,11 +28,13 @@ it('exposes stable location links on search results without any room dependency'
       ]}
     />,
   );
-  expect(screen.getByRole('link', { name: /ITC-S4B/ })).toHaveAttribute(
-    'href',
-    '/locations/ITC-S4B',
-  );
+  expect(
+    screen.getByRole('link', { name: /IT Closet.*ITC-S4B/ }),
+  ).toHaveAttribute('href', '/locations/ITC-S4B');
   expect(screen.getByText('4 units')).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Show ITC-S4B in room' }),
+  ).toHaveAttribute('href', '/room?location=ITC-S4B');
 });
 it('shows record corrections as human readable history distinct from movement', () => {
   render(

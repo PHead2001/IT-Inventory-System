@@ -15,7 +15,7 @@ try {
   };
   // Public environment values are build inputs. Never reuse a build from another backend.
   npm(['run', 'build'], { env });
-  npm(['exec', '--', 'playwright', 'test'], { env });
+  npm(['exec', '--', 'playwright', 'test', ...process.argv.slice(2)], { env });
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

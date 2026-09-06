@@ -20,6 +20,9 @@ export const roomNodeSchema = z.strictObject({
   measuredTopElevation: finite.nonnegative().optional(),
   visual: z
     .strictObject({
+      style: z
+        .enum(['shelf-section', 'drawer', 'rack', 'container', 'shelving'])
+        .optional(),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
       opacity: finite.min(0).max(1),
       edges: z.boolean(),
@@ -31,6 +34,7 @@ export const roomNodeSchema = z.strictObject({
       primaryBinding: z.boolean(),
       label: z.string().trim().min(1),
       focusPoint: vector,
+      labelAnchor: vector.optional(),
       hitBox: z.strictObject({ center: vector, size }).optional(),
     })
     .optional(),
@@ -127,6 +131,12 @@ export const roomSchema = z
           ctx.addIssue({
             code: 'custom',
             message: 'Groups require children and cannot have size',
+          });
+        if (node.kind === 'group' && node.interaction?.selectable)
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Groups cannot be directly selectable; select aggregate locations through the location picker',
           });
         if (node.interaction && !node.locationCode)
           ctx.addIssue({
