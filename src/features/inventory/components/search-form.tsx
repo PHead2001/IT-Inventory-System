@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LocationPicker } from '@/features/locations/location-picker';
 import type { CategoryRef, LocationRef } from '../contracts-ui';
 import { field, panel } from './read-ui';
 export function SearchForm({
@@ -78,24 +79,16 @@ export function SearchForm({
             ))}
           </select>
         </div>
-        <div>
-          <label htmlFor="inventory-location" className="text-sm">
-            Location
-          </label>
-          <select
-            className={field}
-            id="inventory-location"
-            name="location"
-            defaultValue={params.location ?? ''}
-          >
-            <option value="">All locations</option>
-            {locations.map((location) => (
-              <option key={location.id} value={location.code}>
-                {location.breadcrumb}
-              </option>
-            ))}
-          </select>
-        </div>
+        <LocationPicker
+          key={params.location ?? ''}
+          id="inventory-location"
+          label="Location"
+          locations={locations}
+          mode="browse"
+          name="location"
+          defaultValue={params.location ?? ''}
+          allowAll
+        />
       </div>
       <Button type="submit">Search</Button>
     </form>

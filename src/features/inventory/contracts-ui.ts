@@ -6,6 +6,7 @@ export type LocationRef = {
   active: boolean;
   can_hold_inventory: boolean;
   parentId: string | null;
+  sortOrder?: number;
 };
 export type CategoryRef = { id: string; name: string; active: boolean };
 export type Metadata = {

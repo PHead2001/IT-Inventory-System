@@ -188,7 +188,7 @@ Use clean parametric geometry. Do not recreate Matterport mesh noise, wire detai
 Prefer:
 
 - orthographic or orthographic-style presentation
-- pan, zoom, and constrained rotation
+- pan, zoom, Guided constrained rotation by default, and user-selected Free Orbit for continuous horizontal rotation
 - clear click/tap targets
 - persistent selected-location highlight
 - search results that can focus/highlight a physical location
@@ -304,6 +304,9 @@ For changes to schema, seeds, RLS, triggers, RPCs, or persisted invariants:
 - create/update migrations
 - add database tests where appropriate
 - validate from a clean local database state when required
+
+Automated production migration delivery and its gates are defined in
+`docs/deployment.md`; this repository guidance does not replace that mechanism.
 
 ## Storage
 

@@ -14,6 +14,7 @@ import type { RoomDefinition } from './schema';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { buildRoomBindings } from './bindings';
 import { inventoryDescendantCodes } from '../locations/hierarchy';
+import { LocationPicker } from '../locations/location-picker';
 import { roomHref } from './navigation';
 
 const RoomScene = dynamic(() => import('./scene/room-scene'), {
@@ -128,13 +129,6 @@ export function RoomWorkspace({
         </button>
         <button
           className={control}
-          onClick={requestFocus}
-          disabled={!bound || !visible || !!failure || pending}
-        >
-          Focus selected
-        </button>
-        <button
-          className={control}
           disabled={!selectedCode || pending}
           onClick={() =>
             startTransition(() =>
@@ -149,8 +143,8 @@ export function RoomWorkspace({
         </Link>
       </div>
       <p className="text-sm text-slate-400">
-        Drag to rotate, use the wheel to zoom, or use the view controls. The
-        location picker works without the room.
+        Use the room controls to rotate, zoom, and focus. The location picker
+        works without the room.
       </p>
       <div
         className={
@@ -184,6 +178,8 @@ export function RoomWorkspace({
                   onReady={onReady}
                   onFailure={onFailure}
                   onFocusComplete={onFocusComplete}
+                  canFocusSelected={bound && !pending}
+                  onRequestFocus={requestFocus}
                 />
               </SceneBoundary>
             )}
@@ -191,32 +187,21 @@ export function RoomWorkspace({
         )}
         <div className="min-w-0 space-y-5">
           <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4">
-            <label className="mb-2 block font-medium" htmlFor="room-location">
-              Select location
-            </label>
-            <select
+            <LocationPicker
               id="room-location"
-              className="min-h-11 w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-3 text-sm"
-              value={selected?.code ?? ''}
+              label="Select location"
+              locations={locations}
+              mode="browse"
+              value={selectedCode ?? ''}
               disabled={pending}
-              onChange={(event) =>
-                event.target.value
-                  ? select(event.target.value)
-                  : startTransition(() =>
-                      router.push(roomHref(null), { scroll: false }),
-                    )
-              }
-            >
-              <option value="">Choose a location</option>
-              {locations.map((location) => (
-                <option key={location.id} value={location.code}>
-                  {location.breadcrumb} ({location.code})
-                  {!bindings.some((binding) => binding.code === location.code)
-                    ? ' — no room model'
-                    : ''}
-                </option>
-              ))}
-            </select>
+              onValueChange={(code) => {
+                if (code) select(code);
+                else
+                  startTransition(() =>
+                    router.push(roomHref(null), { scroll: false }),
+                  );
+              }}
+            />
             <p role="status" className="mt-3 text-sm">
               {pending
                 ? 'Loading selected location…'
@@ -226,7 +211,9 @@ export function RoomWorkspace({
                     ' (' +
                     selected.code +
                     ')'
-                  : 'No location selected.'}
+                  : selectedCode
+                    ? 'Selected code ' + selectedCode + ' is unavailable.'
+                    : 'No location selected.'}
             </p>
             {selectedCode && !bound && (
               <p className="mt-3 text-sm text-amber-200">

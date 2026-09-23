@@ -109,6 +109,17 @@ Consequential actions require before/after review. Recoverable errors preserve i
 
 The conventional responsive UI works without WebGL. Scene components emit stable location codes and receive selection/focus state; neither room JSON nor meshes own inventory persistence.
 
+Location selectors share a searchable picker. Browse mode uses stable codes for
+navigation and may select aggregate locations; inventory forms retain location
+UUIDs and restrict destinations to active inventory holdings. The picker does
+not change the server's authoritative eligibility checks or a form's captured
+value/version baseline.
+
 ## Interactive room
 
 PR3 adds the client-loaded room as a navigation layer over the existing inventory reads. Selection lives in `/room?location=CODE`; aggregate highlighting uses the database hierarchy. See [room navigation](room-navigation.md) for geometry, camera, lifecycle and application contracts.
+
+Guided is the default bounded camera mode. Free Orbit allows continuous horizontal
+rotation with upright orthographic framing. Recenter restores the room overview
+target while preserving angle and zoom; Fit room reframes against the available
+canvas; Center selected follows the existing primary and aggregate focus bindings.

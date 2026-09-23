@@ -56,3 +56,12 @@ Playwright proves the conventional staff workflows against real local persistenc
 ## Room proof
 
 See [room navigation](room-navigation.md#validation) for graphics-specific contracts. `npm run test:e2e -- tests/e2e/room.spec.ts` forwards focused Playwright arguments while retaining the local backend build. The default `npm run validate` still runs every test. Real WebGL rendering/raycast interaction and forced graphics failure supplement pure and component tests; visual inspection is required for proportions and label readability.
+
+PR5 picker proof includes component search, ordering, eligibility, unavailable
+values, keyboard behavior and form baselines, followed by browser create,
+move, filter and room workflows. Room browser proof exercises pointer/button
+orbit in both directions, mode transitions, focus/recenter/fit, selection and
+history, context recovery, resize and narrow viewport usability. Capture rendered
+picker states and room views from all four sides at desktop and narrow widths;
+inspect clipping, focus, labels and browser console output. Responsive browser
+inspection does not establish physical-phone performance.
