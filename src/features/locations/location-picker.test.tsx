@@ -29,6 +29,37 @@ const secondDrawer: LocationRef = {
   name: 'Drawer 10',
   breadcrumb: 'IT Closet / Right Storage / Drawer 10',
 };
+const right: LocationRef = {
+  ...root,
+  id: 'right',
+  code: 'ITC-R',
+  name: 'Right Storage',
+  breadcrumb: 'IT Closet / Right Storage',
+  parentId: 'root',
+};
+const nestedDrawer = { ...drawer, parentId: 'right' };
+const nestedSecondDrawer = { ...secondDrawer, parentId: 'right' };
+const thirdDrawer: LocationRef = {
+  ...drawer,
+  id: 'drawer-11',
+  code: 'ITC-D11',
+  name: 'Drawer 11',
+};
+const left: LocationRef = {
+  ...right,
+  id: 'left',
+  code: 'ITC-L',
+  name: 'Left Storage',
+  breadcrumb: 'IT Closet / Left Storage',
+};
+const leftDrawer: LocationRef = {
+  ...drawer,
+  id: 'left-drawer',
+  code: 'ITC-D01',
+  name: 'Drawer 1',
+  parentId: 'left',
+  breadcrumb: 'IT Closet / Left Storage / Drawer 1',
+};
 
 describe('LocationPicker', () => {
   it('searches and selects by keyboard without submitting the parent form; Escape returns focus', async () => {
@@ -80,7 +111,7 @@ describe('LocationPicker', () => {
     expect(screen.getByLabelText('Destination')).toHaveTextContent('Drawer 7');
     await user.click(screen.getByLabelText('Destination'));
     expect(
-      screen.queryByRole('option', { name: /Drawer 7/ }),
+      screen.queryByRole('treeitem', { name: /Drawer 7/ }),
     ).not.toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled();
   });
@@ -96,10 +127,10 @@ describe('LocationPicker', () => {
       />,
     );
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('option', { name: /^IT Closet/ }));
+    await user.click(screen.getByRole('treeitem', { name: /^IT Closet/ }));
     expect(document.querySelector('input[name="location"]')).toHaveValue('ITC');
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('option', { name: /All locations/ }));
+    await user.click(screen.getByRole('treeitem', { name: /All locations/ }));
     expect(document.querySelector('input[name="location"]')).toHaveValue('');
   });
   it('does not select hidden results or submit the form while loading or failed', async () => {
@@ -174,37 +205,258 @@ describe('LocationPicker', () => {
     );
     await user.click(screen.getByLabelText('Location'));
     await user.tab();
-    expect(screen.getByRole('option', { name: /^IT Closet/ })).toHaveFocus();
+    expect(screen.getByRole('treeitem', { name: /^IT Closet/ })).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(screen.getByLabelText('Location')).toHaveFocus();
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument();
     await user.click(screen.getByLabelText('Location'));
     await user.tab();
     await user.tab();
-    await user.tab();
     expect(screen.getByRole('button', { name: 'After picker' })).toHaveFocus();
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument();
   });
-  it('exposes full ancestry in each result name without hover', async () => {
+  it('shows compact tree rows and full breadcrumbs only in search results', async () => {
     const user = userEvent.setup();
     render(
       <LocationPicker
         mode="browse"
         label="Location"
-        locations={[root, drawer]}
+        locations={[root, right, nestedDrawer]}
       />,
     );
     await user.click(screen.getByLabelText('Location'));
+    await user.click(
+      screen
+        .getByRole('treeitem', { name: /Right Storage/ })
+        .querySelector('[data-disclosure]')!,
+    );
     expect(
-      screen.getByRole('option', {
-        name: 'Drawer 7, IT Closet / Right Storage, ITC-D07',
+      screen.getByRole('treeitem', {
+        name: /Drawer 7, selectable location, ITC-D07/,
       }),
     ).toBeVisible();
+    expect(screen.getByRole('tree')).not.toHaveTextContent(
+      'IT Closet / Right Storage / Drawer 7',
+    );
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'D07',
+    );
+    expect(screen.getByRole('listbox')).toHaveTextContent(
+      'IT Closet / Right Storage / Drawer 7',
+    );
     await user.click(screen.getByRole('option', { name: /Drawer 7/ }));
-    expect(screen.getByLabelText('Location')).toHaveTextContent(
+    expect(screen.getByLabelText('Location')).toHaveTextContent('Drawer 7');
+    expect(screen.getByLabelText('Location')).not.toHaveTextContent(
       'IT Closet / Right Storage',
     );
   });
+  it('uses chevrons to disclose branches without selecting browse aggregates', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[nestedDrawer, right, root]}
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    expect(screen.getByText('Choose location')).toBeVisible();
+    const room = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(room).toHaveAttribute('aria-expanded', 'true');
+    await user.click(room.querySelector('[data-disclosure]')!);
+    expect(room).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.queryByRole('treeitem', { name: /Right Storage/ }),
+    ).not.toBeInTheDocument();
+    expect(changed).not.toHaveBeenCalled();
+    await user.keyboard('{ArrowRight}');
+    expect(
+      screen.getByRole('treeitem', { name: /Right Storage/ }),
+    ).toBeVisible();
+    await user.click(room);
+    expect(changed).toHaveBeenCalledWith('ITC');
+  });
+  it('keeps mutation ancestors as navigation rows and selects only eligible UUIDs', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[nestedDrawer, right, root]}
+        onValueChange={changed}
+        required
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    const room = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(room).toHaveAccessibleName(/group/);
+    expect(room).not.toHaveAttribute('aria-selected');
+    await user.click(room);
+    expect(changed).not.toHaveBeenCalled();
+    await user.click(room);
+    await user.click(screen.getByRole('treeitem', { name: /Right Storage/ }));
+    await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
+    expect(changed).toHaveBeenCalledWith('drawer');
+    await user.click(screen.getByLabelText('Destination'));
+    expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toBeVisible();
+    await user.keyboard('{Enter}');
+    expect(changed).toHaveBeenCalledOnce();
+  });
+  it('starts with storage branches collapsed and reopens the selected branch', async () => {
+    const user = userEvent.setup();
+    render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root, right, nestedDrawer, left, leftDrawer]}
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    expect(screen.getByRole('treeitem', { name: /IT Closet/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(
+      screen.getByRole('treeitem', { name: /Right Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.getByRole('treeitem', { name: /Left Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.queryByRole('treeitem', { name: /Drawer 7/ }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen
+        .getByRole('treeitem', { name: /Right Storage/ })
+        .querySelector('[data-disclosure]')!,
+    );
+    await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
+    await user.click(screen.getByLabelText('Location'));
+    expect(
+      screen.getByRole('treeitem', { name: /Right Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('treeitem', { name: /Left Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+  it('expands a selected path when locations finish loading after opening', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[]}
+        value="drawer"
+        loading
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, right, nestedDrawer]}
+        value="drawer"
+      />,
+    );
+    expect(
+      screen.getByRole('treeitem', { name: /Right Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+  it('expands a newly available selected path during a populated open picker only once', async () => {
+    const user = userEvent.setup();
+    const initial = [root, right, nestedSecondDrawer, left, leftDrawer];
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={initial}
+        value="drawer"
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    expect(
+      screen.getByRole('treeitem', { name: /Right Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[...initial, nestedDrawer]}
+        value="drawer"
+      />,
+    );
+    const branch = screen.getByRole('treeitem', { name: /Right Storage/ });
+    expect(branch).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(
+      screen.getByRole('treeitem', { name: /Left Storage/ }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    await user.click(branch.querySelector('[data-disclosure]')!);
+    expect(branch).toHaveAttribute('aria-expanded', 'false');
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[...initial, nestedDrawer]}
+        value="drawer"
+      />,
+    );
+    expect(branch).toHaveAttribute('aria-expanded', 'false');
+  });
+  it.each([
+    {
+      mode: 'destination' as const,
+      excludeIds: ['right'],
+      sourceIds: undefined,
+    },
+    { mode: 'source' as const, excludeIds: undefined, sourceIds: ['drawer'] },
+  ])(
+    'marks a capable but ineligible $mode ancestor as navigation only',
+    async ({ mode, excludeIds, sourceIds }) => {
+      const user = userEvent.setup();
+      const changed = vi.fn();
+      render(
+        <LocationPicker
+          mode={mode}
+          label="Location"
+          locations={[
+            root,
+            { ...right, can_hold_inventory: true },
+            nestedDrawer,
+          ]}
+          excludeIds={excludeIds}
+          sourceIds={sourceIds}
+          onValueChange={changed}
+        />,
+      );
+      await user.click(screen.getByLabelText('Location'));
+      const branch = screen.getByRole('treeitem', { name: /Right Storage/ });
+      expect(branch).toHaveAccessibleName(/navigation group/);
+      expect(branch).not.toHaveAccessibleName(/selectable/);
+      expect(branch).not.toHaveAttribute('aria-selected');
+      expect(branch).toHaveTextContent('Group · navigate');
+      await user.click(branch);
+      expect(changed).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
+      expect(changed).toHaveBeenCalledWith('drawer');
+    },
+  );
   it('places the desktop panel inside the viewport when its trigger is near an edge', async () => {
     const user = userEvent.setup();
     render(
@@ -218,7 +470,7 @@ describe('LocationPicker', () => {
       bottom: 740,
     } as DOMRect);
     await user.click(screen.getByLabelText('Location'));
-    const panel = screen.getByRole('listbox').parentElement!;
+    const panel = screen.getByRole('tree').parentElement!;
     await waitFor(() => {
       expect(panel.style.getPropertyValue('--picker-left')).toBe('624px');
       expect(panel.style.getPropertyValue('--picker-top')).toBe('336px');
@@ -236,7 +488,7 @@ describe('LocationPicker', () => {
       />,
     );
     await user.click(screen.getByLabelText('Location'));
-    const oldOption = screen.getByRole('option', { name: /Drawer 7/ });
+    const oldOption = screen.getByRole('treeitem', { name: /Drawer 7/ });
     view.rerender(
       <LocationPicker
         mode="browse"
@@ -246,7 +498,7 @@ describe('LocationPicker', () => {
         disabled
       />,
     );
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Location')).toBeDisabled();
     oldOption.click();
     expect(changed).not.toHaveBeenCalled();
@@ -258,9 +510,9 @@ describe('LocationPicker', () => {
         onValueChange={changed}
       />,
     );
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument();
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('option', { name: /Drawer 7/ }));
+    await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
     expect(changed).toHaveBeenCalledWith('ITC-D07');
   });
   it('puts active result semantics on the focused search combobox', async () => {
@@ -277,11 +529,13 @@ describe('LocationPicker', () => {
     const search = screen.getByRole('combobox', { name: 'Search locations' });
     expect(search).toHaveFocus();
     expect(search).toHaveAttribute('aria-expanded', 'true');
-    expect(search).toHaveAttribute('aria-autocomplete', 'list');
+    expect(search).toHaveAttribute('aria-autocomplete', 'none');
     expect(screen.getByRole('button', { name: 'Location' })).toBeVisible();
     await user.keyboard('{ArrowDown}{ArrowDown}');
     const activeId = search.getAttribute('aria-activedescendant');
-    expect(activeId).toBe(screen.getByRole('option', { name: /Drawer 7/ }).id);
+    expect(activeId).toBe(
+      screen.getByRole('treeitem', { name: /Drawer 7/ }).id,
+    );
     await user.keyboard('{Escape}');
     expect(screen.getByRole('combobox', { name: 'Location' })).toHaveFocus();
   });
@@ -299,12 +553,12 @@ describe('LocationPicker', () => {
       />,
     );
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('option', { name: /Drawer 7/ }));
+    await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
     expect(changed).toHaveBeenCalledOnce();
     await user.click(screen.getByLabelText('Location'));
     const search = screen.getByRole('combobox', { name: 'Search locations' });
     expect(search.getAttribute('aria-activedescendant')).toBe(
-      screen.getByRole('option', { name: /Drawer 7/ }).id,
+      screen.getByRole('treeitem', { name: /Drawer 7/ }).id,
     );
     await user.keyboard('{Enter}');
     expect(changed).toHaveBeenCalledOnce();
@@ -329,7 +583,7 @@ describe('LocationPicker', () => {
     ).not.toHaveAttribute('aria-activedescendant');
     await user.keyboard('{Enter}');
     expect(changed).not.toHaveBeenCalled();
-    await user.keyboard('{ArrowDown}{Enter}');
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
     expect(changed).toHaveBeenLastCalledWith('drawer');
     await user.click(screen.getByLabelText('Destination'));
     await user.keyboard('{Enter}');
@@ -361,5 +615,125 @@ describe('LocationPicker', () => {
     expect(screen.getByRole('button', { name: 'Location' })).toHaveTextContent(
       'MISSING',
     );
+  });
+  it('reconciles a removed active tree row without changing the selected UUID', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer, thirdDrawer]}
+        value="drawer"
+        onValueChange={changed}
+        name="destination"
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.keyboard('{ArrowDown}');
+    expect(search.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('treeitem', { name: /Drawer 10/ }).id,
+    );
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, thirdDrawer]}
+        value="drawer"
+        onValueChange={changed}
+        name="destination"
+      />,
+    );
+    const fallback = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(search.getAttribute('aria-activedescendant')).toBe(fallback.id);
+    expect(fallback).toHaveAttribute('tabindex', '0');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    expect(document.querySelector('input[name="destination"]')).toHaveValue(
+      'drawer',
+    );
+    await user.tab();
+    expect(fallback).toHaveFocus();
+    await user.keyboard('{ArrowRight}{ArrowDown}{ArrowDown}{Enter}');
+    expect(changed).toHaveBeenCalledWith('drawer-11');
+  });
+  it('reconciles a focused row removed by destination exclusions', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer]}
+        value="drawer"
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.tab();
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(screen.getByRole('treeitem', { name: /Drawer 10/ })).toHaveFocus();
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer]}
+        value="drawer"
+        excludeIds={['drawer-10']}
+        onValueChange={changed}
+      />,
+    );
+    const fallback = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(search).toHaveFocus();
+    expect(search.getAttribute('aria-activedescendant')).toBe(fallback.id);
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    await user.tab();
+    expect(fallback).toHaveFocus();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+  });
+  it('does not turn a removed browse selection into an implicit All choice', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root]}
+        value="ITC"
+        allowAll
+        onValueChange={changed}
+        name="location"
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('treeitem', { name: /IT Closet/ }).id,
+    );
+    view.rerender(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[]}
+        value="ITC"
+        allowAll
+        onValueChange={changed}
+        name="location"
+      />,
+    );
+    expect(search).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    expect(document.querySelector('input[name="location"]')).toHaveValue('ITC');
+    await user.tab();
+    expect(
+      screen.getByRole('treeitem', { name: /All locations/ }),
+    ).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(changed).toHaveBeenCalledWith('');
   });
 });

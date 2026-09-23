@@ -13,12 +13,15 @@ import { roomSchema } from '../schema';
 import {
   cameraFacingLabelPosition,
   cameraFacingDirectionInLocalSpace,
+  FREE_POLAR_EPSILON,
   floorDoubleClickAllowed,
   focusZoomForBinding,
   frameBounds,
+  guidedOffset,
   nearestGuidedAzimuth,
   recenteredPosition,
   rotatedOffset,
+  tiltedOffset,
   zoomForBoundsAroundFocus,
 } from './camera-math';
 describe('constrained camera rotation', () => {
@@ -224,6 +227,16 @@ describe('room orbit and framing', () => {
     expect(upper[2]).toBe(-6);
     expect(lower[2]).toBe(6);
   });
+  it('places labels on top and bottom faces at steep Free elevations', () => {
+    const size = [16, 12, 14] as const;
+    const anchor = [8.01, 3, 2] as const;
+    expect(
+      cameraFacingLabelPosition(size, new Vector3(1, 100, 1), anchor),
+    ).toEqual([8, 7.8, -3]);
+    expect(
+      cameraFacingLabelPosition(size, new Vector3(1, -100, 1), anchor),
+    ).toEqual([8, -7.8, -3]);
+  });
   it('keeps a transformed label facing the same side as an orthographic camera pans', () => {
     const parent = new Group();
     parent.position.set(200, 0, 0);
@@ -296,6 +309,44 @@ describe('room orbit and framing', () => {
       -0.5,
     );
     expect(nearestGuidedAzimuth(Math.PI, [-0.5, 0.5])).toBeCloseTo(0.5);
+  });
+  it('tilts through the horizon into below-floor views while respecting pole gaps', () => {
+    const target = new Vector3(3, 4, 5);
+    let position = target.clone().add(new Vector3(0, 30, 100));
+    const radius = position.distanceTo(target);
+    for (let step = 0; step < 12; step++)
+      position = target
+        .clone()
+        .add(
+          tiltedOffset(position, target, Math.PI / 12, [
+            FREE_POLAR_EPSILON,
+            Math.PI - FREE_POLAR_EPSILON,
+          ]),
+        );
+    const polar = new Spherical().setFromVector3(position.clone().sub(target));
+    expect(polar.phi).toBeGreaterThan(Math.PI / 2);
+    expect(polar.phi).toBeLessThan(Math.PI);
+    expect(position.distanceTo(target)).toBeCloseTo(radius);
+    const pole = tiltedOffset(position, target, Math.PI, [
+      FREE_POLAR_EPSILON,
+      Math.PI - FREE_POLAR_EPSILON,
+    ]);
+    expect(new Spherical().setFromVector3(pole).phi).toBeCloseTo(
+      Math.PI - FREE_POLAR_EPSILON,
+    );
+  });
+
+  it('returns to Guided by clamping azimuth and elevation together', () => {
+    const target = new Vector3(0, 0, 0);
+    const position = new Vector3().setFromSpherical(
+      new Spherical(100, MathUtils.degToRad(145), Math.PI),
+    );
+    const result = guidedOffset(position, target, [-0.5, 0.5], [20, 65]);
+    const guided = new Spherical().setFromVector3(result);
+    expect(guided.theta).toBeCloseTo(0.5);
+    expect(guided.phi).toBeCloseTo(MathUtils.degToRad(70));
+    expect(guided.radius).toBeCloseTo(100);
+    expect(position.y).toBeLessThan(0);
   });
 
   it('recenters the pivot while preserving offset and leaving source vectors untouched', () => {

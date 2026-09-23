@@ -65,4 +65,38 @@ describe('room scene controls', () => {
     expect(screen.getByRole('button', { name: 'Fit room' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled();
   });
+
+  it('starts with labels hidden, exposes tilt controls, and resets the label choice for a new room', async () => {
+    const user = userEvent.setup();
+    const first = sceneProps();
+    const view = render(<RoomScene {...first} />);
+    const toggle = screen.getByRole('button', { name: 'Show all labels' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByText('Pan and rotate'));
+    expect(screen.getByRole('button', { name: 'Tilt up' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Tilt down' })).toBeEnabled();
+    view.rerender(<RoomScene {...sceneProps()} />);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('announces a selected room object outside the canvas', () => {
+    const props = sceneProps({ selectedCode: 'ITC-S1A' });
+    props.room.nodes = [
+      {
+        id: 'unrelated-group',
+        children: [{ id: 'unrelated-child', locationCode: 'ITC-R' }],
+      } as RoomSceneProps['room']['nodes'][number],
+      {
+        id: 'section',
+        locationCode: 'ITC-S1A',
+        interaction: { label: 'Shelf 1A' },
+      } as RoomSceneProps['room']['nodes'][number],
+    ];
+    render(<RoomScene {...props} />);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Selected location: Shelf 1A (ITC-S1A)',
+    );
+  });
 });

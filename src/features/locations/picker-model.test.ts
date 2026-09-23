@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
-import { orderedLocations, pickerLocations, pickerValue } from './picker-model';
+import {
+  orderedLocations,
+  pickerLocations,
+  pickerTree,
+  pickerValue,
+  visiblePickerTree,
+} from './picker-model';
 
 const root: LocationRef = {
   id: 'root',
@@ -92,5 +98,47 @@ describe('location picker model', () => {
     ).toEqual(['inactive']);
     expect(pickerValue(drawer7, 'browse')).toBe('ITC-D07');
     expect(pickerValue(drawer7, 'destination')).toBe('7');
+  });
+  it('retains navigation ancestors without making them mutation choices', () => {
+    const destination = pickerTree(locations, 'destination', {
+      excludeIds: ['7'],
+    });
+    expect(
+      destination.map((row) => [row.location.id, row.depth, row.selectable]),
+    ).toEqual([
+      ['root', 0, false],
+      ['right', 1, false],
+      ['10', 2, true],
+    ]);
+    expect(
+      visiblePickerTree(destination, new Set(['root'])).map(
+        (row) => row.location.id,
+      ),
+    ).toEqual(['root', 'right']);
+    expect(
+      visiblePickerTree(destination, new Set(['root', 'right'])).map(
+        (row) => row.location.id,
+      ),
+    ).toEqual(['root', 'right', '10']);
+    expect(
+      pickerTree(locations, 'source', { sourceIds: ['inactive'] }).map(
+        (row) => [row.location.id, row.selectable],
+      ),
+    ).toEqual([
+      ['root', false],
+      ['right', false],
+      ['inactive', true],
+    ]);
+  });
+  it('keeps a capable parent selectable even when it has children', () => {
+    const capableRight = { ...right, can_hold_inventory: true };
+    const rows = pickerTree([root, capableRight, drawer7], 'destination');
+    expect(
+      rows.map((row) => [row.location.id, row.hasChildren, row.selectable]),
+    ).toEqual([
+      ['root', true, false],
+      ['right', true, true],
+      ['7', false, true],
+    ]);
   });
 });

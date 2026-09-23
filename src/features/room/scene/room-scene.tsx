@@ -19,12 +19,14 @@ import { toScenePosition, toSceneSize } from '../coordinates';
 import {
   cameraFacingLabelPosition,
   cameraFacingDirectionInLocalSpace,
+  FREE_POLAR_EPSILON,
   floorDoubleClickAllowed,
   focusZoomForBinding,
   frameBounds,
-  nearestGuidedAzimuth,
+  guidedOffset,
   recenteredPosition,
   rotatedOffset,
+  tiltedOffset,
   type OrbitMode,
 } from './camera-math';
 import { openingTransform } from './opening-transform';
@@ -58,7 +60,9 @@ type ViewCommand = {
     | 'up'
     | 'down'
     | 'rotate-left'
-    | 'rotate-right';
+    | 'rotate-right'
+    | 'tilt-up'
+    | 'tilt-down';
   id: number;
 };
 const ORBIT_MODE_KEY = 'room-orbit-mode';
@@ -78,6 +82,18 @@ function subscribeOrbitMode(onChange: () => void) {
     window.removeEventListener('storage', onChange);
     window.removeEventListener('room-orbit-mode-change', onChange);
   };
+}
+function selectedSceneLabel(
+  nodes: RoomNode[],
+  code: string | null,
+): string | null {
+  if (!code) return null;
+  for (const node of nodes) {
+    if (node.locationCode === code) return node.interaction?.label ?? code;
+    const child = selectedSceneLabel(node.children ?? [], code);
+    if (child) return child;
+  }
+  return null;
 }
 function Solid({
   position,
@@ -107,10 +123,12 @@ function Envelope({
   room,
   onRecenter,
   canRecenter,
+  showAllLabels,
 }: {
   room: RoomDefinition;
   onRecenter: () => void;
   canRecenter: (pointerDelta: number) => boolean;
+  showAllLabels: boolean;
 }) {
   const [width, depth, height] = room.dimensions,
     thickness = room.envelope.wallThickness;
@@ -159,34 +177,89 @@ function Envelope({
           room.dimensions,
         );
         return (
-          <group
+          <OpeningVisual
             key={opening.id}
-            position={toScenePosition(origin)}
-            rotation={[0, rotationY, 0]}
-            onDoubleClick={(event) => event.stopPropagation()}
-          >
-            <mesh position={[opening.width / 2, 0.5, 0]}>
-              <boxGeometry args={[opening.width, 1, 2]} />
-              <meshStandardMaterial color="#64748b" />
-            </mesh>
-            <Html
-              center
-              position={[opening.width / 2, 2, 8]}
-              zIndexRange={[20, 0]}
-              style={{
-                pointerEvents: 'auto',
-                whiteSpace: 'nowrap',
-                fontSize: 11,
-                color: '#94a3b8',
-              }}
-            >
-              <span onDoubleClick={(event) => event.stopPropagation()}>
-                Door · {opening.width}″
-              </span>
-            </Html>
-          </group>
+            origin={origin}
+            rotationY={rotationY}
+            width={opening.width}
+            showAllLabels={showAllLabels}
+          />
         );
       })}
+    </group>
+  );
+}
+function OpeningVisual({
+  origin,
+  rotationY,
+  width,
+  showAllLabels,
+}: {
+  origin: [number, number, number];
+  rotationY: number;
+  width: number;
+  showAllLabels: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  const hoverExit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const labelHover = useRef(false);
+  useEffect(
+    () => () => {
+      if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    },
+    [],
+  );
+  const beginHover = () => {
+    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    hoverExit.current = null;
+    setHover(true);
+  };
+  const endHover = () => {
+    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    hoverExit.current = setTimeout(() => {
+      hoverExit.current = null;
+      if (!labelHover.current) setHover(false);
+    }, 80);
+  };
+  return (
+    <group
+      position={toScenePosition(origin)}
+      rotation={[0, rotationY, 0]}
+      onPointerOver={beginHover}
+      onPointerOut={endHover}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <mesh position={[width / 2, 0.5, 0]}>
+        <boxGeometry args={[width, 1, 2]} />
+        <meshStandardMaterial color="#64748b" />
+      </mesh>
+      {(hover || showAllLabels) && (
+        <Html
+          center
+          position={[width / 2, 2, 8]}
+          zIndexRange={[20, 0]}
+          style={{
+            pointerEvents: 'auto',
+            whiteSpace: 'nowrap',
+            fontSize: 11,
+            color: '#94a3b8',
+          }}
+        >
+          <span
+            onPointerEnter={() => {
+              labelHover.current = true;
+              beginHover();
+            }}
+            onPointerLeave={() => {
+              labelHover.current = false;
+              endHover();
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            Door · {width}″
+          </span>
+        </Html>
+      )}
     </group>
   );
 }
@@ -196,12 +269,16 @@ function CameraFacingLabel({
   selected,
   prioritySelected,
   onSelect,
+  onHoverStart,
+  onHoverEnd,
 }: {
   node: RoomNode;
   size: [number, number, number];
   selected: boolean;
   prioritySelected: boolean;
   onSelect: (code: string) => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
 }) {
   const { camera, invalidate } = useThree();
   const registerLabel = useRoomLabelLayout();
@@ -280,6 +357,8 @@ function CameraFacingLabel({
               data-location-code={node.locationCode}
               aria-label={`Select ${node.interaction!.label} (${node.locationCode})`}
               aria-pressed={prioritySelected}
+              onPointerEnter={onHoverStart}
+              onPointerLeave={onHoverEnd}
               onClick={(event) => {
                 event.stopPropagation();
                 onSelect(node.locationCode!);
@@ -313,14 +392,46 @@ function NodeVisual({
   highlighted,
   onSelect,
   profiles,
+  showAllLabels,
 }: {
   profiles: RoomDefinition['rackFaceProfiles'];
   node: RoomNode;
   selectedCode: string | null;
   highlighted: Set<string>;
   onSelect: (code: string) => void;
+  showAllLabels: boolean;
 }) {
   const [hover, setHover] = useState(false);
+  const hoverExit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const labelHover = useRef(false);
+  useEffect(
+    () => () => {
+      if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    },
+    [],
+  );
+  const beginHover = () => {
+    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    hoverExit.current = null;
+    setHover(true);
+  };
+  const endHover = () => {
+    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    // The HTML label can take the pointer from the raycast mesh. Let its
+    // pointer-enter event retain the label before clearing mesh hover.
+    hoverExit.current = setTimeout(() => {
+      hoverExit.current = null;
+      if (!labelHover.current) setHover(false);
+    }, 80);
+  };
+  const beginLabelHover = () => {
+    labelHover.current = true;
+    beginHover();
+  };
+  const endLabelHover = () => {
+    labelHover.current = false;
+    endHover();
+  };
   const selected =
     !!node.locationCode &&
     (node.locationCode === selectedCode || highlighted.has(node.locationCode));
@@ -338,17 +449,20 @@ function NodeVisual({
         <group
           onClick={click}
           onDoubleClick={(event) => event.stopPropagation()}
+          onPointerOver={(event) => {
+            if (interactive) {
+              event.stopPropagation();
+              beginHover();
+            }
+          }}
+          onPointerOut={(event) => {
+            if (interactive) {
+              event.stopPropagation();
+              endHover();
+            }
+          }}
         >
-          <mesh
-            onClick={click}
-            onPointerOver={(event) => {
-              if (interactive) {
-                event.stopPropagation();
-                setHover(true);
-              }
-            }}
-            onPointerOut={() => setHover(false)}
-          >
+          <mesh onClick={click}>
             <boxGeometry args={toSceneSize(node.size)} />
             <meshStandardMaterial
               color={
@@ -434,13 +548,15 @@ function NodeVisual({
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
           )}
-          {interactive && (
+          {interactive && (hover || showAllLabels) && (
             <CameraFacingLabel
               node={node}
               size={node.size}
               selected={selected}
               prioritySelected={node.locationCode === selectedCode}
               onSelect={onSelect}
+              onHoverStart={beginLabelHover}
+              onHoverEnd={endLabelHover}
             />
           )}
         </group>
@@ -453,6 +569,7 @@ function NodeVisual({
           highlighted={highlighted}
           onSelect={onSelect}
           profiles={profiles}
+          showAllLabels={showAllLabels}
         />
       ))}
     </group>
@@ -555,6 +672,9 @@ function CameraRig({
     const canvas = gl.domElement;
     canvas.dataset.cameraAzimuth = String(azimuth);
     canvas.dataset.cameraAzimuthUnwrapped = String(unwrappedAzimuth.current);
+    canvas.dataset.cameraElevation = String(
+      Math.asin(MathUtils.clamp(offset.y / offset.length(), -1, 1)),
+    );
     canvas.dataset.cameraZoom = String(camera.zoom);
     canvas.dataset.cameraTarget = JSON.stringify(
       controls.current.target.toArray(),
@@ -635,30 +755,28 @@ function CameraRig({
     )
       return;
     const control = controls.current;
-    const offset = camera.position.clone().sub(control.target);
-    const radius = offset.length();
-    const elevation = Math.asin(offset.y / radius);
-    const angle = Math.atan2(offset.x, offset.z);
-    const guided = nearestGuidedAzimuth(angle, [
-      control.minAzimuthAngle,
-      control.maxAzimuthAngle,
-    ]);
-    if (Math.abs(guided - angle) > 1e-7) {
-      animation.current = null;
+    const constrained = guidedOffset(
+      camera.position,
+      control.target,
+      [
+        MathUtils.degToRad(room.camera.azimuthLimitsDegrees[0]),
+        MathUtils.degToRad(room.camera.azimuthLimitsDegrees[1]),
+      ],
+      room.camera.elevationLimitsDegrees,
+    );
+    if (
       camera.position
-        .copy(control.target)
-        .add(
-          new Vector3(
-            Math.sin(guided) * Math.cos(elevation) * radius,
-            Math.sin(elevation) * radius,
-            Math.cos(guided) * Math.cos(elevation) * radius,
-          ),
-        );
+        .clone()
+        .sub(control.target)
+        .distanceToSquared(constrained) > 1e-8
+    ) {
+      animation.current = null;
+      camera.position.copy(control.target).add(constrained);
       control.update();
       writeTelemetry();
       invalidate();
     }
-  }, [orbitMode, camera, gl, invalidate, writeTelemetry]);
+  }, [orbitMode, camera, gl, invalidate, room, writeTelemetry]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (
@@ -777,6 +895,14 @@ function CameraRig({
         [control.minAzimuthAngle, control.maxAzimuthAngle],
       );
       camera.position.copy(control.target).add(offset);
+    } else if (command.kind === 'tilt-up' || command.kind === 'tilt-down') {
+      const offset = tiltedOffset(
+        camera.position,
+        control.target,
+        MathUtils.degToRad(command.kind === 'tilt-up' ? -10 : 10),
+        [control.minPolarAngle, control.maxPolarAngle],
+      );
+      camera.position.copy(control.target).add(offset);
     } else {
       const shift = new Vector3();
       if (command.kind === 'left' || command.kind === 'right')
@@ -848,12 +974,16 @@ function CameraRig({
           ? Infinity
           : MathUtils.degToRad(room.camera.azimuthLimitsDegrees[1])
       }
-      minPolarAngle={MathUtils.degToRad(
-        90 - room.camera.elevationLimitsDegrees[1],
-      )}
-      maxPolarAngle={MathUtils.degToRad(
-        90 - room.camera.elevationLimitsDegrees[0],
-      )}
+      minPolarAngle={
+        orbitMode === 'free'
+          ? FREE_POLAR_EPSILON
+          : MathUtils.degToRad(90 - room.camera.elevationLimitsDegrees[1])
+      }
+      maxPolarAngle={
+        orbitMode === 'free'
+          ? Math.PI - FREE_POLAR_EPSILON
+          : MathUtils.degToRad(90 - room.camera.elevationLimitsDegrees[0])
+      }
       enablePan
       enableZoom
       screenSpacePanning
@@ -891,6 +1021,15 @@ function CameraRig({
 }
 export default function RoomScene(props: RoomSceneProps) {
   const [command, setCommand] = useState<ViewCommand>({ kind: 'fit', id: 0 });
+  const [labelPreference, setLabelPreference] = useState({
+    room: props.room,
+    showAll: false,
+  });
+  const showAllLabels =
+    labelPreference.room === props.room && labelPreference.showAll;
+  const selectedLabel =
+    selectedSceneLabel(props.room.nodes, props.selectedCode) ??
+    props.selectedCode;
   const [suppressedLabels, setSuppressedLabels] = useState(0);
   const onSuppressionChange = useCallback(
     (count: number) => setSuppressedLabels(count),
@@ -926,6 +1065,8 @@ export default function RoomScene(props: RoomSceneProps) {
     ['down', 'Pan down'],
     ['rotate-left', 'Rotate left'],
     ['rotate-right', 'Rotate right'],
+    ['tilt-up', 'Tilt up'],
+    ['tilt-down', 'Tilt down'],
   ];
   return (
     <div className="space-y-3">
@@ -997,6 +1138,17 @@ export default function RoomScene(props: RoomSceneProps) {
             +
           </Button>
         </div>
+        <Button
+          type="button"
+          variant={showAllLabels ? 'default' : 'outline'}
+          className="min-h-11"
+          aria-pressed={showAllLabels}
+          onClick={() =>
+            setLabelPreference({ room: props.room, showAll: !showAllLabels })
+          }
+        >
+          Show all labels
+        </Button>
         <details className="relative">
           <summary className="flex min-h-11 cursor-pointer list-none items-center rounded-md border border-slate-600 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-cyan-300">
             Pan and rotate
@@ -1051,6 +1203,7 @@ export default function RoomScene(props: RoomSceneProps) {
                   performance.now(),
                 )
               }
+              showAllLabels={showAllLabels}
             />
             {props.room.nodes.map((node) => (
               <NodeVisual
@@ -1060,6 +1213,7 @@ export default function RoomScene(props: RoomSceneProps) {
                 highlighted={highlighted}
                 onSelect={props.onSelect}
                 profiles={props.room.rackFaceProfiles}
+                showAllLabels={showAllLabels}
               />
             ))}
             <CameraRig
@@ -1071,7 +1225,13 @@ export default function RoomScene(props: RoomSceneProps) {
           </LabelLayoutProvider>
         </Canvas>
       </div>
-      {suppressedLabels > 0 && (
+      {selectedLabel && (
+        <p role="status" className="text-sm text-cyan-200">
+          Selected location: {selectedLabel}
+          {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
+        </p>
+      )}
+      {showAllLabels && suppressedLabels > 0 && (
         <p role="status" className="text-xs text-slate-400">
           Some room labels are hidden at this view. Zoom in or use the location
           picker.
@@ -1080,8 +1240,9 @@ export default function RoomScene(props: RoomSceneProps) {
       <p className="text-xs text-slate-400">
         Drag to rotate; right-drag to pan; scroll or pinch to zoom. Double-click
         exposed floor to recenter. Guided keeps the operational view; Free Orbit
-        rotates all the way around. The controls and location list support
-        keyboard navigation.
+        rotates around and above or below the room. Hover an object to see its
+        label, or use Show all labels. Pan, rotate and tilt buttons and the
+        location list support keyboard and touch navigation.
       </p>
     </div>
   );

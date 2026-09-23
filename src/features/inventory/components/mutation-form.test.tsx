@@ -64,7 +64,11 @@ async function chooseLocation(
   label: string,
   name: string,
 ) {
-  await user.click(screen.getByLabelText(label));
+  await user.click(screen.getByLabelText(label, { selector: 'button' }));
+  await user.type(
+    screen.getByRole('combobox', { name: 'Search locations' }),
+    name,
+  );
   await user.click(screen.getByRole('option', { name: new RegExp(name) }));
 }
 describe('inventory operation forms', () => {
@@ -167,12 +171,12 @@ describe('inventory operation forms', () => {
       'Select a location',
     );
     await user.click(screen.getByLabelText('Source location'));
-    await user.click(screen.getByRole('option', { name: /1B/ }));
+    await user.click(screen.getByRole('treeitem', { name: /1B/ }));
     await user.click(screen.getByLabelText('Destination location'));
     expect(
-      screen.queryByRole('option', { name: /1B/ }),
+      screen.queryByRole('treeitem', { name: /1B/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /1A/ })).toBeVisible();
+    expect(screen.getByRole('treeitem', { name: /1A/ })).toBeVisible();
   });
   it('preserves input and request identity after an uncertain failure, changing identity when input changes', async () => {
     mocks.submit.mockRejectedValue(new Error('network'));

@@ -59,9 +59,14 @@ See [room navigation](room-navigation.md#validation) for graphics-specific contr
 
 PR5 picker proof includes component search, ordering, eligibility, unavailable
 values, keyboard behavior and form baselines, followed by browser create,
-move, filter and room workflows. Room browser proof exercises pointer/button
-orbit in both directions, mode transitions, focus/recenter/fit, selection and
-history, context recovery, resize and narrow viewport usability. Capture rendered
-picker states and room views from all four sides at desktop and narrow widths;
+move, filter and room workflows. Location-tree coverage includes expand/collapse,
+automatic expansion to the selected node, aggregate browse selection, navigation-only
+ineligible form ancestors, flat search results with full breadcrumbs, quiet stable codes,
+accessible controls and narrow-screen use. Room browser proof exercises pointer/button
+orbit horizontally and vertically above and below the room, Guided clamping of both
+angles, tilt controls, pole stability and no roll; it also covers mode transitions,
+hover-only labels and Show all labels, focus/recenter/fit, selection and history,
+context recovery, resize and narrow viewport usability. Capture rendered picker
+states and room views from all four sides and above/below at desktop and narrow widths;
 inspect clipping, focus, labels and browser console output. Responsive browser
 inspection does not establish physical-phone performance.

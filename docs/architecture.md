@@ -103,7 +103,7 @@ Search uses case-insensitive literal substring matching over name, description, 
 
 Search ordering is lower(name), kind, entity UUID, location code. History orders newest timestamp, kind, event UUID. Page size defaults to 25 and database functions cap it at 100; the application fixes it at 25. History displays human event labels, actor snapshots, reasons, location links, quantity before/after/delta and descriptive metadata changes. JSON is not the primary history UI.
 
-Routes are /inventory, /inventory/quantity/new, /inventory/quantity/[id], /inventory/assets/new, /inventory/assets/[id], /locations, /locations/[code], /history. The /room route provides interactive location navigation and inventory context. Search/filter/page state lives in the URL. Server pages own reads; controlled client forms own pending input and confirmation; Server Actions validate and call the RPC. Viewer pages omit mutation controls and create routes enforce staff membership.
+Routes are /inventory, /inventory/quantity/new, /inventory/quantity/[id], /inventory/assets/new, /inventory/assets/[id], /locations, /locations/[code], /history. The /room route provides interactive location navigation and inventory context. Search/filter/page state lives in the URL. The shared location picker uses an indented collapsible tree for browsing and flat full-breadcrumb search results; browse mode can select aggregates, while ineligible form ancestors only navigate. Server pages own reads; controlled client forms own pending input and confirmation; Server Actions validate and call the RPC. Viewer pages omit mutation controls and create routes enforce staff membership.
 
 Consequential actions require before/after review. Recoverable errors preserve input. A form's editable values and expected_version share a captured baseline: unrelated prop refreshes must not silently advance its version. Explicit stale refresh adopts the latest baseline, preserves pending input, and requires renewed before/after review. Database version checks remain authoritative.
 
@@ -119,7 +119,4 @@ value/version baseline.
 
 PR3 adds the client-loaded room as a navigation layer over the existing inventory reads. Selection lives in `/room?location=CODE`; aggregate highlighting uses the database hierarchy. See [room navigation](room-navigation.md) for geometry, camera, lifecycle and application contracts.
 
-Guided is the default bounded camera mode. Free Orbit allows continuous horizontal
-rotation with upright orthographic framing. Recenter restores the room overview
-target while preserving angle and zoom; Fit room reframes against the available
-canvas; Center selected follows the existing primary and aggregate focus bindings.
+Guided is the default camera mode, constraining both azimuth and elevation; returning from Free Orbit clamps both to their nearest allowed values. Free Orbit allows unrestricted horizontal rotation and viewing above or below the room, with a small pole epsilon to avoid the numerical singularity and no camera roll. Recenter restores the room overview target while preserving angle and zoom; Fit room reframes against the available canvas; Center selected follows the existing primary and aggregate focus bindings. Tilt up/down controls complement camera rotation. Location labels appear on hover by default, with a Show all labels toggle; touch selection remains available through the conventional location panel.
