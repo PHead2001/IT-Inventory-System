@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: foundation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
@@ -79,3 +79,31 @@ jobs:
           echo "Tested SHA: $TESTED_SHA"
           test "$APP_RESULT" = success
           test "$DATABASE_RESULT" = success
+  production_database:
+    name: ${{ github.event_name == 'push' && 'Production database ready' || 'Production database inactive (PR)' }}
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [required]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-database
+    steps:
+      - name: Require successful main tests
+        env:
+          REQUIRED_RESULT: ${{ needs.required.result }}
+        run: test "$REQUIRED_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TESTED_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global npm@11.11.0
+      - run: npm ci
+      - run: npm run db:deliver:production
+        env:
+          ENABLE_PRODUCTION_DB_DELIVERY: ${{ vars.ENABLE_PRODUCTION_DB_DELIVERY }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
