@@ -39,6 +39,12 @@ const right: LocationRef = {
 };
 const nestedDrawer = { ...drawer, parentId: 'right' };
 const nestedSecondDrawer = { ...secondDrawer, parentId: 'right' };
+const thirdDrawer: LocationRef = {
+  ...drawer,
+  id: 'drawer-11',
+  code: 'ITC-D11',
+  name: 'Drawer 11',
+};
 const left: LocationRef = {
   ...right,
   id: 'left',
@@ -609,5 +615,84 @@ describe('LocationPicker', () => {
     expect(screen.getByRole('button', { name: 'Location' })).toHaveTextContent(
       'MISSING',
     );
+  });
+  it('reconciles a removed active tree row without changing the selected UUID', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer, thirdDrawer]}
+        value="drawer"
+        onValueChange={changed}
+        name="destination"
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.keyboard('{ArrowDown}');
+    expect(search.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('treeitem', { name: /Drawer 10/ }).id,
+    );
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, thirdDrawer]}
+        value="drawer"
+        onValueChange={changed}
+        name="destination"
+      />,
+    );
+    const fallback = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(search.getAttribute('aria-activedescendant')).toBe(fallback.id);
+    expect(fallback).toHaveAttribute('tabindex', '0');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    expect(document.querySelector('input[name="destination"]')).toHaveValue(
+      'drawer',
+    );
+    await user.tab();
+    expect(fallback).toHaveFocus();
+    await user.keyboard('{ArrowRight}{ArrowDown}{ArrowDown}{Enter}');
+    expect(changed).toHaveBeenCalledWith('drawer-11');
+  });
+  it('reconciles a focused row removed by destination exclusions', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer]}
+        value="drawer"
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.tab();
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(screen.getByRole('treeitem', { name: /Drawer 10/ })).toHaveFocus();
+    view.rerender(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer]}
+        value="drawer"
+        excludeIds={['drawer-10']}
+        onValueChange={changed}
+      />,
+    );
+    const fallback = screen.getByRole('treeitem', { name: /IT Closet/ });
+    expect(search).toHaveFocus();
+    expect(search.getAttribute('aria-activedescendant')).toBe(fallback.id);
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    await user.tab();
+    expect(fallback).toHaveFocus();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(changed).not.toHaveBeenCalled();
   });
 });

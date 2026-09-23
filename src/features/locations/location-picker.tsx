@@ -99,6 +99,15 @@ export function LocationPicker({
   const treeItems: (PickerTreeRow | null)[] = allowAll
     ? [null, ...visibleTree]
     : visibleTree;
+  const activeTreeStillVisible = treeItems.some(
+    (row) => (row?.location.id ?? 'all') === activeTreeId,
+  );
+  // A refreshed hierarchy or eligibility set can remove the active row. Keep
+  // initial null focus uncommitted, but redirect a stale active row to a visible one.
+  const effectiveActiveTreeId =
+    activeTreeId === null || activeTreeStillVisible
+      ? activeTreeId
+      : (visibleTree[0]?.location.id ?? (allowAll ? 'all' : null));
   useEffect(() => {
     if (!visibleOpen) return;
     const selectedRow = treeRows.find(
@@ -132,8 +141,18 @@ export function LocationPicker({
     expandedSelectedPathRef.current = pathSignature;
   }, [visibleOpen, treeRows, selectedValue, mode, locations]);
   const activeTreeIndex = treeItems.findIndex(
-    (row) => (row?.location.id ?? 'all') === activeTreeId,
+    (row) => (row?.location.id ?? 'all') === effectiveActiveTreeId,
   );
+  useEffect(() => {
+    if (
+      visibleOpen &&
+      !searching &&
+      activeTreeId !== null &&
+      !activeTreeStillVisible &&
+      document.activeElement === document.body
+    )
+      searchRef.current?.focus();
+  }, [visibleOpen, searching, activeTreeId, activeTreeStillVisible]);
   const activeOptionIndex = Math.min(activeIndex, options.length - 1);
   const selected = locations.find(
     (location) => pickerValue(location, mode) === selectedValue,
@@ -186,12 +205,18 @@ export function LocationPicker({
       ? activeOptionIndex >= 0
         ? listId + '-' + activeOptionIndex
         : null
-      : activeTreeId
-        ? listId + '-tree-' + activeTreeId
+      : effectiveActiveTreeId
+        ? listId + '-tree-' + effectiveActiveTreeId
         : null;
     if (visibleOpen && id)
       document.getElementById(id)?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeOptionIndex, activeTreeId, listId, searching, visibleOpen]);
+  }, [
+    activeOptionIndex,
+    effectiveActiveTreeId,
+    listId,
+    searching,
+    visibleOpen,
+  ]);
   useEffect(() => {
     if (!visibleOpen) return;
     function place() {
@@ -348,7 +373,12 @@ export function LocationPicker({
     } else if (event.key === 'Enter') {
       event.preventDefault();
       if (!loading && !loadError && row) activateTree(row);
-      else if (!loading && !loadError && activeTreeId === 'all' && allowAll)
+      else if (
+        !loading &&
+        !loadError &&
+        effectiveActiveTreeId === 'all' &&
+        allowAll
+      )
         choose('');
     }
   }
@@ -496,8 +526,8 @@ export function LocationPicker({
                   ? activeOptionIndex >= 0
                     ? listId + '-' + activeOptionIndex
                     : undefined
-                  : activeTreeIndex >= 0 && activeTreeId
-                    ? listId + '-tree-' + activeTreeId
+                  : activeTreeIndex >= 0 && effectiveActiveTreeId
+                    ? listId + '-tree-' + effectiveActiveTreeId
                     : undefined
             }
             onChange={(event) => {
@@ -623,8 +653,8 @@ export function LocationPicker({
                           : 'All locations, no location filter'
                       }
                       tabIndex={
-                        activeTreeId === rowId ||
-                        (activeTreeId === null && treeItems[0] === row)
+                        effectiveActiveTreeId === rowId ||
+                        (effectiveActiveTreeId === null && treeItems[0] === row)
                           ? 0
                           : -1
                       }
@@ -647,7 +677,9 @@ export function LocationPicker({
                       }}
                       className={
                         'flex min-h-11 w-full items-center gap-2 py-2 pr-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-cyan-400 hover:bg-slate-800 ' +
-                        (activeTreeId === rowId ? 'bg-slate-800 ' : '') +
+                        (effectiveActiveTreeId === rowId
+                          ? 'bg-slate-800 '
+                          : '') +
                         (isGroup
                           ? 'bg-slate-900/70 text-slate-300 '
                           : 'text-slate-100 ')
