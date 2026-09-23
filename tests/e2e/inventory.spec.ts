@@ -62,6 +62,50 @@ async function createQuantity(page: Page, name: string, count = 0) {
     ),
   ).toBe(true);
 }
+
+test('inventory destination tree navigates ancestors without accepting them as destinations', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  await form.getByLabel('Initial quantity').fill('1');
+  const trigger = form.getByLabel('Initial location', { exact: true }).first();
+  await trigger.click();
+  const tree = form.getByRole('tree', { name: 'Initial location' });
+  const root = tree.getByRole('treeitem', { name: /IT Closet.*group.*ITC$/ });
+  const left = tree.getByRole('treeitem', {
+    name: /Left Storage.*group.*ITC-L$/,
+  });
+  await expect(root).toHaveAttribute('aria-expanded', 'true');
+  await expect(left).toHaveAttribute('aria-expanded', 'false');
+  await left.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(left).toHaveAttribute('aria-expanded', 'true');
+  await expect(trigger).not.toContainText('ITC-L');
+  const shelf = tree.getByRole('treeitem', { name: /Shelf 1.*group.*ITC-S1$/ });
+  await shelf.focus();
+  await shelf.press('ArrowRight');
+  await expect(
+    tree.getByRole('treeitem', { name: /1A.*ITC-S1A$/ }),
+  ).toBeVisible();
+  await shelf.press('ArrowLeft');
+  await expect(
+    tree.getByRole('treeitem', { name: /1A.*ITC-S1A$/ }),
+  ).toHaveCount(0);
+  const search = form.getByRole('combobox', { name: 'Search locations' });
+  await search.fill('ITC-S1A');
+  const leaf = form.getByRole('option', { name: /1A.*ITC-S1A$/ });
+  await expect(leaf).toContainText('IT Closet / Left Storage / Shelf 1 / 1A');
+  await leaf.click();
+  await expect(trigger).toContainText('ITC-S1A');
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
 test('quantity core persists multi-location receives, partial and all transfers, counts, metadata and lifecycle', async ({
   page,
 }) => {

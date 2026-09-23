@@ -10,6 +10,8 @@ import type { RoomBinding } from '../bindings';
 import { toScenePosition } from '../coordinates';
 
 export type OrbitMode = 'guided' | 'free';
+// OrbitControls uses spherical coordinates and needs a nonzero pole gap.
+export const FREE_POLAR_EPSILON = 1e-4;
 
 export function floorDoubleClickAllowed(
   pointerDelta: number,
@@ -41,6 +43,17 @@ export function cameraFacingLabelPosition(
   authoredAnchor: readonly [number, number, number],
 ): [number, number, number] {
   const margin = 0.8;
+  // At steep elevations a side label sits behind its own box. Put it on the
+  // visible horizontal face; geometry occlusion still applies (including floor).
+  if (
+    Math.abs(localCamera.y) >
+    Math.max(Math.abs(localCamera.x), Math.abs(localCamera.z))
+  )
+    return [
+      MathUtils.clamp(authoredAnchor[0], -size[0] / 2, size[0] / 2),
+      Math.sign(localCamera.y) * (size[2] / 2 + margin),
+      -MathUtils.clamp(authoredAnchor[1], -size[1] / 2, size[1] / 2),
+    ];
   const authoredXFace =
     Math.abs(authoredAnchor[0] / (size[0] / 2)) >=
     Math.abs(authoredAnchor[1] / (size[1] / 2));
@@ -96,6 +109,39 @@ export function rotatedOffset(
           limits[1],
         )
       : orbit.theta + delta;
+  return new Vector3().setFromSpherical(orbit);
+}
+
+/** Rotate toward/away from the ceiling while keeping the pivot and radius. */
+export function tiltedOffset(
+  position: Vector3,
+  target: Vector3,
+  delta: number,
+  polarLimits: readonly [number, number],
+) {
+  const orbit = new Spherical().setFromVector3(position.clone().sub(target));
+  orbit.phi = MathUtils.clamp(
+    orbit.phi + delta,
+    polarLimits[0],
+    polarLimits[1],
+  );
+  return new Vector3().setFromSpherical(orbit);
+}
+
+/** Returning to Guided must constrain both axes of an existing Free view. */
+export function guidedOffset(
+  position: Vector3,
+  target: Vector3,
+  azimuthLimits: readonly [number, number],
+  elevationLimitsDegrees: readonly [number, number],
+) {
+  const orbit = new Spherical().setFromVector3(position.clone().sub(target));
+  orbit.theta = nearestGuidedAzimuth(orbit.theta, azimuthLimits);
+  orbit.phi = MathUtils.clamp(
+    orbit.phi,
+    MathUtils.degToRad(90 - elevationLimitsDegrees[1]),
+    MathUtils.degToRad(90 - elevationLimitsDegrees[0]),
+  );
   return new Vector3().setFromSpherical(orbit);
 }
 

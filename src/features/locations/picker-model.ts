@@ -74,3 +74,100 @@ export function locationContext(location: LocationRef) {
   const parts = location.breadcrumb.split(' / ');
   return parts.slice(0, -1).join(' / ');
 }
+
+export type PickerTreeRow = {
+  location: LocationRef;
+  depth: number;
+  hasChildren: boolean;
+  selectable: boolean;
+  parentId: string | null;
+};
+
+export function pickerTree(
+  locations: LocationRef[],
+  mode: PickerMode,
+  options: { excludeIds?: string[]; sourceIds?: string[] } = {},
+): PickerTreeRow[] {
+  const ordered = orderedLocations(locations);
+  const byId = new Map(ordered.map((location) => [location.id, location]));
+  const eligible = new Set(
+    pickerLocations(locations, mode, options).map((location) => location.id),
+  );
+  const included = new Set(eligible);
+  for (const location of ordered) {
+    if (!eligible.has(location.id)) continue;
+    let parentId = location.parentId;
+    const seen = new Set([location.id]);
+    while (parentId && byId.has(parentId) && !seen.has(parentId)) {
+      included.add(parentId);
+      seen.add(parentId);
+      parentId = byId.get(parentId)?.parentId ?? null;
+    }
+  }
+  const children = new Map<string, number>();
+  for (const location of ordered) {
+    if (
+      included.has(location.id) &&
+      location.parentId &&
+      included.has(location.parentId)
+    )
+      children.set(
+        location.parentId,
+        (children.get(location.parentId) ?? 0) + 1,
+      );
+  }
+  const depths = new Map<string, number>();
+  return ordered
+    .filter((location) => included.has(location.id))
+    .map((location) => {
+      const parentId =
+        location.parentId &&
+        included.has(location.parentId) &&
+        depths.has(location.parentId)
+          ? location.parentId
+          : null;
+      const depth = parentId ? (depths.get(parentId) ?? 0) + 1 : 0;
+      depths.set(location.id, depth);
+      return {
+        location,
+        depth,
+        hasChildren: Boolean(children.get(location.id)),
+        selectable: eligible.has(location.id),
+        parentId,
+      };
+    });
+}
+
+export function visiblePickerTree(
+  rows: PickerTreeRow[],
+  expanded: Set<string>,
+) {
+  const visible: PickerTreeRow[] = [];
+  const visibleIds = new Set<string>();
+  for (const row of rows) {
+    if (
+      row.parentId &&
+      (!visibleIds.has(row.parentId) || !expanded.has(row.parentId))
+    )
+      continue;
+    visible.push(row);
+    visibleIds.add(row.location.id);
+  }
+  return visible;
+}
+
+export function locationAncestorIds(
+  location: LocationRef,
+  locations: LocationRef[],
+) {
+  const byId = new Map(locations.map((item) => [item.id, item]));
+  const ancestors: string[] = [];
+  const seen = new Set([location.id]);
+  let parentId = location.parentId;
+  while (parentId && byId.has(parentId) && !seen.has(parentId)) {
+    ancestors.push(parentId);
+    seen.add(parentId);
+    parentId = byId.get(parentId)?.parentId ?? null;
+  }
+  return ancestors;
+}

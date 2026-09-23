@@ -188,13 +188,13 @@ Use clean parametric geometry. Do not recreate Matterport mesh noise, wire detai
 Prefer:
 
 - orthographic or orthographic-style presentation
-- pan, zoom, Guided constrained rotation by default, and user-selected Free Orbit for continuous horizontal rotation
+- pan, zoom, Guided constrained rotation by default, and user-selected Free Orbit for unrestricted horizontal and vertical viewing
 - clear click/tap targets
 - persistent selected-location highlight
 - search results that can focus/highlight a physical location
 - clean low-poly visuals
 
-Essential inventory actions must not depend on hover-only or precise 3D manipulation.
+Essential inventory actions must not depend on hover-only or precise 3D manipulation. Room labels are hover-only by default, with a Show all labels control; touch users select locations through the conventional panel. Location pickers use an accessible indented, collapsible tree: browse mode can select aggregate locations, while inventory forms make ineligible ancestors navigation-only; search results remain flat and include full breadcrumbs.
 
 ---
 
