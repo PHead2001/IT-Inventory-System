@@ -107,7 +107,7 @@ export function LocationPicker({
   const effectiveActiveTreeId =
     activeTreeId === null || activeTreeStillVisible
       ? activeTreeId
-      : (visibleTree[0]?.location.id ?? (allowAll ? 'all' : null));
+      : (visibleTree[0]?.location.id ?? null);
   useEffect(() => {
     if (!visibleOpen) return;
     const selectedRow = treeRows.find(

@@ -695,4 +695,45 @@ describe('LocationPicker', () => {
     await user.keyboard('{ArrowDown}{Enter}');
     expect(changed).not.toHaveBeenCalled();
   });
+  it('does not turn a removed browse selection into an implicit All choice', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const view = render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root]}
+        value="ITC"
+        allowAll
+        onValueChange={changed}
+        name="location"
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('treeitem', { name: /IT Closet/ }).id,
+    );
+    view.rerender(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[]}
+        value="ITC"
+        allowAll
+        onValueChange={changed}
+        name="location"
+      />,
+    );
+    expect(search).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    expect(document.querySelector('input[name="location"]')).toHaveValue('ITC');
+    await user.tab();
+    expect(
+      screen.getByRole('treeitem', { name: /All locations/ }),
+    ).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(changed).toHaveBeenCalledWith('');
+  });
 });
