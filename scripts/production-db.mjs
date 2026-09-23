@@ -21,24 +21,31 @@ function execute(command, args, env) {
 }
 
 export function parseMigrationList(output) {
-  const rows = [];
-  let header = false;
-  for (const line of output.split(/\r?\n/)) {
-    const columns = line.split(/[│|]/).map((part) => part.trim());
-    if (columns.length !== 3) continue;
-    if (
-      columns[0].toUpperCase() === 'LOCAL' &&
-      columns[1].toUpperCase() === 'REMOTE'
-    ) {
-      header = true;
-      continue;
-    }
-    if (!/^\d{14}$/.test(columns[0]) && columns[0] !== '') continue;
-    if (!/^\d{14}$/.test(columns[1]) && columns[1] !== '') continue;
-    if (!columns[0] && !columns[1]) continue;
-    rows.push({ local: columns[0], remote: columns[1] });
+  let data;
+  try {
+    data = JSON.parse(output);
+  } catch {
+    throw new Error('Could not verify Supabase migration history');
   }
-  if (!header) throw new Error('Could not verify Supabase migration history');
+  if (!data || !Array.isArray(data.migrations))
+    throw new Error('Could not verify Supabase migration history');
+  const rows = data.migrations.map((row) => {
+    const remote = row?.remote == null ? '' : row.remote;
+    if (
+      !row ||
+      typeof row !== 'object' ||
+      typeof row.local !== 'string' ||
+      typeof remote !== 'string' ||
+      (!/^\d{14}$/.test(row.local) && row.local !== '') ||
+      (!/^\d{14}$/.test(remote) && remote !== '') ||
+      (!row.local && !remote)
+    )
+      throw new Error('Invalid Supabase migration history row');
+    return { local: row.local, remote };
+  });
+  const versions = rows.map((row) => row.local || row.remote);
+  if (versions.some((version, i) => i > 0 && version <= versions[i - 1]))
+    throw new Error('Supabase migration history is not strictly ordered');
   return rows;
 }
 
@@ -108,7 +115,10 @@ export function deliverDatabase({
       env,
     );
   cli('link', '--project-ref', PRODUCTION_PROJECT_REF);
-  const list = () => parseMigrationList(cli('migration', 'list', '--linked'));
+  const list = () =>
+    parseMigrationList(
+      cli('migration', 'list', '--linked', '--output-format', 'json'),
+    );
   const before = assertMigrationHistory(list(), versions);
   cli('db', 'push', '--linked', '--skip-vault', '--dry-run');
   const afterDryRun = assertMigrationHistory(list(), versions);

@@ -25,13 +25,17 @@ const validEnv = {
 };
 
 function history(remote) {
-  return [
-    ' LOCAL │ REMOTE │ TIME (UTC)',
-    ...files.map((file) => {
+  return JSON.stringify({
+    migrations: files.map((file) => {
       const version = file.slice(0, 14);
-      return `${version} │ ${remote.includes(version) ? version : ''} │ 2026-09-04 00:00:00`;
+      return {
+        local: version,
+        remote: remote.includes(version) ? version : '',
+        time: '2026-09-04 00:00:00',
+      };
     }),
-  ].join('\n');
+    message: 'Migrations listed',
+  });
 }
 
 function harness(
@@ -77,6 +81,10 @@ describe('production database delivery', () => {
     const { commands, deliver } = harness();
     expect(deliver()).toBe(`Production database ready at ${sha}`);
     expect(commands.filter((args) => args.includes('list'))).toHaveLength(3);
+    expect(commands.find((args) => args.includes('list'))).toContain(
+      '--output-format',
+    );
+    expect(commands.find((args) => args.includes('list'))).toContain('json');
     expect(commands.filter((args) => args.includes('push'))).toHaveLength(2);
     expect(commands[1]).toContain(PRODUCTION_PROJECT_REF);
     for (const args of commands) {
@@ -117,7 +125,13 @@ describe('production database delivery', () => {
   });
 
   it('rejects remote-only, out-of-order and incomplete histories', () => {
-    const extra = `${history([])}\n │ 20260903000000 │ 2026-09-03 00:00:00`;
+    const extra = JSON.stringify({
+      migrations: [
+        { local: '', remote: '20260903000000' },
+        ...JSON.parse(history([])).migrations,
+      ],
+      message: 'Migrations listed',
+    });
     const wrong = history([files[1].slice(0, 14)]);
     for (const output of [extra, wrong]) {
       const scenario = harness([output]);
@@ -136,6 +150,54 @@ describe('production database delivery', () => {
       incomplete.commands.filter((args) => args.includes('push')),
     ).toHaveLength(2);
     expect(() => parseMigrationList('unexpected CLI output')).toThrow();
+    expect(() =>
+      parseMigrationList('{"migrations":[{"local":123,"remote":""}]}'),
+    ).toThrow();
+    expect(
+      parseMigrationList('{"migrations":[{"local":"20260904000100"}]}'),
+    ).toEqual([{ local: '20260904000100', remote: '' }]);
+    expect(
+      parseMigrationList(
+        '{"migrations":[{"local":"20260904000100","remote":null}]}',
+      ),
+    ).toEqual([{ local: '20260904000100', remote: '' }]);
+    expect(() =>
+      parseMigrationList(
+        '{"migrations":[{"local":"20260904000100","remote":42}]}',
+      ),
+    ).toThrow();
+    expect(() =>
+      parseMigrationList(
+        '{"migrations":[{"local":"20260904000200","remote":""},{"local":"20260904000100","remote":""}]}',
+      ),
+    ).toThrow();
+  });
+
+  it('accepts the pinned CLI 2.116.0 JSON response shape observed on local migration list', () => {
+    const observedShape =
+      '{"migrations":[{"local":"20260904000100","remote":"20260904000100","time":"2026-09-04 00:01:00"},{"local":"20260904000200","remote":"20260904000200","time":"2026-09-04 00:02:00"},{"local":"20260905000100","remote":"20260905000100","time":"2026-09-05 00:01:00"},{"local":"20260905000200","remote":"20260905000200","time":"2026-09-05 00:02:00"}],"message":"Migrations listed"}';
+    expect(parseMigrationList(observedShape)).toEqual([
+      { local: '20260904000100', remote: '20260904000100' },
+      { local: '20260904000200', remote: '20260904000200' },
+      { local: '20260905000100', remote: '20260905000100' },
+      { local: '20260905000200', remote: '20260905000200' },
+    ]);
+  });
+
+  it('delivers pending migrations when JSON omits or nulls their remote version', () => {
+    const pending = JSON.stringify({
+      migrations: [
+        { local: files[0].slice(0, 14) },
+        { local: files[1].slice(0, 14), remote: null },
+      ],
+      message: 'Migrations listed',
+    });
+    const scenario = harness([
+      pending,
+      pending,
+      history(files.map((file) => file.slice(0, 14))),
+    ]);
+    expect(scenario.deliver()).toBe(`Production database ready at ${sha}`);
   });
 
   it('keeps the PR aggregate independent and gates main readiness on its success', () => {
