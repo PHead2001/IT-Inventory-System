@@ -28,3 +28,5 @@ Invite a local user through Supabase Studio and provision membership as describe
 - [Repository rules](AGENTS.md)
 
 Room geometry uses inches and stable location codes, never generated database UUIDs. Production compilation does not require a live database.
+
+Production release uses a required Vercel GitHub Deployment Check on the main-only `Production database ready` job. After one-time owner activation, successful main CI applies checked-in forward migrations before Vercel aliases the matching build. See [deployment](docs/deployment.md#one-time-activation) for the fail-closed setup and backup prerequisites.
