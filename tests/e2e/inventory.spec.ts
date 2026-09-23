@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { chooseLocation } from './location-picker';
 
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -11,14 +12,7 @@ async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   ).toBeVisible();
 }
 async function choose(form: Locator, label: string, code: string) {
-  const select = form.getByLabel(label, { exact: true });
-  const value = await select
-    .locator('option')
-    .filter({ hasText: '(' + code + ')' })
-    .first()
-    .getAttribute('value');
-  expect(value, 'location option ' + code).toBeTruthy();
-  await select.selectOption(value!);
+  await chooseLocation(form, label, code);
 }
 async function openForm(page: Page, name: string) {
   await page
@@ -123,6 +117,21 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await expect(
     page.getByRole('link', { name: name + ' updated', exact: true }),
   ).toHaveCount(2);
+  const filter = page.getByRole('form', { name: 'Search inventory' });
+  const unfilteredUrl = page.url();
+  await chooseLocation(filter, 'Location', 'ITC-L');
+  expect(page.url()).toBe(unfilteredUrl);
+  await filter.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page).toHaveURL(/location=ITC-L/);
+  await expect(
+    page.getByRole('link', { name: name + ' updated', exact: true }),
+  ).toHaveCount(2);
+  await chooseLocation(filter, 'Location', 'ITC-S1C');
+  await filter.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page).toHaveURL(/location=ITC-S1C/);
+  await expect(
+    page.getByRole('link', { name: name + ' updated', exact: true }),
+  ).toHaveCount(1);
   await page
     .getByRole('link', { name: /IT Closet.*ITC-S1C/ })
     .first()
@@ -176,6 +185,23 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await expect(
     page.getByRole('heading', { name: 'Definition archived', exact: true }),
   ).toBeVisible();
+  const historyFilter = page.getByRole('form', { name: 'Filter history' });
+  await chooseLocation(historyFilter, 'Location', 'ITC-L');
+  await historyFilter
+    .getByRole('button', { name: 'Filter history', exact: true })
+    .click();
+  await expect(page).toHaveURL(/location=ITC-L/);
+  await expect(
+    page.getByRole('heading', { name: 'Physically moved', exact: true }),
+  ).toHaveCount(2);
+  await chooseLocation(historyFilter, 'Location', 'ITC-S1C');
+  await historyFilter
+    .getByRole('button', { name: 'Filter history', exact: true })
+    .click();
+  await expect(page).toHaveURL(/location=ITC-S1C/);
+  await expect(
+    page.getByRole('heading', { name: 'Physically moved', exact: true }),
+  ).toHaveCount(1);
 });
 test('serialized core allows duplicate serials and persists distinct moves, corrections and retirement', async ({
   page,

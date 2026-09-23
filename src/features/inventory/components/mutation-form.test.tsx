@@ -59,6 +59,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.duplicates.mockResolvedValue([]);
 });
+async function chooseLocation(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  name: string,
+) {
+  await user.click(screen.getByLabelText(label));
+  await user.click(screen.getByRole('option', { name: new RegExp(name) }));
+}
 describe('inventory operation forms', () => {
   it('reviews a partial transfer and sends its source-scoped command', async () => {
     mocks.submit.mockResolvedValue({
@@ -69,10 +77,7 @@ describe('inventory operation forms', () => {
     });
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_move" />);
-    await user.selectOptions(
-      screen.getByLabelText('Destination location'),
-      destination.id,
-    );
+    await chooseLocation(user, 'Destination location', '1B');
     await user.clear(screen.getByLabelText('Quantity to move'));
     await user.type(screen.getByLabelText('Quantity to move'), '3');
     await user.click(screen.getByRole('button', { name: 'Review move stock' }));
@@ -101,10 +106,7 @@ describe('inventory operation forms', () => {
     });
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_move" />);
-    await user.selectOptions(
-      screen.getByLabelText('Destination location'),
-      destination.id,
-    );
+    await chooseLocation(user, 'Destination location', '1B');
     await user.click(
       screen.getByLabelText('Move All from this source location'),
     );
@@ -123,14 +125,60 @@ describe('inventory operation forms', () => {
       'quantity',
     );
   });
+  it('keeps a selected destination visible and blocks review if it becomes unavailable', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <MutationForm {...defaults} operation="quantity_move" />,
+    );
+    await chooseLocation(user, 'Destination location', '1B');
+    view.rerender(
+      <MutationForm
+        {...defaults}
+        locations={[location, { ...destination, active: false }]}
+        operation="quantity_move"
+      />,
+    );
+    expect(screen.getByLabelText('Destination location')).toHaveTextContent(
+      '1B',
+    );
+    expect(screen.getByLabelText('Destination location')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    expect(
+      screen.queryByRole('region', { name: 'Review changes' }),
+    ).not.toBeInTheDocument();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  it('requires an explicit source when several holdings exist and excludes it from destinations', async () => {
+    const user = userEvent.setup();
+    render(
+      <MutationForm
+        {...defaults}
+        balances={[
+          { location, quantity: 8 },
+          { location: destination, quantity: 2 },
+        ]}
+        operation="quantity_move"
+      />,
+    );
+    expect(screen.getByLabelText('Source location')).toHaveTextContent(
+      'Select a location',
+    );
+    await user.click(screen.getByLabelText('Source location'));
+    await user.click(screen.getByRole('option', { name: /1B/ }));
+    await user.click(screen.getByLabelText('Destination location'));
+    expect(
+      screen.queryByRole('option', { name: /1B/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /1A/ })).toBeVisible();
+  });
   it('preserves input and request identity after an uncertain failure, changing identity when input changes', async () => {
     mocks.submit.mockRejectedValue(new Error('network'));
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_receive" />);
-    await user.selectOptions(
-      screen.getByLabelText('Receive at'),
-      destination.id,
-    );
+    await chooseLocation(user, 'Receive at', '1B');
     await user.type(screen.getByLabelText('Reason (required)'), 'Restocked');
     await user.click(
       screen.getByRole('button', { name: 'Review receive stock' }),
@@ -166,10 +214,7 @@ describe('inventory operation forms', () => {
     });
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_adjust" />);
-    await user.selectOptions(
-      screen.getByLabelText('Counted location'),
-      location.id,
-    );
+    await chooseLocation(user, 'Counted location', '1A');
     fireEvent.change(screen.getByLabelText('Observed physical count'), {
       target: { value: '5' },
     });
@@ -301,10 +346,7 @@ it('automatically warns about duplicate serials before saving without blocking c
   );
   await user.type(screen.getByLabelText('Name'), 'New switch');
   await user.type(screen.getByLabelText('Serial number'), '001-A');
-  await user.selectOptions(
-    screen.getByLabelText('Destination location'),
-    location.id,
-  );
+  await chooseLocation(user, 'Destination location', '1A');
   await user.click(
     screen.getByRole('button', { name: 'Review create serialized asset' }),
   );

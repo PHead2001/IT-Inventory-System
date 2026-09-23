@@ -16,10 +16,11 @@ export const locationRow = z.object({
   active: z.boolean(),
   can_hold_inventory: z.boolean(),
   parent_id: id.nullable(),
+  sort_order: z.number().int().optional(),
 });
 export function mapLocation(input: unknown): LocationRef {
   const row = locationRow.parse(input);
-  return { ...row, parentId: row.parent_id };
+  return { ...row, parentId: row.parent_id, sortOrder: row.sort_order };
 }
 export const metadataRow = z.object({
   id,

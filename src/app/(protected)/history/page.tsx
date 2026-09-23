@@ -6,6 +6,7 @@ import {
   panel,
 } from '@/features/inventory/components/read-ui';
 import { Button } from '@/components/ui/button';
+import { LocationPicker } from '@/features/locations/location-picker';
 export default async function HistoryPage({
   searchParams,
 }: {
@@ -41,22 +42,16 @@ export default async function HistoryPage({
               <option value="asset">Serialized assets</option>
             </select>
           </div>
-          <div>
-            <label htmlFor="history-location">Location</label>
-            <select
-              className={field}
-              id="history-location"
-              name="location"
-              defaultValue={params.location ?? ''}
-            >
-              <option value="">All locations</option>
-              {locations.map((location) => (
-                <option key={location.id} value={location.code}>
-                  {location.breadcrumb}
-                </option>
-              ))}
-            </select>
-          </div>
+          <LocationPicker
+            key={params.location ?? ''}
+            id="history-location"
+            label="Location"
+            locations={locations}
+            mode="browse"
+            name="location"
+            defaultValue={params.location ?? ''}
+            allowAll
+          />
         </div>
         {params.entityId && (
           <>

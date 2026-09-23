@@ -37,7 +37,9 @@ export async function getLocations() {
   const { supabase } = await requireMember();
   const { data, error } = await supabase
     .from('inventory_locations')
-    .select('id,code,name,breadcrumb,active,can_hold_inventory,parent_id')
+    .select(
+      'id,code,name,breadcrumb,active,can_hold_inventory,parent_id,sort_order',
+    )
     .order('breadcrumb')
     .order('code');
   return requireData(data, error, 'Locations could not be loaded.').map(

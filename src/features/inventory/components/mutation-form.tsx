@@ -3,6 +3,8 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LocationPicker } from '@/features/locations/location-picker';
+import { pickerLocations } from '@/features/locations/picker-model';
 import { submitInventory, findDuplicateSerials } from '../actions';
 import type { MutationCommand, MutationState } from '../contracts';
 import type {
@@ -73,7 +75,10 @@ export function MutationForm({
     initial_quantity: '0',
     quantity: '1',
     observed_quantity: '0',
-    source_location_id: balances.find((b) => b.quantity > 0)?.location.id ?? '',
+    source_location_id:
+      balances.filter((b) => b.quantity > 0).length === 1
+        ? balances.find((b) => b.quantity > 0)!.location.id
+        : '',
     location_id: '',
     destination_location_id: '',
     initial_location_id: '',
@@ -81,6 +86,7 @@ export function MutationForm({
     move_all: 'false',
   });
   const [state, setState] = useState<MutationState | null>(null);
+  const [locationError, setLocationError] = useState('');
   const [review, setReview] = useState(false);
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -121,11 +127,11 @@ export function MutationForm({
     'asset_retire',
     'asset_restore',
   ].includes(operation);
-  const eligible = locations.filter((l) => l.active && l.can_hold_inventory);
   const update = (name: string, value: string) => {
     setValues((v) => ({ ...v, [name]: value }));
     setReview(false);
     setState(null);
+    setLocationError('');
     if (name === 'serial_number') setDuplicates([]);
   };
   const input = (
@@ -160,32 +166,43 @@ export function MutationForm({
     source = false,
     required = true,
   ) => (
-    <div className="space-y-2">
-      <label htmlFor={operation + '-' + name}>{label}</label>
-      <select
-        className={field}
-        id={operation + '-' + name}
-        name={name}
-        value={values[name] ?? ''}
-        onChange={(event) => update(name, event.target.value)}
-        required={required}
-      >
-        <option value="">Select a location</option>
-        {(source
-          ? balances.filter((b) => b.quantity > 0).map((b) => b.location)
-          : eligible
-        ).map((location) => (
-          <option key={location.id} value={location.id}>
-            {location.breadcrumb} ({location.code})
-            {source
-              ? ' — ' +
-                balances.find((b) => b.location.id === location.id)?.quantity +
-                ' units'
-              : ''}
-          </option>
-        ))}
-      </select>
-    </div>
+    <LocationPicker
+      key={name}
+      id={operation + '-' + name}
+      label={label}
+      locations={locations}
+      mode={source ? 'source' : 'destination'}
+      value={values[name] ?? ''}
+      onValueChange={(next) => update(name, next)}
+      sourceIds={
+        source
+          ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
+          : undefined
+      }
+      excludeIds={
+        !source
+          ? [
+              ...(moving ? [values.source_location_id] : []),
+              ...(['asset_move', 'asset_correct_location'].includes(
+                operation,
+              ) && currentLocation
+                ? [currentLocation.id]
+                : []),
+            ]
+          : undefined
+      }
+      required={required}
+      error={
+        locationError && !values[name]
+          ? locationError
+          : state && !state.ok
+            ? state.fieldErrors?.[name]
+            : undefined
+      }
+      description={
+        source ? 'Only locations with stock are available.' : undefined
+      }
+    />
   );
   const payload = (): Record<string, unknown> => {
     const result: Record<string, unknown> = {};
@@ -357,6 +374,53 @@ export function MutationForm({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (pending || refreshRequested) return;
+    const needed =
+      operation === 'quantity_create'
+        ? Number(values.initial_quantity) > 0
+          ? ['initial_location_id']
+          : []
+        : operation === 'quantity_move'
+          ? ['source_location_id', 'destination_location_id']
+          : [
+                'quantity_receive',
+                'quantity_adjust',
+                'asset_create',
+                'asset_move',
+                'asset_correct_location',
+                'asset_restore',
+              ].includes(operation)
+            ? ['location_id']
+            : [];
+    for (const name of needed) {
+      const source = name === 'source_location_id';
+      const valid = pickerLocations(
+        locations,
+        source ? 'source' : 'destination',
+        {
+          sourceIds: source
+            ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
+            : undefined,
+          excludeIds: !source
+            ? [
+                ...(moving ? [values.source_location_id] : []),
+                ...(['asset_move', 'asset_correct_location'].includes(
+                  operation,
+                ) && currentLocation
+                  ? [currentLocation.id]
+                  : []),
+              ]
+            : undefined,
+        },
+      ).some((location) => location.id === values[name]);
+      if (!valid) {
+        setLocationError(
+          values[name]
+            ? 'Selected location is unavailable. Choose another location.'
+            : 'Choose a location.',
+        );
+        return;
+      }
+    }
     if (!review) {
       if (serialized && metadata && values.serial_number.trim()) {
         startTransition(async () => {

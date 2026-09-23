@@ -32,6 +32,12 @@ vi.mock('next/dynamic', () => ({
             Emit unknown location
           </button>
           <button
+            disabled={!props.canFocusSelected}
+            onClick={props.onRequestFocus}
+          >
+            Center selected
+          </button>
+          <button
             onClick={() => props.onFocusComplete(props.focusRequest.code)}
           >
             Finish camera focus
@@ -68,6 +74,17 @@ function workspace(code: string | null, refs = locations) {
     </RoomWorkspace>
   );
 }
+async function choose(user: ReturnType<typeof userEvent.setup>, code: string) {
+  await user.click(screen.getByLabelText('Select location'));
+  await user.type(
+    screen.getByRole('combobox', { name: 'Search locations' }),
+    code,
+  );
+  await user.click(screen.getByRole('option', { name: new RegExp(code) }));
+}
+function expectPicker(code: string) {
+  expect(screen.getByLabelText('Select location')).toHaveTextContent(code);
+}
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.push.mockReset();
@@ -85,10 +102,7 @@ describe('room application and scene contract', () => {
     });
     mocks.push.mockReturnValue(navigation);
     const view = render(workspace('ITC-S1A'));
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'Select location' }),
-      'ITC-D01',
-    );
+    await choose(user, 'ITC-D01');
     expect(mocks.push).toHaveBeenCalledWith('/room?location=ITC-D01', {
       scroll: false,
     });
@@ -96,18 +110,20 @@ describe('room application and scene contract', () => {
       screen.getByRole('region', { name: 'Location inventory' }),
     ).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-S1A');
+    expectPicker('ITC-S1A');
     expect(mocks.sceneProps?.selectedCode).toBe('ITC-S1A');
-    expect(screen.getByRole('combobox')).toBeDisabled();
+    expect(mocks.sceneProps?.canFocusSelected).toBe(false);
+    expect(screen.getByLabelText('Select location')).toBeDisabled();
     await act(async () => {
       finish();
       await navigation;
     });
     view.rerender(workspace('ITC-D01'));
     expect(screen.getByText('Server inventory for ITC-D01')).toBeVisible();
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D01');
+    expectPicker('ITC-D01');
     expect(mocks.sceneProps?.selectedCode).toBe('ITC-D01');
     expect(mocks.sceneProps?.focusRequest.code).toBe('ITC-D01');
+    expect(mocks.sceneProps?.canFocusSelected).toBe(true);
   });
 
   it('preserves geometry references across equivalent RSC objects while accepting changed geometry and selection', () => {
@@ -124,7 +140,7 @@ describe('room application and scene contract', () => {
     expect(mocks.sceneProps!.bindings).toBe(firstBindings);
     expect(mocks.sceneProps!.selectedCode).toBe('ITC-D01');
     expect(mocks.sceneProps!.focusRequest.code).toBe('ITC-D01');
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D01');
+    expectPicker('ITC-D01');
     expect(screen.getByText('Server inventory for ITC-D01')).toBeVisible();
     const changed = structuredClone(room);
     changed.camera.azimuthDegrees =
@@ -149,9 +165,9 @@ describe('room application and scene contract', () => {
     expect(mocks.push).toHaveBeenCalledWith('/room?location=ITC-D01', {
       scroll: false,
     });
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-S1A');
+    expectPicker('ITC-S1A');
     view.rerender(workspace('ITC-D01'));
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D01');
+    expectPicker('ITC-D01');
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
       'data-selected-code',
       'ITC-D01',
@@ -165,7 +181,7 @@ describe('room application and scene contract', () => {
 
   it('retains aggregate selection and highlights database inventory descendants', () => {
     render(workspace('ITC-L'));
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-L');
+    expectPicker('ITC-L');
     expect(mocks.sceneProps?.selectedCode).toBe('ITC-L');
     expect(mocks.sceneProps?.highlightedCodes).toHaveLength(12);
     expect(mocks.sceneProps?.highlightedCodes).toContain('ITC-D06');
@@ -185,7 +201,7 @@ describe('room application and scene contract', () => {
       'ITC-D01',
     );
     const first = mocks.sceneProps!.focusRequest.requestId;
-    await user.click(screen.getByRole('button', { name: 'Focus selected' }));
+    await user.click(screen.getByRole('button', { name: 'Center selected' }));
     expect(mocks.sceneProps?.focusRequest.requestId).toBeGreaterThan(first);
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
       'data-focused-code',
@@ -213,7 +229,7 @@ describe('room application and scene contract', () => {
     const view = render(workspace('ITC-S1A'));
     view.rerender(workspace('ITC-D12'));
     expect(mocks.sceneProps?.selectedCode).toBe('ITC-D12');
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D12');
+    expectPicker('ITC-D12');
     await user.click(screen.getByRole('button', { name: 'Clear selection' }));
     expect(mocks.push).toHaveBeenCalledWith('/room', { scroll: false });
     expect(screen.getByText('Server inventory for ITC-D12')).toBeVisible();
@@ -221,7 +237,7 @@ describe('room application and scene contract', () => {
     expect(mocks.sceneProps?.selectedCode).toBeNull();
     expect(mocks.sceneProps?.highlightedCodes).toEqual([]);
     expect(
-      screen.getByRole('button', { name: 'Focus selected' }),
+      screen.getByRole('button', { name: 'Center selected' }),
     ).toBeDisabled();
     expect(
       screen.getByRole('button', { name: 'Clear selection' }),
@@ -238,18 +254,19 @@ describe('room application and scene contract', () => {
       breadcrumb: 'External location',
     };
     render(workspace(external.code, [...locations, external]));
-    expect(screen.getByRole('combobox')).toHaveValue(external.code);
+    expectPicker(external.code);
     expect(screen.getByText(/No modeled location is available/)).toBeVisible();
     expect(screen.getByText('Server inventory for ITC-EXTERNAL')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Focus selected' }),
+      screen.getByRole('button', { name: 'Center selected' }),
     ).toBeDisabled();
     expect(mocks.sceneProps?.focusRequest.code).toBeNull();
+    expect(mocks.sceneProps?.canFocusSelected).toBe(false);
   });
 
   it('handles an unknown deep-link code without inventing a selection or disabling conventional search', () => {
     render(workspace('UNKNOWN'));
-    expect(screen.getByRole('combobox')).toHaveValue('');
+    expectPicker('UNKNOWN');
     expect(screen.getByText(/No modeled location is available/)).toBeVisible();
     expect(
       screen.getByRole('link', { name: 'Search inventory' }),
@@ -273,9 +290,9 @@ describe('room application and scene contract', () => {
     expect(screen.queryByTestId('scene-contract')).not.toBeInTheDocument();
     expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Focus selected' }),
-    ).toBeDisabled();
-    await user.selectOptions(screen.getByRole('combobox'), 'ITC-D01');
+      screen.queryByRole('button', { name: 'Center selected' }),
+    ).not.toBeInTheDocument();
+    await choose(user, 'ITC-D01');
     expect(mocks.push).toHaveBeenCalledWith('/room?location=ITC-D01', {
       scroll: false,
     });
@@ -297,7 +314,7 @@ describe('room application and scene contract', () => {
       'data-state',
       'loading',
     );
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-S1A');
+    expectPicker('ITC-S1A');
     expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
     act(() => mocks.sceneProps!.onReady());
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
@@ -315,7 +332,7 @@ describe('room application and scene contract', () => {
         screen.getByRole('heading', { name: 'Room view unavailable' }),
       ).toBeVisible();
       expect(screen.getByText('Server inventory for ITC-S1A')).toBeVisible();
-      expect(screen.getByRole('combobox')).toBeEnabled();
+      expect(screen.getByLabelText('Select location')).toBeEnabled();
     } finally {
       error.mockRestore();
     }
@@ -346,7 +363,7 @@ describe('room application and scene contract', () => {
       'data-focused-code',
       '',
     );
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D01');
+    expectPicker('ITC-D01');
     expect(screen.getByText('Server inventory for ITC-D01')).toBeVisible();
     act(() => mocks.sceneProps!.onReady());
     expect(screen.getByTestId('room-viewer')).toHaveAttribute(
@@ -367,7 +384,7 @@ describe('room application and scene contract', () => {
     render(workspace('ITC-D01'));
     await user.click(screen.getByRole('button', { name: 'Hide room' }));
     expect(screen.queryByTestId('room-viewer')).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox')).toHaveValue('ITC-D01');
+    expectPicker('ITC-D01');
     expect(screen.getByText('Server inventory for ITC-D01')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Show room' })).toHaveAttribute(
       'aria-expanded',
