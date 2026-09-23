@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { MathUtils, OrthographicCamera, Spherical, Vector3 } from 'three';
+import {
+  Group,
+  MathUtils,
+  OrthographicCamera,
+  Spherical,
+  Vector3,
+} from 'three';
 import rawRoom from '../../../../data/rooms/it-closet.json';
 import { buildRoomBindings, findFocusBinding } from '../bindings';
 import { toScenePosition } from '../coordinates';
 import { roomSchema } from '../schema';
 import {
   cameraFacingLabelPosition,
+  cameraFacingDirectionInLocalSpace,
   floorDoubleClickAllowed,
   focusZoomForBinding,
   frameBounds,
@@ -216,6 +223,34 @@ describe('room orbit and framing', () => {
     );
     expect(upper[2]).toBe(-6);
     expect(lower[2]).toBe(6);
+  });
+  it('keeps a transformed label facing the same side as an orthographic camera pans', () => {
+    const parent = new Group();
+    parent.position.set(200, 0, 0);
+    parent.rotation.y = Math.PI / 2;
+    const origin = new Group();
+    parent.add(origin);
+    const camera = new OrthographicCamera(-10, 10, 10, -10);
+    const target = new Vector3(0, 0, 0);
+    camera.position.set(100, 0, 0);
+    camera.lookAt(target);
+    const before = cameraFacingDirectionInLocalSpace(camera, origin);
+    expect(before.x).toBeCloseTo(0);
+    expect(before.z).toBeCloseTo(1);
+    const positionBefore = cameraFacingLabelPosition(
+      [16, 12, 14],
+      before,
+      [8.01, 3, 2],
+    );
+    camera.position.add(new Vector3(300, 15, -200));
+    target.add(new Vector3(300, 15, -200));
+    camera.lookAt(target);
+    const after = cameraFacingDirectionInLocalSpace(camera, origin);
+    expect(after.distanceTo(before)).toBeLessThan(1e-10);
+    expect(
+      cameraFacingLabelPosition([16, 12, 14], after, [8.01, 3, 2]),
+    ).toEqual(positionBefore);
+    expect(positionBefore).toEqual([4, 2, 6.8]);
   });
 
   it('rejects a floor double-click during or just after manual camera movement', () => {

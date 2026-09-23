@@ -18,6 +18,7 @@ import { findFocusBinding, type RoomBinding } from '../bindings';
 import { toScenePosition, toSceneSize } from '../coordinates';
 import {
   cameraFacingLabelPosition,
+  cameraFacingDirectionInLocalSpace,
   floorDoubleClickAllowed,
   focusZoomForBinding,
   frameBounds,
@@ -237,9 +238,8 @@ function CameraFacingLabel({
   );
   useFrame(() => {
     if (!labelAnchor || !origin.current || !anchor.current) return;
-    origin.current.updateWorldMatrix(true, false);
-    const localCamera = origin.current.worldToLocal(camera.position.clone());
-    const next = cameraFacingLabelPosition(size, localCamera, labelAnchor);
+    const localView = cameraFacingDirectionInLocalSpace(camera, origin.current);
+    const next = cameraFacingLabelPosition(size, localView, labelAnchor);
     if (
       anchor.current.position.distanceToSquared(new Vector3(...next)) > 1e-6
     ) {

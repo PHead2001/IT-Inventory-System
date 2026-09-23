@@ -22,6 +22,13 @@ const drawer: LocationRef = {
   active: true,
   can_hold_inventory: true,
 };
+const secondDrawer: LocationRef = {
+  ...drawer,
+  id: 'drawer-10',
+  code: 'ITC-D10',
+  name: 'Drawer 10',
+  breadcrumb: 'IT Closet / Right Storage / Drawer 10',
+};
 
 describe('LocationPicker', () => {
   it('searches and selects by keyboard without submitting the parent form; Escape returns focus', async () => {
@@ -272,10 +279,87 @@ describe('LocationPicker', () => {
     expect(search).toHaveAttribute('aria-expanded', 'true');
     expect(search).toHaveAttribute('aria-autocomplete', 'list');
     expect(screen.getByRole('button', { name: 'Location' })).toBeVisible();
-    await user.keyboard('{ArrowDown}');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
     const activeId = search.getAttribute('aria-activedescendant');
     expect(activeId).toBe(screen.getByRole('option', { name: /Drawer 7/ }).id);
     await user.keyboard('{Escape}');
     expect(screen.getByRole('combobox', { name: 'Location' })).toHaveFocus();
+  });
+  it('reopens on the selected browse location and Enter leaves navigation unchanged', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root, drawer]}
+        allowAll
+        onValueChange={changed}
+        name="location"
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    await user.click(screen.getByRole('option', { name: /Drawer 7/ }));
+    expect(changed).toHaveBeenCalledOnce();
+    await user.click(screen.getByLabelText('Location'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    expect(search.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('option', { name: /Drawer 7/ }).id,
+    );
+    await user.keyboard('{Enter}');
+    expect(changed).toHaveBeenCalledOnce();
+    expect(document.querySelector('input[name="location"]')).toHaveValue(
+      'ITC-D07',
+    );
+  });
+  it('reopens on the selected destination and arrows can choose another', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="destination"
+        label="Destination"
+        locations={[root, drawer, secondDrawer]}
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Destination'));
+    expect(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+    ).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(changed).toHaveBeenLastCalledWith('drawer');
+    await user.click(screen.getByLabelText('Destination'));
+    await user.keyboard('{Enter}');
+    expect(changed).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Destination')).toHaveTextContent('Drawer 7');
+    await user.click(screen.getByLabelText('Destination'));
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(changed).toHaveBeenLastCalledWith('drawer-10');
+  });
+  it('does not clear an unavailable selected code on opening Enter', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root, drawer]}
+        allowAll
+        value="MISSING"
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    expect(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+    ).not.toHaveAttribute('aria-activedescendant');
+    await user.keyboard('{Enter}');
+    expect(changed).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Location' })).toHaveTextContent(
+      'MISSING',
+    );
   });
 });

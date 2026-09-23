@@ -131,7 +131,7 @@ export function LocationPicker({
     };
   }, [visibleOpen]);
   useEffect(() => {
-    if (visibleOpen)
+    if (visibleOpen && activeOptionIndex >= 0)
       document
         .getElementById(listId + '-' + activeOptionIndex)
         ?.scrollIntoView?.({ block: 'nearest' });
@@ -168,14 +168,35 @@ export function LocationPicker({
   }
   function choose(next: string) {
     if (disabled || !visibleOpen) return;
+    if (next === selectedValue) {
+      close(true);
+      return;
+    }
     if (value === undefined) setLocalValue(next);
     onValueChange?.(next);
     close(true);
   }
   function openPicker() {
     if (disabled) return;
+    const available = pickerLocations(locations, mode, {
+      excludeIds,
+      sourceIds,
+    });
+    const selectedIndex = selectedValue
+      ? available.findIndex(
+          (location) => pickerValue(location, mode) === selectedValue,
+        )
+      : -1;
     setQuery('');
-    setActiveIndex(0);
+    setActiveIndex(
+      selectedValue
+        ? selectedIndex < 0
+          ? -1
+          : selectedIndex + (allowAll ? 1 : 0)
+        : allowAll
+          ? 0
+          : -1,
+    );
     setOpen(true);
   }
   function searchKey(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -320,7 +341,7 @@ export function LocationPicker({
             aria-autocomplete="list"
             aria-controls={listId}
             aria-activedescendant={
-              !loading && !loadError && options.length
+              !loading && !loadError && activeOptionIndex >= 0
                 ? listId + '-' + activeOptionIndex
                 : undefined
             }

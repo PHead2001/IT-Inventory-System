@@ -1,4 +1,11 @@
-import { MathUtils, Spherical, Vector3 } from 'three';
+import {
+  MathUtils,
+  Matrix4,
+  Spherical,
+  Vector3,
+  type Camera,
+  type Object3D,
+} from 'three';
 import type { RoomBinding } from '../bindings';
 import { toScenePosition } from '../coordinates';
 
@@ -11,6 +18,20 @@ export function floorDoubleClickAllowed(
   now: number,
 ) {
   return pointerDelta <= 5 && !gestureActive && now - lastManualMotionAt > 500;
+}
+
+/** The viewer-facing direction in a label group's coordinates.
+ * Orthographic pan changes position but leaves this direction unchanged.
+ */
+export function cameraFacingDirectionInLocalSpace(
+  camera: Camera,
+  origin: Object3D,
+) {
+  origin.updateWorldMatrix(true, false);
+  return camera
+    .getWorldDirection(new Vector3())
+    .negate()
+    .transformDirection(new Matrix4().copy(origin.matrixWorld).invert());
 }
 
 /** Scene-local anchor on the visible side of a room-axis-aligned box. */
