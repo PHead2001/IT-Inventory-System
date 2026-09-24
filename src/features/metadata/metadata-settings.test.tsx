@@ -139,6 +139,23 @@ describe('category form designer', () => {
       'category_id,name',
     );
   });
+  it('gives pointer handles and adjacent move controls touch-sized targets', () => {
+    mount();
+    expect(screen.getByRole('button', { name: 'Drag Name' })).toHaveClass(
+      'min-h-11',
+      'min-w-11',
+    );
+    expect(screen.getByRole('button', { name: 'Resize Name' })).toHaveClass(
+      'min-h-11',
+    );
+    expect(screen.getAllByRole('button', { name: 'Move down' })[0]).toHaveClass(
+      'min-h-11',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    expect(screen.getByRole('button', { name: 'Field down' })).toHaveClass(
+      'min-h-11',
+    );
+  });
   it('preserves entered data and original draft baseline after a stale save response', async () => {
     vi.mocked(submitMetadataDraft).mockResolvedValue({
       ok: false,

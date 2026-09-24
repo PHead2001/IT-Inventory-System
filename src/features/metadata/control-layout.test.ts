@@ -19,8 +19,8 @@ describe('metadata control layout', () => {
       flexGrow: 1,
     });
     expect(controlLayoutStyle('Auto', true)).toMatchObject({
-      flexBasis: 'max(min(100%, 7rem), calc(25.000000% - 0.562500rem))',
-      minWidth: 'min(100%, 7rem)',
+      flexBasis: 'max(min(100%, 5.5rem), calc(25.000000% - 0.562500rem))',
+      minWidth: 'min(100%, 5.5rem)',
     });
     expect(controlLayoutStyle(4, true).flexBasis).toContain('33.333333%');
   });

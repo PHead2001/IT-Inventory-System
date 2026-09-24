@@ -74,10 +74,86 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
       .locator('[data-control-id] button[aria-label^="Drag"]')
       .first(),
   ).toHaveAttribute('aria-label', 'Drag Category Id');
+  const firstControl = designer
+    .locator('[data-section-id]')
+    .first()
+    .locator('[data-control-id]')
+    .first();
+  const touchTargets = [
+    firstControl.getByRole('button', { name: /^Drag Category Id$/ }),
+    firstControl.getByRole('button', { name: /^Resize Category Id$/ }),
+    firstControl.getByRole('button', { name: 'Move down' }),
+  ];
+  for (const target of touchTargets) {
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect((await touchTargets[0].boundingBox())!.width).toBeGreaterThanOrEqual(
+    44,
+  );
   await designer.getByRole('button', { name: 'Phone width' }).click();
-  await expect(
-    designer.getByRole('form', { name: 'Preview quantity metadata' }),
-  ).toContainText('Connector family');
+  const preview = designer.getByRole('form', {
+    name: 'Preview quantity metadata',
+  });
+  await expect(preview).toContainText('Connector family');
+  await designer.getByLabel('New field type').selectOption('boolean');
+  for (const name of ['Flag one', 'Flag two', 'Flag three']) {
+    await designer.getByRole('button', { name: 'Add field' }).click();
+    await designer.getByLabel('Label', { exact: true }).last().fill(name);
+  }
+  const checks = ['Flag one', 'Flag two', 'Flag three'].map((name) =>
+    preview.getByRole('checkbox', { name }),
+  );
+  const checkBoxes = await Promise.all(
+    checks.map((check) => check.boundingBox()),
+  );
+  for (const box of checkBoxes) expect(box).not.toBeNull();
+  expect(checkBoxes[0]!.y).toBeCloseTo(checkBoxes[1]!.y, 0);
+  expect(checkBoxes[1]!.y).toBeCloseTo(checkBoxes[2]!.y, 0);
+  expect(checkBoxes[0]!.x).toBeLessThan(checkBoxes[1]!.x);
+  expect(checkBoxes[1]!.x).toBeLessThan(checkBoxes[2]!.x);
+  for (const box of checkBoxes) expect(box!.height).toBeGreaterThanOrEqual(44);
+  await expect(checks[0]).toHaveAttribute('aria-checked', 'mixed');
+  await checks[0].check();
+  await checks[0].uncheck();
+  await expect(checks[0]).toHaveAttribute('aria-checked', 'false');
+  await preview.getByRole('button', { name: 'Unset' }).first().click();
+  await expect(checks[0]).toHaveAttribute('aria-checked', 'mixed');
+  const longLabel = 'LongFieldLabel'.repeat(12);
+  const longHelp = 'LongHelpText'.repeat(25);
+  await designer.getByLabel('New field type').selectOption('short_text');
+  await designer.getByRole('button', { name: 'Add field' }).click();
+  const longField = designer.locator('[data-testid^="field-"]').last();
+  await longField.getByLabel('Label', { exact: true }).fill(longLabel);
+  await longField.getByLabel('Help text').fill(longHelp);
+  const previewLabel = preview.getByText(longLabel, { exact: true });
+  const previewHelp = preview.getByText(longHelp, { exact: true });
+  await expect(previewLabel).toBeVisible();
+  await expect(previewHelp).toBeVisible();
+  for (const text of [previewLabel, previewHelp]) {
+    expect(
+      await text.evaluate((element) => {
+        const parent = element.parentElement!;
+        return (
+          parent.scrollWidth <= parent.clientWidth + 1 &&
+          parent.getBoundingClientRect().right <= innerWidth
+        );
+      }),
+    ).toBe(true);
+  }
+  await longField.getByRole('checkbox', { name: 'Quantity' }).uncheck();
+  await longField.getByRole('checkbox', { name: 'Asset' }).uncheck();
+  const issue = designer.getByRole('alert');
+  await expect(issue).toContainText(
+    `${longLabel} needs inventory applicability`,
+  );
+  const issueFits = await issue.evaluate(
+    (element) => element.scrollWidth <= element.clientWidth + 1,
+  );
+  expect(issueFits).toBe(true);
+  await longField.getByRole('checkbox', { name: 'Quantity' }).check();
+  await longField.getByRole('checkbox', { name: 'Asset' }).check();
   const layout = await page.evaluate(() => ({
     viewport: innerWidth,
     content: document.documentElement.scrollWidth,
@@ -115,14 +191,15 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
     ).toHaveCount(0);
     await designer
       .getByLabel('Label', { exact: true })
+      .first()
       .fill('Connector family retained');
     await designer.getByRole('button', { name: 'Save draft' }).click();
     await expect(designer.getByRole('status')).toContainText(
       'draft or published revision changed',
     );
-    await expect(designer.getByLabel('Label', { exact: true })).toHaveValue(
-      'Connector family retained',
-    );
+    await expect(
+      designer.getByLabel('Label', { exact: true }).first(),
+    ).toHaveValue('Connector family retained');
     page.once('dialog', (dialog) => dialog.accept());
     await page.goBack();
     await expect(
@@ -138,9 +215,9 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
     ).toBeVisible();
     await expect(designer.getByLabel('Label', { exact: true })).toHaveCount(0);
     await designer.getByRole('button', { name: 'Recover edits' }).click();
-    await expect(designer.getByLabel('Label', { exact: true })).toHaveValue(
-      'Connector family retained',
-    );
+    await expect(
+      designer.getByLabel('Label', { exact: true }).first(),
+    ).toHaveValue('Connector family retained');
     page.once('dialog', (dialog) => dialog.accept());
     await designer.getByRole('button', { name: 'Refresh from server' }).click();
     await expect(designer.getByLabel('Label', { exact: true })).toHaveValue(

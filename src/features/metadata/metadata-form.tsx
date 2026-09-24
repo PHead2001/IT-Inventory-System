@@ -269,7 +269,7 @@ export function MetadataForm({
         : undefined;
     const inputId = 'metadata-' + id;
     const help = config.help ? (
-      <p className="text-xs text-slate-400">{config.help}</p>
+      <p className="break-words text-xs text-slate-400">{config.help}</p>
     ) : null;
     const type = config.type;
     const rules = config.rules;
@@ -278,34 +278,41 @@ export function MetadataForm({
       className: fieldClass,
       'aria-describedby': config.help ? inputId + '-help' : undefined,
     };
-    const clear = !config.required && value !== undefined && (
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => updateCustom(id, undefined)}
-      >
-        Unset
-      </Button>
-    );
+    const clear = (config.type === 'boolean' || !config.required) &&
+      value !== undefined && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => updateCustom(id, undefined)}
+        >
+          Unset
+        </Button>
+      );
     let control: React.ReactNode;
     if (type === 'boolean') {
       control = (
-        <select
-          {...common}
-          value={value === undefined ? '' : String(value)}
-          onChange={(event) =>
-            updateCustom(
-              id,
-              event.target.value === ''
-                ? undefined
-                : event.target.value === 'true',
-            )
-          }
-        >
-          <option value="">Choose</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
+        <div className="flex min-h-11 flex-wrap items-center gap-1">
+          <input
+            id={inputId}
+            type="checkbox"
+            className="h-11 w-11 shrink-0 accent-cyan-400"
+            aria-checked={value === undefined ? 'mixed' : value === true}
+            aria-describedby={config.help ? inputId + '-help' : undefined}
+            ref={(element) => {
+              if (element) element.indeterminate = value === undefined;
+            }}
+            checked={value === true}
+            onChange={(event) =>
+              updateCustom(
+                id,
+                value === undefined ? true : event.target.checked,
+              )
+            }
+          />
+          <span className="min-w-0 break-words text-xs text-slate-400">
+            {value === undefined ? 'Not set' : value === true ? 'Yes' : 'No'}
+          </span>
+        </div>
       );
     } else if (type === 'single_select' || type === 'hierarchical_select') {
       const rows = optionRows(config.options);
@@ -432,8 +439,8 @@ export function MetadataForm({
       );
     }
     return (
-      <div className="space-y-2" key={id}>
-        <label htmlFor={inputId}>
+      <div className="min-w-0 space-y-2" key={id}>
+        <label htmlFor={inputId} className="break-words">
           {config.label}
           {config.required ? ' (required)' : ''}
         </label>
@@ -709,8 +716,10 @@ export function MetadataForm({
         className="space-y-5"
       >
         {definition?.layout.map((section) => (
-          <section key={section.id} className="space-y-3">
-            <h3 className="text-lg font-semibold">{section.label}</h3>
+          <section key={section.id} className="min-w-0 space-y-3">
+            <h3 className="break-words text-lg font-semibold">
+              {section.label}
+            </h3>
             <div className="flex flex-wrap gap-3">
               {section.controls.map((control) => {
                 const content =
@@ -719,7 +728,7 @@ export function MetadataForm({
                   ) : control.kind === 'builtin' ? (
                     builtin(control.builtin ?? '')
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm text-slate-400">
+                    <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
                       {control.help}
                     </p>
                   );
@@ -737,6 +746,7 @@ export function MetadataForm({
                   <div
                     key={control.id}
                     style={controlLayoutStyle(control.width, booleanShort)}
+                    className="min-w-0 break-words"
                   >
                     {content}
                   </div>
@@ -823,7 +833,7 @@ export function MetadataForm({
       {!preview && state && !state.ok && (
         <p
           role="alert"
-          className="rounded border border-amber-700 p-3 text-amber-100"
+          className="break-words rounded border border-amber-700 p-3 text-amber-100"
         >
           {state.message}
         </p>

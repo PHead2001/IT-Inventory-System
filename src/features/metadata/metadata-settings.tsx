@@ -131,15 +131,23 @@ function FieldPanel({
         <h4 className="min-w-0 flex-1 break-words font-semibold">
           {field.label || 'Untitled field'} · {label(field.type)}
         </h4>
-        <button type="button" className="underline" onClick={moveUp}>
+        <button
+          type="button"
+          className="min-h-11 px-2 underline"
+          onClick={moveUp}
+        >
           Field up
         </button>
-        <button type="button" className="underline" onClick={moveDown}>
+        <button
+          type="button"
+          className="min-h-11 px-2 underline"
+          onClick={moveDown}
+        >
           Field down
         </button>
         <button
           type="button"
-          className="text-rose-300 underline"
+          className="min-h-11 px-2 text-rose-300 underline"
           onClick={remove}
         >
           Remove field
@@ -832,7 +840,7 @@ export function MetadataSettings({
           {storageWarning && (
             <p
               role="status"
-              className="rounded border border-amber-700 p-3 text-sm"
+              className="break-words rounded border border-amber-700 p-3 text-sm"
             >
               {storageWarning}
             </p>
@@ -1079,7 +1087,7 @@ export function MetadataSettings({
                                 type="button"
                                 aria-label={`Drag ${name}`}
                                 title="Drag to reorder"
-                                className="cursor-grab touch-none select-none rounded border px-2 py-1"
+                                className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
                                 onPointerDown={(event) => {
                                   event.preventDefault();
                                   drag.current = control.id;
@@ -1226,7 +1234,7 @@ export function MetadataSettings({
                               type="button"
                               aria-label={`Resize ${name}`}
                               title="Drag to snap width; width selector is also available"
-                              className="w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
+                              className="min-h-11 w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
                               onPointerDown={(event) => {
                                 event.preventDefault();
                                 const container =
@@ -1274,7 +1282,7 @@ export function MetadataSettings({
                             <div className="flex flex-wrap gap-2 text-xs">
                               <button
                                 type="button"
-                                className="underline"
+                                className="min-h-11 px-2 underline"
                                 disabled={index === 0}
                                 onClick={() =>
                                   move(control.id, section.id, index - 1)
@@ -1284,7 +1292,7 @@ export function MetadataSettings({
                               </button>
                               <button
                                 type="button"
-                                className="underline"
+                                className="min-h-11 px-2 underline"
                                 disabled={index === section.controls.length - 1}
                                 onClick={() =>
                                   move(control.id, section.id, index + 2)
@@ -1294,7 +1302,7 @@ export function MetadataSettings({
                               </button>
                               <button
                                 type="button"
-                                className="text-rose-300 underline"
+                                className="min-h-11 px-2 text-rose-300 underline"
                                 disabled={
                                   control.kind === 'builtin' &&
                                   ['name', 'category_id'].includes(
@@ -1463,7 +1471,7 @@ export function MetadataSettings({
           )}
           {issues.length > 0 && !recovery && (
             <div
-              className="rounded border border-amber-700 p-3 text-sm"
+              className="break-words rounded border border-amber-700 p-3 text-sm"
               role="alert"
             >
               <p>Resolve before publishing:</p>
@@ -1600,7 +1608,7 @@ export function MetadataSettings({
             <div
               role="region"
               aria-label="Form publication impact"
-              className="space-y-3 rounded border border-amber-700 p-3 text-sm"
+              className="space-y-3 break-words rounded border border-amber-700 p-3 text-sm"
             >
               <p>
                 Revision {review.draft_version} will become current for{' '}
@@ -1636,7 +1644,7 @@ export function MetadataSettings({
           {message && (
             <p
               role="status"
-              className="rounded border border-cyan-700 p-3 text-sm"
+              className="break-words rounded border border-cyan-700 p-3 text-sm"
             >
               {message}
             </p>
