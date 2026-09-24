@@ -49,5 +49,6 @@ export async function getConfiguration() {
     categories: z.array(category).parse(categories.data),
     labelDefaults: labelDefaults.parse(defaults.data),
     canManage: member.role === 'staff' && member.can_manage_configuration,
+    memberId: member.user_id,
   };
 }

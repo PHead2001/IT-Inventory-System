@@ -1,5 +1,4 @@
-import { logout } from '@/lib/auth/actions';
-import { Button } from '@/components/ui/button';
+import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 export const dynamic = 'force-dynamic';
 export default function AccessDeniedPage() {
   return (
@@ -10,9 +9,7 @@ export default function AccessDeniedPage() {
         Your account does not have an active application membership. Contact the
         application owner to request access.
       </p>
-      <form action={logout}>
-        <Button variant="outline">Sign out</Button>
-      </form>
+      <QueueLogoutForm />
     </main>
   );
 }
