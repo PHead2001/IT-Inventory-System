@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -137,7 +138,12 @@ it('does not call a currently referenced category unreferenced when no replaceme
 });
 
 it('allows an unreferenced last category to be deleted and shows the empty state', async () => {
-  mocks.review.mockResolvedValue(impact(null, '0'));
+  let finishReview!: (value: ReturnType<typeof impact>) => void;
+  mocks.review.mockReturnValue(
+    new Promise((resolve) => {
+      finishReview = resolve;
+    }),
+  );
   mocks.submit.mockResolvedValue({
     ok: true,
     result: {
@@ -152,18 +158,24 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   );
   fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
   fireEvent.click(screen.getByRole('button', { name: 'Review impact' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Review impact' }),
+    ).toBeDisabled(),
+  );
+  await act(async () => finishReview(impact(null, '0')));
   const review = await screen.findByRole('region', {
     name: 'Removal impact review',
   });
   expect(review).toHaveTextContent(
     'truly unreferenced category will be deleted',
   );
-  fireEvent.click(
-    within(review).getByRole('button', { name: 'Confirm removal' }),
-  );
-  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1), {
-    timeout: 3000,
+  const confirm = within(review).getByRole('button', {
+    name: 'Confirm removal',
   });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
   view.rerender(
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );
