@@ -24,6 +24,9 @@ it('exposes stable location links on search results with independent conventiona
           quantity: 4,
           assetTag: null,
           serialNumber: null,
+          recordedTotal: 4,
+          reorderThreshold: null,
+          stockState: 'disabled',
         },
       ]}
     />,
@@ -35,6 +38,32 @@ it('exposes stable location links on search results with independent conventiona
   expect(
     screen.getByRole('link', { name: 'Show ITC-S4B in room' }),
   ).toHaveAttribute('href', '/room?location=ITC-S4B');
+});
+it('labels item-wide low stock while retaining the location holding quantity', () => {
+  render(
+    <InventoryRows
+      rows={[
+        {
+          kind: 'quantity',
+          id: 'item',
+          name: 'Cable',
+          categoryName: 'Cables',
+          status: 'active',
+          location,
+          quantity: 2,
+          assetTag: null,
+          serialNumber: null,
+          recordedTotal: 3,
+          reorderThreshold: 4,
+          stockState: 'needs_restocking',
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText('2 units')).toBeVisible();
+  expect(
+    screen.getByText(/Needs restocking · Item-wide total 3 \/ threshold 4/),
+  ).toBeVisible();
 });
 it('shows record corrections as human readable history distinct from movement', () => {
   render(

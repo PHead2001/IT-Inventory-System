@@ -290,6 +290,7 @@ export type Database = {
           manufacturer: string | null
           model: string | null
           name: string
+          reorder_threshold: number | null
           updated_at: string
           version: number
         }
@@ -302,6 +303,7 @@ export type Database = {
           manufacturer?: string | null
           model?: string | null
           name: string
+          reorder_threshold?: number | null
           updated_at?: string
           version?: number
         }
@@ -314,6 +316,7 @@ export type Database = {
           manufacturer?: string | null
           model?: string | null
           name?: string
+          reorder_threshold?: number | null
           updated_at?: string
           version?: number
         }
@@ -478,8 +481,11 @@ export type Database = {
           model: string | null
           name: string | null
           quantity: number | null
+          recorded_total: number | null
+          reorder_threshold: number | null
           serial_number: string | null
           status: string | null
+          stock_state: string | null
         }
         Relationships: []
       }
@@ -509,6 +515,18 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      inventory_export_snapshot: {
+        Args: {
+          p_category_id?: string
+          p_export_type?: string
+          p_location_code?: string
+          p_low_stock?: boolean
+          p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
       inventory_history: {
         Args: {
           p_entity_id?: string
@@ -531,6 +549,19 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_search_v2: {
+        Args: {
+          p_category_id?: string
+          p_location_code?: string
+          p_low_stock?: boolean
+          p_page?: number
+          p_page_size?: number
+          p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
       inventory_serial_matches: {
         Args: { p_exclude_id?: string; p_serial: string }
         Returns: {
@@ -539,6 +570,10 @@ export type Database = {
           name: string
           status: string
         }[]
+      }
+      low_stock_dashboard: {
+        Args: { p_page?: number; p_page_size?: number }
+        Returns: Json
       }
       quantity_adjust: {
         Args: { p_payload: Json; p_request_id: string }

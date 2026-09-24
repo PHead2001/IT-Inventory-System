@@ -62,6 +62,7 @@ export function MutationForm({
   const entity = item ?? asset;
   const latestEntity = latestItem ?? latestAsset;
   const [refreshRequested, setRefreshRequested] = useState(false);
+  const [thresholdTouched, setThresholdTouched] = useState(false);
   const [refreshedVersion, setRefreshedVersion] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({
     name: entity?.name ?? '',
@@ -70,6 +71,10 @@ export function MutationForm({
       entity?.categoryId ?? categories.find((c) => c.active)?.id ?? '',
     manufacturer: entity?.manufacturer ?? '',
     model: entity?.model ?? '',
+    reorder_threshold:
+      item?.reorderThreshold === null || item === undefined
+        ? ''
+        : String(item.reorderThreshold),
     asset_tag: asset?.assetTag ?? '',
     serial_number: asset?.serialNumber ?? '',
     initial_quantity: '0',
@@ -105,6 +110,14 @@ export function MutationForm({
       balances: latestBalances,
     });
     setRefreshRequested(false);
+    if (!thresholdTouched && latestItem)
+      setValues((current) => ({
+        ...current,
+        reorder_threshold:
+          latestItem.reorderThreshold === null
+            ? ''
+            : String(latestItem.reorderThreshold),
+      }));
     setRefreshedVersion(latestEntity.version);
     setReview(false);
     setState(null);
@@ -129,6 +142,7 @@ export function MutationForm({
   ].includes(operation);
   const update = (name: string, value: string) => {
     setValues((v) => ({ ...v, [name]: value }));
+    if (name === 'reorder_threshold') setThresholdTouched(true);
     setReview(false);
     setState(null);
     setLocationError('');
@@ -223,6 +237,11 @@ export function MutationForm({
         result.asset_tag = values.asset_tag.trim() || null;
         result.serial_number = values.serial_number.trim() || null;
       }
+      if (!serialized && (creating || thresholdTouched))
+        result.reorder_threshold =
+          values.reorder_threshold === ''
+            ? null
+            : Number(values.reorder_threshold);
     }
     if (operation === 'quantity_create') {
       result.initial_quantity = Number(values.initial_quantity);
@@ -315,6 +334,10 @@ export function MutationForm({
     if (operation === 'quantity_create')
       return [
         values.name + ': ' + values.initial_quantity + ' initial units',
+        'Reorder threshold: ' +
+          (values.reorder_threshold === ''
+            ? 'Monitoring disabled'
+            : values.reorder_threshold + ' units'),
         Number(values.initial_quantity) > 0
           ? locationName(values.initial_location_id)
           : 'No initial stock',
@@ -349,7 +372,7 @@ export function MutationForm({
       'category_id',
       'manufacturer',
       'model',
-      ...(serialized ? ['asset_tag', 'serial_number'] : []),
+      ...(serialized ? ['asset_tag', 'serial_number'] : ['reorder_threshold']),
     ].map((key) => {
       const old: Record<string, string | null | undefined> = {
         name: entity?.name,
@@ -359,6 +382,10 @@ export function MutationForm({
         model: entity?.model,
         asset_tag: asset?.assetTag,
         serial_number: asset?.serialNumber,
+        reorder_threshold:
+          item?.reorderThreshold === null || item === undefined
+            ? null
+            : String(item.reorderThreshold),
       };
       return (
         key.replaceAll('_', ' ') +
@@ -367,7 +394,10 @@ export function MutationForm({
         ' → ' +
         (key === 'category_id'
           ? categories.find((c) => c.id === values[key])?.name
-          : values[key] || 'Not set')
+          : key === 'reorder_threshold' && !thresholdTouched
+            ? old[key] || 'Monitoring disabled'
+            : values[key] ||
+              (key === 'reorder_threshold' ? 'Monitoring disabled' : 'Not set'))
       );
     });
   };
@@ -508,6 +538,18 @@ export function MutationForm({
             </div>
             {input('manufacturer', 'Manufacturer', { max: 200 })}
             {input('model', 'Model', { max: 200 })}
+            {!serialized && (
+              <div>
+                {input('reorder_threshold', 'Reorder threshold (optional)', {
+                  numeric: true,
+                })}
+                <p className="mt-1 text-xs text-slate-400">
+                  Leave blank to disable monitoring. A threshold of 0 alerts
+                  only when the item-wide recorded total is zero. All recorded
+                  locations count, including inactive ones.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <label htmlFor={operation + '-description'}>Description</label>
               <textarea

@@ -60,3 +60,22 @@ it('preserves refreshed cookie chunks and cache headers across writes', async ()
     'old',
   );
 });
+it('overwrites a caller-supplied return header with a canonical matched path', async () => {
+  sdk.createServerClient.mockReturnValue({
+    auth: { getClaims: async () => ({ data: null, error: null }) },
+  });
+  const valid = new NextRequest('http://localhost:3000/locations/ITC', {
+    headers: { 'x-inventory-return': 'https://evil.test' },
+  });
+  const validResponse = await proxy(valid);
+  expect(
+    validResponse.headers.get('x-middleware-request-x-inventory-return'),
+  ).toBe('/locations/ITC');
+  const invalid = new NextRequest('http://localhost:3000/inventory', {
+    headers: { 'x-inventory-return': '/locations/ITC' },
+  });
+  const invalidResponse = await proxy(invalid);
+  expect(
+    invalidResponse.headers.get('x-middleware-request-x-inventory-return'),
+  ).toBe('');
+});

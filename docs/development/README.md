@@ -53,3 +53,9 @@ After migration changes, run the local database gate and regenerate types. tests
 ## Interactive room iteration
 
 Use `/room` after local sign-in. Geometry lives in the validated Git JSON, with no database running needed for schema tests. Reuse local Supabase while iterating on visuals; no reset is needed for materials, camera or labels. Use `npm run test:e2e -- tests/e2e/room.spec.ts` for the real browser surface. See [room navigation](../room-navigation.md) for selection, coordinate and fallback contracts.
+
+## Labels, scanning and stock iteration
+
+Use fictional local inventory while iterating on labels, scan navigation, thresholds, and exports. Label targets use the configured local `APP_ORIGIN` (default `http://localhost:3000`); preview and production labels belong to their own application environment. Production label generation and absolute-URL scan input require explicit production `APP_ORIGIN`; internal relative paths and `LOC:`/`AST:` or bare exact-identifier lookup work without it. QR images are generated locally. Camera use starts only from the explicit scan action; manual/paste input provides a camera-free path. Keep synthetic decoder fixtures distinct from testing with a physical phone.
+
+Thresholds default to unset. Exercise disabled monitoring, threshold zero, exact-boundary totals, multiple holdings, and a balance still recorded at an inactive location. Verify that moving stock conserves item-wide status and that viewer access remains read-only. Exports use the current caller's read access, one snapshot, and a 10,000-row limit with an explicit overflow response. Never put hosted credentials or real inventory identifiers in local fixtures.

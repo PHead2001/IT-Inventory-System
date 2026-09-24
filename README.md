@@ -30,3 +30,5 @@ Invite a local user through Supabase Studio and provision membership as describe
 Room geometry uses inches and stable location codes, never generated database UUIDs. Production compilation does not require a live database.
 
 Production release uses a required Vercel GitHub Deployment Check on the main-only `Production database ready` job. After one-time owner activation, successful main CI applies checked-in forward migrations before Vercel aliases the matching build. See [deployment](docs/deployment.md#one-time-activation) for the fail-closed setup and backup prerequisites.
+
+PR6 adds local QR/optional Code 128 labels, scan-to-open navigation, item-wide reorder thresholds, a low-stock overview and authenticated CSV downloads. See [labels, scanning and stock status](docs/labels-and-stock.md) for user and data contracts.

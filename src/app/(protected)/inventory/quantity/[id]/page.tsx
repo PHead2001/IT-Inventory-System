@@ -21,7 +21,7 @@ export default async function QuantityPage({
   const { id } = await params;
   const detail = await getQuantityDetail(id);
   if (!detail) notFound();
-  const { item, balances, history } = detail;
+  const { item, balances, history, stockSummary } = detail;
   const [categories, locations] = await Promise.all([
     getCategories(),
     getLocations(),
@@ -36,6 +36,27 @@ export default async function QuantityPage({
         {item.categoryName} · Quantity inventory ·{' '}
         {item.archived ? 'Archived' : 'Active'} · Version {item.version}
       </p>
+      <p className="mt-3 text-sm">
+        Reorder threshold:{' '}
+        {stockSummary.reorderThreshold === null
+          ? 'Monitoring disabled'
+          : stockSummary.reorderThreshold + ' units'}
+        {(stockSummary.stockState === 'needs_restocking' ||
+          stockSummary.stockState === 'out_of_stock') && (
+          <span className="ml-2 font-medium text-amber-200">
+            ·{' '}
+            {stockSummary.stockState === 'out_of_stock'
+              ? 'Out of stock'
+              : 'Needs restocking'}{' '}
+            (item-wide total {stockSummary.recordedTotal})
+          </span>
+        )}
+        {stockSummary.stockState === 'in_stock' && (
+          <span className="ml-2 text-emerald-200">
+            · Above threshold (item-wide total {stockSummary.recordedTotal})
+          </span>
+        )}
+      </p>
       <section className={panel + ' my-5'}>
         <h2 className="font-semibold">Item details</h2>
         <p className="mt-2 whitespace-pre-wrap break-words">
@@ -48,8 +69,7 @@ export default async function QuantityPage({
       </section>
       <section className="my-6">
         <h2 className="mb-3 text-xl font-semibold">
-          Current stock — {balances.reduce((sum, b) => sum + b.quantity, 0)}{' '}
-          units total
+          Current stock — {stockSummary.recordedTotal} units total
         </h2>
         {balances.some((b) => b.quantity > 0) ? (
           <ul className="space-y-3">

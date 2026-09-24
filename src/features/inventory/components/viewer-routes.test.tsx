@@ -28,8 +28,13 @@ vi.mock('@/lib/auth/session.server', () => ({
 }));
 vi.mock('../queries.server', () => ({
   getQuantityDetail: async () => ({
-    item: { ...fixture.metadata, archived: false },
-    balances: [],
+    item: { ...fixture.metadata, archived: false, reorderThreshold: null },
+    stockSummary: {
+      recordedTotal: 2,
+      reorderThreshold: 3,
+      stockState: 'needs_restocking',
+    },
+    balances: [{ location: fixture.location, quantity: 2 }],
     history: [],
   }),
   getAssetDetail: async () => ({
@@ -59,6 +64,9 @@ vi.mock('next/navigation', () => ({
 it('viewers can read both detail types and history links without mutation panels', async () => {
   render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
   expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
+  expect(
+    screen.getByText(/Needs restocking \(item-wide total 2\)/),
+  ).toBeVisible();
   expect(
     screen.getByRole('link', { name: 'View all item history' }),
   ).toBeVisible();

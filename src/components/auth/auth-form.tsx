@@ -9,10 +9,12 @@ export function AuthForm({
   mode,
   tokenHash,
   tokenType,
+  next,
 }: {
   mode: keyof typeof actions;
   tokenHash?: string;
   tokenType?: string;
+  next?: string;
 }) {
   const [state, action, pending] = useActionState<AuthState, FormData>(
     actions[mode],
@@ -26,6 +28,9 @@ export function AuthForm({
   }[mode];
   return (
     <form action={action} className="space-y-5" aria-label={label}>
+      {mode === 'login' && next && (
+        <input type="hidden" name="next" value={next} />
+      )}
       {(mode === 'login' || mode === 'recover') && (
         <div className="space-y-2">
           <label htmlFor="email">Email</label>

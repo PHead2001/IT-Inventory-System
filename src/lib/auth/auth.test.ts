@@ -8,9 +8,14 @@ const mocks = vi.hoisted(() => ({
   verifyOtp: vi.fn(),
   getUser: vi.fn(),
   updateUser: vi.fn(),
+  member: vi.fn(),
+  from: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: vi.fn(async () => ({ auth: mocks })),
+  createSupabaseServerClient: vi.fn(async () => ({
+    auth: mocks,
+    from: mocks.from,
+  })),
 }));
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((url: string) => {
@@ -37,6 +42,18 @@ beforeEach(() => {
     error: null,
   });
   mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
+  mocks.member.mockResolvedValue({
+    data: {
+      user_id: 'user',
+      display_name: 'Test',
+      role: 'staff',
+      active: true,
+    },
+    error: null,
+  });
+  mocks.from.mockReturnValue({
+    select: () => ({ eq: () => ({ maybeSingle: mocks.member }) }),
+  });
 });
 afterEach(() => vi.unstubAllEnvs());
 describe('auth boundaries', () => {
@@ -126,6 +143,38 @@ describe('auth boundaries', () => {
         }),
       ),
     ).rejects.toThrow('REDIRECT:/inventory');
+  });
+  it('returns to a validated label only after checking current membership', async () => {
+    await expect(
+      login(
+        {},
+        form({
+          email: 'staff@example.test',
+          password: 'Password123456',
+          next: '/locations/ITC',
+        }),
+      ),
+    ).rejects.toThrow('REDIRECT:/locations/ITC');
+    expect(mocks.from).toHaveBeenCalledWith('app_members');
+    mocks.member.mockResolvedValue({
+      data: {
+        user_id: 'user',
+        display_name: 'Test',
+        role: 'staff',
+        active: false,
+      },
+      error: null,
+    });
+    await expect(
+      login(
+        {},
+        form({
+          email: 'staff@example.test',
+          password: 'Password123456',
+          next: '/locations/ITC',
+        }),
+      ),
+    ).rejects.toThrow('REDIRECT:/access-denied');
   });
   it('returns safe invalid-credential errors', async () => {
     mocks.signInWithPassword.mockResolvedValue({

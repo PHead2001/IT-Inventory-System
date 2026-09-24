@@ -90,6 +90,15 @@ export function SearchForm({
           allowAll
         />
       </div>
+      <label className="flex min-h-11 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="lowStock"
+          value="true"
+          defaultChecked={params.lowStock === 'true'}
+        />
+        Needs restocking only (item-wide total)
+      </label>
       <Button type="submit">Search</Button>
     </form>
   );

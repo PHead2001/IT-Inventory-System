@@ -34,6 +34,7 @@ export type MutationState =
 const uuid = z.uuid();
 const count = z.number().int().min(0).max(2147483647);
 const positive = count.min(1);
+const reorderThreshold = count.nullable().optional();
 const optionalText = (max: number) =>
   z
     .string()
@@ -65,6 +66,7 @@ export const payloadSchemas = {
       ...metadata,
       initial_location_id: uuid.nullish().transform((v) => v ?? null),
       initial_quantity: count.default(0),
+      reorder_threshold: reorderThreshold,
     })
     .refine((v) => v.initial_quantity === 0 || !!v.initial_location_id, {
       path: ['initial_location_id'],
@@ -95,7 +97,11 @@ export const payloadSchemas = {
     observed_quantity: count,
     reason,
   }),
-  quantity_update: z.strictObject({ ...quantity, ...metadata }),
+  quantity_update: z.strictObject({
+    ...quantity,
+    ...metadata,
+    reorder_threshold: reorderThreshold,
+  }),
   quantity_archive: z.strictObject({ ...quantity, reason }),
   quantity_restore: z.strictObject({ ...quantity, reason }),
   asset_create: z.strictObject({

@@ -6,6 +6,7 @@ import {
   mapHistory,
   searchRow,
   historyRow,
+  mapQuantityStockSummary,
 } from './read-model';
 const id = '00000000-0000-4000-8000-000000000001';
 const other = '00000000-0000-4000-8000-000000000002';
@@ -40,6 +41,8 @@ describe('inventory read contracts', () => {
     expect(
       readFilters({ type: 'hacked', status: 'retired', category: 'invalid' }),
     ).toMatchObject({ type: 'all', status: 'active', category: undefined });
+    expect(readFilters({ lowStock: 'true' }).lowStock).toBe(true);
+    expect(readFilters({ lowStock: 'false' }).lowStock).toBe(false);
   });
   it('supports unlocated zero definitions and multiple located rows of the same item', () => {
     const base = {
@@ -52,6 +55,9 @@ describe('inventory read contracts', () => {
       quantity: null,
       asset_tag: null,
       serial_number: null,
+      recorded_total: 0,
+      reorder_threshold: null,
+      stock_state: 'disabled',
     };
     expect(mapSearch(searchRow.parse(base), [location])).toMatchObject({
       id: other,
@@ -64,11 +70,48 @@ describe('inventory read contracts', () => {
     );
     expect(located.location?.code).toBe('ITC-S4B');
     expect(located.quantity).toBe(7);
+    const needing = mapSearch(
+      searchRow.parse({
+        ...base,
+        location_id: id,
+        quantity: 7,
+        recorded_total: 7,
+        reorder_threshold: 8,
+        stock_state: 'needs_restocking',
+      }),
+      [location],
+    );
+    expect(needing).toMatchObject({
+      quantity: 7,
+      recordedTotal: 7,
+      reorderThreshold: 8,
+      stockState: 'needs_restocking',
+    });
     expect(() =>
       mapSearch(searchRow.parse({ ...base, location_id: other, quantity: 7 }), [
         location,
       ]),
     ).toThrow('location could not be resolved');
+  });
+  it('maps the authoritative item-wide stock projection independently of form metadata', () => {
+    expect(
+      mapQuantityStockSummary({
+        recorded_total: 2,
+        reorder_threshold: 3,
+        stock_state: 'needs_restocking',
+      }),
+    ).toEqual({
+      recordedTotal: 2,
+      reorderThreshold: 3,
+      stockState: 'needs_restocking',
+    });
+    expect(() =>
+      mapQuantityStockSummary({
+        recorded_total: 2,
+        reorder_threshold: 3,
+        stock_state: 'guessed',
+      }),
+    ).toThrow();
   });
   it('renders corrections, quantities, actors and metadata as structured human values', () => {
     const row = historyRow.parse({
@@ -123,11 +166,36 @@ describe('inventory read contracts', () => {
       quantity: null,
       asset_tag: 'tag-1',
       serial_number: '0001-A/02',
+      recorded_total: null,
+      reorder_threshold: null,
+      stock_state: null,
     });
     expect(mapSearch(row, [location])).toMatchObject({
       status: 'retired',
       serialNumber: '0001-A/02',
       location: { code: 'ITC-S4B' },
+    });
+  });
+  it('shows threshold metadata changes including zero and monitoring disabled', () => {
+    const row = historyRow.parse({
+      id,
+      kind: 'quantity',
+      entity_id: other,
+      entity_name: 'Cables',
+      event_type: 'metadata_updated',
+      created_at: '2026-09-05T00:00:00Z',
+      actor_name: 'IT Staff',
+      reason: null,
+      before_metadata: { reorder_threshold: null },
+      after_metadata: { reorder_threshold: 0 },
+      from_location_id: null,
+      to_location_id: null,
+      lines: [],
+    });
+    expect(mapHistory(row, [], [])).toMatchObject({
+      metadataChanges: [
+        { field: 'Reorder threshold', before: null, after: '0' },
+      ],
     });
   });
 });

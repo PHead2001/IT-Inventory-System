@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest';
+import {
+  assetLabelPath,
+  locationLabelPath,
+  parseScan,
+  validReturnPath,
+} from './targets';
+const origin = 'https://inventory.example.test';
+const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+describe('label destinations', () => {
+  it('resolves stable identity without names or storage in the payload', () => {
+    expect(parseScan(origin + locationLabelPath('ITC-S1A'), origin)).toEqual({
+      kind: 'location',
+      code: 'ITC-S1A',
+      path: '/locations/ITC-S1A',
+    });
+    expect(parseScan(origin + assetLabelPath(id), origin)).toEqual({
+      kind: 'asset',
+      id,
+      path: '/inventory/assets/' + id,
+    });
+    expect(parseScan('LOC:ITC', origin)?.kind).toBe('location');
+    expect(parseScan('AST:tag-001', origin)).toEqual({
+      kind: 'tag',
+      tag: 'tag-001',
+    });
+    expect(parseScan('AST:tag/a%b?#', origin)).toEqual({
+      kind: 'tag',
+      tag: 'tag/a%b?#',
+    });
+    expect(parseScan('München № 4', origin)).toEqual({
+      kind: 'bare',
+      identifier: 'München № 4',
+    });
+    expect(parseScan('ITC', origin)).toEqual({
+      kind: 'bare',
+      identifier: 'ITC',
+    });
+  });
+  it.each([
+    'https://evil.test/locations/ITC',
+    'https://inventory-commit.test/locations/ITC',
+    '//inventory.example.test/locations/ITC',
+    '/locations/ITC?status=all',
+    '/inventory/assets/' + id + '#x',
+    '/locations/%49TC',
+    '/locations/ITC%2fS1',
+    'https://inventory.example.test/locations/../locations/ITC',
+    'https://user@inventory.example.test/locations/ITC',
+    'https://inventory.example.test/locations/ITC?next=/inventory',
+    'AST:' + 'x'.repeat(101),
+    'javascript:alert(1)',
+    'HTTP://inventory.example.test/locations/ITC',
+    'LOC:ITC S1',
+    'a'.repeat(1025),
+  ])('rejects unsafe or unsupported text %s', (value) => {
+    expect(parseScan(value, origin)).toBeNull();
+  });
+  it('accepts return only to canonical detail paths', () => {
+    expect(validReturnPath('/locations/ITC')).toBe('/locations/ITC');
+    expect(validReturnPath('/inventory/assets/' + id)).toBe(
+      '/inventory/assets/' + id,
+    );
+    expect(validReturnPath('/scan')).toBeNull();
+    expect(
+      validReturnPath('https://inventory.example.test/locations/ITC'),
+    ).toBeNull();
+  });
+});

@@ -48,6 +48,7 @@ const item: QuantityItem = {
   model: null,
   version: 2,
   archived: false,
+  reorderThreshold: null,
 };
 const defaults = {
   item,
@@ -329,6 +330,59 @@ it('keeps edited values paired with their old version until an explicit stale re
   );
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
   expect(mocks.submit.mock.calls[1][0].payload.expected_version).toBe(3);
+});
+it('omits an untouched threshold during metadata edits and sends explicit clear', async () => {
+  mocks.submit.mockResolvedValue({
+    ok: false,
+    kind: 'domain',
+    code: 'stale_version',
+    message: 'Record changed',
+  });
+  const user = userEvent.setup();
+  const view = render(
+    <MutationForm
+      {...defaults}
+      item={{ ...item, reorderThreshold: 3 }}
+      operation="quantity_update"
+    />,
+  );
+  await user.clear(screen.getByLabelText('Name'));
+  await user.type(screen.getByLabelText('Name'), 'New cable name');
+  view.rerender(
+    <MutationForm
+      {...defaults}
+      item={{ ...item, reorderThreshold: 8, version: 3 }}
+      operation="quantity_update"
+    />,
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Review edit quantity metadata' }),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm edit quantity metadata' }),
+  );
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(mocks.submit.mock.calls[0][0].payload).not.toHaveProperty(
+    'reorder_threshold',
+  );
+  expect(mocks.submit.mock.calls[0][0].payload.expected_version).toBe(2);
+  await user.click(
+    await screen.findByRole('button', { name: 'Refresh latest record' }),
+  );
+  expect(screen.getByLabelText('Reorder threshold (optional)')).toHaveValue(8);
+  expect(screen.getByLabelText('Name')).toHaveValue('New cable name');
+  await user.clear(screen.getByLabelText('Reorder threshold (optional)'));
+  await user.click(
+    screen.getByRole('button', { name: 'Review edit quantity metadata' }),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm edit quantity metadata' }),
+  );
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0].payload).toMatchObject({
+    expected_version: 3,
+    reorder_threshold: null,
+  });
 });
 it('automatically warns about duplicate serials before saving without blocking confirmation', async () => {
   const user = userEvent.setup();
