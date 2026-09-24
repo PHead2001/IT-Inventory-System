@@ -3,10 +3,12 @@ import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
   getQuantityDetail,
+  getQuantityArchiveReview,
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
 import { OperationPanel } from '@/features/inventory/components/mutation-form';
+import { ArchiveQuantityPanel } from '@/features/inventory/components/archive-quantity-form';
 import {
   HistoryList,
   LocationLink,
@@ -26,6 +28,10 @@ export default async function QuantityPage({
     getCategories(),
     getLocations(),
   ]);
+  const archiveReview =
+    member.role === 'staff' && !item.archived
+      ? await getQuantityArchiveReview(id)
+      : null;
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">
@@ -96,7 +102,6 @@ export default async function QuantityPage({
                 'quantity_receive',
                 'quantity_move',
                 'quantity_adjust',
-                'quantity_archive',
               ] as const)
           ).map((operation) => (
             <OperationPanel
@@ -108,6 +113,9 @@ export default async function QuantityPage({
               locations={locations}
             />
           ))}
+          {archiveReview && !archiveReview.archived && (
+            <ArchiveQuantityPanel review={archiveReview} />
+          )}
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
