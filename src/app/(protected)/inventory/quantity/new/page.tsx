@@ -17,7 +17,9 @@ export default async function NewQuantityPage() {
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(categories.map((category) => category.id));
+  const forms = await getPublishedForms(
+    categories.map((category) => category.id),
+  );
   if (!categories.some((category) => category.active))
     return (
       <p role="alert">

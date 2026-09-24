@@ -294,10 +294,25 @@ export function SettingsPanel({
                           assets
                         </strong>{' '}
                         also reference this category.{' '}
-                        {reviewedHasReferences
+                        {review.will_tombstone
                           ? 'The category will be removed from active choices but retained for readable history.'
                           : 'This truly unreferenced category will be deleted.'}
                       </p>
+                      <p>
+                        {review.authored_revision_count} authored form revisions
+                        and {review.retained_value_count} records with retained
+                        custom values also reference this category.
+                      </p>
+                      {review.target_id && (
+                        <p>
+                          After reassignment,{' '}
+                          {review.quantity_needs_metadata_count} quantity
+                          definitions and {review.asset_needs_metadata_count}{' '}
+                          serialized assets will need metadata review under the
+                          replacement form. Their source custom values stay
+                          visible as legacy values.
+                        </p>
+                      )}
                       <p className="text-sm text-slate-400">
                         This review expires at{' '}
                         {new Date(review.expires_at).toLocaleTimeString()}. New

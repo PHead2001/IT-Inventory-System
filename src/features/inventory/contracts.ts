@@ -27,7 +27,13 @@ export type MutationCommand = {
   payload: Record<string, unknown>;
 };
 export type MutationState =
-  | { ok: true; entityId: string; version: string; changed: boolean; needsMetadata?: boolean }
+  | {
+      ok: true;
+      entityId: string;
+      version: string;
+      changed: boolean;
+      needsMetadata?: boolean;
+    }
   | {
       ok: false;
       kind: 'validation' | 'domain' | 'unexpected';
@@ -137,6 +143,7 @@ export const payloadSchemas = {
     ...quantity,
     ...metadata,
     ...published,
+    acknowledge_legacy_values: z.boolean().optional(),
     reorder_threshold: reorderThreshold,
   }),
   quantity_archive: z.strictObject({ ...quantity, reason }),
@@ -174,6 +181,7 @@ export const payloadSchemas = {
     ...metadata,
     ...identifiers,
     ...published,
+    acknowledge_legacy_values: z.boolean().optional(),
   }),
   asset_retire: z.strictObject({ ...asset, reason }),
   asset_restore: z.strictObject({ ...asset, location_id: uuid, reason }),
@@ -232,10 +240,26 @@ const errors: Record<string, [string, string]> = {
   P1010: ['not_found', 'This inventory record could not be found.'],
   P1011: ['invalid_category', 'Choose an active category.'],
   P1012: ['invalid_input', 'Check the supplied values and try again.'],
-  P1021: ['invalid_metadata', 'Review the published metadata fields and values.'],
-  P1022: ['metadata_limit', 'Metadata exceeds a supported size or complexity limit.'],
-  P1023: ['metadata_required', 'Published metadata is required. Open the current form to complete this record.'],
-  P1024: ['stale_schema', 'The published form changed. Review the new revision before saving.'],
+  P1021: [
+    'invalid_metadata',
+    'Review the published metadata fields and values.',
+  ],
+  P1022: [
+    'metadata_limit',
+    'Metadata exceeds a supported size or complexity limit.',
+  ],
+  P1023: [
+    'metadata_required',
+    'Open the current form to complete required metadata or review retained legacy values before changing category.',
+  ],
+  P1024: [
+    'stale_schema',
+    'The published form changed. Review the new revision before saving.',
+  ],
+  P1026: [
+    'legacy_ack_required',
+    'Review and acknowledge retained legacy values before changing category.',
+  ],
 };
 export function mutationError(code: string | undefined): MutationState {
   const known = code ? errors[code] : undefined;

@@ -1,8 +1,17 @@
 import { z } from 'zod';
 
 export const fieldTypes = [
-  'short_text', 'long_text', 'integer', 'decimal', 'boolean', 'date',
-  'datetime', 'url', 'currency', 'single_select', 'multi_select',
+  'short_text',
+  'long_text',
+  'integer',
+  'decimal',
+  'boolean',
+  'date',
+  'datetime',
+  'url',
+  'currency',
+  'single_select',
+  'multi_select',
   'hierarchical_select',
 ] as const;
 export type FieldType = (typeof fieldTypes)[number];
@@ -32,17 +41,23 @@ const control = z.object({
   help: z.string().optional(),
   width: z.union([
     z.literal('Auto'),
-    z.literal(3), z.literal(4), z.literal(6), z.literal(8),
-    z.literal(9), z.literal(12),
+    z.literal(3),
+    z.literal(4),
+    z.literal(6),
+    z.literal(8),
+    z.literal(9),
+    z.literal(12),
   ]),
 });
 export const metadataDefinition = z.object({
   fields: z.array(metadataField),
-  layout: z.array(z.object({
-    id: uuid,
-    label: z.string(),
-    controls: z.array(control),
-  })),
+  layout: z.array(
+    z.object({
+      id: uuid,
+      label: z.string(),
+      controls: z.array(control),
+    }),
+  ),
 });
 export const formEnvelope = z.object({
   category_id: uuid,
@@ -50,19 +65,28 @@ export const formEnvelope = z.object({
   published_number: z.string().regex(/^[1-9]\d*$/),
   published_definition: metadataDefinition,
   draft_id: uuid.nullish(),
-  draft_version: z.string().regex(/^[1-9]\d*$/).nullish(),
+  draft_version: z
+    .string()
+    .regex(/^[1-9]\d*$/)
+    .nullish(),
   draft_definition: z.unknown().nullish(),
 });
 export type MetadataDefinition = z.infer<typeof metadataDefinition>;
 export type MetadataForm = z.infer<typeof formEnvelope>;
-export type StoredCustomValues = Record<string, {
-  value: unknown;
-  validated_revision_id: string;
-}>;
-export const storedCustomSchema = z.record(uuid, z.object({
-  value: z.unknown(),
-  validated_revision_id: uuid,
-}));
+export type StoredCustomValues = Record<
+  string,
+  {
+    value: unknown;
+    validated_revision_id: string;
+  }
+>;
+export const storedCustomSchema = z.record(
+  uuid,
+  z.object({
+    value: z.unknown(),
+    validated_revision_id: uuid,
+  }),
+);
 
 export const reviewSchema = z.object({
   token: uuid,
@@ -77,12 +101,20 @@ export const reviewSchema = z.object({
 
 export function formatCustomValue(value: unknown, paths: unknown): string {
   if (Array.isArray(paths) && paths.length > 0) {
-    return paths.map((path) => Array.isArray(path) ? path.join(' / ') : '').join('; ');
+    return paths
+      .map((path) => (Array.isArray(path) ? path.join(' / ') : ''))
+      .join('; ');
   }
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value === 'string' || typeof value === 'number')
+    return String(value);
   if (Array.isArray(value)) return value.map(String).join(', ');
-  if (value && typeof value === 'object' && 'amount' in value && 'currency' in value) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'amount' in value &&
+    'currency' in value
+  ) {
     const amount = (value as { amount: unknown }).amount;
     const currency = (value as { currency: unknown }).currency;
     return String(amount) + ' ' + String(currency);

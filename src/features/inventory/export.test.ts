@@ -104,18 +104,42 @@ describe('inventory CSV', () => {
     ).toThrow();
   });
   it('adds one opt-in UUID-keyed custom JSON column while preserving the base column order', () => {
-    const custom = { [id]: {
-      category_id: id, validated_revision_id: id, label: 'Formula, "value"',
-      option_paths: [['Root', '=Child']], value: '=1+1',
-    } };
-    const row = {
-      entity_id: id, kind: 'asset', name: 'Laptop', category_name: 'Computers',
-      manufacturer: null, model: null, status: 'active', asset_tag: null,
-      serial_number: null, quantity: null, location_name: '1A',
-      location_code: 'ITC-S1A', breadcrumb: 'Closet / 1A', custom_fields: custom,
+    const custom = {
+      [id]: {
+        category_id: id,
+        validated_revision_id: id,
+        label: 'Formula, "value"',
+        option_paths: [['Root', '=Child']],
+        value: '=1+1',
+      },
     };
-    const plain = exportCsv('inventory', { rows: [row], total: '1', exported_at: at }, 'Preview').csv;
-    const withCustom = exportCsv('inventory', { rows: [row], total: '1', exported_at: at }, 'Preview', true).csv;
+    const row = {
+      entity_id: id,
+      kind: 'asset',
+      name: 'Laptop',
+      category_name: 'Computers',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: null,
+      location_name: '1A',
+      location_code: 'ITC-S1A',
+      breadcrumb: 'Closet / 1A',
+      custom_fields: custom,
+    };
+    const plain = exportCsv(
+      'inventory',
+      { rows: [row], total: '1', exported_at: at },
+      'Preview',
+    ).csv;
+    const withCustom = exportCsv(
+      'inventory',
+      { rows: [row], total: '1', exported_at: at },
+      'Preview',
+      true,
+    ).csv;
     expect(plain).not.toContain('Custom Fields JSON');
     expect(withCustom).toContain('"Environment","Custom Fields JSON"');
     expect(withCustom).toContain(id);
@@ -124,13 +148,45 @@ describe('inventory CSV', () => {
   });
   it('measures UTF-8 CSV bytes including BOM and neutralized formula text before completing a file', () => {
     const row = {
-      entity_id: id, kind: 'quantity', name: '=😀"'.repeat(50000),
-      category_name: 'Parts', manufacturer: null, model: null,
-      status: 'active', asset_tag: null, serial_number: null, quantity: 1,
-      location_name: '1A', location_code: 'ITC-S1A', breadcrumb: 'Closet / 1A',
+      entity_id: id,
+      kind: 'quantity',
+      name: '=😀"'.repeat(50000),
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: 1,
+      location_name: '1A',
+      location_code: 'ITC-S1A',
+      breadcrumb: 'Closet / 1A',
     };
-    expect(() => exportCsv('inventory', {
-      rows: Array.from({ length: 10 }, () => row), total: '10', exported_at: at,
-    }, 'Preview')).toThrow(ExportTooLargeError);
+    expect(() =>
+      exportCsv(
+        'inventory',
+        {
+          rows: Array.from({ length: 10 }, () => row),
+          total: '10',
+          exported_at: at,
+        },
+        'Preview',
+      ),
+    ).toThrow(ExportTooLargeError);
+  });
+  it('stops synchronous CSV encoding when the monotonic deadline is crossed', () => {
+    let checks = 0;
+    expect(() =>
+      exportCsv(
+        'inventory',
+        { rows: [], total: '0', exported_at: at },
+        'Preview',
+        false,
+        () => {
+          if (++checks === 5) throw new Error('deadline');
+        },
+      ),
+    ).toThrow('deadline');
+    expect(checks).toBe(5);
   });
 });

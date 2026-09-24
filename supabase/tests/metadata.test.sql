@@ -15,6 +15,13 @@ select ok((select count(*)=1 from public.category_form_revisions where category_
   'one shared immutable baseline exists');
 select ok((select count(distinct published_form_revision_id)=1 from public.categories),
   'untouched categories share canonical baseline');
+select ok(private.metadata_currency_code_valid('USD') and
+  private.metadata_currency_code_valid('XDR') and
+  not private.metadata_currency_code_valid('ZZZ'),
+  'currency rules use the pinned ISO code list');
+select ok((select count(*)=1 from pg_trigger where tgname='category_form_pointer_valid'
+  and tgrelid='public.categories'::regclass),
+  'category pointers cannot reference a foreign or draft form');
 select ok((select relrowsecurity from pg_class where oid='public.category_form_revisions'::regclass),
   'revisions use RLS');
 select ok((select relrowsecurity from pg_class where oid='public.form_revision_fields'::regclass),
@@ -31,6 +38,8 @@ select ok(not has_function_privilege('anon','public.quantity_create_v2(uuid,json
   'anonymous v2 creation is unavailable');
 select ok(not has_function_privilege('authenticated','private.metadata_mutate_v2(uuid,jsonb,text,text)','EXECUTE'),
   'shared mutation helper is not directly callable');
+select ok(not has_function_privilege('authenticated','private.metadata_category_references(uuid)','EXECUTE'),
+  'category metadata impact helper is not directly callable');
 select ok((select proconfig @> array['statement_timeout=5s'] from pg_proc
   where oid='public.metadata_publish(uuid,jsonb)'::regprocedure),
   'publication declares five-second database budget');

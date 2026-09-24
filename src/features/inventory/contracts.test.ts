@@ -18,7 +18,10 @@ const quantity = { item_id: itemId, expected_version: 1 };
 const asset = { asset_id: itemId, expected_version: 1 };
 const payloads: Record<Operation, Record<string, unknown>> = {
   quantity_create: metadata,
-  quantity_create_v2: { ...metadata, expected_published_revision_id: publishedId },
+  quantity_create_v2: {
+    ...metadata,
+    expected_published_revision_id: publishedId,
+  },
   quantity_receive: {
     ...quantity,
     location_id: locationId,
@@ -38,7 +41,11 @@ const payloads: Record<Operation, Record<string, unknown>> = {
     reason: 'Counted',
   },
   quantity_update: { ...quantity, ...metadata },
-  quantity_update_v2: { ...quantity, ...metadata, expected_published_revision_id: publishedId },
+  quantity_update_v2: {
+    ...quantity,
+    ...metadata,
+    expected_published_revision_id: publishedId,
+  },
   quantity_archive: { ...quantity, reason: 'No longer stocked' },
   quantity_archive_and_clear: {
     ...quantity,
@@ -48,7 +55,11 @@ const payloads: Record<Operation, Record<string, unknown>> = {
   },
   quantity_restore: { ...quantity, reason: 'Stocking again' },
   asset_create: { ...metadata, location_id: locationId },
-  asset_create_v2: { ...metadata, location_id: locationId, expected_published_revision_id: publishedId },
+  asset_create_v2: {
+    ...metadata,
+    location_id: locationId,
+    expected_published_revision_id: publishedId,
+  },
   asset_move: { ...asset, location_id: destinationId },
   asset_correct_location: {
     ...asset,
@@ -56,7 +67,11 @@ const payloads: Record<Operation, Record<string, unknown>> = {
     reason: 'Record correction',
   },
   asset_update: { ...asset, ...metadata },
-  asset_update_v2: { ...asset, ...metadata, expected_published_revision_id: publishedId },
+  asset_update_v2: {
+    ...asset,
+    ...metadata,
+    expected_published_revision_id: publishedId,
+  },
   asset_retire: { ...asset, reason: 'Disposal' },
   asset_restore: {
     ...asset,

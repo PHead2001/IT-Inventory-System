@@ -18,17 +18,23 @@ export type Metadata = {
   manufacturer: string | null;
   model: string | null;
   version: number;
-  customValues?: Record<string, { value: unknown; validated_revision_id: string }>;
+  customValues?: Record<
+    string,
+    { value: unknown; validated_revision_id: string }
+  >;
   validatedFormRevisionId?: string | null;
   needsMetadata?: boolean;
-  customDisplay?: Record<string, {
-    value: unknown;
-    validated_revision_id: string;
-    label: string;
-    field_type: string;
-    option_paths: string[][];
-    legacy: boolean;
-  }>;
+  customDisplay?: Record<
+    string,
+    {
+      value: unknown;
+      validated_revision_id: string;
+      label: string;
+      field_type: string;
+      option_paths: string[][];
+      legacy: boolean;
+    }
+  >;
 };
 export type StockState =
   'disabled' | 'in_stock' | 'needs_restocking' | 'out_of_stock' | 'archived';

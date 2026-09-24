@@ -31,7 +31,9 @@ export default async function QuantityPage({
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(categories.map((category) => category.id));
+  const forms = await getPublishedForms(
+    categories.map((category) => category.id),
+  );
   const archiveReview =
     member.role === 'staff' && !item.archived
       ? await getQuantityArchiveReview(id)
@@ -83,7 +85,10 @@ export default async function QuantityPage({
           {item.model || 'Not set'}
         </p>
       </section>
-      <CustomMetadataList values={item.customDisplay} needsMetadata={item.needsMetadata} />
+      <CustomMetadataList
+        values={item.customDisplay}
+        needsMetadata={item.needsMetadata}
+      />
       <section className="my-6">
         <h2 className="mb-3 text-xl font-semibold">
           Current stock — {stockSummary.recordedTotal} units total
@@ -114,18 +119,31 @@ export default async function QuantityPage({
                 'quantity_move',
                 'quantity_adjust',
               ] as const)
-          ).map((operation) => (
+          ).map((operation) =>
             operation === 'quantity_update' ? (
               <section key={operation} className={panel}>
-                <h3 className="mb-4 text-lg font-semibold">Edit quantity metadata</h3>
-                <MetadataForm kind="quantity" item={item} categories={categories}
-                  locations={locations} forms={forms} />
+                <h3 className="mb-4 text-lg font-semibold">
+                  Edit quantity metadata
+                </h3>
+                <MetadataForm
+                  kind="quantity"
+                  item={item}
+                  categories={categories}
+                  locations={locations}
+                  forms={forms}
+                />
               </section>
             ) : (
-              <OperationPanel key={operation} operation={operation} item={item}
-                balances={balances} categories={categories} locations={locations} />
-            )
-          ))}
+              <OperationPanel
+                key={operation}
+                operation={operation}
+                item={item}
+                balances={balances}
+                categories={categories}
+                locations={locations}
+              />
+            ),
+          )}
           {archiveReview && !archiveReview.archived && (
             <ArchiveQuantityPanel review={archiveReview} />
           )}

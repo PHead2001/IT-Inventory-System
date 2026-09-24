@@ -74,7 +74,11 @@ export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
           {row.serialNumber && (
             <p className="mt-2 break-all text-sm">Serial: {row.serialNumber}</p>
           )}
-          {row.customSummary && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">{row.customSummary}</p>}
+          {row.customSummary && (
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">
+              {row.customSummary}
+            </p>
+          )}
           <p className="mt-3 text-sm">
             {row.location ? (
               <LocationLink location={row.location} />

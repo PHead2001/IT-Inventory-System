@@ -29,7 +29,9 @@ export default async function AssetPage({
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(categories.map((category) => category.id));
+  const forms = await getPublishedForms(
+    categories.map((category) => category.id),
+  );
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">
@@ -71,7 +73,10 @@ export default async function AssetPage({
           </div>
         </dl>
       </section>
-      <CustomMetadataList values={asset.customDisplay} needsMetadata={asset.needsMetadata} />
+      <CustomMetadataList
+        values={asset.customDisplay}
+        needsMetadata={asset.needsMetadata}
+      />
       {duplicateSerialMatches.length > 0 && (
         <aside className="my-5 rounded-xl border border-amber-700 p-4 text-amber-200">
           <h2 className="font-semibold">Duplicate serial warning</h2>
@@ -112,18 +117,31 @@ export default async function AssetPage({
                 'asset_correct_location',
                 'asset_retire',
               ] as const)
-          ).map((operation) => (
+          ).map((operation) =>
             operation === 'asset_update' ? (
               <section key={operation} className={panel}>
-                <h3 className="mb-4 text-lg font-semibold">Edit asset metadata</h3>
-                <MetadataForm kind="asset" asset={asset} categories={categories}
-                  locations={locations} forms={forms} />
+                <h3 className="mb-4 text-lg font-semibold">
+                  Edit asset metadata
+                </h3>
+                <MetadataForm
+                  kind="asset"
+                  asset={asset}
+                  categories={categories}
+                  locations={locations}
+                  forms={forms}
+                />
               </section>
             ) : (
-              <OperationPanel key={operation} operation={operation} asset={asset}
-                currentLocation={location} categories={categories} locations={locations} />
-            )
-          ))}
+              <OperationPanel
+                key={operation}
+                operation={operation}
+                asset={asset}
+                currentLocation={location}
+                categories={categories}
+                locations={locations}
+              />
+            ),
+          )}
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>

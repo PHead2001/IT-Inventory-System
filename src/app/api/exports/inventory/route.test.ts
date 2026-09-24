@@ -13,7 +13,10 @@ vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: mocks.createClient,
 }));
 vi.mock('@/lib/supabase/config', () => ({
-  supabaseConfig: () => ({ url: 'https://supabase.example', key: 'public-test-key' }),
+  supabaseConfig: () => ({
+    url: 'https://supabase.example',
+    key: 'public-test-key',
+  }),
 }));
 vi.mock('@/features/inventory/export-reader.server', () => ({
   requestExportSnapshot: mocks.snapshot,
@@ -36,7 +39,10 @@ beforeEach(() => {
     from: mocks.from,
   });
   mocks.getUser.mockResolvedValue({ data: { user: { id } }, error: null });
-  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'test-token' } }, error: null });
+  mocks.getSession.mockResolvedValue({
+    data: { session: { access_token: 'test-token' } },
+    error: null,
+  });
   mocks.from.mockReturnValue(query);
   mocks.select.mockReturnValue(query);
   mocks.eq.mockReturnValue(query);
@@ -83,15 +89,22 @@ describe('authenticated inventory downloads', () => {
     );
     expect(await response.text()).toContain('"Recorded Total"');
     expect(mocks.snapshot).toHaveBeenCalledOnce();
-    expect(mocks.snapshot).toHaveBeenCalledWith(expect.objectContaining({
-      url: 'https://supabase.example',
-      accessToken: 'test-token',
-      payload: {
-        p_query: '100%_\\', p_type: 'quantity', p_status: 'all',
-        p_category_id: null, p_location_code: null,
-        p_low_stock: true, p_export_type: 'low_stock', p_include_custom: false,
-      },
-    }));
+    expect(mocks.snapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://supabase.example',
+        accessToken: 'test-token',
+        payload: {
+          p_query: '100%_\\',
+          p_type: 'quantity',
+          p_status: 'all',
+          p_category_id: null,
+          p_location_code: null,
+          p_low_stock: true,
+          p_export_type: 'low_stock',
+          p_include_custom: false,
+        },
+      }),
+    );
   });
   it('marks production exports distinctly from isolated preview downloads', async () => {
     vi.stubEnv('APP_ENV', 'production');
@@ -112,8 +125,118 @@ describe('authenticated inventory downloads', () => {
     });
     const response = await GET(request());
     expect(response.status).toBe(413);
+    expect(response.headers.get('X-Inventory-Export-Error')).toBe(
+      'export_row_limit',
+    );
     expect(response.headers.get('Cache-Control')).toContain('no-store');
     expect(await response.text()).not.toContain('private');
+  });
+  it('rejects a single oversized custom record with an actionable 413 and no file header', async () => {
+    mocks.snapshot.mockResolvedValue({ data: null, code: 'P1025' });
+    const response = await GET(request('?customFields=true'));
+    expect(response.status).toBe(413);
+    expect(response.headers.get('X-Inventory-Export-Error')).toBe(
+      'export_too_large',
+    );
+    expect(response.headers.get('Content-Disposition')).toBeNull();
+    expect(await response.text()).toContain('retry without custom fields');
+    expect(mocks.snapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ p_include_custom: true }),
+      }),
+    );
+  });
+  it('returns a retryable timeout without a partial CSV when the request aborts', async () => {
+    mocks.snapshot.mockImplementation(
+      async ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          signal.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const abort = new AbortController();
+    const pending = GET(
+      new Request('https://inventory.example/api/exports/inventory', {
+        signal: abort.signal,
+      }),
+    );
+    abort.abort();
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-Inventory-Export-Error')).toBe(
+      'export_timeout',
+    );
+    expect(response.headers.get('Content-Disposition')).toBeNull();
+    expect(await response.text()).toContain('Retry');
+  });
+  it('stops after an authentication wait expires before starting the export fetch', async () => {
+    let finishUser: ((value: unknown) => void) | undefined;
+    mocks.getUser.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishUser = resolve;
+        }),
+    );
+    const abort = new AbortController();
+    const pending = GET(
+      new Request('https://inventory.example/api/exports/inventory', {
+        signal: abort.signal,
+      }),
+    );
+    await Promise.resolve();
+    abort.abort();
+    const response = await pending;
+    finishUser?.({ data: { user: { id } }, error: null });
+    await Promise.resolve();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Content-Disposition')).toBeNull();
+    expect(mocks.snapshot).not.toHaveBeenCalled();
+  });
+  it('maps database cancellation to a retryable timeout with no CSV', async () => {
+    mocks.snapshot.mockResolvedValue({ data: null, code: '57014' });
+    const response = await GET(request());
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-Inventory-Export-Error')).toBe(
+      'export_timeout',
+    );
+    expect(response.headers.get('Content-Disposition')).toBeNull();
+  });
+  it('checks the monotonic deadline during synchronous CSV encoding before success headers', async () => {
+    mocks.snapshot.mockResolvedValue({
+      data: {
+        rows: [],
+        total: '0',
+        exported_at: '2026-09-24T15:18:37+00:00',
+      },
+    });
+    let fakeTime = 100;
+    const nowSpy = vi
+      .spyOn(performance, 'now')
+      .mockImplementation(() => fakeTime);
+    const encode = TextEncoder.prototype.encode;
+    const encodeSpy = vi
+      .spyOn(TextEncoder.prototype, 'encode')
+      .mockImplementation(function (this: TextEncoder, input?: string) {
+        const bytes = encode.call(this, input);
+        if (input?.includes('"Record ID"')) fakeTime = 10101;
+        return bytes;
+      });
+    try {
+      const response = await GET(request());
+      expect(response.status).toBe(503);
+      expect(response.headers.get('X-Inventory-Export-Error')).toBe(
+        'export_timeout',
+      );
+      expect(response.headers.get('Content-Disposition')).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
   });
   it('rejects unsupported export kinds before invoking the snapshot', async () => {
     const response = await GET(request('?export=unknown'));

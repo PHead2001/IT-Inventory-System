@@ -63,20 +63,28 @@ function csvNumber(value: number | string | null | undefined) {
 }
 
 export class ExportTooLargeError extends Error {
-  constructor() { super('export_too_large'); }
+  constructor() {
+    super('export_too_large');
+  }
 }
 const csvLimit = 3 * 1024 * 1024;
-function boundedCsv(lines: Iterable<string>) {
+function boundedCsv(lines: Iterable<string>, checkDeadline: () => void) {
   const encoder = new TextEncoder();
   const chunks = ['\uFEFF'];
   let size = encoder.encode(chunks[0]).byteLength;
+  checkDeadline();
   for (const line of lines) {
+    checkDeadline();
     const next = line + '\r\n';
     size += encoder.encode(next).byteLength;
+    checkDeadline();
     if (size > csvLimit) throw new ExportTooLargeError();
     chunks.push(next);
   }
-  return chunks.join('');
+  checkDeadline();
+  const complete = chunks.join('');
+  checkDeadline();
+  return complete;
 }
 
 export function exportCsv(
@@ -84,11 +92,13 @@ export function exportCsv(
   input: unknown,
   environment: 'Production' | 'Preview',
   includeCustom = false,
+  checkDeadline: () => void = () => {},
 ): { csv: string; exportedAt: string } {
-  const parsed = parseExportSnapshot(type, input);
-  const exportedAt = parsed.exported_at;
+  checkDeadline();
   if (type === 'inventory') {
-    const rows = snapshot(inventoryRow).parse(parsed).rows;
+    const parsed = snapshot(inventoryRow).parse(input);
+    checkDeadline();
+    const { rows, exported_at: exportedAt } = parsed;
     const headers = [
       'Record ID',
       'Type',
@@ -113,23 +123,33 @@ export function exportCsv(
         const cells = [
           csvText(row.entity_id),
           csvText(row.kind === 'quantity' ? 'Quantity' : 'Serialized asset'),
-          csvText(row.name), csvText(row.category_name),
-          csvText(row.manufacturer), csvText(row.model),
-          csvText(row.asset_tag), csvText(row.serial_number),
-          csvText(row.status), csvNumber(row.quantity),
-          csvText(row.location_name), csvText(row.location_code),
-          csvText(row.breadcrumb), csvText(exportedAt), csvText(environment),
+          csvText(row.name),
+          csvText(row.category_name),
+          csvText(row.manufacturer),
+          csvText(row.model),
+          csvText(row.asset_tag),
+          csvText(row.serial_number),
+          csvText(row.status),
+          csvNumber(row.quantity),
+          csvText(row.location_name),
+          csvText(row.location_code),
+          csvText(row.breadcrumb),
+          csvText(exportedAt),
+          csvText(environment),
         ];
-        if (includeCustom) cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+        if (includeCustom)
+          cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
         yield cells.join(',');
       }
     }
     return {
       exportedAt,
-      csv: boundedCsv(lines()),
+      csv: boundedCsv(lines(), checkDeadline),
     };
   }
-  const rows = snapshot(lowStockRow).parse(parsed).rows;
+  const parsed = snapshot(lowStockRow).parse(input);
+  checkDeadline();
+  const { rows, exported_at: exportedAt } = parsed;
   const headers = [
     'Record ID',
     'Type',
@@ -150,19 +170,31 @@ export function exportCsv(
     yield headers.map(csvText).join(',');
     for (const row of rows) {
       const cells = [
-        csvText(row.entity_id), csvText('Quantity'), csvText(row.name),
-        csvText(row.category_name), csvText(row.manufacturer), csvText(row.model),
-        csvText(row.status), csvNumber(row.recorded_total),
+        csvText(row.entity_id),
+        csvText('Quantity'),
+        csvText(row.name),
+        csvText(row.category_name),
+        csvText(row.manufacturer),
+        csvText(row.model),
+        csvText(row.status),
+        csvNumber(row.recorded_total),
         csvNumber(row.reorder_threshold),
-        csvText(row.stock_state === 'out_of_stock' ? 'Out of stock' : 'Needs restocking'),
-        csvText(row.holding_context), csvText(exportedAt), csvText(environment),
+        csvText(
+          row.stock_state === 'out_of_stock'
+            ? 'Out of stock'
+            : 'Needs restocking',
+        ),
+        csvText(row.holding_context),
+        csvText(exportedAt),
+        csvText(environment),
       ];
-      if (includeCustom) cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+      if (includeCustom)
+        cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
       yield cells.join(',');
     }
   }
   return {
     exportedAt,
-    csv: boundedCsv(lines()),
+    csv: boundedCsv(lines(), checkDeadline),
   };
 }
