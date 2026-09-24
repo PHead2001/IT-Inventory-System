@@ -60,6 +60,28 @@ describe('published metadata wire contract', () => {
     expect(formEnvelope.safeParse(envelope(definition())).success).toBe(true);
   });
 
+  it('accepts lowercase PostgreSQL UUIDs regardless of RFC variant', () => {
+    const value = definition();
+    const nonVariant = (digit: string) =>
+      `${digit.repeat(8)}-${digit.repeat(4)}-${digit.repeat(4)}-${digit.repeat(4)}-${digit.repeat(12)}`;
+    value.fields[0].id = nonVariant('1');
+    value.fields[0].options[0].id = nonVariant('2');
+    value.layout[0].id = nonVariant('3');
+    value.layout[0].controls[0].id = nonVariant('4');
+    value.layout[0].controls[1].id = nonVariant('5');
+    value.layout[0].controls[2].id = nonVariant('6');
+    value.layout[0].controls[2].field_id = value.fields[0].id;
+    expect(
+      formEnvelope.safeParse({
+        ...envelope(value),
+        category_id: nonVariant('7'),
+        published_revision_id: nonVariant('8'),
+      }).success,
+    ).toBe(true);
+    value.fields[0].id = nonVariant('a').toUpperCase();
+    expect(formEnvelope.safeParse(envelope(value)).success).toBe(false);
+  });
+
   it('rejects UUID spelling that the mutation patch cannot address', () => {
     for (const change of [
       (value: ReturnType<typeof definition>) => {

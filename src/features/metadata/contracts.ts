@@ -15,7 +15,7 @@ export const fieldTypes = [
   'hierarchical_select',
 ] as const;
 export type FieldType = (typeof fieldTypes)[number];
-const uuid = z.uuid().refine((value) => value === value.toLowerCase(), {
+const uuid = z.guid().refine((value) => value === value.toLowerCase(), {
   message: 'Use a canonical lowercase UUID.',
 });
 const option = z.strictObject({
