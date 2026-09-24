@@ -456,11 +456,11 @@ begin
  perform private.configuration_catalog_lock(false);
  select category_id into v_previous_category from public.quantity_items where id=v_id;
  perform id from public.categories where id in (v_previous_category,v_category) order by id for share;
- select name into v_previous_category_name from public.categories where id=v_previous_category;
  select name into v_category_name from public.categories where id=v_category;
  select * into v_item from public.quantity_items where id=v_id for update;
  if not found then raise exception using errcode='P1010',message='not_found'; end if;
  if v_item.version<>v_version then raise exception using errcode='P1002',message='stale_version'; end if;
+ select name into v_previous_category_name from public.categories where id=v_item.category_id;
  if v_item.archived then raise exception using errcode='P1008',message='invalid_transition'; end if;
  if not(p_payload ? 'reorder_threshold') then v_threshold:=v_item.reorder_threshold; end if;
  perform private.inventory_category(v_category,v_item.category_id);
@@ -600,11 +600,11 @@ begin
  perform private.configuration_catalog_lock(false);
  select category_id into v_previous_category from public.serialized_assets where id=v_id;
  perform id from public.categories where id in (v_previous_category,v_category) order by id for share;
- select name into v_previous_category_name from public.categories where id=v_previous_category;
  select name into v_category_name from public.categories where id=v_category;
  select * into v_asset from public.serialized_assets where id=v_id for update;
  if not found then raise exception using errcode='P1010',message='not_found'; end if;
  if v_asset.version<>v_version then raise exception using errcode='P1002',message='stale_version'; end if;
+ select name into v_previous_category_name from public.categories where id=v_asset.category_id;
  perform private.inventory_category(v_category,v_asset.category_id);
  update public.serialized_assets set name=v_name,description=v_description,category_id=v_category,manufacturer=v_manufacturer,model=v_model,asset_tag=v_tag,serial_number=v_serial where id=v_id;
  if v_asset.version=2147483647 then raise exception using errcode='P1008',message='invalid_transition'; end if;

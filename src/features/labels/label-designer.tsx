@@ -120,7 +120,10 @@ export function LabelDesigner({
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
       if (!current) return;
-      const stored = parseStoredQueue(sessionStorage.getItem(storageKey), defaults);
+      const stored = parseStoredQueue(
+        sessionStorage.getItem(storageKey),
+        defaults,
+      );
       if (stored) {
         const merged = [...stored.entries];
         for (const record of initial) {
@@ -453,14 +456,14 @@ export function LabelDesigner({
               <option value="all">All</option>
             </select>
           </label>
-          <label>
+          <label className="w-full min-w-0">
             Category{' '}
             <select
               value={draft.category}
               onChange={(event) =>
                 setDraft({ ...draft, category: event.target.value })
               }
-              className="rounded bg-slate-800 p-2"
+              className="mt-1 block w-full min-w-0 rounded bg-slate-800 p-2"
             >
               <option value="">All</option>
               {categories.map((category) => (
@@ -681,8 +684,9 @@ export function LabelDesigner({
           </label>
         </div>
         <p className="text-sm text-slate-400">
-          Default: 90 × 50 mm on US Letter, QR. Print at actual size / 100%.
-          Code 128 asset tags require reprinting if the tag changes.
+          New jobs start with the shared choices in Settings. Print at actual
+          size / 100%. Code 128 asset tags require reprinting if the tag
+          changes.
         </p>
         {job.format === 'code128' && fallbackCount > 0 && (
           <p className="rounded border border-amber-700 p-3 text-amber-200">
