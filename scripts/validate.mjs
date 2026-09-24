@@ -5,6 +5,7 @@ try {
     'lint',
     'format:check',
     'test',
+    'test:export:memory',
     'test:e2e:list',
     'build',
   ])

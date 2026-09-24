@@ -1,6 +1,8 @@
 # Validation
 
-The metadata database gate includes `supabase/tests/metadata.test.sql` and `tests/integration/metadata.ts`. It proves publication validation, direct-write denial, value evolution, stale revisions and an independent-connection catalog race. Export limits also require a real authenticated Data API download and hosted PostgREST timeout evidence before release; unit tests alone do not establish those bounds.
+The metadata database gate includes `supabase/tests/metadata.test.sql` and `tests/integration/metadata.ts`. It proves publication validation, direct-write denial, value evolution, draft UUID/version/published-pointer ABA rejection, and independent-connection item creation/update versus publication plus category removal/reassignment versus publication in both serial orders. It also checks that two export reads in one SQL statement retain the same inventory and category snapshot when another connection commits between them, while the next statement sees the commit. Export limits also require a real authenticated Data API download and hosted PostgREST timeout evidence before release; unit tests alone do not establish those bounds.
+
+`npm run test:export:memory` runs without a database in an isolated Node process. It streams a 1,924,608-byte UTF-8 snapshot in 32 KiB chunks through the raw response reader, JSON parser and CSV encoder, and checks the 2 MiB raw and 3 MiB CSV limits, including the exact raw boundary and an oversized response. It samples heap plus external memory and RSS at reader and encoder checkpoints, adding the retained source fixture bytes to the incremental estimate. On the 2026-09-24 local run, the accepted 2,115,801-byte CSV used 31.7 MiB sampled incremental heap plus external memory and took 55.5 ms; a separate CSV expansion case threw before response at 38.7 MiB sampled incremental memory. These are observed checkpoint maxima in an isolated process, not a continuous transient peak or hosted Vercel measurement. The script enforces a 64 MiB sampled incremental bound and ten-second local processing bound; hosted end-to-end memory and timeout proof remains a separate gate.
 
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
@@ -10,6 +12,7 @@ package.json is the canonical command source. Iterate cheaply; certify the final
 | npm run lint                  | ESLint, zero warnings                                                     |
 | npm run format:check          | Formatting verification                                                   |
 | npm run test / test:watch     | Unit, room, auth and component tests                                      |
+| npm run test:export:memory    | Isolated sampled export reader/CSV memory and byte-bound checks           |
 | npm run db:start / db:stop    | Local Supabase lifecycle                                                  |
 | npm run db:reset              | Explicit local reset and migrations                                       |
 | npm run db:types              | Generate committed database types                                         |

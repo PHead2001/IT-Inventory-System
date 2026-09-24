@@ -1,5 +1,12 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import type { LiveLabel } from './queue.server';
 import { defaultFilters, queueStorageKey } from './queue-model';
 
@@ -112,6 +119,58 @@ it('starts a new job from shared defaults while retaining valid saved-job choice
   );
   expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('letter');
   expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('qr');
+});
+
+it('keeps a pending Add from being silently cancelled by print settings or queue edits', async () => {
+  mocks.searchLabelRecords.mockResolvedValue({
+    rows: [
+      {
+        kind: 'asset',
+        key: asset.key,
+        name: asset.name,
+        categoryName: 'Computers',
+        status: 'active',
+        assetTag: asset.tag,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+        holdingContext: 'ITC-S1A',
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  let resolveAdd!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementation(
+    () =>
+      new Promise<LiveLabel[]>((resolve) => {
+        resolveAdd = resolve;
+      }),
+  );
+  render(<LabelDesigner {...props} initial={[quantity]} />);
+  await screen.findByRole('link', { name: asset.name });
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  fireEvent.change(within(queue).getByRole('spinbutton'), {
+    target: { value: '3' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add to queue' }));
+  for (const label of ['Label size', 'Page', 'Code'])
+    expect(screen.getByRole('combobox', { name: label })).toBeDisabled();
+  expect(within(queue).getByRole('spinbutton')).toBeDisabled();
+  expect(within(queue).getByRole('button', { name: 'Remove' })).toBeDisabled();
+  await act(async () => resolveAdd([asset]));
+  await waitFor(() => expect(queue).toHaveTextContent('2 distinct records'));
+  expect(within(queue).getAllByRole('spinbutton')[0]).toHaveValue(3);
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeEnabled();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
+    target: { value: '70x35' },
+  });
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '70x35',
+  );
+  expect(queue).toHaveTextContent('2 distinct records');
+  expect(within(queue).getAllByRole('spinbutton')[0]).toHaveValue(3);
 });
 
 it('prints every mixed-queue copy only after a fresh exact-ID read', async () => {
