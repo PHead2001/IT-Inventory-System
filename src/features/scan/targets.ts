@@ -2,16 +2,18 @@
 export const LOCATION_CODE = /^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$/;
 export const ASSET_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const QUANTITY_UUID = ASSET_UUID;
 
 export type ScanTarget =
   | { kind: 'location'; code: string; path: string }
   | { kind: 'asset'; id: string; path: string }
+  | { kind: 'quantity'; id: string; path: string }
   | { kind: 'tag'; tag: string }
   | { kind: 'bare'; identifier: string };
 
 export function targetPath(
   value: string,
-): Extract<ScanTarget, { kind: 'location' | 'asset' }> | null {
+): Extract<ScanTarget, { kind: 'location' | 'asset' | 'quantity' }> | null {
   if (
     value.length > 256 ||
     /[%\\?#\u0000-\u001f\u007f]/.test(value) ||
@@ -25,6 +27,9 @@ export function targetPath(
   const asset = /^\/inventory\/assets\/([^/]+)$/.exec(value);
   if (asset && ASSET_UUID.test(asset[1]))
     return { kind: 'asset', id: asset[1], path: value };
+  const quantity = /^\/inventory\/quantity\/([^/]+)$/.exec(value);
+  if (quantity && QUANTITY_UUID.test(quantity[1]))
+    return { kind: 'quantity', id: quantity[1], path: value };
   return null;
 }
 
@@ -97,4 +102,8 @@ export function locationLabelPath(code: string): string {
 export function assetLabelPath(id: string): string {
   if (!ASSET_UUID.test(id)) throw new Error('Invalid asset ID');
   return '/inventory/assets/' + id;
+}
+export function quantityLabelPath(id: string): string {
+  if (!QUANTITY_UUID.test(id)) throw new Error('Invalid quantity item ID');
+  return '/inventory/quantity/' + id;
 }

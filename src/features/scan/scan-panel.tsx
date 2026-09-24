@@ -75,7 +75,7 @@ export function ScanPanel() {
           );
         else
           setMessage(
-            'This record is inactive or retired. Review its state before opening.',
+            'This record is inactive, retired, or archived. Review its state before opening.',
           );
       } catch {
         if (mounted.current && token === generation.current)
