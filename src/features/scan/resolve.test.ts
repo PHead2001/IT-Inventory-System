@@ -28,12 +28,10 @@ import { resolveScan } from './resolve.server';
 beforeEach(() => {
   db.location.mockReset().mockResolvedValue({ data: null, error: null });
   db.asset.mockReset().mockResolvedValue({ data: null, error: null });
-  db.origin
-    .mockReset()
-    .mockReturnValue({
-      origin: 'https://inventory.example.test',
-      preview: false,
-    });
+  db.origin.mockReset().mockReturnValue({
+    origin: 'https://inventory.example.test',
+    preview: false,
+  });
 });
 it('keeps stable URL resolution tied to live records after rename and move', async () => {
   db.location.mockResolvedValue({

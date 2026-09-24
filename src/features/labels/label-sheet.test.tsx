@@ -29,8 +29,12 @@ it('shortens display text visibly while preserving the full stable identifier', 
   );
   expect(screen.getByText(id)).toBeInTheDocument();
   expect(screen.getByText(printExcerpt(name, 30))).toHaveTextContent('…');
-  expect(document.querySelector('.label-card')?.getAttribute('style')).toContain('width: 70mm');
-  expect(document.querySelector('.label-card')?.getAttribute('style')).toContain('height: 35mm');
+  expect(
+    document.querySelector('.label-card')?.getAttribute('style'),
+  ).toContain('width: 70mm');
+  expect(
+    document.querySelector('.label-card')?.getAttribute('style'),
+  ).toContain('height: 35mm');
 });
 
 it('scales Code 128 bars and quiet zones at physical module width', async () => {
