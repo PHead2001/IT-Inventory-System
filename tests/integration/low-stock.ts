@@ -275,7 +275,7 @@ async function main() {
     0,
     'omitted threshold is retained',
   );
-  const cleared = await mutation(staff.client, 'quantity_update', {
+  await mutation(staff.client, 'quantity_update', {
     ...legacyPayload,
     expected_version: legacy.version,
     reorder_threshold: null,
