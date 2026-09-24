@@ -633,6 +633,7 @@ export function LabelDesigner({
                   type="number"
                   min={1}
                   max={MAX_COPIES}
+                  disabled={busy}
                   value={entry.copies}
                   onChange={(event) =>
                     setCopies(id, Number(event.target.value))
@@ -642,6 +643,7 @@ export function LabelDesigner({
               </label>
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => {
                   setEntries((list) =>
                     list.filter((item) => queueIdentity(item) !== id),
@@ -663,6 +665,7 @@ export function LabelDesigner({
             Label size{' '}
             <select
               value={job.size}
+              disabled={busy}
               onChange={(event) => {
                 setJob({
                   ...job,
@@ -680,6 +683,7 @@ export function LabelDesigner({
             Page{' '}
             <select
               value={job.page}
+              disabled={busy}
               onChange={(event) => {
                 setJob({
                   ...job,
@@ -697,6 +701,7 @@ export function LabelDesigner({
             Code{' '}
             <select
               value={job.format}
+              disabled={busy}
               onChange={(event) => {
                 setJob({
                   ...job,
@@ -743,6 +748,7 @@ export function LabelDesigner({
             </p>
             <button
               type="button"
+              disabled={busy}
               onClick={acknowledge}
               className="mt-2 rounded bg-amber-400 px-3 py-2 font-semibold text-slate-950"
             >
@@ -758,6 +764,7 @@ export function LabelDesigner({
             </p>
             <button
               type="button"
+              disabled={busy}
               onClick={() => {
                 setFormatAcknowledged(true);
                 setFallbackPending(false);

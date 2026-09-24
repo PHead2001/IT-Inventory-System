@@ -101,10 +101,10 @@ export function ScanPanel() {
     const token = generation.current;
     setCamera('starting');
     try {
-      const { BrowserMultiFormatReader } = await import('@zxing/browser');
+      const { InventoryCodeReader } = await import('./inventory-code-reader');
       if (!mounted.current || token !== generation.current || !video.current)
         return;
-      const reader = new BrowserMultiFormatReader(undefined, {
+      const reader = new InventoryCodeReader(undefined, {
         delayBetweenScanAttempts: 250,
       });
       const running = await reader.decodeFromConstraints(

@@ -1,12 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
-import path from 'node:path';
+import { PNG } from 'pngjs';
+import {
+  BinaryBitmap,
+  HybridBinarizer,
+  MultiFormatReader,
+  RGBLuminanceSource,
+} from '@zxing/library';
+import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
-const zxingBundle = path.resolve(
-  'node_modules/@zxing/browser/umd/zxing-browser.min.js',
-);
 const rootCode = 'ITC';
 test.use({ deviceScaleFactor: 2 });
 
@@ -20,24 +24,32 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   ).toBeVisible();
 }
 
-async function decodeScreenshot(page: Page, png: Buffer): Promise<string> {
-  await page.addScriptTag({ path: zxingBundle });
-  return page.evaluate(
-    async (data) => {
-      const zxing = (
-        window as typeof window & {
-          ZXingBrowser: {
-            BrowserMultiFormatReader: new () => {
-              decodeFromImageUrl(url: string): Promise<{ getText(): string }>;
-            };
-          };
-        }
-      ).ZXingBrowser;
-      const reader = new zxing.BrowserMultiFormatReader();
-      return (await reader.decodeFromImageUrl(data)).getText();
-    },
-    `data:image/png;base64,${png.toString('base64')}`,
-  );
+async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
+  const image = PNG.sync.read(png);
+  const rgba = new Uint8ClampedArray(image.data);
+  const canvas = {
+    width: image.width,
+    height: image.height,
+    getContext: () => ({
+      getImageData: () => ({
+        data: rgba,
+        width: image.width,
+        height: image.height,
+      }),
+    }),
+  } as unknown as HTMLCanvasElement;
+  return decodeInventoryFrame(canvas, () => {
+    const gray = new Uint8ClampedArray(image.width * image.height);
+    for (let i = 0; i < gray.length; i++) gray[i] = rgba[i * 4];
+    return new MultiFormatReader().decode(
+      new BinaryBitmap(
+        new HybridBinarizer(
+          new RGBLuminanceSource(gray, image.width, image.height),
+        ),
+      ),
+      new Map(),
+    );
+  }).getText();
 }
 
 async function generatedLocationQr(page: Page, code = rootCode) {
