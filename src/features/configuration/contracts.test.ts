@@ -72,6 +72,11 @@ describe('configuration command boundaries', () => {
         asset_count: 0,
         historical_quantity_count: '0',
         historical_asset_count: '1',
+        authored_revision_count: '2',
+        retained_value_count: '0',
+        quantity_needs_metadata_count: '0',
+        asset_needs_metadata_count: '0',
+        will_tombstone: true,
         expires_at: new Date().toISOString(),
       }).success,
     ).toBe(true);

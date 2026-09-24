@@ -65,6 +65,11 @@ function impact(
       asset_count: '0',
       historical_quantity_count: historicalCount,
       historical_asset_count: '0',
+      authored_revision_count: '0',
+      retained_value_count: '0',
+      quantity_needs_metadata_count: '0',
+      asset_needs_metadata_count: '0',
+      will_tombstone: historicalCount !== '0' || currentCount !== '0',
       expires_at: new Date(Date.now() + 60_000).toISOString(),
     },
   };
@@ -180,4 +185,34 @@ it('allows an unreferenced last category to be deleted and shows the empty state
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );
   expect(screen.getByText(/No active categories/)).toBeInTheDocument();
+});
+
+it('keeps an authored form category for history and shows target metadata gaps before removal', async () => {
+  const authored = impact(target.id, '0');
+  authored.review.authored_revision_count = '1';
+  authored.review.retained_value_count = '2';
+  authored.review.quantity_needs_metadata_count = '1';
+  authored.review.will_tombstone = true;
+  mocks.review.mockResolvedValue(authored);
+  render(
+    <SettingsPanel
+      categories={[source, target]}
+      labelDefaults={defaults}
+      canManage
+    />,
+  );
+  const row = screen.getByText('Source').closest('li')!;
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove' }));
+  fireEvent.change(within(row).getByLabelText(/replacement/i), {
+    target: { value: target.id },
+  });
+  fireEvent.click(within(row).getByRole('button', { name: 'Review impact' }));
+  const review = await within(row).findByRole('region', {
+    name: 'Removal impact review',
+  });
+  expect(review).toHaveTextContent('1 authored form revisions');
+  expect(review).toHaveTextContent('2 records with retained custom values');
+  expect(review).toHaveTextContent('1 quantity definitions');
+  expect(review).toHaveTextContent('legacy values');
+  expect(review).toHaveTextContent('retained for readable history');
 });

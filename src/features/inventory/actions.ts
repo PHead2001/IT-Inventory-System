@@ -1,6 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import type { Json } from '@/lib/supabase/database.types';
 import { isActiveMember } from '@/lib/auth/membership';
 import {
   validateCommand,
@@ -40,7 +41,7 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       return mutationError('P1001');
     const { data, error } = await supabase.rpc(command.data.operation, {
       p_request_id: command.data.requestId,
-      p_payload: command.data.payload,
+      p_payload: command.data.payload as Json,
     });
     if (error) return mutationError(error.code);
     const result = mutationResultSchema.safeParse(data);
@@ -54,6 +55,7 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       entityId: result.data.entity_id,
       version: result.data.version,
       changed: result.data.changed,
+      needsMetadata: result.data.needs_metadata,
     };
   } catch {
     return mutationError(undefined);

@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:export:memory": "node --conditions=react-server --expose-gc --import tsx tests/integration/export-memory.ts",
     "test:watch": "vitest",
     "db:start": "node scripts/db.mjs start",
     "db:stop": "node scripts/db.mjs stop",

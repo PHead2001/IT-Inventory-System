@@ -120,6 +120,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          published_form_revision_id: string | null
           removed_at: string | null
           sort_order: number
           updated_at: string
@@ -131,6 +132,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          published_form_revision_id?: string | null
           removed_at?: string | null
           sort_order?: number
           updated_at?: string
@@ -142,12 +144,79 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          published_form_revision_id?: string | null
           removed_at?: string | null
           sort_order?: number
           updated_at?: string
           version?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "category_published_form_same_category"
+            columns: ["published_form_revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      category_form_revisions: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          draft_definition: Json | null
+          draft_version: number
+          id: string
+          published_at: string | null
+          published_by: string | null
+          revision_number: number
+          status: string
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          draft_definition?: Json | null
+          draft_version?: number
+          id?: string
+          published_at?: string | null
+          published_by?: string | null
+          revision_number: number
+          status: string
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          draft_definition?: Json | null
+          draft_version?: number
+          id?: string
+          published_at?: string | null
+          published_by?: string | null
+          revision_number?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_form_revisions_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_form_revisions_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "configuration_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_form_revisions_published_by_fkey"
+            columns: ["published_by"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       configuration_events: {
         Row: {
@@ -193,6 +262,254 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "app_members"
             referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      form_publication_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          affected_assets: number
+          affected_quantity: number
+          category_id: string
+          created_at: string
+          id: string
+          previous_revision_id: string | null
+          revision_id: string
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          affected_assets: number
+          affected_quantity: number
+          category_id: string
+          created_at?: string
+          id?: string
+          previous_revision_id?: string | null
+          revision_id: string
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          affected_assets?: number
+          affected_quantity?: number
+          category_id?: string
+          created_at?: string
+          id?: string
+          previous_revision_id?: string | null
+          revision_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_publication_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "form_publication_events_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_publication_events_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "configuration_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_publication_events_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_revision_controls: {
+        Row: {
+          builtin: string | null
+          control_id: string
+          field_id: string | null
+          help: string | null
+          kind: string
+          revision_id: string
+          section_id: string
+          sort_order: number
+          width: string
+        }
+        Insert: {
+          builtin?: string | null
+          control_id: string
+          field_id?: string | null
+          help?: string | null
+          kind: string
+          revision_id: string
+          section_id: string
+          sort_order: number
+          width: string
+        }
+        Update: {
+          builtin?: string | null
+          control_id?: string
+          field_id?: string | null
+          help?: string | null
+          kind?: string
+          revision_id?: string
+          section_id?: string
+          sort_order?: number
+          width?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_revision_controls_revision_id_field_id_fkey"
+            columns: ["revision_id", "field_id"]
+            isOneToOne: false
+            referencedRelation: "form_revision_fields"
+            referencedColumns: ["revision_id", "field_id"]
+          },
+          {
+            foreignKeyName: "form_revision_controls_revision_id_section_id_fkey"
+            columns: ["revision_id", "section_id"]
+            isOneToOne: false
+            referencedRelation: "form_revision_sections"
+            referencedColumns: ["revision_id", "id"]
+          },
+        ]
+      }
+      form_revision_fields: {
+        Row: {
+          applies_to: string[]
+          default_value: Json | null
+          field_id: string
+          help: string | null
+          label: string
+          required: boolean
+          revision_id: string
+          rules: Json
+          sort_order: number
+        }
+        Insert: {
+          applies_to: string[]
+          default_value?: Json | null
+          field_id: string
+          help?: string | null
+          label: string
+          required: boolean
+          revision_id: string
+          rules?: Json
+          sort_order: number
+        }
+        Update: {
+          applies_to?: string[]
+          default_value?: Json | null
+          field_id?: string
+          help?: string | null
+          label?: string
+          required?: boolean
+          revision_id?: string
+          rules?: Json
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_revision_fields_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "metadata_fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_revision_fields_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_revision_options: {
+        Row: {
+          active: boolean
+          field_id: string
+          label: string
+          option_id: string
+          parent_option_id: string | null
+          revision_id: string
+          sort_order: number
+        }
+        Insert: {
+          active?: boolean
+          field_id: string
+          label: string
+          option_id: string
+          parent_option_id?: string | null
+          revision_id: string
+          sort_order: number
+        }
+        Update: {
+          active?: boolean
+          field_id?: string
+          label?: string
+          option_id?: string
+          parent_option_id?: string | null
+          revision_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_revision_options_option_id_field_id_fkey"
+            columns: ["option_id", "field_id"]
+            isOneToOne: false
+            referencedRelation: "metadata_options"
+            referencedColumns: ["id", "field_id"]
+          },
+          {
+            foreignKeyName: "form_revision_options_revision_id_field_id_fkey"
+            columns: ["revision_id", "field_id"]
+            isOneToOne: false
+            referencedRelation: "form_revision_fields"
+            referencedColumns: ["revision_id", "field_id"]
+          },
+          {
+            foreignKeyName: "form_revision_options_revision_id_field_id_parent_option_i_fkey"
+            columns: ["revision_id", "field_id", "parent_option_id"]
+            isOneToOne: false
+            referencedRelation: "form_revision_options"
+            referencedColumns: ["revision_id", "field_id", "option_id"]
+          },
+        ]
+      }
+      form_revision_sections: {
+        Row: {
+          id: string
+          label: string
+          revision_id: string
+          sort_order: number
+        }
+        Insert: {
+          id: string
+          label: string
+          revision_id: string
+          sort_order: number
+        }
+        Update: {
+          id?: string
+          label?: string
+          revision_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_revision_sections_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -266,6 +583,68 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      metadata_fields: {
+        Row: {
+          category_id: string
+          created_at: string
+          field_type: string
+          id: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          field_type: string
+          id: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          field_type?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "metadata_fields_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "metadata_fields_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "configuration_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      metadata_options: {
+        Row: {
+          created_at: string
+          field_id: string
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          field_id: string
+          id: string
+        }
+        Update: {
+          created_at?: string
+          field_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "metadata_options_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "metadata_fields"
             referencedColumns: ["id"]
           },
         ]
@@ -368,39 +747,48 @@ export type Database = {
           archived: boolean
           category_id: string
           created_at: string
+          custom_values: Json
           description: string | null
           id: string
           manufacturer: string | null
           model: string | null
           name: string
+          needs_metadata: boolean
           reorder_threshold: number | null
           updated_at: string
+          validated_form_revision_id: string | null
           version: number
         }
         Insert: {
           archived?: boolean
           category_id: string
           created_at?: string
+          custom_values?: Json
           description?: string | null
           id?: string
           manufacturer?: string | null
           model?: string | null
           name: string
+          needs_metadata?: boolean
           reorder_threshold?: number | null
           updated_at?: string
+          validated_form_revision_id?: string | null
           version?: number
         }
         Update: {
           archived?: boolean
           category_id?: string
           created_at?: string
+          custom_values?: Json
           description?: string | null
           id?: string
           manufacturer?: string | null
           model?: string | null
           name?: string
+          needs_metadata?: boolean
           reorder_threshold?: number | null
           updated_at?: string
+          validated_form_revision_id?: string | null
           version?: number
         }
         Relationships: [
@@ -418,6 +806,13 @@ export type Database = {
             referencedRelation: "configuration_categories"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "quantity_items_validated_form_revision_id_fkey"
+            columns: ["validated_form_revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
+            referencedColumns: ["id"]
+          },
         ]
       }
       serialized_assets: {
@@ -425,45 +820,54 @@ export type Database = {
           asset_tag: string | null
           category_id: string
           created_at: string
+          custom_values: Json
           description: string | null
           id: string
           location_id: string
           manufacturer: string | null
           model: string | null
           name: string
+          needs_metadata: boolean
           serial_number: string | null
           status: string
           updated_at: string
+          validated_form_revision_id: string | null
           version: number
         }
         Insert: {
           asset_tag?: string | null
           category_id: string
           created_at?: string
+          custom_values?: Json
           description?: string | null
           id?: string
           location_id: string
           manufacturer?: string | null
           model?: string | null
           name: string
+          needs_metadata?: boolean
           serial_number?: string | null
           status?: string
           updated_at?: string
+          validated_form_revision_id?: string | null
           version?: number
         }
         Update: {
           asset_tag?: string | null
           category_id?: string
           created_at?: string
+          custom_values?: Json
           description?: string | null
           id?: string
           location_id?: string
           manufacturer?: string | null
           model?: string | null
           name?: string
+          needs_metadata?: boolean
           serial_number?: string | null
           status?: string
           updated_at?: string
+          validated_form_revision_id?: string | null
           version?: number
         }
         Relationships: [
@@ -486,6 +890,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "serialized_assets_validated_form_revision_id_fkey"
+            columns: ["validated_form_revision_id"]
+            isOneToOne: false
+            referencedRelation: "category_form_revisions"
             referencedColumns: ["id"]
           },
         ]
@@ -656,6 +1067,10 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      asset_create_v2: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       asset_move: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -669,6 +1084,10 @@ export type Database = {
         Returns: Json
       }
       asset_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_update_v2: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
@@ -688,18 +1107,32 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
-      inventory_export_snapshot: {
-        Args: {
-          p_category_id?: string
-          p_export_type?: string
-          p_location_code?: string
-          p_low_stock?: boolean
-          p_query?: string
-          p_status?: string
-          p_type?: string
-        }
-        Returns: Json
-      }
+      inventory_export_snapshot:
+        | {
+            Args: {
+              p_category_id?: string
+              p_export_type?: string
+              p_location_code?: string
+              p_low_stock?: boolean
+              p_query?: string
+              p_status?: string
+              p_type?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_category_id: string
+              p_export_type: string
+              p_include_custom: boolean
+              p_location_code: string
+              p_low_stock: boolean
+              p_query: string
+              p_status: string
+              p_type: string
+            }
+            Returns: Json
+          }
       inventory_history: {
         Args: {
           p_entity_id?: string
@@ -765,6 +1198,24 @@ export type Database = {
         Args: { p_page?: number; p_page_size?: number }
         Returns: Json
       }
+      metadata_describe_values: {
+        Args: { p_current_category: string; p_values: Json }
+        Returns: Json
+      }
+      metadata_draft_discard: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      metadata_draft_save: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      metadata_form_get: { Args: { p_category_id: string }; Returns: Json }
+      metadata_publish: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      metadata_publish_review: { Args: { p_payload: Json }; Returns: Json }
       quantity_adjust: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -782,6 +1233,10 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      quantity_create_v2: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       quantity_move: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -795,6 +1250,10 @@ export type Database = {
         Returns: Json
       }
       quantity_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_update_v2: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }

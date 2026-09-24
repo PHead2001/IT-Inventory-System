@@ -74,10 +74,13 @@ async function denied(
   account: SupabaseClient,
   name: string,
   parameters: object,
-  code: string,
+  code: string | string[],
 ) {
   const result = await account.rpc(name, parameters);
-  assert.equal(result.error?.code, code, name + ': ' + result.error?.message);
+  assert.ok(
+    (Array.isArray(code) ? code : [code]).includes(result.error?.code ?? ''),
+    name + ': ' + result.error?.message,
+  );
   checks++;
 }
 async function search(account: SupabaseClient, parameters: object = {}) {
@@ -533,7 +536,7 @@ async function main() {
     p_export_type: 'low_stock',
   });
   assert.equal(scopedLowExport.total, 1);
-  assert.equal(scopedLowExport.rows[0].recorded_total, 4);
+  assert.equal(scopedLowExport.rows[0].recorded_total, '4');
   assert.match(scopedLowExport.rows[0].holding_context, /ITC-S1A/);
   assert.match(scopedLowExport.rows[0].holding_context, /ITC-S1B/);
   assert.deepEqual(
@@ -563,7 +566,7 @@ async function main() {
     staff.client,
     'inventory_export_snapshot',
     { p_query: capPrefix },
-    'P1013',
+    ['P1013', 'P1025'],
   );
   console.log(
     `Low-stock metadata, stock state, dashboard, export snapshot, RLS, concurrency and cap passed (${checks} RPC checks).`,

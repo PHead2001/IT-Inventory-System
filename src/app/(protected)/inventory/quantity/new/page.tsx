@@ -3,7 +3,8 @@ import {
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
-import { MutationForm } from '@/features/inventory/components/mutation-form';
+import { MetadataForm } from '@/features/metadata/metadata-form';
+import { getPublishedForms } from '@/features/metadata/queries.server';
 import { panel } from '@/features/inventory/components/read-ui';
 import Link from 'next/link';
 export default async function NewQuantityPage() {
@@ -16,6 +17,9 @@ export default async function NewQuantityPage() {
     getCategories(),
     getLocations(),
   ]);
+  const forms = await getPublishedForms(
+    categories.map((category) => category.id),
+  );
   if (!categories.some((category) => category.active))
     return (
       <p role="alert">
@@ -35,10 +39,11 @@ export default async function NewQuantityPage() {
         one location.
       </p>
       <div className={panel}>
-        <MutationForm
-          operation="quantity_create"
+        <MetadataForm
+          kind="quantity"
           categories={categories}
           locations={locations}
+          forms={forms}
         />
       </div>
     </>
