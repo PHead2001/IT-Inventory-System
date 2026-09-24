@@ -31,6 +31,7 @@ type Props = {
   forms: Record<string, MetadataForm>;
   item?: QuantityItem;
   asset?: AssetItem;
+  preview?: boolean;
 };
 const labels: Record<string, string> = {
   name: 'Name',
@@ -117,6 +118,7 @@ export function MetadataForm({
   forms,
   item,
   asset,
+  preview = false,
 }: Props) {
   const router = useRouter();
   const latest = item ?? asset;
@@ -510,9 +512,13 @@ export function MetadataForm({
     <form
       className="space-y-5"
       aria-label={
-        creating ? `Create ${kind} inventory` : `Edit ${kind} metadata`
+        preview
+          ? `Preview ${kind} metadata`
+          : creating
+            ? `Create ${kind} inventory`
+            : `Edit ${kind} metadata`
       }
-      onSubmit={submit}
+      onSubmit={preview ? (event) => event.preventDefault() : submit}
     >
       {schemaStale && (
         <div
@@ -609,7 +615,7 @@ export function MetadataForm({
             </div>
           </section>
         ))}
-        {creating && kind === 'quantity' && (
+        {creating && !preview && kind === 'quantity' && (
           <div className="space-y-3">
             <label htmlFor="metadata-initial-quantity">Initial quantity</label>
             <Input
@@ -638,7 +644,7 @@ export function MetadataForm({
             )}
           </div>
         )}
-        {creating && kind === 'asset' && (
+        {creating && !preview && kind === 'asset' && (
           <LocationPicker
             id="metadata-location"
             label="Current location"
@@ -650,7 +656,7 @@ export function MetadataForm({
           />
         )}
       </fieldset>
-      {review && (
+      {!preview && review && (
         <div
           className="rounded border border-cyan-700 p-3"
           role="region"
@@ -684,7 +690,7 @@ export function MetadataForm({
           </p>
         </div>
       )}
-      {state && !state.ok && (
+      {!preview && state && !state.ok && (
         <p
           role="alert"
           className="rounded border border-amber-700 p-3 text-amber-100"
@@ -692,29 +698,65 @@ export function MetadataForm({
           {state.message}
         </p>
       )}
-      {state?.ok && <p role="status">Metadata saved.</p>}
-      <div className="flex gap-2">
-        <Button
-          disabled={
-            pending ||
-            !form ||
-            schemaStale ||
-            itemStale ||
-            (review && legacyMigration && !ackLegacy)
-          }
-        >
-          {review ? 'Confirm save' : 'Review metadata'}
-        </Button>
-        {review && (
+      {!preview && state?.ok && <p role="status">Metadata saved.</p>}
+      {!preview && (
+        <div className="flex gap-2">
           <Button
-            type="button"
-            variant="outline"
-            onClick={() => setReview(false)}
+            disabled={
+              pending ||
+              !form ||
+              schemaStale ||
+              itemStale ||
+              (review && legacyMigration && !ackLegacy)
+            }
           >
-            Edit values
+            {review ? 'Confirm save' : 'Review metadata'}
           </Button>
-        )}
-      </div>
+          {review && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setReview(false)}
+            >
+              Edit values
+            </Button>
+          )}
+        </div>
+      )}
     </form>
+  );
+}
+
+/** Designer preview of the same controls used by inventory create/edit. */
+export function MetadataFormPreview({
+  kind,
+  definition,
+  categoryId,
+  categoryName,
+}: {
+  kind: Kind;
+  definition: MetadataDefinition;
+  categoryId: string;
+  categoryName: string;
+}) {
+  return (
+    <MetadataForm
+      key={categoryId}
+      kind={kind}
+      categories={[{ id: categoryId, name: categoryName, active: true }]}
+      locations={[]}
+      forms={{
+        [categoryId]: {
+          category_id: categoryId,
+          published_revision_id: '00000000-0000-4000-8000-000000000001',
+          published_number: '1',
+          published_definition: definition,
+          draft_id: null,
+          draft_version: null,
+          draft_definition: null,
+        },
+      }}
+      preview
+    />
   );
 }

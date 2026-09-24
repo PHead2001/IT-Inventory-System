@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MetadataForm, buildCustomPatch } from './metadata-form';
+import { submitInventory } from '@/features/inventory/actions';
+import {
+  MetadataForm,
+  MetadataFormPreview,
+  buildCustomPatch,
+} from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
 
 vi.mock('next/navigation', () => ({
@@ -89,6 +94,35 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  it('previews live controls in order without submitting inventory', () => {
+    const { container } = render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={form().published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(
+      screen.getByRole('form', { name: 'Preview quantity metadata' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Inspected/)).toBeInTheDocument();
+    expect(
+      [...container.querySelectorAll('label')].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['Name', 'Category', 'Inspected (required)']);
+    expect(
+      screen.queryByRole('button', { name: 'Review metadata' }),
+    ).toBeNull();
+    expect(screen.queryByLabelText('Initial quantity')).toBeNull();
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Preview quantity metadata' }),
+    );
+    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
   it('preserves false, zero and empty strings as values distinct from missing', () => {
     const definition = {
       fields: [
