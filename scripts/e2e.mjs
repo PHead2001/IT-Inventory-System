@@ -1,6 +1,12 @@
 import { npm, localStatus } from './runtime.mjs';
 import { seedUsers } from './fixtures.mjs';
 try {
+  const playwrightArgs = process.argv.slice(2);
+  // The telemetry spec needs the same server-side Preview opt-in as the hosted
+  // feature. Keep ordinary focused E2E runs in the default, disabled state.
+  const testTelemetry =
+    playwrightArgs.length === 0 ||
+    playwrightArgs.some((argument) => argument.includes('telemetry'));
   const status = localStatus();
   await seedUsers(status);
   const env = {
@@ -12,10 +18,12 @@ try {
     APP_ENV: 'local',
     LOCAL_API_URL: status.API_URL,
     LOCAL_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY,
+    VERCEL_ENV: testTelemetry ? 'preview' : 'development',
+    SPEED_INSIGHTS_ENABLED: testTelemetry ? 'true' : 'false',
   };
   // Public environment values are build inputs. Never reuse a build from another backend.
   npm(['run', 'build'], { env });
-  npm(['exec', '--', 'playwright', 'test', ...process.argv.slice(2)], { env });
+  npm(['exec', '--', 'playwright', 'test', ...playwrightArgs], { env });
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

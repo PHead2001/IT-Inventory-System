@@ -11,6 +11,8 @@ import {
 import { requireMember } from '@/lib/auth/session.server';
 import { logout } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
+import { PrivateSpeedInsights } from '@/features/telemetry/private-speed-insights';
+import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
 export const dynamic = 'force-dynamic';
 export default async function ApplicationLayout({
   children,
@@ -109,6 +111,10 @@ export default async function ApplicationLayout({
           {children}
         </main>
       </div>
+      {speedInsightsEnabled({
+        VERCEL_ENV: process.env.VERCEL_ENV,
+        SPEED_INSIGHTS_ENABLED: process.env.SPEED_INSIGHTS_ENABLED,
+      }) && <PrivateSpeedInsights />}
     </div>
   );
 }

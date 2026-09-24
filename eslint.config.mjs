@@ -11,5 +11,6 @@ export default defineConfig([
     'test-results/**',
     'next-env.d.ts',
     'src/lib/supabase/database.types.ts',
+    'tests/fixtures/speed-insights-script.js',
   ]),
 ]);

@@ -143,6 +143,12 @@ export function LocationPicker({
   const activeTreeIndex = treeItems.findIndex(
     (row) => (row?.location.id ?? 'all') === effectiveActiveTreeId,
   );
+  // DOM selectors can be included in performance attribution. Keep record IDs
+  // in React/state only; the rendered tree IDs use local visible ordinals.
+  const treeDomId = (locationId: string) =>
+    listId +
+    '-tree-' +
+    treeItems.findIndex((row) => (row?.location.id ?? 'all') === locationId);
   useEffect(() => {
     if (
       visibleOpen &&
@@ -205,18 +211,12 @@ export function LocationPicker({
       ? activeOptionIndex >= 0
         ? listId + '-' + activeOptionIndex
         : null
-      : effectiveActiveTreeId
-        ? listId + '-tree-' + effectiveActiveTreeId
+      : activeTreeIndex >= 0
+        ? listId + '-tree-' + activeTreeIndex
         : null;
     if (visibleOpen && id)
       document.getElementById(id)?.scrollIntoView?.({ block: 'nearest' });
-  }, [
-    activeOptionIndex,
-    effectiveActiveTreeId,
-    listId,
-    searching,
-    visibleOpen,
-  ]);
+  }, [activeOptionIndex, activeTreeIndex, listId, searching, visibleOpen]);
   useEffect(() => {
     if (!visibleOpen) return;
     function place() {
@@ -314,7 +314,7 @@ export function LocationPicker({
       treeItems[Math.max(0, Math.min(treeItems.length - 1, nextIndex))]
         ?.location.id ?? 'all';
     setActiveTreeId(nextId);
-    if (focusRow) document.getElementById(listId + '-tree-' + nextId)?.focus();
+    if (focusRow) document.getElementById(treeDomId(nextId))?.focus();
   }
   function moveTree(direction: number, focusRow = false) {
     focusTreeIndex(activeTreeIndex + direction, focusRow);
@@ -368,7 +368,7 @@ export function LocationPicker({
       else if (row.parentId) {
         setActiveTreeId(row.parentId);
         if (event.currentTarget !== searchRef.current)
-          document.getElementById(listId + '-tree-' + row.parentId)?.focus();
+          document.getElementById(treeDomId(row.parentId))?.focus();
       }
     } else if (event.key === 'Enter') {
       event.preventDefault();
@@ -526,8 +526,8 @@ export function LocationPicker({
                   ? activeOptionIndex >= 0
                     ? listId + '-' + activeOptionIndex
                     : undefined
-                  : activeTreeIndex >= 0 && effectiveActiveTreeId
-                    ? listId + '-tree-' + effectiveActiveTreeId
+                  : activeTreeIndex >= 0
+                    ? listId + '-tree-' + activeTreeIndex
                     : undefined
             }
             onChange={(event) => {
@@ -604,7 +604,7 @@ export function LocationPicker({
             {!loading &&
               !loadError &&
               !searching &&
-              treeItems.map((row) => {
+              treeItems.map((row, index) => {
                 const location = row?.location;
                 const rowId = location?.id ?? 'all';
                 const isNavigation = Boolean(row && !row.selectable);
@@ -631,7 +631,7 @@ export function LocationPicker({
                     <button
                       type="button"
                       role="treeitem"
-                      id={listId + '-tree-' + rowId}
+                      id={listId + '-tree-' + index}
                       aria-level={row ? row.depth + 1 : 1}
                       aria-posinset={
                         row
