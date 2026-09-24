@@ -35,6 +35,11 @@ import {
   useRoomLabelLayout,
 } from './label-layout-runtime';
 import { SafeCanvas as Canvas } from './safe-canvas';
+import {
+  VisibleHoverTracker,
+  type VisibleHover,
+} from './visible-hover-runtime';
+import { placeHoverTooltip } from './visible-hover';
 
 export type RoomSceneProps = {
   room: RoomDefinition;
@@ -269,16 +274,12 @@ function CameraFacingLabel({
   selected,
   prioritySelected,
   onSelect,
-  onHoverStart,
-  onHoverEnd,
 }: {
   node: RoomNode;
   size: [number, number, number];
   selected: boolean;
   prioritySelected: boolean;
   onSelect: (code: string) => void;
-  onHoverStart: () => void;
-  onHoverEnd: () => void;
 }) {
   const { camera, invalidate } = useThree();
   const registerLabel = useRoomLabelLayout();
@@ -355,10 +356,9 @@ function CameraFacingLabel({
               ref={buttonRef}
               type="button"
               data-location-code={node.locationCode}
+              data-room-label-code={node.locationCode}
               aria-label={`Select ${node.interaction!.label} (${node.locationCode})`}
               aria-pressed={prioritySelected}
-              onPointerEnter={onHoverStart}
-              onPointerLeave={onHoverEnd}
               onClick={(event) => {
                 event.stopPropagation();
                 onSelect(node.locationCode!);
@@ -393,6 +393,7 @@ function NodeVisual({
   onSelect,
   profiles,
   showAllLabels,
+  hoveredCode,
 }: {
   profiles: RoomDefinition['rackFaceProfiles'];
   node: RoomNode;
@@ -400,38 +401,8 @@ function NodeVisual({
   highlighted: Set<string>;
   onSelect: (code: string) => void;
   showAllLabels: boolean;
+  hoveredCode: string | null;
 }) {
-  const [hover, setHover] = useState(false);
-  const hoverExit = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const labelHover = useRef(false);
-  useEffect(
-    () => () => {
-      if (hoverExit.current !== null) clearTimeout(hoverExit.current);
-    },
-    [],
-  );
-  const beginHover = () => {
-    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
-    hoverExit.current = null;
-    setHover(true);
-  };
-  const endHover = () => {
-    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
-    // The HTML label can take the pointer from the raycast mesh. Let its
-    // pointer-enter event retain the label before clearing mesh hover.
-    hoverExit.current = setTimeout(() => {
-      hoverExit.current = null;
-      if (!labelHover.current) setHover(false);
-    }, 80);
-  };
-  const beginLabelHover = () => {
-    labelHover.current = true;
-    beginHover();
-  };
-  const endLabelHover = () => {
-    labelHover.current = false;
-    endHover();
-  };
   const selected =
     !!node.locationCode &&
     (node.locationCode === selectedCode || highlighted.has(node.locationCode));
@@ -447,20 +418,18 @@ function NodeVisual({
     >
       {node.kind === 'box' && node.size && (
         <group
+          userData={
+            interactive
+              ? {
+                  roomHoverTarget: {
+                    code: node.locationCode,
+                    label: node.interaction!.label,
+                  },
+                }
+              : undefined
+          }
           onClick={click}
           onDoubleClick={(event) => event.stopPropagation()}
-          onPointerOver={(event) => {
-            if (interactive) {
-              event.stopPropagation();
-              beginHover();
-            }
-          }}
-          onPointerOut={(event) => {
-            if (interactive) {
-              event.stopPropagation();
-              endHover();
-            }
-          }}
         >
           <mesh onClick={click}>
             <boxGeometry args={toSceneSize(node.size)} />
@@ -468,7 +437,7 @@ function NodeVisual({
               color={
                 selected
                   ? '#0891b2'
-                  : hover
+                  : hoveredCode === node.locationCode
                     ? '#64748b'
                     : (node.visual?.color ?? '#475569')
               }
@@ -542,21 +511,20 @@ function NodeVisual({
           {interactive && node.interaction?.hitBox && (
             <mesh
               position={toScenePosition(node.interaction.hitBox.center)}
+              userData={{ hoverPassThrough: true }}
               onClick={click}
             >
               <boxGeometry args={toSceneSize(node.interaction.hitBox.size)} />
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
           )}
-          {interactive && (hover || showAllLabels) && (
+          {interactive && showAllLabels && (
             <CameraFacingLabel
               node={node}
               size={node.size}
               selected={selected}
               prioritySelected={node.locationCode === selectedCode}
               onSelect={onSelect}
-              onHoverStart={beginLabelHover}
-              onHoverEnd={endLabelHover}
             />
           )}
         </group>
@@ -570,6 +538,7 @@ function NodeVisual({
           onSelect={onSelect}
           profiles={profiles}
           showAllLabels={showAllLabels}
+          hoveredCode={hoveredCode}
         />
       ))}
     </group>
@@ -1021,6 +990,70 @@ function CameraRig({
 }
 export default function RoomScene(props: RoomSceneProps) {
   const [command, setCommand] = useState<ViewCommand>({ kind: 'fit', id: 0 });
+  const [hoverState, setHoverState] = useState<{
+    room: RoomDefinition;
+    hit: VisibleHover;
+  } | null>(null);
+  const activeHover = hoverState?.room === props.room ? hoverState.hit : null;
+  const tooltipButton = useRef<HTMLButtonElement>(null);
+  const [tooltipSize, setTooltipSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const element = tooltipButton.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      setTooltipSize({
+        width: entry.borderBoxSize[0]?.inlineSize ?? element.offsetWidth,
+        height: entry.borderBoxSize[0]?.blockSize ?? element.offsetHeight,
+      });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [activeHover?.needsTooltip, activeHover?.target.code]);
+  const tooltipPosition = activeHover
+    ? placeHoverTooltip(activeHover, activeHover, tooltipSize)
+    : null;
+  const labelPointer = useRef(false);
+  const [retainDuringLabelHandoff, setRetainDuringLabelHandoff] =
+    useState(false);
+  const hoverExit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    },
+    [],
+  );
+  const cancelHoverExit = useCallback(() => {
+    if (hoverExit.current !== null) clearTimeout(hoverExit.current);
+    hoverExit.current = null;
+  }, []);
+  const onVisibleHover = useCallback(
+    (hit: VisibleHover | null) => {
+      cancelHoverExit();
+      if (!hit) {
+        setHoverState(null);
+        return;
+      }
+      setHoverState((current) =>
+        current?.room === props.room &&
+        current.hit.target.code === hit.target.code &&
+        current.hit.needsTooltip === hit.needsTooltip &&
+        current.hit.width === hit.width &&
+        current.hit.height === hit.height
+          ? current
+          : { room: props.room, hit },
+      );
+    },
+    [cancelHoverExit, props.room],
+  );
+  const onCanvasHoverLeave = useCallback(() => {
+    cancelHoverExit();
+    if (labelPointer.current) return;
+    hoverExit.current = setTimeout(() => {
+      hoverExit.current = null;
+      if (!labelPointer.current) setHoverState(null);
+    }, 80);
+  }, [cancelHoverExit]);
   const [labelPreference, setLabelPreference] = useState({
     room: props.room,
     showAll: false,
@@ -1169,7 +1202,7 @@ export default function RoomScene(props: RoomSceneProps) {
         </details>
       </div>
       <div
-        className="h-[440px] overflow-hidden rounded-xl border border-slate-700 bg-slate-950 sm:h-[580px]"
+        className="relative h-[440px] overflow-hidden rounded-xl border border-slate-700 bg-slate-950 sm:h-[580px]"
         aria-label="Interactive room canvas"
       >
         <Canvas
@@ -1214,6 +1247,7 @@ export default function RoomScene(props: RoomSceneProps) {
                 onSelect={props.onSelect}
                 profiles={props.room.rackFaceProfiles}
                 showAllLabels={showAllLabels}
+                hoveredCode={activeHover?.target.code ?? null}
               />
             ))}
             <CameraRig
@@ -1222,8 +1256,48 @@ export default function RoomScene(props: RoomSceneProps) {
               orbitMode={orbitMode}
               manualGesture={manualGesture}
             />
+            <VisibleHoverTracker
+              showAllLabels={showAllLabels}
+              retainDuringLabelHandoff={retainDuringLabelHandoff}
+              onHit={onVisibleHover}
+              onCanvasLeave={onCanvasHoverLeave}
+            />
           </LabelLayoutProvider>
         </Canvas>
+        {activeHover?.needsTooltip && (
+          <button
+            ref={tooltipButton}
+            type="button"
+            data-hover-tooltip="true"
+            data-location-code={activeHover.target.code}
+            aria-label={`Select ${activeHover.target.label} (${activeHover.target.code})`}
+            aria-pressed={props.selectedCode === activeHover.target.code}
+            onPointerEnter={() => {
+              labelPointer.current = true;
+              setRetainDuringLabelHandoff(true);
+              cancelHoverExit();
+            }}
+            onPointerLeave={() => {
+              labelPointer.current = false;
+              setRetainDuringLabelHandoff(false);
+              onCanvasHoverLeave();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onSelect(activeHover.target.code);
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="absolute z-10 rounded border border-cyan-500/60 bg-slate-950/95 px-2 py-1 text-xs text-cyan-50 shadow-lg focus-visible:outline-2 focus-visible:outline-cyan-300"
+            style={{
+              left: tooltipPosition?.left,
+              top: tooltipPosition?.top,
+              maxWidth: Math.max(0, Math.min(208, activeHover.width - 16)),
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {activeHover.target.label}
+          </button>
+        )}
       </div>
       {selectedLabel && (
         <p role="status" className="text-sm text-cyan-200">
