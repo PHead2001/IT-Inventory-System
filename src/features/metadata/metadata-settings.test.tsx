@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import {
   cleanup,
   fireEvent,
@@ -12,7 +13,7 @@ import {
   reviewMetadataPublish,
   verifyMetadataDesignerIdentity,
 } from './actions';
-import type { MetadataForm } from './contracts';
+import type { MetadataDefinition, MetadataForm } from './contracts';
 import {
   clearAllDesignerRecovery,
   designerInstanceKey,
@@ -27,7 +28,27 @@ vi.mock('./actions', () => ({
   verifyMetadataDesignerIdentity: vi.fn(),
 }));
 vi.mock('./metadata-form', () => ({
-  MetadataFormPreview: () => <div>Shared live preview</div>,
+  MetadataFormPreview: ({ definition }: { definition: MetadataDefinition }) => {
+    // The live form snapshots its form at mount. The designer must explicitly
+    // remount that same component after edits without changing inventory behavior.
+    const [snapshot] = useState(() => ({
+      labels: definition.fields.map((field) => field.label).join(','),
+      order: definition.layout
+        .flatMap((section) =>
+          section.controls.map(
+            (control) => control.builtin ?? control.field_id ?? control.kind,
+          ),
+        )
+        .join(','),
+    }));
+    return (
+      <div>
+        <span>Shared live preview</span>
+        <span data-testid="preview-fields">{snapshot.labels}</span>
+        <span data-testid="preview-order">{snapshot.order}</span>
+      </div>
+    );
+  },
 }));
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -99,6 +120,23 @@ describe('category form designer', () => {
     ).toBeDisabled();
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
+    );
+  });
+  it('refreshes the shared preview snapshot after field and layout edits', () => {
+    mount();
+    expect(screen.getByTestId('preview-order')).toHaveTextContent(
+      'name,category_id',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'Connector family' },
+    });
+    expect(screen.getByTestId('preview-fields')).toHaveTextContent(
+      'Connector family',
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move down' })[0]);
+    expect(screen.getByTestId('preview-order')).toHaveTextContent(
+      'category_id,name',
     );
   });
   it('preserves entered data and original draft baseline after a stale save response', async () => {
@@ -303,6 +341,11 @@ describe('category form designer', () => {
       expect(
         screen.getByRole('region', { name: 'Form publication impact' }),
       ).toHaveTextContent('3 quantity definitions'),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Publish reviewed revision' }),
+      ).toBeEnabled(),
     );
     fireEvent.click(
       screen.getByRole('button', { name: 'Publish reviewed revision' }),

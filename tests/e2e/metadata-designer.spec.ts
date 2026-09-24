@@ -49,6 +49,7 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
   browser,
 }) => {
   test.setTimeout(120_000);
+  page.setDefaultTimeout(10_000);
   const name = `Designer ${Date.now()}`;
   await signIn(page);
   await page.goto('/settings');
@@ -64,7 +65,8 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
   await designer.getByLabel('Label', { exact: true }).fill('Connector family');
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Specifications');
-  await designer.getByRole('button', { name: 'Move down' }).first().click();
+  await designer.getByRole('button', { name: 'Move down' }).first().focus();
+  await page.keyboard.press('Enter');
   await expect(
     designer
       .locator('[data-section-id]')
@@ -153,7 +155,16 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
   const secondHandle = designer.getByRole('button', {
     name: /^Drag Name$/,
   });
-  await first.dragTo(secondHandle);
+  const from = await first.boundingBox();
+  const to = await secondHandle.boundingBox();
+  expect(from).not.toBeNull();
+  expect(to).not.toBeNull();
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
   const handles = designer
     .locator('[data-section-id]')
     .first()
@@ -165,10 +176,12 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
   );
   const nameControl = designer
     .locator('[data-control-id]')
-    .filter({ has: designer.getByRole('button', { name: /^Resize Name$/ }) });
+    .filter({ has: page.getByRole('button', { name: /^Resize Name$/ }) });
+  await expect(nameControl).toHaveCount(1);
   const width = nameControl.getByLabel('Width');
   await width.selectOption('3');
   const handle = designer.getByRole('button', { name: /^Resize Name$/ });
+  await handle.scrollIntoViewIfNeeded();
   const box = await handle.boundingBox();
   expect(box).not.toBeNull();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);

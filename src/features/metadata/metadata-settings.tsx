@@ -381,6 +381,7 @@ export function MetadataSettings({
     'quantity',
   );
   const [phone, setPhone] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const drag = useRef<string | null>(null);
   const resize = useRef<{
     id: string;
@@ -496,6 +497,7 @@ export function MetadataSettings({
   }, [dirty]);
   const edit = (next: MetadataDefinition) => {
     editEpoch.current += 1;
+    setPreviewVersion((version) => version + 1);
     if (definition)
       setHistory((prior) => [...prior.slice(-19), copy(definition)]);
     setDefinition(next);
@@ -509,6 +511,7 @@ export function MetadataSettings({
     nextDraftId: string | null,
   ) => {
     editEpoch.current += 1;
+    setPreviewVersion((version) => version + 1);
     const parsed = initialDefinition(value);
     setDefinition(parsed);
     setSaved(JSON.stringify(parsed ?? value));
@@ -797,6 +800,7 @@ export function MetadataSettings({
                   onClick={() => {
                     setDefinition(recovery.definition);
                     editEpoch.current += 1;
+                    setPreviewVersion((version) => version + 1);
                     setSaved(recovery.savedDefinition);
                     setDraftVersion(recovery.expectedDraftVersion);
                     setDraftId(recovery.expectedDraftId);
@@ -862,6 +866,7 @@ export function MetadataSettings({
                   const prior = history.at(-1);
                   if (prior) {
                     setDefinition(prior);
+                    setPreviewVersion((version) => version + 1);
                     setHistory(history.slice(0, -1));
                     setReview(null);
                   }
@@ -1074,8 +1079,9 @@ export function MetadataSettings({
                                 type="button"
                                 aria-label={`Drag ${name}`}
                                 title="Drag to reorder"
-                                className="cursor-grab touch-none rounded border px-2 py-1"
+                                className="cursor-grab touch-none select-none rounded border px-2 py-1"
                                 onPointerDown={(event) => {
+                                  event.preventDefault();
                                   drag.current = control.id;
                                   event.currentTarget.setPointerCapture(
                                     event.pointerId,
@@ -1220,8 +1226,9 @@ export function MetadataSettings({
                               type="button"
                               aria-label={`Resize ${name}`}
                               title="Drag to snap width; width selector is also available"
-                              className="w-full cursor-ew-resize touch-none rounded border border-slate-600 py-1 text-xs"
+                              className="w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
                               onPointerDown={(event) => {
+                                event.preventDefault();
                                 const container =
                                   event.currentTarget
                                     .closest('[data-section-id]')
@@ -1419,7 +1426,7 @@ export function MetadataSettings({
                     variant={phone ? 'default' : 'outline'}
                     onClick={() => setPhone(!phone)}
                   >
-                    {phone ? 'Phone' : 'Desktop'} width
+                    {phone ? 'Desktop' : 'Phone'} width
                   </Button>
                 </div>
                 {metadataDefinition.safeParse(definition).success ? (
@@ -1431,7 +1438,7 @@ export function MetadataSettings({
                     }
                   >
                     <MetadataFormPreview
-                      key={`${categoryId}-${previewKind}`}
+                      key={`${categoryId}-${previewKind}-${previewVersion}`}
                       kind={previewKind}
                       definition={definition}
                       categoryId={categoryId}
