@@ -30,6 +30,12 @@ export const metadataRow = z.object({
   manufacturer: nullableText,
   model: nullableText,
   version: z.number().int().positive(),
+  custom_values: z.record(z.string(), z.object({
+    value: z.unknown(),
+    validated_revision_id: id,
+  })).default({}),
+  validated_form_revision_id: id.nullish(),
+  needs_metadata: z.boolean().default(false),
 });
 export const quantityRow = metadataRow.extend({
   archived: z.boolean(),

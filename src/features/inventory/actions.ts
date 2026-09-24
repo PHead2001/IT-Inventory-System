@@ -38,10 +38,10 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       .maybeSingle();
     if (memberError || !isActiveMember(member) || member.role !== 'staff')
       return mutationError('P1001');
-    const { data, error } = await supabase.rpc(command.data.operation, {
+    const { data, error } = await supabase.rpc(command.data.operation as never, {
       p_request_id: command.data.requestId,
       p_payload: command.data.payload,
-    });
+    } as never);
     if (error) return mutationError(error.code);
     const result = mutationResultSchema.safeParse(data);
     if (!result.success) return mutationError(undefined);
@@ -54,6 +54,7 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       entityId: result.data.entity_id,
       version: result.data.version,
       changed: result.data.changed,
+      needsMetadata: result.data.needs_metadata,
     };
   } catch {
     return mutationError(undefined);

@@ -177,6 +177,9 @@ function metadata(
     manufacturer: row.manufacturer,
     model: row.model,
     version: row.version,
+    customValues: row.custom_values,
+    validatedFormRevisionId: row.validated_form_revision_id ?? null,
+    needsMetadata: row.needs_metadata,
   };
 }
 export async function getQuantityDetail(

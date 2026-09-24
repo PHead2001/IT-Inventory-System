@@ -7,6 +7,8 @@ import {
   getLocations,
 } from '@/features/inventory/queries.server';
 import { OperationPanel } from '@/features/inventory/components/mutation-form';
+import { MetadataForm } from '@/features/metadata/metadata-form';
+import { getPublishedForms } from '@/features/metadata/queries.server';
 import {
   HistoryList,
   LocationLink,
@@ -26,6 +28,7 @@ export default async function QuantityPage({
     getCategories(),
     getLocations(),
   ]);
+  const forms = await getPublishedForms(categories.map((category) => category.id));
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">
@@ -105,14 +108,16 @@ export default async function QuantityPage({
                 'quantity_archive',
               ] as const)
           ).map((operation) => (
-            <OperationPanel
-              key={operation}
-              operation={operation}
-              item={item}
-              balances={balances}
-              categories={categories}
-              locations={locations}
-            />
+            operation === 'quantity_update' ? (
+              <section key={operation} className={panel}>
+                <h3 className="mb-4 text-lg font-semibold">Edit quantity metadata</h3>
+                <MetadataForm kind="quantity" item={item} categories={categories}
+                  locations={locations} forms={forms} />
+              </section>
+            ) : (
+              <OperationPanel key={operation} operation={operation} item={item}
+                balances={balances} categories={categories} locations={locations} />
+            )
           ))}
         </section>
       )}

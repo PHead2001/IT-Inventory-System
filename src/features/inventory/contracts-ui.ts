@@ -18,6 +18,9 @@ export type Metadata = {
   manufacturer: string | null;
   model: string | null;
   version: number;
+  customValues?: Record<string, { value: unknown; validated_revision_id: string }>;
+  validatedFormRevisionId?: string | null;
+  needsMetadata?: boolean;
 };
 export type StockState =
   'disabled' | 'in_stock' | 'needs_restocking' | 'out_of_stock' | 'archived';
@@ -43,6 +46,7 @@ export type InventoryResult = {
   recordedTotal: number | null;
   reorderThreshold: number | null;
   stockState: StockState | null;
+  customSummary?: string;
 };
 export type PageResult<T> = {
   rows: T[];

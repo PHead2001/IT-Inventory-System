@@ -2,14 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getUser: vi.fn(),
+  getSession: vi.fn(),
   from: vi.fn(),
   select: vi.fn(),
   eq: vi.fn(),
   maybeSingle: vi.fn(),
-  rpc: vi.fn(),
+  snapshot: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: mocks.createClient,
+}));
+vi.mock('@/lib/supabase/config', () => ({
+  supabaseConfig: () => ({ url: 'https://supabase.example', key: 'public-test-key' }),
+}));
+vi.mock('@/features/inventory/export-reader.server', () => ({
+  requestExportSnapshot: mocks.snapshot,
+  SnapshotTooLargeError: class SnapshotTooLargeError extends Error {},
 }));
 import { GET } from './route';
 
@@ -24,11 +32,11 @@ const request = (search = '') =>
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.createClient.mockResolvedValue({
-    auth: { getUser: mocks.getUser },
+    auth: { getUser: mocks.getUser, getSession: mocks.getSession },
     from: mocks.from,
-    rpc: mocks.rpc,
   });
   mocks.getUser.mockResolvedValue({ data: { user: { id } }, error: null });
+  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'test-token' } }, error: null });
   mocks.from.mockReturnValue(query);
   mocks.select.mockReturnValue(query);
   mocks.eq.mockReturnValue(query);
@@ -36,9 +44,8 @@ beforeEach(() => {
     data: { user_id: id, display_name: 'Viewer', role: 'viewer', active: true },
     error: null,
   });
-  mocks.rpc.mockResolvedValue({
+  mocks.snapshot.mockResolvedValue({
     data: { rows: [], total: 0, exported_at: '2026-09-24T15:18:37+00:00' },
-    error: null,
   });
 });
 describe('authenticated inventory downloads', () => {
@@ -47,7 +54,7 @@ describe('authenticated inventory downloads', () => {
     const anonymous = await GET(request());
     expect(anonymous.status).toBe(401);
     expect(anonymous.headers.get('Cache-Control')).toContain('no-store');
-    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.snapshot).not.toHaveBeenCalled();
     mocks.getUser.mockResolvedValue({ data: { user: { id } }, error: null });
     mocks.maybeSingle.mockResolvedValue({
       data: {
@@ -61,7 +68,7 @@ describe('authenticated inventory downloads', () => {
     const inactive = await GET(request());
     expect(inactive.status).toBe(403);
     expect(inactive.headers.get('Cache-Control')).toContain('no-store');
-    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.snapshot).not.toHaveBeenCalled();
   });
   it('lets a current viewer download all filtered rows in one scoped RPC call', async () => {
     const response = await GET(
@@ -75,16 +82,16 @@ describe('authenticated inventory downloads', () => {
       'attachment; filename="preview-low-stock-20260924T151837Z.csv"',
     );
     expect(await response.text()).toContain('"Recorded Total"');
-    expect(mocks.rpc).toHaveBeenCalledOnce();
-    expect(mocks.rpc).toHaveBeenCalledWith('inventory_export_snapshot', {
-      p_query: '100%_\\',
-      p_type: 'quantity',
-      p_status: 'all',
-      p_category_id: undefined,
-      p_location_code: undefined,
-      p_low_stock: true,
-      p_export_type: 'low_stock',
-    });
+    expect(mocks.snapshot).toHaveBeenCalledOnce();
+    expect(mocks.snapshot).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://supabase.example',
+      accessToken: 'test-token',
+      payload: {
+        p_query: '100%_\\', p_type: 'quantity', p_status: 'all',
+        p_category_id: null, p_location_code: null,
+        p_low_stock: true, p_export_type: 'low_stock', p_include_custom: false,
+      },
+    }));
   });
   it('marks production exports distinctly from isolated preview downloads', async () => {
     vi.stubEnv('APP_ENV', 'production');
@@ -99,9 +106,9 @@ describe('authenticated inventory downloads', () => {
     }
   });
   it('reports the bounded export limit without exposing backend details', async () => {
-    mocks.rpc.mockResolvedValue({
+    mocks.snapshot.mockResolvedValue({
       data: null,
-      error: { code: 'P1013', message: 'private SQL detail' },
+      code: 'P1013',
     });
     const response = await GET(request());
     expect(response.status).toBe(413);
@@ -112,6 +119,6 @@ describe('authenticated inventory downloads', () => {
     const response = await GET(request('?export=unknown'));
     expect(response.status).toBe(400);
     expect(response.headers.get('Cache-Control')).toContain('no-store');
-    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.snapshot).not.toHaveBeenCalled();
   });
 });

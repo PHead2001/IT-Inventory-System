@@ -2,16 +2,20 @@ import { z } from 'zod';
 
 export const operations = [
   'quantity_create',
+  'quantity_create_v2',
   'quantity_receive',
   'quantity_move',
   'quantity_adjust',
   'quantity_update',
+  'quantity_update_v2',
   'quantity_archive',
   'quantity_restore',
   'asset_create',
+  'asset_create_v2',
   'asset_move',
   'asset_correct_location',
   'asset_update',
+  'asset_update_v2',
   'asset_retire',
   'asset_restore',
 ] as const;
@@ -22,7 +26,7 @@ export type MutationCommand = {
   payload: Record<string, unknown>;
 };
 export type MutationState =
-  | { ok: true; entityId: string; version: number; changed: boolean }
+  | { ok: true; entityId: string; version: number; changed: boolean; needsMetadata?: boolean }
   | {
       ok: false;
       kind: 'validation' | 'domain' | 'unexpected';
@@ -60,10 +64,30 @@ const identifiers = {
   asset_tag: optionalText(100),
   serial_number: optionalText(200),
 };
+const customPatch = z.strictObject({
+  set: z.record(uuid, z.unknown()).default({}),
+  unset: z.array(uuid).max(100).default([]),
+});
+const published = {
+  expected_published_revision_id: uuid,
+  custom_patch: customPatch.default({ set: {}, unset: [] }),
+};
 export const payloadSchemas = {
   quantity_create: z
     .strictObject({
       ...metadata,
+      initial_location_id: uuid.nullish().transform((v) => v ?? null),
+      initial_quantity: count.default(0),
+      reorder_threshold: reorderThreshold,
+    })
+    .refine((v) => v.initial_quantity === 0 || !!v.initial_location_id, {
+      path: ['initial_location_id'],
+      message: 'Choose a location for initial stock.',
+    }),
+  quantity_create_v2: z
+    .strictObject({
+      ...metadata,
+      ...published,
       initial_location_id: uuid.nullish().transform((v) => v ?? null),
       initial_quantity: count.default(0),
       reorder_threshold: reorderThreshold,
@@ -102,11 +126,23 @@ export const payloadSchemas = {
     ...metadata,
     reorder_threshold: reorderThreshold,
   }),
+  quantity_update_v2: z.strictObject({
+    ...quantity,
+    ...metadata,
+    ...published,
+    reorder_threshold: reorderThreshold,
+  }),
   quantity_archive: z.strictObject({ ...quantity, reason }),
   quantity_restore: z.strictObject({ ...quantity, reason }),
   asset_create: z.strictObject({
     ...metadata,
     ...identifiers,
+    location_id: uuid,
+  }),
+  asset_create_v2: z.strictObject({
+    ...metadata,
+    ...identifiers,
+    ...published,
     location_id: uuid,
   }),
   asset_move: z.strictObject({
@@ -120,6 +156,12 @@ export const payloadSchemas = {
     reason,
   }),
   asset_update: z.strictObject({ ...asset, ...metadata, ...identifiers }),
+  asset_update_v2: z.strictObject({
+    ...asset,
+    ...metadata,
+    ...identifiers,
+    ...published,
+  }),
   asset_retire: z.strictObject({ ...asset, reason }),
   asset_restore: z.strictObject({ ...asset, location_id: uuid, reason }),
 } satisfies Record<Operation, z.ZodType>;
@@ -177,6 +219,10 @@ const errors: Record<string, [string, string]> = {
   P1010: ['not_found', 'This inventory record could not be found.'],
   P1011: ['invalid_category', 'Choose an active category.'],
   P1012: ['invalid_input', 'Check the supplied values and try again.'],
+  P1021: ['invalid_metadata', 'Review the published metadata fields and values.'],
+  P1022: ['metadata_limit', 'Metadata exceeds a supported size or complexity limit.'],
+  P1023: ['metadata_required', 'Published metadata is required. Open the current form to complete this record.'],
+  P1024: ['stale_schema', 'The published form changed. Review the new revision before saving.'],
 };
 export function mutationError(code: string | undefined): MutationState {
   const known = code ? errors[code] : undefined;
@@ -200,4 +246,5 @@ export const mutationResultSchema = z.object({
   version: positive,
   event_id: uuid.nullable(),
   changed: z.boolean(),
+  needs_metadata: z.boolean().optional(),
 });

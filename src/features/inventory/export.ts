@@ -10,6 +10,10 @@ const common = {
   model: text,
   status: z.string(),
 };
+const safeDecimal = z.union([
+  z.string().regex(/^(0|[1-9]\d*)$/),
+  z.number().int().nonnegative().safe().transform(String),
+]);
 const inventoryRow = z.object({
   ...common,
   kind: z.enum(['quantity', 'asset']),
@@ -19,18 +23,20 @@ const inventoryRow = z.object({
   location_name: text,
   location_code: text,
   breadcrumb: text,
+  custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const lowStockRow = z.object({
   ...common,
-  recorded_total: z.number().int().nonnegative(),
+  recorded_total: safeDecimal,
   reorder_threshold: z.number().int().nonnegative(),
   stock_state: z.enum(['needs_restocking', 'out_of_stock']),
   holding_context: z.string(),
+  custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const snapshot = <T extends z.ZodType>(row: T) =>
   z.object({
     rows: z.array(row).max(10000),
-    total: z.number().int().min(0).max(10000),
+    total: safeDecimal.refine((value) => BigInt(value) <= 10000n),
     exported_at: z.iso.datetime({ offset: true }),
   });
 
@@ -52,14 +58,32 @@ export function csvText(value: string | null | undefined): string {
   return '"' + (prefix + source).replaceAll('"', '""') + '"';
 }
 
-function csvNumber(value: number | null | undefined) {
+function csvNumber(value: number | string | null | undefined) {
   return value === null || value === undefined ? '' : String(value);
+}
+
+export class ExportTooLargeError extends Error {
+  constructor() { super('export_too_large'); }
+}
+const csvLimit = 3 * 1024 * 1024;
+function boundedCsv(lines: Iterable<string>) {
+  const encoder = new TextEncoder();
+  const chunks = ['\uFEFF'];
+  let size = encoder.encode(chunks[0]).byteLength;
+  for (const line of lines) {
+    const next = line + '\r\n';
+    size += encoder.encode(next).byteLength;
+    if (size > csvLimit) throw new ExportTooLargeError();
+    chunks.push(next);
+  }
+  return chunks.join('');
 }
 
 export function exportCsv(
   type: ExportType,
   input: unknown,
   environment: 'Production' | 'Preview',
+  includeCustom = false,
 ): { csv: string; exportedAt: string } {
   const parsed = parseExportSnapshot(type, input);
   const exportedAt = parsed.exported_at;
@@ -82,35 +106,27 @@ export function exportCsv(
       'Exported At (UTC)',
       'Environment',
     ];
+    if (includeCustom) headers.push('Custom Fields JSON');
+    function* lines() {
+      yield headers.map(csvText).join(',');
+      for (const row of rows) {
+        const cells = [
+          csvText(row.entity_id),
+          csvText(row.kind === 'quantity' ? 'Quantity' : 'Serialized asset'),
+          csvText(row.name), csvText(row.category_name),
+          csvText(row.manufacturer), csvText(row.model),
+          csvText(row.asset_tag), csvText(row.serial_number),
+          csvText(row.status), csvNumber(row.quantity),
+          csvText(row.location_name), csvText(row.location_code),
+          csvText(row.breadcrumb), csvText(exportedAt), csvText(environment),
+        ];
+        if (includeCustom) cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+        yield cells.join(',');
+      }
+    }
     return {
       exportedAt,
-      csv:
-        '\uFEFF' +
-        [
-          headers.map(csvText).join(','),
-          ...rows.map((row) =>
-            [
-              csvText(row.entity_id),
-              csvText(
-                row.kind === 'quantity' ? 'Quantity' : 'Serialized asset',
-              ),
-              csvText(row.name),
-              csvText(row.category_name),
-              csvText(row.manufacturer),
-              csvText(row.model),
-              csvText(row.asset_tag),
-              csvText(row.serial_number),
-              csvText(row.status),
-              csvNumber(row.quantity),
-              csvText(row.location_name),
-              csvText(row.location_code),
-              csvText(row.breadcrumb),
-              csvText(exportedAt),
-              csvText(environment),
-            ].join(','),
-          ),
-        ].join('\r\n') +
-        '\r\n',
+      csv: boundedCsv(lines()),
     };
   }
   const rows = snapshot(lowStockRow).parse(parsed).rows;
@@ -129,34 +145,24 @@ export function exportCsv(
     'Exported At (UTC)',
     'Environment',
   ];
+  if (includeCustom) headers.push('Custom Fields JSON');
+  function* lines() {
+    yield headers.map(csvText).join(',');
+    for (const row of rows) {
+      const cells = [
+        csvText(row.entity_id), csvText('Quantity'), csvText(row.name),
+        csvText(row.category_name), csvText(row.manufacturer), csvText(row.model),
+        csvText(row.status), csvNumber(row.recorded_total),
+        csvNumber(row.reorder_threshold),
+        csvText(row.stock_state === 'out_of_stock' ? 'Out of stock' : 'Needs restocking'),
+        csvText(row.holding_context), csvText(exportedAt), csvText(environment),
+      ];
+      if (includeCustom) cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+      yield cells.join(',');
+    }
+  }
   return {
     exportedAt,
-    csv:
-      '\uFEFF' +
-      [
-        headers.map(csvText).join(','),
-        ...rows.map((row) =>
-          [
-            csvText(row.entity_id),
-            csvText('Quantity'),
-            csvText(row.name),
-            csvText(row.category_name),
-            csvText(row.manufacturer),
-            csvText(row.model),
-            csvText(row.status),
-            csvNumber(row.recorded_total),
-            csvNumber(row.reorder_threshold),
-            csvText(
-              row.stock_state === 'out_of_stock'
-                ? 'Out of stock'
-                : 'Needs restocking',
-            ),
-            csvText(row.holding_context),
-            csvText(exportedAt),
-            csvText(environment),
-          ].join(','),
-        ),
-      ].join('\r\n') +
-      '\r\n',
+    csv: boundedCsv(lines()),
   };
 }

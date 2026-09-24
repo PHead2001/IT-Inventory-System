@@ -7,6 +7,8 @@ import {
   getLocations,
 } from '@/features/inventory/queries.server';
 import { OperationPanel } from '@/features/inventory/components/mutation-form';
+import { MetadataForm } from '@/features/metadata/metadata-form';
+import { getPublishedForms } from '@/features/metadata/queries.server';
 import {
   HistoryList,
   LocationLink,
@@ -26,6 +28,7 @@ export default async function AssetPage({
     getCategories(),
     getLocations(),
   ]);
+  const forms = await getPublishedForms(categories.map((category) => category.id));
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">
@@ -108,14 +111,16 @@ export default async function AssetPage({
                 'asset_retire',
               ] as const)
           ).map((operation) => (
-            <OperationPanel
-              key={operation}
-              operation={operation}
-              asset={asset}
-              currentLocation={location}
-              categories={categories}
-              locations={locations}
-            />
+            operation === 'asset_update' ? (
+              <section key={operation} className={panel}>
+                <h3 className="mb-4 text-lg font-semibold">Edit asset metadata</h3>
+                <MetadataForm kind="asset" asset={asset} categories={categories}
+                  locations={locations} forms={forms} />
+              </section>
+            ) : (
+              <OperationPanel key={operation} operation={operation} asset={asset}
+                currentLocation={location} categories={categories} locations={locations} />
+            )
           ))}
         </section>
       )}
