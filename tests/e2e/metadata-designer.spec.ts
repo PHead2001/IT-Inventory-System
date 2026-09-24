@@ -101,6 +101,11 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
   for (const name of ['Flag one', 'Flag two', 'Flag three']) {
     await designer.getByRole('button', { name: 'Add field' }).click();
     await designer.getByLabel('Label', { exact: true }).last().fill(name);
+    await designer
+      .locator('[data-control-id]')
+      .filter({ has: page.getByRole('button', { name: `Drag ${name}` }) })
+      .getByLabel('Section')
+      .selectOption({ label: 'Specifications' });
   }
   const checks = ['Flag one', 'Flag two', 'Flag three'].map((name) =>
     preview.getByRole('checkbox', { name }),
