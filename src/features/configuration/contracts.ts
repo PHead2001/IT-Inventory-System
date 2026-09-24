@@ -50,6 +50,9 @@ export type ConfigurationResult = {
   category_id?: string;
   quantity_count?: string;
   asset_count?: string;
+  historical_quantity_count?: string;
+  historical_asset_count?: string;
+  tombstoned?: boolean;
 };
 export type ConfigurationState =
   | { ok: true; result: ConfigurationResult }
@@ -64,6 +67,8 @@ export type RemovalReview = {
   target_version: string | null;
   quantity_count: string;
   asset_count: string;
+  historical_quantity_count: string;
+  historical_asset_count: string;
   expires_at: string;
 };
 const resultSchema = z.object({
@@ -74,6 +79,9 @@ const resultSchema = z.object({
   category_id: uuid.optional(),
   quantity_count: total.optional(),
   asset_count: total.optional(),
+  historical_quantity_count: total.optional(),
+  historical_asset_count: total.optional(),
+  tombstoned: z.boolean().optional(),
 });
 export const removalReviewSchema = z.object({
   token: uuid,
@@ -85,6 +93,8 @@ export const removalReviewSchema = z.object({
   target_version: version.nullable(),
   quantity_count: total,
   asset_count: total,
+  historical_quantity_count: total,
+  historical_asset_count: total,
   expires_at: z.iso.datetime({ offset: true }),
 });
 
@@ -123,7 +133,8 @@ const messages: Record<string, string> = {
     'More than 10,000 records would be affected. Divide the work before removing this category.',
   P1016: 'This change requires a fresh read-committed transaction.',
   P1017: 'The impact changed. Review the affected records again.',
-  P1018: 'Choose a replacement category for referenced records.',
+  P1018:
+    'Choose a replacement category for current or historical inventory references.',
   '55P03': 'Another inventory change is in progress. Retry after it finishes.',
   '57014':
     'This change exceeded the time budget. Review the current state before retrying.',

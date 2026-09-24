@@ -55,6 +55,8 @@ create table private.category_impact_reviews (
   source_version bigint not null,
   target_version bigint,
   reference_set jsonb not null,
+  historical_quantity_count bigint not null check(historical_quantity_count>=0),
+  historical_asset_count bigint not null check(historical_asset_count>=0),
   created_at timestamptz not null default clock_timestamp(),
   expires_at timestamptz not null default (clock_timestamp()+interval '15 minutes')
 );
@@ -123,6 +125,33 @@ language sql volatile set search_path='' as $$
     select 'asset'::text kind,id,version from public.serialized_assets where category_id=category
     order by kind,id limit 10001
   ) r;
+$$;
+
+-- Count distinct inventory identities whose retained events mention this category
+-- but whose current category no longer does. Configuration events alone do not
+-- constitute an inventory reference to a newly created, unused category.
+create function private.category_historical_reference_counts(category uuid) returns jsonb
+language sql volatile set search_path='' as $$
+  select jsonb_build_object(
+    'quantity_count',(
+      select count(*) from (
+        select e.item_id from public.quantity_events e where e.before_metadata->>'category_id'=category::text
+        union
+        select e.item_id from public.quantity_events e where e.after_metadata->>'category_id'=category::text
+      ) h where not exists (
+        select 1 from public.quantity_items i where i.id=h.item_id and i.category_id=category
+      )
+    ),
+    'asset_count',(
+      select count(*) from (
+        select e.asset_id from public.asset_events e where e.before_metadata->>'category_id'=category::text
+        union
+        select e.asset_id from public.asset_events e where e.after_metadata->>'category_id'=category::text
+      ) h where not exists (
+        select 1 from public.serialized_assets a where a.id=h.asset_id and a.category_id=category
+      )
+    )
+  );
 $$;
 
 create function public.category_create(p_request_id uuid,p_payload jsonb) returns jsonb
@@ -195,7 +224,7 @@ $$;
 create function public.category_removal_review(p_category_id uuid,p_replacement_id uuid default null) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
 declare actor uuid:=auth.uid(); source_row public.categories%rowtype; target_row public.categories%rowtype;
-  refs jsonb; token_id uuid; quantity_count integer; asset_count integer;
+  refs jsonb; historical_refs jsonb; token_id uuid; quantity_count integer; asset_count integer;
 begin
   perform 1 from public.app_members where user_id=actor and active and role='staff'
     and can_manage_configuration for share;
@@ -215,12 +244,17 @@ begin
   if jsonb_array_length(refs)>10000 then raise exception using errcode='P1015',message='impact_too_large'; end if;
   select count(*) filter(where x->>'kind'='quantity'),count(*) filter(where x->>'kind'='asset')
     into quantity_count,asset_count from jsonb_array_elements(refs) x;
-  insert into private.category_impact_reviews(actor_id,source_id,target_id,source_version,target_version,reference_set)
-    values(actor,p_category_id,p_replacement_id,source_row.version,target_row.version,refs) returning token into token_id;
+  historical_refs:=private.category_historical_reference_counts(p_category_id);
+  insert into private.category_impact_reviews(actor_id,source_id,target_id,source_version,target_version,reference_set,historical_quantity_count,historical_asset_count)
+    values(actor,p_category_id,p_replacement_id,source_row.version,target_row.version,refs,
+      (historical_refs->>'quantity_count')::bigint,(historical_refs->>'asset_count')::bigint) returning token into token_id;
   return jsonb_build_object('token',token_id,'source_id',p_category_id,'source_name',source_row.name,
     'source_version',source_row.version::text,'target_id',p_replacement_id,
     'target_name',target_row.name,'target_version',target_row.version::text,
-    'quantity_count',quantity_count::text,'asset_count',asset_count::text,'expires_at',clock_timestamp()+interval '15 minutes');
+    'quantity_count',quantity_count::text,'asset_count',asset_count::text,
+    'historical_quantity_count',historical_refs->>'quantity_count',
+    'historical_asset_count',historical_refs->>'asset_count',
+    'expires_at',clock_timestamp()+interval '15 minutes');
 end;
 $$;
 
@@ -230,7 +264,7 @@ declare actor uuid:=auth.uid(); actor_name text; normalized jsonb; replay jsonb;
   source_id uuid; target_id uuid; review_token uuid; reviewed private.category_impact_reviews%rowtype;
   source_row public.categories%rowtype; target_row public.categories%rowtype;
   item public.quantity_items%rowtype; asset public.serialized_assets%rowtype;
-  current_refs jsonb; q_count integer:=0; a_count integer:=0; historical boolean; event_id uuid;
+  current_refs jsonb; historical_refs jsonb; q_count integer:=0; a_count integer:=0; historical boolean; event_id uuid;
 begin
   select display_name into actor_name from public.app_members
     where user_id=actor and active and role='staff' and can_manage_configuration for share;
@@ -272,8 +306,13 @@ begin
   end loop;
   current_refs:=private.category_reference_set(source_id);
   if current_refs<>reviewed.reference_set then raise exception using errcode='P1017',message='stale_review'; end if;
+  historical_refs:=private.category_historical_reference_counts(source_id);
+  if (historical_refs->>'quantity_count')::bigint<>reviewed.historical_quantity_count
+    or (historical_refs->>'asset_count')::bigint<>reviewed.historical_asset_count then
+    raise exception using errcode='P1017',message='stale_review'; end if;
   if jsonb_array_length(current_refs)>10000 then raise exception using errcode='P1015',message='impact_too_large'; end if;
-  if jsonb_array_length(current_refs)>0 and target_id is null then
+  if (jsonb_array_length(current_refs)>0 or reviewed.historical_quantity_count>0
+    or reviewed.historical_asset_count>0) and target_id is null then
     raise exception using errcode='P1018',message='replacement_required'; end if;
   if target_id is not null then
     for item in select * from public.quantity_items where category_id=source_id order by id loop
@@ -314,7 +353,10 @@ begin
       jsonb_build_object('code',source_row.code,'name',source_row.name,'version',source_row.version::text),
       jsonb_build_object('replacement_id',target_id,'tombstoned',historical or q_count+a_count>0),q_count,a_count) returning id into event_id;
   replay:=jsonb_build_object('entity_id',source_id,'category_id',source_id,'version',case when historical or q_count+a_count>0 then (source_row.version+1)::text else null end,
-    'event_id',event_id,'changed',true,'quantity_count',q_count::text,'asset_count',a_count::text);
+    'event_id',event_id,'changed',true,'quantity_count',q_count::text,'asset_count',a_count::text,
+    'historical_quantity_count',reviewed.historical_quantity_count::text,
+    'historical_asset_count',reviewed.historical_asset_count::text,
+    'tombstoned',historical or q_count+a_count>0);
   update private.mutation_requests set result=replay where actor_id=actor and request_id=p_request_id;
   return replay;
 end;
@@ -360,7 +402,8 @@ end;
 $$;
 
 revoke all on function private.preserve_category_identity(),private.configuration_catalog_lock(boolean),
-  private.configuration_version(jsonb,text),private.category_reference_set(uuid)
+  private.configuration_version(jsonb,text),private.category_reference_set(uuid),
+  private.category_historical_reference_counts(uuid)
   from public,anon,authenticated,service_role;
 revoke all on function public.category_create(uuid,jsonb),public.category_rename(uuid,jsonb),
   public.category_removal_review(uuid,uuid),public.category_remove(uuid,jsonb),

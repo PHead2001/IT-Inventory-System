@@ -82,7 +82,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await current.getByRole('button', { name: 'Review impact' }).click();
     await expect(
       current.getByRole('region', { name: 'Removal impact review' }),
-    ).toContainText('1 quantity definitions');
+    ).toContainText('1 current quantity definitions');
     await noHorizontalOverflow(page);
     await current.getByRole('button', { name: 'Confirm removal' }).click();
     await expect(current).toContainText('Removed');
