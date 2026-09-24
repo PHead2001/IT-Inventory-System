@@ -174,6 +174,42 @@ describe('inventory CSV', () => {
       ),
     ).toThrow(ExportTooLargeError);
   });
+  it('accepts the exact 3 MiB CSV boundary and rejects the next byte', () => {
+    const row = {
+      entity_id: id,
+      kind: 'quantity' as const,
+      name: '',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: 0,
+      location_name: null,
+      location_code: null,
+      breadcrumb: null,
+    };
+    const input = (name: string) => ({
+      rows: [{ ...row, name }],
+      total: '1',
+      exported_at: at,
+    });
+    const encoder = new TextEncoder();
+    const baseBytes = encoder.encode(
+      exportCsv('inventory', input(''), 'Preview').csv,
+    ).byteLength;
+    const remaining = 3 * 1024 * 1024 - baseBytes;
+    const boundaryName =
+      '"'.repeat(Math.floor(remaining / 2)) + (remaining % 2 ? 'A' : '');
+    expect(
+      encoder.encode(exportCsv('inventory', input(boundaryName), 'Preview').csv)
+        .byteLength,
+    ).toBe(3 * 1024 * 1024);
+    expect(() =>
+      exportCsv('inventory', input(boundaryName + 'A'), 'Preview'),
+    ).toThrow(ExportTooLargeError);
+  });
   it('stops synchronous CSV encoding when the monotonic deadline is crossed', () => {
     let checks = 0;
     expect(() =>

@@ -26,6 +26,9 @@ const fixture = vi.hoisted(() => ({
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({ member: { role: 'viewer' } }),
 }));
+vi.mock('@/features/metadata/queries.server', () => ({
+  getPublishedForms: async () => ({}),
+}));
 vi.mock('../queries.server', () => ({
   getQuantityDetail: async () => ({
     item: { ...fixture.metadata, archived: false, reorderThreshold: null },

@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { isActiveMember } from '@/lib/auth/membership';
+import type { Json } from '@/lib/supabase/database.types';
 import { reviewSchema } from './contracts';
 
 type Result =
@@ -41,13 +42,10 @@ export async function submitMetadataDraft(input: {
       !member.can_manage_configuration
     )
       return { ok: false, code: 'P1001', message: messages.P1001 };
-    const { data, error } = await supabase.rpc(
-      input.operation as never,
-      {
-        p_request_id: input.requestId,
-        p_payload: input.payload,
-      } as never,
-    );
+    const { data, error } = await supabase.rpc(input.operation, {
+      p_request_id: input.requestId,
+      p_payload: input.payload as Json,
+    });
     if (error)
       return {
         ok: false,
@@ -78,12 +76,9 @@ export async function submitMetadataDraft(input: {
 export async function reviewMetadataPublish(categoryId: string) {
   try {
     const supabase = await createSupabaseServerClient(true);
-    const { data, error } = await supabase.rpc(
-      'metadata_publish_review' as never,
-      {
-        p_category_id: categoryId,
-      } as never,
-    );
+    const { data, error } = await supabase.rpc('metadata_publish_review', {
+      p_category_id: categoryId,
+    });
     if (error)
       return {
         ok: false as const,

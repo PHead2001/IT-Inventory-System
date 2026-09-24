@@ -1,6 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import type { Json } from '@/lib/supabase/database.types';
 import { isActiveMember } from '@/lib/auth/membership';
 import {
   validateCommand,
@@ -38,13 +39,10 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       .maybeSingle();
     if (memberError || !isActiveMember(member) || member.role !== 'staff')
       return mutationError('P1001');
-    const { data, error } = await supabase.rpc(
-      command.data.operation as never,
-      {
-        p_request_id: command.data.requestId,
-        p_payload: command.data.payload,
-      } as never,
-    );
+    const { data, error } = await supabase.rpc(command.data.operation, {
+      p_request_id: command.data.requestId,
+      p_payload: command.data.payload as Json,
+    });
     if (error) return mutationError(error.code);
     const result = mutationResultSchema.safeParse(data);
     if (!result.success) return mutationError(undefined);

@@ -209,13 +209,14 @@ async function main() {
     ).error?.code,
     '42501',
   );
+  const directMetadataUpdate = await staff.client
+    .from('metadata_fields')
+    .update({ field_type: 'date' } as never)
+    .eq('id', uid());
   assert.equal(
-    (
-      await staff.client
-        .from('metadata_fields')
-        .update({ field_type: 'date' } as never)
-    ).error?.code,
+    directMetadataUpdate.error?.code,
     '42501',
+    directMetadataUpdate.error?.message,
   );
 
   const malformed = await save(maintainer.client, categoryId, '0', {
@@ -627,7 +628,21 @@ async function main() {
       settled = true;
       return value;
     });
-    await delay(100);
+    let sawBarrier = false;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const locks = await owner.query(
+        "select bool_or(granted) holder,bool_or(not granted) waiter from pg_locks where locktype='advisory' and classid=91081::oid and objid=5::oid",
+      );
+      sawBarrier =
+        locks.rows[0].holder === true && locks.rows[0].waiter === true;
+      if (sawBarrier) break;
+      await delay(25);
+    }
+    assert.equal(
+      sawBarrier,
+      true,
+      'observed shared holder and exclusive waiter',
+    );
     assert.equal(
       settled,
       false,
@@ -639,6 +654,39 @@ async function main() {
     await independent.query('rollback').catch(() => undefined);
     await independent.end();
   }
+  const isolated = new Client({
+    connectionString: db,
+    application_name: 'metadata-isolation-rejection',
+  });
+  await isolated.connect();
+  try {
+    await isolated.query('begin isolation level repeatable read');
+    await isolated.query('set local role authenticated');
+    await isolated.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+    ]);
+    await assert.rejects(
+      isolated.query('select public.quantity_update_v2($1,$2::jsonb)', [
+        uid(),
+        JSON.stringify({
+          item_id: itemId,
+          expected_version: grandfather.version,
+          name: 'Should not commit',
+          category_id: categoryId,
+          expected_published_revision_id: strictRevision,
+          custom_patch: { set: {}, unset: [] },
+        }),
+      ]),
+      { code: 'P1016' },
+    );
+  } finally {
+    await isolated.query('rollback').catch(() => undefined);
+    await isolated.end();
+  }
+  await success(maintainer.client, 'metadata_draft_discard', {
+    category_id: categoryId,
+    expected_draft_version: '1',
+  });
 
   const snapshot = await viewer.client.rpc(
     'inventory_export_snapshot' as never,
@@ -1038,8 +1086,147 @@ async function main() {
     migratedRow.custom_values[optionalField].validated_revision_id,
     migrationRevision,
   );
+  const budgetCategory = await category(maintainer.client, 'Export bytes');
+  const budgetFields = Array.from({ length: 27 }, (_, index) => ({
+    id: uid(),
+    type: 'long_text',
+    label: `Large field ${index}`,
+    applies_to: ['quantity'],
+    required: false,
+    rules: {},
+    options: [],
+  }));
+  await save(maintainer.client, budgetCategory, '0', {
+    fields: budgetFields,
+    layout: [
+      {
+        id: uid(),
+        label: 'Details',
+        controls: [
+          { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          ...budgetFields.map((field) => ({
+            id: uid(),
+            kind: 'field',
+            field_id: field.id,
+            width: 6,
+          })),
+        ],
+      },
+    ],
+  });
+  const budgetRevision = (await publish(maintainer.client, budgetCategory))
+    .published_revision_id;
+  const largeValue = '😀"\\\n'.repeat(970);
+  const nearLimit = Object.fromEntries(
+    budgetFields.slice(0, 26).map((field) => [field.id, largeValue]),
+  );
+  const budgetItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Budget export seed',
+    category_id: budgetCategory,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: budgetRevision,
+    custom_patch: { set: nearLimit, unset: [] },
+  });
+  const budgetBytes = (
+    await owner.query(
+      'select octet_length(custom_values::text) bytes from public.quantity_items where id=$1',
+      [budgetItem.entity_id],
+    )
+  ).rows[0].bytes as number;
+  assert.ok(
+    budgetBytes > 240000 && budgetBytes <= 262144,
+    `stored ${budgetBytes} bytes`,
+  );
+  await failure(
+    staff.client,
+    'quantity_update_v2',
+    {
+      item_id: budgetItem.entity_id,
+      expected_version: budgetItem.version,
+      name: 'Budget export seed',
+      category_id: budgetCategory,
+      expected_published_revision_id: budgetRevision,
+      custom_patch: {
+        set: { [budgetFields[26].id]: largeValue },
+        unset: [],
+      },
+    },
+    'P1022',
+  );
+  const budgetExportFilter = {
+    p_query: 'Budget export',
+    p_type: 'quantity',
+    p_status: 'active',
+    p_category_id: budgetCategory,
+    p_location_code: null,
+    p_low_stock: false,
+    p_export_type: 'inventory',
+  };
+  const oneLarge = await viewer.client.rpc(
+    'inventory_export_snapshot' as never,
+    {
+      ...budgetExportFilter,
+      p_include_custom: true,
+    } as never,
+  );
+  assert.equal(oneLarge.error, null, oneLarge.error?.message);
+  assert.equal((oneLarge.data as { total: string }).total, '1');
+  const copied = await owner.query(
+    "insert into public.quantity_items(name,category_id,custom_values) select 'Budget export '||g.n,q.category_id,q.custom_values from public.quantity_items q cross join generate_series(1,8) g(n) where q.id=$1",
+    [budgetItem.entity_id],
+  );
+  assert.equal(copied.rowCount, 8);
+  const plainBudget = await viewer.client.rpc(
+    'inventory_export_snapshot' as never,
+    {
+      ...budgetExportFilter,
+      p_include_custom: false,
+    } as never,
+  );
+  assert.equal(plainBudget.error, null, plainBudget.error?.message);
+  assert.equal((plainBudget.data as { total: string }).total, '9');
+  const tooLargeBudget = await viewer.client.rpc(
+    'inventory_export_snapshot' as never,
+    {
+      ...budgetExportFilter,
+      p_include_custom: true,
+    } as never,
+  );
+  assert.equal(tooLargeBudget.error?.code, 'P1025');
+  // PostgREST must hoist the function setting before executing the statement.
+  await owner.query(
+    "create function public.metadata_timeout_probe() returns text language plpgsql volatile set search_path='' set statement_timeout='5s' as $$ begin perform pg_catalog.pg_sleep(6); return 'late'; end $$",
+  );
+  try {
+    await owner.query(
+      'revoke all on function public.metadata_timeout_probe() from public,anon,authenticated',
+    );
+    await owner.query(
+      'grant execute on function public.metadata_timeout_probe() to authenticated',
+    );
+    await owner.query("notify pgrst, 'reload schema'");
+    let probe: { error: { code?: string } | null } | null = null;
+    let started = 0;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      started = performance.now();
+      probe = await maintainer.client.rpc('metadata_timeout_probe' as never);
+      if (probe.error?.code !== 'PGRST202') break;
+      await delay(250);
+    }
+    assert.equal(probe?.error?.code, '57014');
+    const elapsed = performance.now() - started;
+    assert.ok(
+      elapsed >= 4500 && elapsed < 7500,
+      `5s REST budget elapsed ${elapsed}ms`,
+    );
+  } finally {
+    await owner.query('drop function public.metadata_timeout_probe()');
+    await owner.query("notify pgrst, 'reload schema'");
+  }
   console.log(
-    'Published metadata authorization, draft validation, value evolution, stale revisions, race and bounded export checks passed.',
+    'Published metadata authorization, draft validation, value evolution, stale revisions, observed lock race, isolation, REST timeout and bounded export checks passed.',
   );
 }
 main()

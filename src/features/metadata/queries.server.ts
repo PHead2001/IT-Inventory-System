@@ -1,5 +1,6 @@
 import 'server-only';
 import { requireMember } from '@/lib/auth/session.server';
+import type { Json } from '@/lib/supabase/database.types';
 import {
   formEnvelope,
   type MetadataForm,
@@ -12,12 +13,9 @@ export async function getPublishedForms(
   const { supabase } = await requireMember();
   const pairs = await Promise.all(
     categoryIds.map(async (id) => {
-      const { data, error } = await supabase.rpc(
-        'metadata_form_get' as never,
-        {
-          p_category_id: id,
-        } as never,
-      );
+      const { data, error } = await supabase.rpc('metadata_form_get', {
+        p_category_id: id,
+      });
       if (error)
         throw new Error('Published inventory forms could not be loaded.');
       return [id, formEnvelope.parse(data)] as const;
@@ -40,13 +38,10 @@ export async function describeValues(
 ): Promise<Record<string, DescribedValue>> {
   if (Object.keys(values).length === 0) return {};
   const { supabase } = await requireMember();
-  const { data, error } = await supabase.rpc(
-    'metadata_describe_values' as never,
-    {
-      p_values: values,
-      p_current_category: categoryId,
-    } as never,
-  );
+  const { data, error } = await supabase.rpc('metadata_describe_values', {
+    p_values: values as Json,
+    p_current_category: categoryId,
+  });
   if (error || !data || typeof data !== 'object' || Array.isArray(data))
     throw new Error('Inventory metadata could not be loaded.');
   return data as Record<string, DescribedValue>;

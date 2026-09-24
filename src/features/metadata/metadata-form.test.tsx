@@ -174,7 +174,7 @@ describe('published metadata form', () => {
     rerender(
       <MetadataForm
         {...props}
-        item={{ ...item, version: 2 }}
+        item={{ ...item, version: 2, name: 'Updated elsewhere' }}
         forms={{ [categoryId]: form(secondRevision) }}
       />,
     );
@@ -185,6 +185,9 @@ describe('published metadata form', () => {
       screen.getByText(/record changed from version 1 to 2/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/published form changed/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/previous "Cable"; latest "Updated elsewhere"/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Review metadata' }),
     ).toBeDisabled();
@@ -206,6 +209,59 @@ describe('published metadata form', () => {
     expect(
       (screen.getByLabelText(/Inspected/) as HTMLSelectElement).value,
     ).toBe('false');
+  });
+  it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
+    const choiceId = '00000000-0000-4000-8000-000000000020';
+    const original = form();
+    original.published_definition.fields[0] = {
+      ...original.published_definition.fields[0],
+      type: 'single_select',
+      label: 'Inspection choice',
+      options: [
+        {
+          id: choiceId,
+          label: 'Original choice',
+          active: true,
+          parent_id: null,
+        },
+      ],
+    };
+    const revised = form(secondRevision);
+    revised.published_definition.fields[0] = {
+      ...revised.published_definition.fields[0],
+      type: 'single_select',
+      label: 'Revised choice',
+      required: false,
+      options: [],
+    };
+    const { rerender } = render(
+      <MetadataForm {...props} forms={{ [categoryId]: original }} />,
+    );
+    fireEvent.change(screen.getByLabelText(/Inspection choice/), {
+      target: { value: choiceId },
+    });
+    rerender(<MetadataForm {...props} forms={{ [categoryId]: revised }} />);
+    const oldInput = screen.getByLabelText(
+      /Inspection choice/,
+    ) as HTMLSelectElement;
+    expect(oldInput.value).toBe(choiceId);
+    expect(screen.queryByLabelText(/Revised choice/)).toBeNull();
+    expect(
+      screen.getByText(/label changed to Revised choice/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/available choices or choice labels changed/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use reviewed form revision' }),
+    );
+    const newInput = screen.getByLabelText(
+      'Revised choice',
+    ) as HTMLSelectElement;
+    expect(newInput.value).toBe(choiceId);
+    expect(
+      screen.getByText(/Retained historical choice: Original choice/),
+    ).toBeInTheDocument();
   });
   it('requires an explicit legacy-value acknowledgement when changing an item category', () => {
     const target = form(secondRevision);

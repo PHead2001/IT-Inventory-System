@@ -401,7 +401,7 @@ begin
       raise exception using errcode='P1021',message='invalid_form_rules'; end if;
     if coalesce((rules->>'minLength')::integer,0)>coalesce((rules->>'maxLength')::integer,
       case when kind='short_text' then 500 else 10000 end)
-      or coalesce((rules->>'maxLength')::integer,0)>case when kind='short_text' then 500 else 10000 end then
+      or coalesce((rules->>'maxLength')::integer,0)>(case when kind='short_text' then 500 else 10000 end) then
       raise exception using errcode='P1021',message='invalid_form_rules'; end if;
   elsif kind in ('integer','decimal','currency') then
     if kind='integer' and (rules ? 'precision' or rules ? 'currencyCode') then
@@ -1139,26 +1139,26 @@ begin
   perform 1 from public.app_members where user_id=actor and active;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
   if jsonb_typeof(p_values)<>'object' or octet_length(p_values::text)>262144 then
-    raise exception using errcode='P1012',message='invalid_custom_values'; end if;
+    raise exception using errcode='P1012',message='invalid_custom_envelope'; end if;
   select published_form_revision_id into current_form from public.categories
     where id=p_current_category;
   for field_key,entry in select key,value from jsonb_each(p_values) loop
     if jsonb_typeof(entry) is distinct from 'object' then
-      raise exception using errcode='P1012',message='invalid_custom_values'; end if;
-    if field_key !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+      raise exception using errcode='P1012',message='invalid_custom_entry'; end if;
+    if field_key !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
       or not (entry ?& array['value','validated_revision_id'])
       or (select count(*) from jsonb_object_keys(entry))<>2
       or jsonb_typeof(entry->'validated_revision_id') is distinct from 'string'
       or not coalesce((entry->>'validated_revision_id') ~
         '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false) then
-      raise exception using errcode='P1012',message='invalid_custom_values'; end if;
+      raise exception using errcode='P1012',message='invalid_custom_shape'; end if;
     field_uuid:=field_key::uuid; rev:=(entry->>'validated_revision_id')::uuid;
     if field_key<>field_uuid::text or not exists(
       select 1 from public.category_form_revisions where id=rev and status='published'
-    ) then raise exception using errcode='P1012',message='invalid_custom_values'; end if;
+    ) then raise exception using errcode='P1012',message='invalid_custom_revision'; end if;
     select * into cfg from public.form_revision_fields where revision_id=rev and field_id=field_uuid;
     if not found or not private.metadata_value_valid(rev,field_uuid,entry->'value') then
-      raise exception using errcode='P1012',message='invalid_custom_values'; end if;
+      raise exception using errcode='P1012',message='invalid_custom_value'; end if;
     select field_type into kind from public.metadata_fields where id=field_uuid;
     paths:='[]'::jsonb;
     path_bytes:=0;

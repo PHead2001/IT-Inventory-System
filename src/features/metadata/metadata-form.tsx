@@ -111,6 +111,79 @@ function optionRows(options: MetadataDefinition['fields'][number]['options']) {
     return { ...option, path: path.join(' / ') };
   });
 }
+function formChanges(
+  previous: MetadataDefinition,
+  next: MetadataDefinition,
+  kind: Kind,
+) {
+  const changes: string[] = [];
+  const before = new Map(previous.fields.map((field) => [field.id, field]));
+  const after = new Map(next.fields.map((field) => [field.id, field]));
+  for (const field of previous.fields.filter((value) =>
+    value.applies_to.includes(kind),
+  )) {
+    const current = after.get(field.id);
+    if (!current || !current.applies_to.includes(kind)) {
+      changes.push(
+        `${field.label}: no longer on this form; entered values remain retained.`,
+      );
+      continue;
+    }
+    if (field.label !== current.label)
+      changes.push(`${field.label}: label changed to ${current.label}.`);
+    if (field.required !== current.required)
+      changes.push(
+        `${current.label}: ${current.required ? 'now required' : 'no longer required'}.`,
+      );
+    if (JSON.stringify(field.rules) !== JSON.stringify(current.rules))
+      changes.push(`${current.label}: validation rules changed.`);
+    if (JSON.stringify(field.options) !== JSON.stringify(current.options))
+      changes.push(
+        `${current.label}: available choices or choice labels changed.`,
+      );
+  }
+  for (const field of next.fields.filter((value) =>
+    value.applies_to.includes(kind),
+  ))
+    if (!before.get(field.id)?.applies_to.includes(kind))
+      changes.push(
+        `${field.label}: new ${field.required ? 'required' : 'optional'} field.`,
+      );
+  if (JSON.stringify(previous.layout) !== JSON.stringify(next.layout))
+    changes.push('The section or control layout changed.');
+  return changes;
+}
+function displayComparisonValue(value: unknown) {
+  if (value === undefined) return '(missing)';
+  const rendered = JSON.stringify(value) ?? String(value);
+  return rendered.length > 160 ? `${rendered.slice(0, 160)}…` : rendered;
+}
+function itemChanges(
+  previous: QuantityItem | AssetItem,
+  next: QuantityItem | AssetItem,
+) {
+  const changes: { label: string; before: unknown; after: unknown }[] = [];
+  const oldCore = initialCore(previous, []);
+  const newCore = initialCore(next, []);
+  for (const name of Object.keys(oldCore) as (keyof typeof oldCore)[])
+    if (oldCore[name] !== newCore[name])
+      changes.push({
+        label: labels[name] ?? name,
+        before: oldCore[name],
+        after: newCore[name],
+      });
+  const ids = new Set([
+    ...Object.keys(previous.customValues ?? {}),
+    ...Object.keys(next.customValues ?? {}),
+  ]);
+  for (const id of ids) {
+    const before = previous.customValues?.[id]?.value;
+    const after = next.customValues?.[id]?.value;
+    if (JSON.stringify(before) !== JSON.stringify(after))
+      changes.push({ label: `Custom field ${id}`, before, after });
+  }
+  return changes;
+}
 export function MetadataForm({
   kind,
   categories,
@@ -130,8 +203,9 @@ export function MetadataForm({
   );
   const [touched, setTouched] = useState<string[]>([]);
   const [thresholdTouched, setThresholdTouched] = useState(false);
-  const [ackRevision, setAckRevision] = useState(
-    () => forms[core.category_id]?.published_revision_id ?? '',
+  const [reviewedForms, setReviewedForms] = useState(() => forms);
+  const [priorForms, setPriorForms] = useState<Record<string, MetadataForm>>(
+    {},
   );
   const [review, setReview] = useState(false);
   const [ackLegacy, setAckLegacy] = useState(false);
@@ -141,9 +215,13 @@ export function MetadataForm({
     null,
   );
   const [duplicates, setDuplicates] = useState<string[]>([]);
-  const form = forms[core.category_id];
+  const currentForm = forms[core.category_id];
+  const form = reviewedForms[core.category_id] ?? currentForm;
   const definition = form?.published_definition;
-  const schemaStale = !!form && ackRevision !== form.published_revision_id;
+  const schemaStale =
+    !!currentForm &&
+    !!form &&
+    form.published_revision_id !== currentForm.published_revision_id;
   const itemStale =
     !!latest && !!baseline && latest.version !== baseline.version;
   const legacyMigration =
@@ -153,8 +231,8 @@ export function MetadataForm({
   const updateCore = (name: keyof typeof core, value: string) => {
     setCore((prior) => ({ ...prior, [name]: value }));
     if (name === 'reorder_threshold') setThresholdTouched(true);
-    if (name === 'category_id')
-      setAckRevision(forms[value]?.published_revision_id ?? '');
+    if (name === 'category_id' && forms[value])
+      setReviewedForms((prior) => ({ ...prior, [value]: forms[value] }));
     setReview(false);
     setAckLegacy(false);
     setState(null);
@@ -174,6 +252,13 @@ export function MetadataForm({
   };
   const applicable =
     definition?.fields.filter((value) => value.applies_to.includes(kind)) ?? [];
+  const priorDefinition = priorForms[core.category_id]?.published_definition;
+  const schemaChanges =
+    schemaStale && currentForm && definition
+      ? formChanges(definition, currentForm.published_definition, kind)
+      : [];
+  const changedItemValues =
+    itemStale && baseline && latest ? itemChanges(baseline, latest) : [];
   const customControl = (id: string) => {
     const config = applicable.find((candidate) => candidate.id === id);
     if (!config) return null;
@@ -223,6 +308,19 @@ export function MetadataForm({
         </select>
       );
     } else if (type === 'single_select' || type === 'hierarchical_select') {
+      const rows = optionRows(config.options);
+      const historicalValue =
+        typeof value === 'string' &&
+        value !== '' &&
+        !rows.some((option) => option.id === value)
+          ? value
+          : null;
+      const priorOption = historicalValue
+        ? optionRows(
+            priorDefinition?.fields.find((field) => field.id === id)?.options ??
+              [],
+          ).find((option) => option.id === historicalValue)
+        : undefined;
       control = (
         <select
           {...common}
@@ -232,7 +330,12 @@ export function MetadataForm({
           }
         >
           <option value="">Choose</option>
-          {optionRows(config.options).map((option) => (
+          {historicalValue && (
+            <option value={historicalValue} disabled>
+              Retained historical choice: {priorOption?.path ?? historicalValue}
+            </option>
+          )}
+          {rows.map((option) => (
             <option key={option.id} value={option.id} disabled={!option.active}>
               {option.path}
               {!option.active ? ' (retired)' : ''}
@@ -418,7 +521,7 @@ export function MetadataForm({
       category_id: core.category_id,
       manufacturer: core.manufacturer || null,
       model: core.model || null,
-      expected_published_revision_id: ackRevision,
+      expected_published_revision_id: form.published_revision_id,
       custom_patch: buildCustomPatch(
         definition,
         kind,
@@ -525,14 +628,29 @@ export function MetadataForm({
           className="rounded border border-amber-600 p-3 text-amber-100"
           role="alert"
         >
-          The published form changed. Your entered values are still here. Review
-          revision {form.published_number} before saving.
+          The published form changed from revision {form.published_number} to{' '}
+          {currentForm.published_number}. Your entered values and original form
+          remain visible until you review the new revision.
+          {schemaChanges.length > 0 && (
+            <ul className="mt-2 list-disc pl-5">
+              {schemaChanges.map((change, index) => (
+                <li key={`${index}-${change}`}>{change}</li>
+              ))}
+            </ul>
+          )}
           <Button
             type="button"
             variant="outline"
             className="ml-2"
             onClick={() => {
-              setAckRevision(form.published_revision_id);
+              setPriorForms((prior) => ({
+                ...prior,
+                [core.category_id]: form,
+              }));
+              setReviewedForms((prior) => ({
+                ...prior,
+                [core.category_id]: currentForm,
+              }));
               setReview(false);
               setAckLegacy(false);
               setState(null);
@@ -549,7 +667,19 @@ export function MetadataForm({
         >
           This record changed from version {baseline?.version} to{' '}
           {latest?.version}. Your entered values are still here. Review the
-          latest record before using its new version.
+          latest record before using its new version. Saving your entered values
+          may replace these newer values.
+          {changedItemValues.length > 0 && (
+            <ul className="mt-2 list-disc pl-5">
+              {changedItemValues.map((change) => (
+                <li key={change.label}>
+                  {change.label}: previous{' '}
+                  {displayComparisonValue(change.before)}; latest{' '}
+                  {displayComparisonValue(change.after)}.
+                </li>
+              ))}
+            </ul>
+          )}
           <Button
             type="button"
             variant="outline"
