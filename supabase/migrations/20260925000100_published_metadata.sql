@@ -17,7 +17,7 @@ create table public.metadata_options (
 );
 create table public.category_form_revisions (
   id uuid primary key default gen_random_uuid(),
-  category_id uuid not null references public.categories(id) on delete restrict,
+  category_id uuid references public.categories(id) on delete restrict,
   status text not null check(status in ('draft','published')),
   revision_number bigint not null check(revision_number>0),
   draft_version bigint not null default 1 check(draft_version>0),
@@ -26,15 +26,15 @@ create table public.category_form_revisions (
   published_at timestamptz,
   published_by uuid references public.app_members(user_id) on delete restrict,
   unique(category_id,revision_number),
-  unique(id,category_id),
+  check(category_id is not null or (status='published' and revision_number=1)),
   check((status='draft' and published_at is null) or
         (status='published' and published_at is not null))
 );
 create unique index category_one_form_draft on public.category_form_revisions(category_id) where status='draft';
 alter table public.categories add column published_form_revision_id uuid;
 alter table public.categories add constraint category_published_form_same_category
-  foreign key(published_form_revision_id,id)
-  references public.category_form_revisions(id,category_id) deferrable initially deferred;
+  foreign key(published_form_revision_id)
+  references public.category_form_revisions(id) deferrable initially deferred;
 create table public.form_revision_fields (
   revision_id uuid not null references public.category_form_revisions(id) on delete restrict,
   field_id uuid not null references public.metadata_fields(id) on delete restrict,
@@ -124,12 +124,12 @@ alter table public.serialized_assets add column custom_values jsonb not null def
 
 create function private.metadata_immutable() returns trigger language plpgsql set search_path='' as $$
 begin
-  if tg_op='DELETE' then raise exception using errcode='P1020',message='published_form_immutable'; end if;
   if tg_table_name='category_form_revisions' then
     if old.status='published' then raise exception using errcode='P1020',message='published_form_immutable'; end if;
   elsif exists(select 1 from public.category_form_revisions r where r.id=old.revision_id and r.status='published') then
     raise exception using errcode='P1020',message='published_form_immutable';
   end if;
+  if tg_op='DELETE' then return old; end if;
   return new;
 end;
 $$;
@@ -158,9 +158,11 @@ create trigger metadata_fields_identity before update or delete on public.metada
 create trigger metadata_options_identity before update or delete on public.metadata_options
   for each row execute function private.metadata_identity_immutable();
 
--- A new category has a useful published form immediately, including every
--- mandatory canonical control. Existing categories receive the same revision.
-create function private.metadata_seed_form(category uuid) returns void language plpgsql set search_path='' as $$
+-- An untouched category references one shared immutable canonical baseline.
+-- A category-owned revision exists only after a maintainer authors a draft.
+create unique index one_shared_form_baseline on public.category_form_revisions((true))
+  where category_id is null;
+create function private.metadata_seed_form() returns uuid language plpgsql set search_path='' as $$
 declare rev uuid:=gen_random_uuid(); section_id uuid:=gen_random_uuid();
   name_control uuid:=gen_random_uuid(); category_control uuid:=gen_random_uuid();
   description_control uuid:=gen_random_uuid(); manufacturer_control uuid:=gen_random_uuid();
@@ -168,7 +170,7 @@ declare rev uuid:=gen_random_uuid(); section_id uuid:=gen_random_uuid();
   tag_control uuid:=gen_random_uuid(); serial_control uuid:=gen_random_uuid();
 begin
   insert into public.category_form_revisions(id,category_id,status,revision_number,published_at,draft_definition)
-    values(rev,category,'published',1,now(),jsonb_build_object('fields','[]'::jsonb,'layout',
+    values(rev,null,'published',1,now(),jsonb_build_object('fields','[]'::jsonb,'layout',
       jsonb_build_array(jsonb_build_object('id',section_id,'label','Details','controls',
         jsonb_build_array(jsonb_build_object('id',name_control,'kind','builtin','builtin','name','width',12),
           jsonb_build_object('id',category_control,'kind','builtin','builtin','category_id','width',12),
@@ -188,12 +190,18 @@ begin
           (rev,section_id,description_control,'builtin','description','12',5),
           (rev,section_id,tag_control,'builtin','asset_tag','6',6),
           (rev,section_id,serial_control,'builtin','serial_number','6',7);
-  update public.categories set published_form_revision_id=rev where id=category;
+  update public.categories set published_form_revision_id=rev;
+  return rev;
 end;
 $$;
-select private.metadata_seed_form(id) from public.categories;
+select private.metadata_seed_form();
 create function private.metadata_seed_category() returns trigger language plpgsql set search_path='' as $$
-begin perform private.metadata_seed_form(new.id); return new; end;
+begin
+  update public.categories set published_form_revision_id=
+    (select id from public.category_form_revisions where category_id is null)
+    where id=new.id;
+  return new;
+end;
 $$;
 create trigger category_seed_form after insert on public.categories
   for each row execute function private.metadata_seed_category();
@@ -241,7 +249,7 @@ create function private.metadata_value_valid(rev uuid, field uuid, value jsonb) 
 language plpgsql stable set search_path='' as $$
 declare cfg public.form_revision_fields%rowtype; kind text; raw text; digits text;
   n numeric; limit_min numeric; limit_max numeric; options uuid[]; selected_option uuid;
-  currency text;
+  currency text; parsed_time timestamptz;
 begin
   select * into cfg from public.form_revision_fields where revision_id=rev and field_id=field;
   if not found or value is null or value='null'::jsonb then return false; end if;
@@ -280,8 +288,16 @@ begin
   elsif kind='datetime' then
     if raw !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' then return false; end if;
     begin
-      return (cfg.rules->>'min' is null or raw::timestamptz >= (cfg.rules->>'min')::timestamptz)
-        and (cfg.rules->>'max' is null or raw::timestamptz <= (cfg.rules->>'max')::timestamptz);
+      if to_char(split_part(raw,'T',1)::date,'YYYY-MM-DD')<>split_part(raw,'T',1)
+        or substring(raw from 12 for 2)::integer>23
+        or substring(raw from 15 for 2)::integer>59
+        or substring(raw from 18 for 2)::integer>59
+        or substring(raw from '[+-]([0-9]{2}):[0-9]{2}$')::integer>23
+        or substring(raw from '[+-][0-9]{2}:([0-9]{2})$')::integer>59 then
+        return false; end if;
+      parsed_time:=raw::timestamptz;
+      return (cfg.rules->>'min' is null or parsed_time >= (cfg.rules->>'min')::timestamptz)
+        and (cfg.rules->>'max' is null or parsed_time <= (cfg.rules->>'max')::timestamptz);
     exception when others then return false; end;
   elsif kind='url' then
     return length(raw)<=2048 and raw ~ '^https?://[^/@:[:space:]]+(:[0-9]{1,5})?(/[^[:space:]]*)?$'
@@ -336,7 +352,8 @@ $$;
 
 create function private.metadata_validate_rules(kind text, rules jsonb) returns void
 language plpgsql set search_path='' as $$
-declare allowed text[]; key text; min_value numeric; max_value numeric; precision_value integer;
+declare allowed text[]; key text; min_value numeric; max_value numeric; bound text;
+  precision_value integer;
 begin
   if rules is null or jsonb_typeof(rules)<>'object' then raise exception using errcode='P1021',message='invalid_form_rules'; end if;
   allowed:=case
@@ -359,9 +376,11 @@ begin
     if kind='integer' and (rules ? 'precision' or rules ? 'currencyCode') then
       raise exception using errcode='P1021',message='invalid_form_rules'; end if;
     if kind='decimal' and rules ? 'currencyCode' then raise exception using errcode='P1021',message='invalid_form_rules'; end if;
-    if kind='currency' and (rules->>'currencyCode') !~ '^[A-Z]{3}$' then
+    if kind='currency' and (rules->>'currencyCode' is null or
+      (rules->>'currencyCode') !~ '^[A-Z]{3}$') then
       raise exception using errcode='P1021',message='invalid_currency'; end if;
-    if rules ? 'precision' and ((rules->>'precision') !~ '^[0-9]$' or
+    if rules ? 'precision' and (jsonb_typeof(rules->'precision') is distinct from 'number' or
+      (rules->>'precision') !~ '^[0-9]$' or
       (rules->>'precision')::integer>case when kind='currency' then 4 else 6 end) then
       raise exception using errcode='P1021',message='invalid_precision'; end if;
     if kind='currency' and not rules ? 'precision' then raise exception using errcode='P1021',message='missing_currency_precision'; end if;
@@ -371,16 +390,24 @@ begin
       raise exception using errcode='P1021',message='invalid_maximum'; end if;
     min_value:=(rules->>'min')::numeric; max_value:=(rules->>'max')::numeric;
     if min_value>max_value then raise exception using errcode='P1021',message='inverted_bounds'; end if;
+    precision_value:=coalesce((rules->>'precision')::integer,6);
+    for bound in select value from (values(rules->>'min'),(rules->>'max')) x(value)
+      where value is not null loop
+      if length(regexp_replace(bound,'[^0-9]','','g'))>24 or
+        length(split_part(bound,'.',2))>precision_value then
+        raise exception using errcode='P1021',message='inconsistent_numeric_bounds'; end if;
+    end loop;
     if kind='integer' and (min_value<>trunc(min_value) or max_value<>trunc(max_value)
       or abs(coalesce(min_value,0))>9007199254740991 or abs(coalesce(max_value,0))>9007199254740991) then
       raise exception using errcode='P1021',message='invalid_integer_bounds'; end if;
   elsif kind='multi_select' then
-    if rules ? 'maxSelections' and ((rules->>'maxSelections') !~ '^[1-9][0-9]{0,3}$'
+    if rules ? 'maxSelections' and (jsonb_typeof(rules->'maxSelections') is distinct from 'number'
+      or (rules->>'maxSelections') !~ '^[1-9][0-9]{0,3}$'
       or (rules->>'maxSelections')::integer>1000) then raise exception using errcode='P1021',message='invalid_selection_limit'; end if;
   elsif kind in ('date','datetime') then
-    if rules ? 'min' and not private.metadata_date_bound_valid(kind,rules->>'min') then
+    if rules ? 'min' and not coalesce(private.metadata_date_bound_valid(kind,rules->>'min'),false) then
       raise exception using errcode='P1021',message='invalid_date_minimum'; end if;
-    if rules ? 'max' and not private.metadata_date_bound_valid(kind,rules->>'max') then
+    if rules ? 'max' and not coalesce(private.metadata_date_bound_valid(kind,rules->>'max'),false) then
       raise exception using errcode='P1021',message='invalid_date_maximum'; end if;
     if rules ? 'min' and rules ? 'max' and
       (case when kind='date' then (rules->>'min')::date>(rules->>'max')::date
@@ -391,12 +418,19 @@ end;
 $$;
 
 create function private.metadata_date_bound_valid(kind text, value text) returns boolean
-language plpgsql immutable set search_path='' as $$
+language plpgsql stable set search_path='' as $$
 begin
+  if value is null then return false; end if;
   if kind='date' then
     return value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' and to_char(value::date,'YYYY-MM-DD')=value;
   end if;
   return value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+    and to_char(split_part(value,'T',1)::date,'YYYY-MM-DD')=split_part(value,'T',1)
+    and substring(value from 12 for 2)::integer<=23
+    and substring(value from 15 for 2)::integer<=59
+    and substring(value from 18 for 2)::integer<=59
+    and coalesce(substring(value from '[+-]([0-9]{2}):[0-9]{2}$')::integer,0)<=23
+    and coalesce(substring(value from '[+-][0-9]{2}:([0-9]{2})$')::integer,0)<=59
     and value::timestamptz is not null;
 exception when others then return false;
 end;
@@ -408,8 +442,10 @@ declare f jsonb; o jsonb; s jsonb; c jsonb; field_uuid uuid; option_uuid uuid;
   parent_uuid uuid; section_uuid uuid; control_uuid uuid; kind text; ordinal integer;
   field_count integer; option_count integer:=0; row_count integer; bad_count integer;
 begin
-  if jsonb_typeof(definition)<>'object' or jsonb_typeof(definition->'fields')<>'array'
-    or jsonb_typeof(definition->'layout')<>'array' or
+  if jsonb_typeof(definition) is distinct from 'object' or
+    not (definition ?& array['fields','layout']) or
+    jsonb_typeof(definition->'fields') is distinct from 'array'
+    or jsonb_typeof(definition->'layout') is distinct from 'array' or
     (select count(*) from jsonb_object_keys(definition))<>2 then
     raise exception using errcode='P1021',message='invalid_form_shape'; end if;
   field_count:=jsonb_array_length(definition->'fields');
@@ -417,14 +453,19 @@ begin
     raise exception using errcode='P1022',message='form_resource_limit'; end if;
   ordinal:=0;
   for f in select value from jsonb_array_elements(definition->'fields') loop
-    if jsonb_typeof(f)<>'object' or (f->>'id') !~ '^[0-9a-fA-F-]{36}$'
-      or (f->>'type') not in ('short_text','long_text','integer','decimal','boolean','date','datetime','url',
+    if jsonb_typeof(f) is distinct from 'object' or
+      not (f ?& array['id','type','label','applies_to','required']) or
+      not coalesce((f->>'id') ~ '^[0-9a-fA-F-]{36}$',false)
+      or not coalesce((f->>'type') in ('short_text','long_text','integer','decimal','boolean','date','datetime','url',
         'currency','single_select','multi_select','hierarchical_select')
-      or jsonb_typeof(f->'label')<>'string' or length(btrim(f->>'label')) not between 1 and 200
+        ,false)
+      or jsonb_typeof(f->'label') is distinct from 'string'
+      or not coalesce(length(btrim(f->>'label')) between 1 and 200,false)
       or (f ? 'help' and f->'help'<>'null'::jsonb and
         (jsonb_typeof(f->'help')<>'string' or length(f->>'help')>2000))
-      or jsonb_typeof(f->'applies_to')<>'array' or jsonb_array_length(f->'applies_to') not between 1 and 2
-      or jsonb_typeof(f->'required')<>'boolean'
+      or jsonb_typeof(f->'applies_to') is distinct from 'array'
+      or not coalesce(jsonb_array_length(f->'applies_to') between 1 and 2,false)
+      or jsonb_typeof(f->'required') is distinct from 'boolean'
       or (f ? 'options' and jsonb_typeof(f->'options')<>'array') then
       raise exception using errcode='P1021',message='invalid_field'; end if;
     if exists(select 1 from jsonb_array_elements_text(f->'applies_to') x where x not in ('quantity','asset'))
@@ -438,6 +479,13 @@ begin
     insert into public.metadata_fields(id,category_id,field_type) values(field_uuid,category,kind)
       on conflict(id) do nothing;
     perform private.metadata_validate_rules(kind,coalesce(f->'rules','{}'::jsonb));
+    if kind='currency' and exists(
+      select 1 from public.form_revision_fields prior
+      join public.category_form_revisions published on published.id=prior.revision_id
+      where prior.field_id=field_uuid and published.status='published'
+        and (prior.rules->>'currencyCode' is distinct from f->'rules'->>'currencyCode'
+          or prior.rules->>'precision' is distinct from f->'rules'->>'precision')
+    ) then raise exception using errcode='P1021',message='currency_meaning_requires_new_field_id'; end if;
     insert into public.form_revision_fields(revision_id,field_id,label,help,applies_to,required,
       default_value,rules,sort_order)
       values(rev,field_uuid,btrim(f->>'label'),nullif(f->>'help',''),
@@ -450,10 +498,14 @@ begin
       raise exception using errcode='P1021',message='options_on_nonselection'; end if;
     option_count:=option_count+row_count;
     for o in select value from jsonb_array_elements(coalesce(f->'options','[]'::jsonb)) loop
-      if jsonb_typeof(o)<>'object' or (o->>'id') !~ '^[0-9a-fA-F-]{36}$'
-        or jsonb_typeof(o->'label')<>'string' or length(btrim(o->>'label')) not between 1 and 200
-        or jsonb_typeof(o->'active')<>'boolean' or
-        (o ? 'parent_id' and o->'parent_id'<>'null'::jsonb and (o->>'parent_id') !~ '^[0-9a-fA-F-]{36}$') then
+      if jsonb_typeof(o) is distinct from 'object' or
+        not (o ?& array['id','label','active']) or
+        not coalesce((o->>'id') ~ '^[0-9a-fA-F-]{36}$',false)
+        or jsonb_typeof(o->'label') is distinct from 'string'
+        or not coalesce(length(btrim(o->>'label')) between 1 and 200,false)
+        or jsonb_typeof(o->'active') is distinct from 'boolean' or
+        (o ? 'parent_id' and o->'parent_id'<>'null'::jsonb and
+          not coalesce((o->>'parent_id') ~ '^[0-9a-fA-F-]{36}$',false)) then
         raise exception using errcode='P1021',message='invalid_option'; end if;
       option_uuid:=(o->>'id')::uuid;
       if exists(select 1 from public.metadata_options where id=option_uuid and field_id<>field_uuid) then
@@ -489,27 +541,34 @@ begin
   end loop;
   ordinal:=0;
   for s in select value from jsonb_array_elements(definition->'layout') loop
-    if jsonb_typeof(s)<>'object' or (s->>'id') !~ '^[0-9a-fA-F-]{36}$'
-      or jsonb_typeof(s->'label')<>'string' or length(btrim(s->>'label')) not between 1 and 200
-      or jsonb_typeof(s->'controls')<>'array' or jsonb_array_length(s->'controls')>200 then
+    if jsonb_typeof(s) is distinct from 'object' or
+      not (s ?& array['id','label','controls']) or
+      not coalesce((s->>'id') ~ '^[0-9a-fA-F-]{36}$',false)
+      or jsonb_typeof(s->'label') is distinct from 'string'
+      or not coalesce(length(btrim(s->>'label')) between 1 and 200,false)
+      or jsonb_typeof(s->'controls') is distinct from 'array'
+      or coalesce(jsonb_array_length(s->'controls'),0)>200 then
       raise exception using errcode='P1021',message='invalid_section'; end if;
     section_uuid:=(s->>'id')::uuid;
     insert into public.form_revision_sections(revision_id,id,label,sort_order)
       values(rev,section_uuid,btrim(s->>'label'),ordinal);
     row_count:=0;
     for c in select value from jsonb_array_elements(s->'controls') loop
-      if jsonb_typeof(c)<>'object' or (c->>'id') !~ '^[0-9a-fA-F-]{36}$'
-        or c->>'kind' not in ('field','builtin','help')
-        or (c->>'width') !~ '^(Auto|3|4|6|8|9|12)$' then
+      if jsonb_typeof(c) is distinct from 'object' or
+        not (c ?& array['id','kind','width']) or
+        not coalesce((c->>'id') ~ '^[0-9a-fA-F-]{36}$',false)
+        or not coalesce(c->>'kind' in ('field','builtin','help'),false)
+        or not ((jsonb_typeof(c->'width')='string' and c->>'width'='Auto')
+          or (jsonb_typeof(c->'width')='number' and c->>'width' ~ '^(3|4|6|8|9|12)$')) then
         raise exception using errcode='P1021',message='invalid_control'; end if;
       control_uuid:=(c->>'id')::uuid;
       kind:=c->>'kind';
-      if kind='field' and ((c->>'field_id') !~ '^[0-9a-fA-F-]{36}$' or
+      if kind='field' and (not coalesce((c->>'field_id') ~ '^[0-9a-fA-F-]{36}$',false) or
         not exists(select 1 from public.form_revision_fields where revision_id=rev
           and field_id=(c->>'field_id')::uuid)) then
         raise exception using errcode='P1021',message='unknown_layout_field'; end if;
-      if kind='builtin' and c->>'builtin' not in
-        ('name','category_id','description','manufacturer','model','reorder_threshold','asset_tag','serial_number') then
+      if kind='builtin' and not coalesce(c->>'builtin' in
+        ('name','category_id','description','manufacturer','model','reorder_threshold','asset_tag','serial_number'),false) then
         raise exception using errcode='P1021',message='unsupported_builtin'; end if;
       if kind='help' and (jsonb_typeof(c->'help')<>'string' or length(c->>'help')>2000) then
         raise exception using errcode='P1021',message='invalid_help'; end if;
@@ -716,6 +775,7 @@ begin
   for field_key in select jsonb_object_keys(coalesce(patch->'set','{}'::jsonb)) loop
     if field_key !~ '^[0-9a-fA-F-]{36}$' then raise exception using errcode='P1012',message='invalid_field_id'; end if;
     field_uuid:=field_key::uuid;
+    if field_key<>field_uuid::text then raise exception using errcode='P1012',message='noncanonical_field_id'; end if;
     if exists(select 1 from jsonb_array_elements(coalesce(patch->'unset','[]'::jsonb)) x
       where jsonb_typeof(x)='string' and x#>>'{}'=field_key) then
       raise exception using errcode='P1012',message='patch_overlap'; end if;
@@ -734,6 +794,7 @@ begin
     if jsonb_typeof(value)<>'string' or (value#>>'{}') !~ '^[0-9a-fA-F-]{36}$' then
       raise exception using errcode='P1012',message='invalid_unset_field'; end if;
     field_key:=value#>>'{}'; field_uuid:=field_key::uuid;
+    if field_key<>field_uuid::text then raise exception using errcode='P1012',message='noncanonical_field_id'; end if;
     select * into cfg from public.form_revision_fields where revision_id=rev and field_id=field_uuid
       and entity_kind=any(applies_to);
     if not found then
@@ -995,11 +1056,11 @@ language sql stable set search_path='' as $$
   )
   select array_agg(label order by depth desc) from path;
 $$;
-create function public.metadata_describe_values(p_values jsonb) returns jsonb
+create function public.metadata_describe_values(p_values jsonb,p_current_category uuid) returns jsonb
 language plpgsql stable security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); field_key text; entry jsonb; rev uuid; field_uuid uuid;
   cfg public.form_revision_fields%rowtype; kind text; option_id uuid; paths jsonb; choice jsonb;
-  result jsonb:='{}'::jsonb;
+  result jsonb:='{}'::jsonb; choice_path text[]; path_bytes integer;
 begin
   perform 1 from public.app_members where user_id=actor and active;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
@@ -1012,13 +1073,25 @@ begin
     select * into cfg from public.form_revision_fields where revision_id=rev and field_id=field_uuid;
     select field_type into kind from public.metadata_fields where id=field_uuid;
     paths:='[]'::jsonb;
+    path_bytes:=0;
     if kind in ('single_select','hierarchical_select') and jsonb_typeof(entry->'value')='string' then
       option_id:=(entry->>'value')::uuid;
-      paths:=jsonb_build_array(private.metadata_option_path(rev,field_uuid,option_id));
+      choice_path:=private.metadata_option_path(rev,field_uuid,option_id);
+      path_bytes:=octet_length(to_jsonb(choice_path)::text);
+      if path_bytes>2096640 then raise exception using errcode='P1025',message='metadata_description_too_large'; end if;
+      paths:=jsonb_build_array(choice_path);
     elsif kind='multi_select' and jsonb_typeof(entry->'value')='array' then
+      if jsonb_array_length(entry->'value')>1000 then
+        raise exception using errcode='P1022',message='selection_resource_limit'; end if;
+      if (select count(distinct x::text) from jsonb_array_elements(entry->'value') x)<>
+         jsonb_array_length(entry->'value') then
+        raise exception using errcode='P1012',message='duplicate_selected_option'; end if;
       for choice in select x from jsonb_array_elements(entry->'value') x loop
         option_id:=(choice#>>'{}')::uuid;
-        paths:=paths||jsonb_build_array(private.metadata_option_path(rev,field_uuid,option_id));
+        choice_path:=private.metadata_option_path(rev,field_uuid,option_id);
+        path_bytes:=path_bytes+octet_length(to_jsonb(choice_path)::text)+1;
+        if path_bytes>2096640 then raise exception using errcode='P1025',message='metadata_description_too_large'; end if;
+        paths:=paths||jsonb_build_array(choice_path);
       end loop;
     end if;
     result:=result||jsonb_build_object(field_key,jsonb_build_object('value',entry->'value',
@@ -1026,7 +1099,7 @@ begin
       'legacy',not exists(select 1 from public.categories cat
         join public.category_form_revisions current_rev on current_rev.id=cat.published_form_revision_id
         join public.form_revision_fields current_field on current_field.revision_id=current_rev.id
-          and current_field.field_id=field_uuid where cat.id=(select category_id from public.metadata_fields where id=field_uuid))));
+          and current_field.field_id=field_uuid where cat.id=p_current_category)));
     if octet_length(result::text)>2096640 then
       raise exception using errcode='P1025',message='metadata_description_too_large'; end if;
   end loop;
@@ -1035,7 +1108,7 @@ end;
 $$;
 
 revoke all on function private.metadata_immutable(),private.metadata_identity_immutable(),
-  private.metadata_seed_form(uuid),private.metadata_seed_category(),
+  private.metadata_seed_form(),private.metadata_seed_category(),
   private.metadata_value_valid(uuid,uuid,jsonb),private.metadata_canonical_value(uuid,uuid,jsonb),
   private.metadata_date_bound_valid(text,text),private.metadata_validate_rules(text,jsonb),
   private.metadata_compile_form(uuid,uuid,jsonb),private.metadata_reference_fingerprint(uuid),
@@ -1044,12 +1117,12 @@ revoke all on function private.metadata_immutable(),private.metadata_identity_im
   private.metadata_option_path(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.metadata_draft_save(uuid,jsonb),public.metadata_draft_discard(uuid,jsonb),
   public.metadata_publish_review(uuid),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
-  public.metadata_describe_values(jsonb),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
+  public.metadata_describe_values(jsonb,uuid),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
   public.asset_create_v2(uuid,jsonb),public.asset_update_v2(uuid,jsonb)
   from public,anon,authenticated,service_role;
 grant execute on function public.metadata_draft_save(uuid,jsonb),public.metadata_draft_discard(uuid,jsonb),
   public.metadata_publish_review(uuid),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
-  public.metadata_describe_values(jsonb),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
+  public.metadata_describe_values(jsonb,uuid),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
   public.asset_create_v2(uuid,jsonb),public.asset_update_v2(uuid,jsonb) to authenticated;
 
 -- A cursor checks each row and nested holding before appending to the result.
@@ -1085,7 +1158,7 @@ begin
         if r.kind='quantity' then
           select custom_values into custom from public.quantity_items where id=r.entity_id;
         else select custom_values into custom from public.serialized_assets where id=r.entity_id; end if;
-        described:=public.metadata_describe_values(custom);
+        described:=public.metadata_describe_values(custom,r.category_id);
         select published_form_revision_id into current_form from public.categories where id=r.category_id;
         custom_out:='{}'::jsonb;
         for kv in select key,value from jsonb_each(described) loop
@@ -1137,7 +1210,7 @@ begin
         'stock_state',r.stock_state,'holding_context',holdings);
       if p_include_custom then
         select custom_values into custom from public.quantity_items where id=r.entity_id;
-        described:=public.metadata_describe_values(custom);
+        described:=public.metadata_describe_values(custom,r.category_id);
         select published_form_revision_id into current_form from public.categories where id=r.category_id;
         custom_out:='{}'::jsonb;
         for kv in select key,value from jsonb_each(described) loop

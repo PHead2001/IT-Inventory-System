@@ -59,6 +59,10 @@ export type StoredCustomValues = Record<string, {
   value: unknown;
   validated_revision_id: string;
 }>;
+export const storedCustomSchema = z.record(uuid, z.object({
+  value: z.unknown(),
+  validated_revision_id: uuid,
+}));
 
 export const reviewSchema = z.object({
   token: uuid,

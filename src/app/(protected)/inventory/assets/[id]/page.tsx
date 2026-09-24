@@ -9,6 +9,7 @@ import {
 import { OperationPanel } from '@/features/inventory/components/mutation-form';
 import { MetadataForm } from '@/features/metadata/metadata-form';
 import { getPublishedForms } from '@/features/metadata/queries.server';
+import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
 import {
   HistoryList,
   LocationLink,
@@ -70,6 +71,7 @@ export default async function AssetPage({
           </div>
         </dl>
       </section>
+      <CustomMetadataList values={asset.customDisplay} needsMetadata={asset.needsMetadata} />
       {duplicateSerialMatches.length > 0 && (
         <aside className="my-5 rounded-xl border border-amber-700 p-4 text-amber-200">
           <h2 className="font-semibold">Duplicate serial warning</h2>

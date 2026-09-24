@@ -10,6 +10,7 @@ import {
 import { OperationPanel } from '@/features/inventory/components/mutation-form';
 import { MetadataForm } from '@/features/metadata/metadata-form';
 import { getPublishedForms } from '@/features/metadata/queries.server';
+import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
 import { ArchiveQuantityPanel } from '@/features/inventory/components/archive-quantity-form';
 import {
   HistoryList,
@@ -82,6 +83,7 @@ export default async function QuantityPage({
           {item.model || 'Not set'}
         </p>
       </section>
+      <CustomMetadataList values={item.customDisplay} needsMetadata={item.needsMetadata} />
       <section className="my-6">
         <h2 className="mb-3 text-xl font-semibold">
           Current stock — {stockSummary.recordedTotal} units total

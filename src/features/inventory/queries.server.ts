@@ -23,6 +23,8 @@ import {
   historyPage,
   mapQuantityStockSummary,
 } from './read-model';
+import { describeValues, type DescribedValue } from '@/features/metadata/queries.server';
+import { formatCustomValue, storedCustomSchema } from '@/features/metadata/contracts';
 
 const dashboardSchema = z.object({
   configured_count: z.number().int().nonnegative(),
@@ -116,8 +118,27 @@ export async function getInventory(
   const result = searchPage.parse(
     requireData(data, error, 'Inventory could not be loaded.'),
   );
+  const quantityIds = [...new Set(result.rows.filter((row) => row.kind === 'quantity').map((row) => row.entity_id))];
+  const assetIds = [...new Set(result.rows.filter((row) => row.kind === 'asset').map((row) => row.entity_id))];
+  const [quantityCustom, assetCustom] = await Promise.all([
+    quantityIds.length ? supabase.from('quantity_items').select('id,category_id,custom_values').in('id', quantityIds)
+      : Promise.resolve({ data: [], error: null }),
+    assetIds.length ? supabase.from('serialized_assets').select('id,category_id,custom_values').in('id', assetIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (quantityCustom.error || assetCustom.error) throw new Error('Inventory metadata could not be loaded.');
+  const customRows = [...(quantityCustom.data ?? []), ...(assetCustom.data ?? [])] as unknown as
+    { id: string; category_id: string; custom_values: unknown }[];
+  const summaries = new Map(await Promise.all(customRows.map(async (row) => {
+    const values = storedCustomSchema.parse(row.custom_values);
+    const described = await describeValues(values, row.category_id);
+    const summary = Object.entries(described).map(([id, entry]) =>
+      `${entry.label || id}: ${formatCustomValue(entry.value, entry.option_paths)}` +
+      (entry.legacy ? ' (legacy)' : '')).join(' · ');
+    return [row.id, summary] as const;
+  })));
   return {
-    rows: result.rows.map((r) => mapSearch(r, locations)),
+    rows: result.rows.map((r) => ({ ...mapSearch(r, locations), customSummary: summaries.get(r.entity_id) })),
     total: result.total,
     page: filter.page,
     pageSize,
@@ -171,8 +192,36 @@ export async function getHistory(
   const result = historyPage.parse(
     requireData(data, error, 'History could not be loaded.'),
   );
+  const rows = await Promise.all(result.rows.map(async (row) => {
+    const mapped = mapHistory(row, locations, categories);
+    const before = row.before_metadata ?? {};
+    const after = row.after_metadata ?? {};
+    const beforeValues = storedCustomSchema.parse(before.custom_values ?? {});
+    const afterValues = storedCustomSchema.parse(after.custom_values ?? {});
+    if (!Object.keys(beforeValues).length && !Object.keys(afterValues).length) return mapped;
+    const [beforeDisplay, afterDisplay] = await Promise.all([
+      Object.keys(beforeValues).length && typeof before.category_id === 'string'
+        ? describeValues(beforeValues, before.category_id) : Promise.resolve({} as Record<string, DescribedValue>),
+      Object.keys(afterValues).length && typeof after.category_id === 'string'
+        ? describeValues(afterValues, after.category_id) : Promise.resolve({} as Record<string, DescribedValue>),
+    ]);
+    const keys = new Set([...Object.keys(beforeDisplay), ...Object.keys(afterDisplay)]);
+    for (const id of keys) {
+      const previous = beforeDisplay[id];
+      const next = afterDisplay[id];
+      if (JSON.stringify(beforeValues[id]) === JSON.stringify(afterValues[id])) continue;
+      mapped.metadataChanges.push({
+        field: (next?.label || previous?.label || id) + (next?.legacy ? ' (legacy)' : ''),
+        before: previous ? formatCustomValue(previous.value, previous.option_paths) +
+          ` [revision ${previous.validated_revision_id}]` : null,
+        after: next ? formatCustomValue(next.value, next.option_paths) +
+          ` [revision ${next.validated_revision_id}]` : null,
+      });
+    }
+    return mapped;
+  }));
   return {
-    rows: result.rows.map((r) => mapHistory(r, locations, categories)),
+    rows,
     total: result.total,
     page: filter.page,
     pageSize,
@@ -217,6 +266,7 @@ export async function getQuantityDetail(
     locations,
     categories,
     history,
+    customDisplay,
   ] = await Promise.all([
     supabase
       .from('stock_balances')
@@ -233,10 +283,12 @@ export async function getQuantityDetail(
     getLocations(),
     getCategories(),
     getHistory({ type: 'quantity', entityId: id }),
+    describeValues(row.custom_values, row.category_id),
   ]);
   return {
     item: {
       ...metadata(row, categories),
+      customDisplay,
       archived: row.archived,
       reorderThreshold: row.reorder_threshold,
     },
@@ -282,16 +334,18 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
   if (error) throw new Error('Asset could not be loaded.');
   if (!data) return null;
   const row = assetRow.parse(data);
-  const [locations, categories, history, duplicateSerialMatches] =
+  const [locations, categories, history, duplicateSerialMatches, customDisplay] =
     await Promise.all([
       getLocations(),
       getCategories(),
       getHistory({ type: 'asset', entityId: id }),
       duplicateSerials(row.serial_number ?? '', id),
+      describeValues(row.custom_values, row.category_id),
     ]);
   return {
     asset: {
       ...metadata(row, categories),
+      customDisplay,
       status: row.status,
       assetTag: row.asset_tag,
       serialNumber: row.serial_number,

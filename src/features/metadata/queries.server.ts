@@ -22,11 +22,12 @@ export type DescribedValue = {
   option_paths: string[][];
   legacy: boolean;
 };
-export async function describeValues(values: StoredCustomValues): Promise<Record<string, DescribedValue>> {
+export async function describeValues(values: StoredCustomValues, categoryId: string): Promise<Record<string, DescribedValue>> {
   if (Object.keys(values).length === 0) return {};
   const { supabase } = await requireMember();
   const { data, error } = await supabase.rpc('metadata_describe_values' as never, {
     p_values: values,
+    p_current_category: categoryId,
   } as never);
   if (error || !data || typeof data !== 'object' || Array.isArray(data))
     throw new Error('Inventory metadata could not be loaded.');
