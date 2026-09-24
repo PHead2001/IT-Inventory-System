@@ -32,6 +32,12 @@ export default async function QuantityPage({
         Back to inventory
       </Link>
       <h1 className="mt-4 break-words text-3xl font-semibold">{item.name}</h1>
+      <Link
+        href={'/labels?quantity=' + item.id}
+        className="mt-3 inline-block min-h-11 py-3 text-cyan-300 underline"
+      >
+        Add quantity QR label to queue
+      </Link>
       <p className="mt-2 text-slate-400">
         {item.categoryName} · Quantity inventory ·{' '}
         {item.archived ? 'Archived' : 'Active'} · Version {item.version}

@@ -1,13 +1,13 @@
 'use server';
 import { requireMember } from '@/lib/auth/session.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
-import { ASSET_UUID, parseScan } from './targets';
+import { ASSET_UUID, QUANTITY_UUID, parseScan } from './targets';
 
 export type ScanMatch = {
-  kind: 'location' | 'asset';
+  kind: 'location' | 'asset' | 'quantity';
   path: string;
   label: string;
-  state: 'active' | 'inactive' | 'retired';
+  state: 'active' | 'inactive' | 'retired' | 'archived';
 };
 export type ScanResolution =
   | { status: 'invalid' | 'unknown'; matches: [] }
@@ -54,6 +54,25 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       .maybeSingle();
     if (error) throw new Error('Asset lookup failed.');
     if (data) matches.push(assetMatch(data));
+  }
+  if (
+    target.kind === 'quantity' ||
+    (target.kind === 'bare' && QUANTITY_UUID.test(target.identifier))
+  ) {
+    const id = target.kind === 'quantity' ? target.id : target.identifier;
+    const { data, error } = await supabase
+      .from('quantity_items')
+      .select('id,name,archived')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error('Quantity item lookup failed.');
+    if (data)
+      matches.push({
+        kind: 'quantity',
+        path: '/inventory/quantity/' + data.id,
+        label: data.name,
+        state: data.archived ? 'archived' : 'active',
+      });
   }
   if (target.kind === 'tag' || target.kind === 'bare') {
     const tag = target.kind === 'tag' ? target.tag : target.identifier;

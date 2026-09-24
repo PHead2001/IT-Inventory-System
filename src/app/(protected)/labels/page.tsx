@@ -1,20 +1,34 @@
-import { getLocations } from '@/features/inventory/queries.server';
+import {
+  getCategories,
+  getLocations,
+} from '@/features/inventory/queries.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
-import { getAssetLabel } from '@/features/labels/queries.server';
+import { getQueueRecords } from '@/features/labels/queue.server';
 import { LabelDesigner } from '@/features/labels/label-designer';
-import type { LabelRecord } from '@/features/labels/label-sheet';
-import { ASSET_UUID, LOCATION_CODE } from '@/features/scan/targets';
 import { getLabelDefaults } from '@/features/configuration/queries.server';
+import { requireMember } from '@/lib/auth/session.server';
+import {
+  ASSET_UUID,
+  LOCATION_CODE,
+  QUANTITY_UUID,
+} from '@/features/scan/targets';
 export default async function LabelsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asset?: string; location?: string }>;
+  searchParams: Promise<{
+    asset?: string;
+    quantity?: string;
+    location?: string;
+  }>;
 }) {
-  const [locations, params, defaults] = await Promise.all([
-    getLocations(),
-    searchParams,
-    getLabelDefaults(),
-  ]);
+  const [{ member }, locations, categories, params, defaults] =
+    await Promise.all([
+      requireMember(),
+      getLocations(),
+      getCategories(),
+      searchParams,
+      getLabelDefaults(),
+    ]);
   let config: ReturnType<typeof getLabelOrigin>;
   try {
     config = getLabelOrigin();
@@ -34,33 +48,29 @@ export default async function LabelsPage({
     );
   }
   const { origin, preview } = config;
-  const initial: LabelRecord[] = [];
+  const selection: { kind: 'location' | 'asset' | 'quantity'; key: string }[] =
+    [];
   if (params.location && LOCATION_CODE.test(params.location)) {
-    const location = locations.find((item) => item.code === params.location);
-    if (location)
-      initial.push({
-        kind: 'location',
-        key: location.code,
-        name: location.name,
-        context: location.breadcrumb,
-        path: '/locations/' + location.code,
-        state: location.active ? 'active' : 'inactive',
-      });
+    selection.push({ kind: 'location', key: params.location });
   }
   if (params.asset && ASSET_UUID.test(params.asset)) {
-    const asset = await getAssetLabel(params.asset);
-    if (asset) initial.push(asset);
+    selection.push({ kind: 'asset', key: params.asset.toLowerCase() });
   }
+  if (params.quantity && QUANTITY_UUID.test(params.quantity))
+    selection.push({ kind: 'quantity', key: params.quantity.toLowerCase() });
+  const initial = await getQueueRecords(selection);
   return (
     <>
       <h1 className="mb-2 text-3xl font-semibold">Print labels</h1>
       <p className="mb-6 text-slate-400">
-        Select the exact locations and assets to print. Labels open current
-        records after sign in.
+        Select exact quantity definitions, assets, and locations to print.
+        Labels open current records after sign in.
       </p>
       <LabelDesigner
         locations={locations}
+        categories={categories}
         origin={origin}
+        memberId={member.user_id}
         preview={preview}
         initial={initial}
         defaults={defaults}
