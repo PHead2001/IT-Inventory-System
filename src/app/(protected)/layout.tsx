@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   ScanLine,
   Tags,
+  Settings,
 } from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
@@ -100,6 +101,13 @@ export default async function ApplicationLayout({
           >
             <History size={18} />
             History
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/settings"
+          >
+            <Settings size={18} />
+            Settings
           </Link>
         </nav>
         <main id="main-content" className="min-w-0">

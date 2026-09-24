@@ -116,7 +116,9 @@ async function main() {
    (select id from public.locations where code='ITC-S4C') inactive_location`);
   const { category, a, b, inactive_location } = refs.rows[0];
   const oldSql = 'supabase/migrations/20260905000100_inventory_core.sql';
-  const newSql = 'supabase/migrations/20260924151837_low_stock_exports.sql';
+  const installed = await owner.query(`select
+    pg_get_functiondef('public.quantity_create(uuid,jsonb)'::regprocedure) as create_definition,
+    pg_get_functiondef('public.quantity_update(uuid,jsonb)'::regprocedure) as update_definition`);
   const beforeMigrationRequest = randomUUID();
   const beforeMigrationUpdateRequest = randomUUID();
   const beforeMigrationCreate = {
@@ -127,7 +129,7 @@ async function main() {
   let beforeMigrationUpdateResult: { entity_id: string; version: number };
   let beforeMigrationUpdate: Record<string, unknown>;
   // Exercise receipts written by the actual original RPC definitions, then restore
-  // the migrated definitions before replaying them. This local fixture never leaves
+  // the exact installed definitions before replaying them. This local fixture never leaves
   // the disposable database and is serialized within the canonical DB test runner.
   await owner.query(definition(oldSql, 'quantity_create'));
   await owner.query(definition(oldSql, 'quantity_update'));
@@ -151,8 +153,8 @@ async function main() {
       beforeMigrationUpdateRequest,
     );
   } finally {
-    await owner.query(definition(newSql, 'quantity_create'));
-    await owner.query(definition(newSql, 'quantity_update'));
+    await owner.query(installed.rows[0].create_definition);
+    await owner.query(installed.rows[0].update_definition);
   }
   assert.deepEqual(
     await mutation(

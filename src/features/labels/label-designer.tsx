@@ -69,6 +69,7 @@ export function LabelDesigner({
   memberId,
   preview,
   initial = emptyInitial,
+  defaults = defaultJob,
 }: {
   locations: LocationRef[];
   categories: CategoryRef[];
@@ -76,13 +77,14 @@ export function LabelDesigner({
   memberId: string;
   preview: boolean;
   initial?: LiveLabel[];
+  defaults?: JobSettings;
 }) {
   const storageKey = queueStorageKey(origin, memberId);
   const [entries, setEntries] = useState<QueueEntry[]>(initial.map(entryFor));
   const [live, setLive] = useState<LiveLabel[]>(initial);
   const [filters, setFilters] = useState<LabelSearchFilters>(defaultFilters);
   const [draft, setDraft] = useState<LabelSearchFilters>(defaultFilters);
-  const [job, setJob] = useState<JobSettings>(defaultJob);
+  const [job, setJob] = useState<JobSettings>(defaults);
   const [locationCode, setLocationCode] = useState('');
   const [search, setSearch] = useState<{
     rows: LabelCandidate[];
@@ -100,6 +102,7 @@ export function LabelDesigner({
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const queueEpoch = useRef(0);
+  const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
@@ -108,6 +111,7 @@ export function LabelDesigner({
   useEffect(
     () => () => {
       queueEpoch.current++;
+      clearPrintAuthorization.current?.();
     },
     [],
   );
@@ -118,7 +122,10 @@ export function LabelDesigner({
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
       if (!current) return;
-      const stored = parseStoredQueue(sessionStorage.getItem(storageKey));
+      const stored = parseStoredQueue(
+        sessionStorage.getItem(storageKey),
+        defaults,
+      );
       if (stored) {
         const merged = [...stored.entries];
         for (const record of initial) {
@@ -155,7 +162,7 @@ export function LabelDesigner({
     return () => {
       current = false;
     };
-  }, [storageKey, initial]);
+  }, [storageKey, initial, defaults]);
   useEffect(() => {
     if (hydrated)
       sessionStorage.setItem(
@@ -179,6 +186,7 @@ export function LabelDesigner({
 
   const invalidate = () => {
     queueEpoch.current++;
+    clearPrintAuthorization.current?.();
     setPrepared(null);
     setPrintRows(null);
     setPendingChanges([]);
@@ -358,7 +366,32 @@ export function LabelDesigner({
         );
         return;
       }
-      window.print();
+      const sheet = document.querySelector<HTMLElement>('.label-print-root');
+      if (!sheet) {
+        setMessage('Print preview is unavailable. Prepare it again.');
+        return;
+      }
+      // Ctrl/Cmd+P skips the final inventory check. Some browsers return from
+      // print() before capture; keep the sheet available until afterprint,
+      // with a bounded fallback for browsers that never dispatch it.
+      clearPrintAuthorization.current?.();
+      const clear = () => {
+        window.removeEventListener('afterprint', clear);
+        window.clearTimeout(timeout);
+        delete sheet.dataset.printAuthorized;
+        if (clearPrintAuthorization.current === clear)
+          clearPrintAuthorization.current = null;
+      };
+      clearPrintAuthorization.current = clear;
+      window.addEventListener('afterprint', clear, { once: true });
+      const timeout = window.setTimeout(clear, 30_000);
+      sheet.dataset.printAuthorized = 'true';
+      try {
+        window.print();
+      } catch (error) {
+        clear();
+        throw error;
+      }
     } catch {
       if (epoch !== queueEpoch.current) return;
       invalidate();
@@ -417,7 +450,7 @@ export function LabelDesigner({
           />
         </label>
         <div className="flex flex-wrap gap-3">
-          <label>
+          <label className="min-w-0 max-w-full">
             Type{' '}
             <select
               value={draft.type}
@@ -427,14 +460,14 @@ export function LabelDesigner({
                   type: event.target.value as LabelSearchFilters['type'],
                 })
               }
-              className="rounded bg-slate-800 p-2"
+              className="max-w-full rounded bg-slate-800 p-2"
             >
               <option value="all">All</option>
               <option value="quantity">Quantity</option>
               <option value="asset">Asset</option>
             </select>
           </label>
-          <label>
+          <label className="min-w-0 max-w-full">
             Status{' '}
             <select
               value={draft.status}
@@ -444,21 +477,21 @@ export function LabelDesigner({
                   status: event.target.value as LabelSearchFilters['status'],
                 })
               }
-              className="rounded bg-slate-800 p-2"
+              className="max-w-full rounded bg-slate-800 p-2"
             >
               <option value="active">Active</option>
               <option value="historical">Archived / retired</option>
               <option value="all">All</option>
             </select>
           </label>
-          <label>
+          <label className="w-full min-w-0">
             Category{' '}
             <select
               value={draft.category}
               onChange={(event) =>
                 setDraft({ ...draft, category: event.target.value })
               }
-              className="rounded bg-slate-800 p-2"
+              className="mt-1 block w-full min-w-0 rounded bg-slate-800 p-2"
             >
               <option value="">All</option>
               {categories.map((category) => (
@@ -679,8 +712,9 @@ export function LabelDesigner({
           </label>
         </div>
         <p className="text-sm text-slate-400">
-          Default: 90 × 50 mm on US Letter, QR. Print at actual size / 100%.
-          Code 128 asset tags require reprinting if the tag changes.
+          New jobs start with the shared choices in Settings. Print at actual
+          size / 100%. Code 128 asset tags require reprinting if the tag
+          changes.
         </p>
         {job.format === 'code128' && fallbackCount > 0 && (
           <p className="rounded border border-amber-700 p-3 text-amber-200">

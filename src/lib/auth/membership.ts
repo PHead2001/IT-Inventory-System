@@ -3,6 +3,7 @@ export type Member = {
   display_name: string;
   role: string;
   active: boolean;
+  can_manage_configuration?: boolean;
 };
 export function isActiveMember(member: Member | null): member is Member {
   return (
@@ -13,4 +14,11 @@ export function isActiveMember(member: Member | null): member is Member {
 }
 export function mayMutateInventory(member: Member | null) {
   return isActiveMember(member) && member.role === 'staff';
+}
+export function mayManageConfiguration(member: Member | null) {
+  return (
+    isActiveMember(member) &&
+    member.role === 'staff' &&
+    member.can_manage_configuration === true
+  );
 }

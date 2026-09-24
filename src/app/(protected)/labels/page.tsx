@@ -5,6 +5,7 @@ import {
 import { getLabelOrigin } from '@/features/labels/origin.server';
 import { getQueueRecords } from '@/features/labels/queue.server';
 import { LabelDesigner } from '@/features/labels/label-designer';
+import { getLabelDefaults } from '@/features/configuration/queries.server';
 import { requireMember } from '@/lib/auth/session.server';
 import {
   ASSET_UUID,
@@ -20,12 +21,14 @@ export default async function LabelsPage({
     location?: string;
   }>;
 }) {
-  const [{ member }, locations, categories, params] = await Promise.all([
-    requireMember(),
-    getLocations(),
-    getCategories(),
-    searchParams,
-  ]);
+  const [{ member }, locations, categories, params, defaults] =
+    await Promise.all([
+      requireMember(),
+      getLocations(),
+      getCategories(),
+      searchParams,
+      getLabelDefaults(),
+    ]);
   let config: ReturnType<typeof getLabelOrigin>;
   try {
     config = getLabelOrigin();
@@ -70,6 +73,7 @@ export default async function LabelsPage({
         memberId={member.user_id}
         preview={preview}
         initial={initial}
+        defaults={defaults}
       />
     </>
   );

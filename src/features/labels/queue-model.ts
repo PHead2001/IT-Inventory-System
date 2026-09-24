@@ -98,7 +98,10 @@ export function clearLabelQueueSession(): void {
   }
 }
 
-export function parseStoredQueue(raw: string | null): {
+export function parseStoredQueue(
+  raw: string | null,
+  fallbackJob: JobSettings = defaultJob,
+): {
   entries: QueueEntry[];
   filters: LabelSearchFilters;
   job: JobSettings;
@@ -159,7 +162,7 @@ export function parseStoredQueue(raw: string | null): {
         ['letter', 'A4'].includes(job.page) &&
         ['qr', 'code128'].includes(job.format)
           ? job
-          : defaultJob,
+          : fallbackJob,
     };
   } catch {
     return null;

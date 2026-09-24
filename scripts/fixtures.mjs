@@ -52,6 +52,7 @@ export async function seedUsers(status) {
         display_name: 'Test ' + kind,
         role: kind === 'viewer' ? 'viewer' : 'staff',
         active: kind !== 'inactive',
+        can_manage_configuration: kind === 'staff',
       });
       if (result.error) throw result.error;
     }

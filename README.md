@@ -32,3 +32,5 @@ Room geometry uses inches and stable location codes, never generated database UU
 Production release uses a required Vercel GitHub Deployment Check on the main-only `Production database ready` job. After one-time owner activation, successful main CI applies checked-in forward migrations before Vercel aliases the matching build. See [deployment](docs/deployment.md#one-time-activation) for the fail-closed setup and backup prerequisites.
 
 PR6 adds local QR/optional Code 128 labels, scan-to-open navigation, item-wide reorder thresholds, a low-stock overview and authenticated CSV downloads. See [labels, scanning and stock status](docs/labels-and-stock.md) for user and data contracts.
+
+Settings lets active members read categories and shared label defaults. An active staff member with the separately provisioned `can_manage_configuration` grant can create, rename, or remove categories and edit label defaults. Referenced category removal requires an impact review and replacement; inventory identity, stock and history are preserved.
