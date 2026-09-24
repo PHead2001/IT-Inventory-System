@@ -184,6 +184,10 @@ describe('official Speed Insights emitted payload', () => {
     ).toEqual([]);
   });
 
+  it('emits nothing when the official script retains /inventory for a /labels URL', async () => {
+    expect(await emitFromOfficialScript('/labels', '/inventory')).toEqual([]);
+  });
+
   it('emits only opaque DOM selectors in actual LCP attribution', async () => {
     const payloads = await emitFromOfficialScript(
       '/inventory',

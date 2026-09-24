@@ -110,6 +110,12 @@ describe('private Speed Insights policy', () => {
     ).toBeNull();
   });
 
+  it('drops an allowed route paired with a different allowed URL path', () => {
+    expect(
+      beforeSendPrivateVitals(vital(`${origin}/labels`, '/inventory')),
+    ).toBeNull();
+  });
+
   it('keeps the application usable when the official provider script fails to load', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const main = document.createElement('main');

@@ -67,6 +67,7 @@ export function beforeSendPrivateVitals<T extends VitalEvent>(
       hasAuthParameters(current) ||
       url.origin !== current.origin ||
       !measuredRoutes.has(url.pathname) ||
+      event.route !== url.pathname ||
       hasAuthParameters(url)
     )
       return null;
