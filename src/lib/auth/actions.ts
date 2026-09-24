@@ -2,6 +2,8 @@
 import { redirect } from 'next/navigation';
 import { getAppOrigin } from './origin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { isActiveMember } from './membership';
+import { validReturnPath } from '@/features/scan/targets';
 import {
   confirmationSchema,
   emailSchema,
@@ -23,7 +25,19 @@ export async function login(
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error)
     return { error: 'Unable to sign in. Check your email and password.' };
-  redirect('/inventory');
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user)
+    return { error: 'Unable to verify this account. Please try again.' };
+  const { data: member, error: memberError } = await supabase
+    .from('app_members')
+    .select('user_id, display_name, role, active')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (memberError || !isActiveMember(member)) redirect('/access-denied');
+  redirect(validReturnPath(form.get('next')) ?? '/inventory');
 }
 export async function logout() {
   const supabase = await createSupabaseServerClient(true);

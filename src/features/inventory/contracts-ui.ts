@@ -19,7 +19,12 @@ export type Metadata = {
   model: string | null;
   version: number;
 };
-export type QuantityItem = Metadata & { archived: boolean };
+export type StockState =
+  'disabled' | 'in_stock' | 'needs_restocking' | 'out_of_stock' | 'archived';
+export type QuantityItem = Metadata & {
+  archived: boolean;
+  reorderThreshold: number | null;
+};
 export type AssetItem = Metadata & {
   status: 'active' | 'retired';
   assetTag: string | null;
@@ -35,6 +40,9 @@ export type InventoryResult = {
   quantity: number | null;
   assetTag: string | null;
   serialNumber: string | null;
+  recordedTotal: number | null;
+  reorderThreshold: number | null;
+  stockState: StockState | null;
 };
 export type PageResult<T> = {
   rows: T[];
@@ -73,6 +81,11 @@ export type DuplicateSerial = {
 };
 export type QuantityDetail = {
   item: QuantityItem;
+  stockSummary: {
+    recordedTotal: number;
+    reorderThreshold: number | null;
+    stockState: StockState;
+  };
   balances: { location: LocationRef; quantity: number }[];
   history: HistoryEvent[];
 };

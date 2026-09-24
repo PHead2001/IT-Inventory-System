@@ -21,7 +21,25 @@ import {
   readFilters,
   searchPage,
   historyPage,
+  mapQuantityStockSummary,
 } from './read-model';
+
+const dashboardSchema = z.object({
+  configured_count: z.number().int().nonnegative(),
+  needs_restocking_count: z.number().int().nonnegative(),
+  out_of_stock_count: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  rows: z.array(
+    z.object({
+      entity_id: z.uuid(),
+      name: z.string(),
+      category_name: z.string(),
+      recorded_total: z.number().int().nonnegative(),
+      reorder_threshold: z.number().int().nonnegative(),
+      stock_state: z.enum(['needs_restocking', 'out_of_stock']),
+    }),
+  ),
+});
 
 const pageSize = 25;
 const categorySchema = z.object({
@@ -67,7 +85,7 @@ export async function getInventory(
   const { supabase } = await requireMember();
   const filter = readFilters(input);
   const [{ data, error }, locations] = await Promise.all([
-    supabase.rpc('inventory_search', {
+    supabase.rpc('inventory_search_v2', {
       p_query: filter.query,
       p_type: filter.type,
       p_status: filter.status,
@@ -75,6 +93,7 @@ export async function getInventory(
       p_location_code: filter.location,
       p_page: filter.page,
       p_page_size: pageSize,
+      p_low_stock: filter.lowStock,
     }),
     getLocations(),
   ]);
@@ -85,6 +104,35 @@ export async function getInventory(
     rows: result.rows.map((r) => mapSearch(r, locations)),
     total: result.total,
     page: filter.page,
+    pageSize,
+  };
+}
+export async function getLowStockDashboard(page = 1) {
+  const { supabase } = await requireMember();
+  const safePage = Number.isSafeInteger(page)
+    ? Math.min(100000, Math.max(1, page))
+    : 1;
+  const { data, error } = await supabase.rpc('low_stock_dashboard', {
+    p_page: safePage,
+    p_page_size: pageSize,
+  });
+  const result = dashboardSchema.parse(
+    requireData(data, error, 'Low-stock overview could not be loaded.'),
+  );
+  return {
+    configuredCount: result.configured_count,
+    needsRestockingCount: result.needs_restocking_count,
+    outOfStockCount: result.out_of_stock_count,
+    rows: result.rows.map((row) => ({
+      id: row.entity_id,
+      name: row.name,
+      categoryName: row.category_name,
+      recordedTotal: row.recorded_total,
+      reorderThreshold: row.reorder_threshold,
+      stockState: row.stock_state,
+    })),
+    total: result.total,
+    page: safePage,
     pageSize,
   };
 }
@@ -146,6 +194,7 @@ export async function getQuantityDetail(
   const row = quantityRow.parse(data);
   const [
     { data: balances, error: balanceError },
+    { data: stockSummary, error: stockSummaryError },
     locations,
     categories,
     history,
@@ -155,12 +204,30 @@ export async function getQuantityDetail(
       .select('location_id,quantity')
       .eq('item_id', id)
       .order('location_id'),
+    supabase
+      .from('inventory_search_rows')
+      .select('recorded_total,reorder_threshold,stock_state')
+      .eq('entity_id', id)
+      .eq('kind', 'quantity')
+      .limit(1)
+      .maybeSingle(),
     getLocations(),
     getCategories(),
     getHistory({ type: 'quantity', entityId: id }),
   ]);
   return {
-    item: { ...metadata(row, categories), archived: row.archived },
+    item: {
+      ...metadata(row, categories),
+      archived: row.archived,
+      reorderThreshold: row.reorder_threshold,
+    },
+    stockSummary: mapQuantityStockSummary(
+      requireData(
+        stockSummary,
+        stockSummaryError,
+        'Stock state could not be loaded.',
+      ),
+    ),
     balances: requireData(
       balances,
       balanceError,

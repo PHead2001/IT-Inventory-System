@@ -104,6 +104,7 @@ describe('inventory server-action boundary', () => {
     });
     expect(mocks.revalidate.mock.calls).toEqual([
       ['/inventory', 'layout'],
+      ['/dashboard'],
       ['/locations', 'layout'],
       ['/history'],
     ]);

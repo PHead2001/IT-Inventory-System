@@ -31,7 +31,10 @@ export const metadataRow = z.object({
   model: nullableText,
   version: z.number().int().positive(),
 });
-export const quantityRow = metadataRow.extend({ archived: z.boolean() });
+export const quantityRow = metadataRow.extend({
+  archived: z.boolean(),
+  reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
+});
 export const assetRow = metadataRow.extend({
   status: z.enum(['active', 'retired']),
   asset_tag: nullableText,
@@ -48,6 +51,17 @@ export const searchRow = z.object({
   quantity: z.number().int().nonnegative().nullable(),
   asset_tag: nullableText,
   serial_number: nullableText,
+  recorded_total: z.number().int().nonnegative().nullable(),
+  reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
+  stock_state: z
+    .enum([
+      'disabled',
+      'in_stock',
+      'needs_restocking',
+      'out_of_stock',
+      'archived',
+    ])
+    .nullable(),
 });
 export const historyRow = z.object({
   id,
@@ -75,6 +89,25 @@ export const searchPage = z.object({
   rows: z.array(searchRow),
   total: z.number().int().nonnegative(),
 });
+export const quantityStockSummaryRow = z.object({
+  recorded_total: z.number().int().nonnegative(),
+  reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
+  stock_state: z.enum([
+    'disabled',
+    'in_stock',
+    'needs_restocking',
+    'out_of_stock',
+    'archived',
+  ]),
+});
+export function mapQuantityStockSummary(input: unknown) {
+  const row = quantityStockSummaryRow.parse(input);
+  return {
+    recordedTotal: row.recorded_total,
+    reorderThreshold: row.reorder_threshold,
+    stockState: row.stock_state,
+  };
+}
 export const historyPage = z.object({
   rows: z.array(historyRow),
   total: z.number().int().nonnegative(),
@@ -102,6 +135,9 @@ export function mapSearch(
     quantity: row.quantity,
     assetTag: row.asset_tag,
     serialNumber: row.serial_number,
+    recordedTotal: row.recorded_total,
+    reorderThreshold: row.reorder_threshold,
+    stockState: row.stock_state,
   };
 }
 export function mapHistory(
@@ -117,8 +153,11 @@ export function mapHistory(
     model: 'Model',
     asset_tag: 'Asset tag',
     serial_number: 'Serial number',
+    reorder_threshold: 'Reorder threshold',
   };
   const display = (key: string, value: unknown): string | null => {
+    if (key === 'reorder_threshold')
+      return typeof value === 'number' ? String(value) : null;
     if (typeof value !== 'string') return null;
     if (key === 'category_id')
       return categories.find((c) => c.id === value)?.name ?? 'Unknown category';
@@ -172,5 +211,6 @@ export function readFilters(input: Record<string, string | undefined>) {
     category: id.safeParse(input.category).success ? input.category : undefined,
     location: input.location?.slice(0, 100) || undefined,
     entityId: id.safeParse(input.entityId).success ? input.entityId : undefined,
+    lowStock: input.lowStock === 'true',
   };
 }

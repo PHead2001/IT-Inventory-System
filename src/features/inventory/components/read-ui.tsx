@@ -52,6 +52,18 @@ export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
                   : 'Serialized asset'}{' '}
                 · {row.status}
               </p>
+              {row.kind === 'quantity' &&
+                row.status === 'active' &&
+                (row.stockState === 'needs_restocking' ||
+                  row.stockState === 'out_of_stock') && (
+                  <p className="mt-2 text-sm font-medium text-amber-200">
+                    {row.stockState === 'out_of_stock'
+                      ? 'Out of stock'
+                      : 'Needs restocking'}{' '}
+                    · Item-wide total {row.recordedTotal} / threshold{' '}
+                    {row.reorderThreshold}
+                  </p>
+                )}
             </div>
             <span>
               {row.kind === 'quantity'

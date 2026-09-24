@@ -1,0 +1,542 @@
+import { expect, test, type Page } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
+import path from 'node:path';
+import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { chooseLocation } from './location-picker';
+
+const zxingBundle = path.resolve(
+  'node_modules/@zxing/browser/umd/zxing-browser.min.js',
+);
+const rootCode = 'ITC';
+test.use({ deviceScaleFactor: 2 });
+
+async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
+  await page.goto('/login');
+  await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);
+  await page.getByLabel('Password', { exact: true }).fill(fixture.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Inventory workspace' }),
+  ).toBeVisible();
+}
+
+async function decodeScreenshot(page: Page, png: Buffer): Promise<string> {
+  await page.addScriptTag({ path: zxingBundle });
+  return page.evaluate(
+    async (data) => {
+      const zxing = (
+        window as typeof window & {
+          ZXingBrowser: {
+            BrowserMultiFormatReader: new () => {
+              decodeFromImageUrl(url: string): Promise<{ getText(): string }>;
+            };
+          };
+        }
+      ).ZXingBrowser;
+      const reader = new zxing.BrowserMultiFormatReader();
+      return (await reader.decodeFromImageUrl(data)).getText();
+    },
+    `data:image/png;base64,${png.toString('base64')}`,
+  );
+}
+
+async function generatedLocationQr(page: Page, code = rootCode) {
+  await page.goto('/labels?location=' + code);
+  const card = page.locator('.label-card').first();
+  const qr = card.getByRole('img', { name: /QR code for/ });
+  await expect(qr).toBeVisible();
+  const source = await qr.getAttribute('src');
+  expect(source).toMatch(/^data:image\/png;base64,/);
+  return { card, source: source! };
+}
+
+test('printed QR and Code 128 decode from rendered label cards with physical size and page breaks', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await signIn(page, 'viewer');
+  const { card } = await generatedLocationQr(page);
+  await expect(page.getByText(/Preview labels for/)).toBeVisible();
+  const dimensions = await card.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const code = element.querySelector('img')!.getBoundingClientRect();
+    return { width: box.width, height: box.height, code: code.width };
+  });
+  expect(dimensions.width).toBeCloseTo((90 * 96) / 25.4, 0);
+  expect(dimensions.height).toBeCloseTo((50 * 96) / 25.4, 0);
+  expect(dimensions.code).toBeGreaterThanOrEqual((30 * 96) / 25.4 - 2);
+  const qrShot = await card.screenshot({
+    path: testInfo.outputPath('location-qr.png'),
+    scale: 'css',
+  });
+  await page.screenshot({
+    path: testInfo.outputPath('labels-desktop.png'),
+    fullPage: true,
+  });
+  expect(await decodeScreenshot(page, qrShot)).toBe(
+    process.env.APP_ORIGIN + '/locations/ITC',
+  );
+  const codeFormat = page
+    .locator('select')
+    .filter({ has: page.locator('option[value="code128"]') });
+  await codeFormat.selectOption('code128');
+  const barcode = card.getByRole('img', { name: 'Code 128 LOC:ITC' });
+  await expect(barcode).toBeVisible();
+  await expect(barcode).not.toHaveClass(/hidden/);
+  await card.screenshot({
+    path: testInfo.outputPath('location-code128.png'),
+    scale: 'device',
+  });
+  expect(
+    await decodeScreenshot(
+      page,
+      await barcode.screenshot({
+        path: testInfo.outputPath('location-code128-crop.png'),
+      }),
+    ),
+  ).toBe('LOC:ITC');
+  await codeFormat.selectOption('qr');
+  for (const code of [
+    'ITC-L',
+    'ITC-R',
+    'ITC-S1',
+    'ITC-S2',
+    'ITC-S3',
+    'ITC-S4',
+    'ITC-D01',
+    'ITC-D02',
+    'ITC-D03',
+    'ITC-D04',
+  ]) {
+    await chooseLocation(
+      page.locator('section').filter({ hasText: 'Add a location' }).first(),
+      'Choose a location or group',
+      code,
+    );
+    await page.getByRole('button', { name: 'Add location label' }).click();
+  }
+  await expect(page.locator('.label-card')).toHaveCount(11);
+  const pdf = await page.pdf({
+    path: testInfo.outputPath('labels-letter.pdf'),
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+  const pdfText = pdf.toString('latin1');
+  expect((pdfText.match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(1);
+  expect(pdfText).toMatch(/\/MediaBox\s*\[\s*0\s+0\s+612\s+792\s*\]/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: testInfo.outputPath('labels-phone.png'),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test('generated QR crosses the synthetic camera frame path and releases its stream', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const { source } = await generatedLocationQr(page, 'ITC-S1A');
+  const events: string[] = [];
+  await page.exposeFunction('recordCameraEvent', (event: string) => {
+    events.push(event);
+  });
+  await page.addInitScript(
+    ({ qr }) => {
+      const record = (event: string) =>
+        (
+          window as typeof window & {
+            recordCameraEvent: (event: string) => Promise<void>;
+          }
+        ).recordCameraEvent(event);
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+        configurable: true,
+        value: async (constraints: MediaStreamConstraints) => {
+          void record('requested:' + JSON.stringify(constraints));
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 640;
+          const ctx = canvas.getContext('2d')!;
+          const image = new Image();
+          image.src = qr;
+          await image.decode();
+          const draw = () => {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, 640, 640);
+            ctx.drawImage(image, 120, 120, 400, 400);
+          };
+          draw();
+          const stream = canvas.captureStream(15);
+          const track = stream.getVideoTracks()[0];
+          const originalStop = track.stop.bind(track);
+          track.stop = () => {
+            void record('stopped');
+            originalStop();
+          };
+          const timer = setInterval(draw, 100);
+          track.addEventListener('ended', () => clearInterval(timer));
+          return stream;
+        },
+      });
+    },
+    { qr: source },
+  );
+  await page.goto('/scan');
+  await expect(
+    page.getByRole('heading', { name: 'Scan and open' }),
+  ).toBeVisible();
+  expect(events).toEqual([]);
+  await page.getByRole('button', { name: 'Start camera' }).click();
+  await expect(page).toHaveURL(/\/locations\/ITC-S1A$/);
+  expect(events.filter((event) => event.startsWith('requested:'))).toHaveLength(
+    1,
+  );
+  expect(events[0]).toContain('environment');
+  await expect
+    .poll(() => events.filter((event) => event === 'stopped').length)
+    .toBeGreaterThan(0);
+});
+
+test('denied camera has manual fallback, rejects external text and opens exact records', async ({
+  page,
+}) => {
+  await signIn(page, 'viewer');
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: async () => {
+        throw new DOMException('Denied', 'NotAllowedError');
+      },
+    });
+  });
+  await page.goto('/scan');
+  await page.getByRole('button', { name: 'Start camera' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Camera permission was denied',
+  );
+  const input = page.getByLabel(
+    'Paste a label URL, barcode text, or exact identifier',
+  );
+  await input.fill('https://example.com/locations/ITC');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'not a supported inventory label',
+  );
+  await expect(page).toHaveURL(/\/scan$/);
+  await input.fill('LOC:ITC-S1A');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page).toHaveURL(/\/locations\/ITC-S1A$/);
+});
+
+test('explicit Stop and route navigation release a camera stream without a decoded frame', async ({
+  page,
+}) => {
+  await signIn(page, 'viewer');
+  const events: string[] = [];
+  await page.exposeFunction('recordCameraEvent', (event: string) => {
+    events.push(event);
+  });
+  await page.addInitScript(() => {
+    const record = (event: string) =>
+      (
+        window as typeof window & {
+          recordCameraEvent: (event: string) => Promise<void>;
+        }
+      ).recordCameraEvent(event);
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: async () => {
+        void record('requested');
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 640;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, 640, 640);
+        const stream = canvas.captureStream(15);
+        const track = stream.getVideoTracks()[0];
+        const originalStop = track.stop.bind(track);
+        track.stop = () => {
+          void record('stopped');
+          originalStop();
+        };
+        return stream;
+      },
+    });
+  });
+  await page.goto('/scan');
+  await page.getByRole('button', { name: 'Start camera' }).click();
+  await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
+  await page.getByRole('button', { name: 'Stop camera' }).click();
+  await expect
+    .poll(() => events.filter((event) => event === 'stopped').length)
+    .toBeGreaterThanOrEqual(1);
+  await page.getByRole('button', { name: 'Start camera' }).click();
+  await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
+  await page.getByRole('link', { name: 'Inventory', exact: true }).click();
+  await expect
+    .poll(() => events.filter((event) => event === 'stopped').length)
+    .toBeGreaterThanOrEqual(2);
+  expect(events.filter((event) => event === 'requested')).toHaveLength(2);
+});
+
+test('unavailable camera still permits exact manual lookup', async ({
+  page,
+}) => {
+  await signIn(page, 'viewer');
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+  await page.goto('/scan');
+  await page.getByRole('button', { name: 'Start camera' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'Camera access is unavailable',
+  );
+  await page
+    .getByLabel('Paste a label URL, barcode text, or exact identifier')
+    .fill('LOC:ITC');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page).toHaveURL(/\/locations\/ITC$/);
+});
+
+test('anonymous label opens login then exact destination; unsafe return is ignored', async ({
+  page,
+}) => {
+  await page.goto('/locations/ITC-S1A');
+  await expect(page).toHaveURL(/\/login\?next=%2Flocations%2FITC-S1A$/);
+  await page.getByLabel('Email', { exact: true }).fill(fixture.emails.viewer);
+  await page.getByLabel('Password', { exact: true }).fill(fixture.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/locations\/ITC-S1A$/);
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.goto(
+    '/login?next=' + encodeURIComponent('//example.com/locations/ITC'),
+  );
+  await page.getByLabel('Email', { exact: true }).fill(fixture.emails.viewer);
+  await page.getByLabel('Password', { exact: true }).fill(fixture.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/inventory$/);
+});
+
+test('asset UUID label survives rename and move, while a bare colliding identifier requires selection', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const originalName =
+    'Label asset ' + crypto.randomUUID() + ' ' + 'long-name-'.repeat(10);
+  const api = new URL(process.env.LOCAL_API_URL!);
+  expect(['localhost', '127.0.0.1']).toContain(api.hostname);
+  expect(api.port).toBe('54321');
+  const local = createClient(api.href, process.env.LOCAL_SERVICE_ROLE_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const existing = await local
+    .from('serialized_assets')
+    .select('id')
+    .eq('asset_tag', 'itc')
+    .maybeSingle();
+  expect(existing.error).toBeNull();
+  let id = existing.data?.id;
+  let form;
+  if (!id) {
+    await page.goto('/inventory/assets/new');
+    form = page.getByRole('form', { name: 'Create serialized asset' });
+    await form.getByLabel('Name', { exact: true }).fill(originalName);
+    await form.getByLabel('Asset tag').fill('ITC');
+    await chooseLocation(form, 'Destination location', 'ITC-RACK');
+    await form
+      .getByRole('button', { name: 'Review create serialized asset' })
+      .click();
+    await form
+      .getByRole('button', { name: 'Confirm create serialized asset' })
+      .click();
+    await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+    id = page.url().split('/').at(-1)!;
+  } else {
+    await page.goto('/inventory/assets/' + id);
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Edit asset metadata$/ })
+      .click();
+    form = page.getByRole('form', { name: 'Edit asset metadata' });
+    await form.getByLabel('Name', { exact: true }).fill(originalName);
+    await form
+      .getByRole('button', { name: 'Review edit asset metadata' })
+      .click();
+    await form
+      .getByRole('button', { name: 'Confirm edit asset metadata' })
+      .click();
+    await expect(form.getByRole('status')).toContainText('Saved successfully');
+  }
+  await page.goto('/labels?asset=' + id);
+  const card = page.locator('.label-card').first();
+  await expect(card).toContainText(id);
+  const initialCode = await decodeScreenshot(
+    page,
+    await card.screenshot({
+      path: testInfo.outputPath('asset-before-move.png'),
+    }),
+  );
+  expect(initialCode).toBe(process.env.APP_ORIGIN + '/inventory/assets/' + id);
+  const located = await local
+    .from('serialized_assets')
+    .select('location_id')
+    .eq('id', id)
+    .single();
+  expect(located.error).toBeNull();
+  const currentLocation = await local
+    .from('inventory_locations')
+    .select('code')
+    .eq('id', located.data!.location_id)
+    .single();
+  expect(currentLocation.error).toBeNull();
+  const destination =
+    currentLocation.data!.code === 'ITC-D01' ? 'ITC-D02' : 'ITC-D01';
+  await page.goto('/inventory/assets/' + id);
+  form = page.getByRole('form', { name: 'Move asset' });
+  if (!(await form.isVisible())) {
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Move asset$/ })
+      .click();
+  }
+  await chooseLocation(form, 'Destination location', destination);
+  await form.getByRole('button', { name: 'Review move asset' }).click();
+  await form.getByRole('button', { name: 'Confirm move asset' }).click();
+  await expect(form.getByRole('status')).toContainText('Saved successfully');
+  await page.reload();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Edit asset metadata$/ })
+    .click();
+  form = page.getByRole('form', { name: 'Edit asset metadata' });
+  await form
+    .getByLabel('Name', { exact: true })
+    .fill('Renamed ' + originalName);
+  await form
+    .getByRole('button', { name: 'Review edit asset metadata' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm edit asset metadata' })
+    .click();
+  await expect(form.getByRole('status')).toContainText('Saved successfully');
+  await page.goto('/labels?asset=' + id);
+  await expect(card).toContainText('Renamed Label asset');
+  expect(
+    await decodeScreenshot(
+      page,
+      await card.screenshot({
+        path: testInfo.outputPath('asset-after-move.png'),
+      }),
+    ),
+  ).toBe(initialCode);
+  await page.goto('/scan');
+  const input = page.getByLabel(
+    'Paste a label URL, barcode text, or exact identifier',
+  );
+  await input.fill('ITC');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('more than one record');
+  await expect(
+    page.getByRole('link', { name: /IT Closet.*ITC/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: /Label asset.*itc/i }),
+  ).toBeVisible();
+  await input.fill('AST:ITC');
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp('/inventory/assets/' + id + '$'));
+});
+
+test('staff threshold persists into dashboard, inventory filter, and real CSV download; viewer can read and export', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  const name = '=Stock,"quoted" ' + crypto.randomUUID();
+  await signIn(page);
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  await form.getByLabel('Name', { exact: true }).fill(name);
+  await form.getByLabel('Reorder threshold (optional)').fill('0');
+  await form
+    .getByRole('button', { name: 'Review create quantity inventory' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm create quantity inventory' })
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const id = page.url().split('/').at(-1)!;
+  await expect(page.getByText(/Reorder threshold/).first()).toBeVisible();
+  await page.goto('/dashboard');
+  await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+  const lowStockDownload = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Download low-stock CSV' }).click();
+  const lowStockFile = await lowStockDownload;
+  expect(lowStockFile.suggestedFilename()).toMatch(
+    /^preview-low-stock-\d{8}T\d{6}Z\.csv$/,
+  );
+  const lowStockPath = testInfo.outputPath(lowStockFile.suggestedFilename());
+  await lowStockFile.saveAs(lowStockPath);
+  const lowStockCsv = await import('node:fs/promises').then((fs) =>
+    fs.readFile(lowStockPath, 'utf8'),
+  );
+  expect(lowStockCsv).toContain(
+    '"Recorded Total","Reorder Threshold","Stock State"',
+  );
+  expect(lowStockCsv).toContain(id);
+  await page.getByRole('link', { name: 'View filtered inventory' }).click();
+  await expect(page).toHaveURL(/lowStock=true/);
+  await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page
+    .getByRole('link', { name: 'Download filtered inventory CSV' })
+    .click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(
+    /^preview-inventory-\d{8}T\d{6}Z\.csv$/,
+  );
+  const destination = testInfo.outputPath(file.suggestedFilename());
+  await file.saveAs(destination);
+  const csv = await import('node:fs/promises').then((fs) =>
+    fs.readFile(destination, 'utf8'),
+  );
+  expect(csv).toContain('"Record ID","Type","Name"');
+  expect(csv).toContain(id);
+  expect(csv).toContain('\'=Stock,""quoted""');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signIn(page, 'viewer');
+  await page.goto('/inventory/quantity/' + id);
+  await expect(page.getByText(/Reorder threshold/).first()).toBeVisible();
+  await expect(
+    page.getByRole('form', { name: 'Edit quantity metadata' }),
+  ).toHaveCount(0);
+  const response = await page.request.get(
+    '/api/exports/inventory?lowStock=true&q=' + encodeURIComponent(name),
+  );
+  expect(response.status()).toBe(200);
+  expect(response.headers()['cache-control']).toContain('private, no-store');
+  expect(await response.text()).toContain(id);
+});
+
+test('empty CSV retains headers and anonymous export is denied', async ({
+  page,
+  request,
+}) => {
+  const denied = await request.get('/api/exports/inventory');
+  expect(denied.status()).toBe(401);
+  await signIn(page, 'viewer');
+  const response = await page.request.get(
+    '/api/exports/inventory?q=' + crypto.randomUUID(),
+  );
+  expect(response.status()).toBe(200);
+  const csv = await response.text();
+  expect(csv).toContain('"Record ID","Type","Name"');
+  expect(csv.trim().split(/\r?\n/)).toHaveLength(1);
+});

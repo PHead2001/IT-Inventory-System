@@ -109,6 +109,31 @@ describe('inventory mutation input contracts', () => {
       }).success,
     ).toBe(true);
   });
+  it('normalizes optional thresholds without erasing an omitted update field', () => {
+    const oldCaller = command('quantity_update');
+    expect(oldCaller.success).toBe(true);
+    if (oldCaller.success)
+      expect(oldCaller.data.payload).not.toHaveProperty('reorder_threshold');
+    for (const threshold of [null, 0, 2147483647]) {
+      const parsed = command('quantity_update', {
+        ...payloads.quantity_update,
+        reorder_threshold: threshold,
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success)
+        expect(parsed.data.payload).toHaveProperty(
+          'reorder_threshold',
+          threshold,
+        );
+    }
+    for (const threshold of [-1, 1.5, 2147483648, '1', Number.NaN])
+      expect(
+        command('quantity_create', {
+          ...metadata,
+          reorder_threshold: threshold,
+        }).success,
+      ).toBe(false);
+  });
 
   it.each([
     -1,

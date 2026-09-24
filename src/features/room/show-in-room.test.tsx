@@ -23,6 +23,9 @@ const row: InventoryResult = {
   quantity: 3,
   assetTag: null,
   serialNumber: null,
+  recordedTotal: 3,
+  reorderThreshold: null,
+  stockState: 'disabled',
 };
 
 it('links by stable code with an accessible location-specific name', () => {

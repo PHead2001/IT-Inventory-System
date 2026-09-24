@@ -32,6 +32,12 @@ export default async function AssetPage({
         Back to inventory
       </Link>
       <h1 className="mt-4 break-words text-3xl font-semibold">{asset.name}</h1>
+      <Link
+        className="mt-3 inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
+        href={'/labels?asset=' + encodeURIComponent(asset.id)}
+      >
+        Print asset label
+      </Link>
       <p className="mt-2 text-slate-400">
         {asset.categoryName} · Serialized asset · {asset.status} · Version{' '}
         {asset.version}

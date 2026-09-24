@@ -60,3 +60,7 @@ Application rollback returns to a compatible previous deployment. Database recov
 ## External prerequisites
 
 Hosted projects, SMTP, Vercel connection/environment setup, branch protection, initial members, DNS and production authorization require owner setup. This code change does not activate delivery, alter production configuration/data, or run production migrations. An owner-only preview configuration issue must be reported separately after independent local/CI validation.
+
+### Inventory labels and deployment origin
+
+Inventory QR labels contain ordinary application destinations and must be generated for the stable origin of the environment where they will be used. Keep `APP_ORIGIN` unset for Vercel Preview so the existing `VERCEL_BRANCH_URL` resolution selects the branch preview. Set the stable canonical origin explicitly for production. Do not generate production labels with a commit-specific preview URL or copy preview labels into production; a missing canonical origin is an owner configuration prerequisite, not a reason to guess a domain. Without production `APP_ORIGIN`, QR label generation and absolute-URL scan input fail closed with a configuration message; internal relative paths and `LOC:`/`AST:` or bare exact-identifier lookup remain available. QR creation is local. A label does not grant access, and authentication/membership/RLS remain required after a scan. Existing deployment gates and migration delivery behavior are unchanged by this feature.

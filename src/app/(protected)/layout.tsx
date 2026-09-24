@@ -1,5 +1,13 @@
 import Link from 'next/link';
-import { Boxes, Map, MapPin, History } from 'lucide-react';
+import {
+  Boxes,
+  Map,
+  MapPin,
+  History,
+  LayoutDashboard,
+  ScanLine,
+  Tags,
+} from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
 import { logout } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
@@ -49,10 +57,31 @@ export default async function ApplicationLayout({
         >
           <Link
             className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/dashboard"
+          >
+            <LayoutDashboard size={18} />
+            Overview
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
             href="/inventory"
           >
             <Boxes size={18} />
             Inventory
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/scan"
+          >
+            <ScanLine size={18} />
+            Scan
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/labels"
+          >
+            <Tags size={18} />
+            Labels
           </Link>
           <Link
             className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"

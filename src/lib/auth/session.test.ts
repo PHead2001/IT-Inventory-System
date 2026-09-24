@@ -16,6 +16,9 @@ vi.mock('next/navigation', () => ({
     throw new Error('REDIRECT:' + path);
   },
 }));
+vi.mock('next/headers', () => ({
+  headers: async () => new Headers({ 'x-inventory-return': '/locations/ITC' }),
+}));
 import { requireMember } from './session.server';
 beforeEach(() => {
   vi.resetAllMocks();
@@ -32,7 +35,9 @@ it('rejects anonymous/invalid sessions before querying membership', async () => 
     data: { user: null },
     error: { message: 'invalid' },
   });
-  await expect(requireMember()).rejects.toThrow('REDIRECT:/login');
+  await expect(requireMember()).rejects.toThrow(
+    'REDIRECT:/login?next=%2Flocations%2FITC',
+  );
   expect(mocks.from).not.toHaveBeenCalled();
 });
 it.each([

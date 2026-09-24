@@ -34,6 +34,12 @@ export default async function LocationPage({
         All locations
       </Link>
       <h1 className="mt-4 text-3xl font-semibold">{location.name}</h1>
+      <Link
+        className="inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
+        href={'/labels?location=' + encodeURIComponent(location.code)}
+      >
+        Print location label
+      </Link>
       <p className="my-3 break-words text-slate-400">
         {location.breadcrumb} · {location.code} ·{' '}
         {!location.active
@@ -74,6 +80,18 @@ export default async function LocationPage({
         >
           Location history
         </Link>
+        <a
+          className="min-h-11 py-3 text-cyan-300 underline"
+          href={
+            '/api/exports/inventory?location=' +
+            encodeURIComponent(code) +
+            (filters.status === 'all' || filters.status === 'historical'
+              ? '&status=' + filters.status
+              : '')
+          }
+        >
+          Download location inventory CSV
+        </a>
       </div>
       <InventoryRows rows={result.rows} />
       <Pagination

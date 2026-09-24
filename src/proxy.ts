@@ -1,9 +1,15 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseConfig } from './lib/supabase/config';
+import { validReturnPath } from './features/scan/targets';
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // Replace any caller-supplied header with a value derived from the matched URL.
+  request.headers.set(
+    'x-inventory-return',
+    validReturnPath(request.nextUrl.pathname) ?? '',
+  );
+  let response = NextResponse.next({ request: { headers: request.headers } });
   response.headers.set('Cache-Control', 'private, no-store');
   const { url, key } = supabaseConfig();
   const supabase = createServerClient(url, key, {
@@ -13,7 +19,7 @@ export async function proxy(request: NextRequest) {
         const previousCookies = response.cookies.getAll();
         const previousHeaders = new Headers(response.headers);
         values.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        response = NextResponse.next({ request: { headers: request.headers } });
         previousHeaders.forEach((value, name) => {
           if (!name.startsWith('x-middleware-'))
             response.headers.set(name, value);

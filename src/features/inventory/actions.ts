@@ -46,6 +46,7 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
     const result = mutationResultSchema.safeParse(data);
     if (!result.success) return mutationError(undefined);
     revalidatePath('/inventory', 'layout');
+    revalidatePath('/dashboard');
     revalidatePath('/locations', 'layout');
     revalidatePath('/history');
     return {
