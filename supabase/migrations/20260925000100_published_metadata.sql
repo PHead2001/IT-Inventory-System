@@ -651,14 +651,25 @@ $$;
 create function public.metadata_draft_save(p_request_id uuid,p_payload jsonb) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
 declare actor uuid:=auth.uid(); actor_name text; normalized jsonb; replay jsonb;
-  category_id uuid; expected bigint; definition jsonb; draft public.category_form_revisions%rowtype;
+  category_id uuid; expected bigint; expected_draft uuid; expected_published uuid;
+  definition jsonb; draft public.category_form_revisions%rowtype;
   next_number bigint; category_row public.categories%rowtype; raw_version text;
 begin
   select display_name into actor_name from public.app_members where user_id=actor
     and active and role='staff' and can_manage_configuration for share;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
-  perform private.inventory_payload(p_payload,array['category_id','expected_draft_version','definition']);
+  perform private.inventory_payload(p_payload,array['category_id','expected_actor_id',
+    'expected_draft_id','expected_draft_version','expected_published_revision_id','definition']);
+  if private.inventory_uuid(p_payload,'expected_actor_id') is distinct from actor then
+    raise exception using errcode='P1001',message='actor_changed'; end if;
   category_id:=private.inventory_uuid(p_payload,'category_id');
+  if not(p_payload ? 'expected_draft_id') or
+    not (jsonb_typeof(p_payload->'expected_draft_id')='null' or
+      (jsonb_typeof(p_payload->'expected_draft_id')='string' and
+        (p_payload->>'expected_draft_id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')) then
+    raise exception using errcode='P1012',message='invalid_input'; end if;
+  expected_draft:=private.inventory_uuid(p_payload,'expected_draft_id',false);
+  expected_published:=private.inventory_uuid(p_payload,'expected_published_revision_id');
   raw_version:=p_payload->>'expected_draft_version';
   if jsonb_typeof(p_payload->'expected_draft_version') not in ('string','number')
     or not coalesce(raw_version ~ '^(0|[1-9][0-9]{0,18})$',false) then
@@ -668,26 +679,34 @@ begin
       and raw_version::numeric>9007199254740991) then
     raise exception using errcode='P1012',message='invalid_input'; end if;
   expected:=raw_version::bigint;
+  if (expected_draft is null) is distinct from (expected=0) then
+    raise exception using errcode='P1012',message='invalid_input'; end if;
   definition:=p_payload->'definition';
   if definition is null or octet_length(definition::text)>262144 then
     raise exception using errcode='P1022',message='draft_resource_limit'; end if;
-  normalized:=jsonb_build_object('category_id',category_id,'expected_draft_version',expected::text,'definition',definition);
+  normalized:=jsonb_build_object('category_id',category_id,'expected_actor_id',actor,
+    'expected_draft_id',expected_draft,'expected_draft_version',expected::text,
+    'expected_published_revision_id',expected_published,'definition',definition);
   replay:=private.inventory_receipt(actor,p_request_id,'metadata_draft_save',normalized);
   if replay is not null then return replay; end if;
   perform private.configuration_catalog_lock(false);
   select * into category_row from public.categories where id=category_id for share;
   if not found or not category_row.active or category_row.removed_at is not null then
     raise exception using errcode='P1011',message='invalid_category'; end if;
+  if category_row.published_form_revision_id is distinct from expected_published then
+    raise exception using errcode='P1002',message='stale_form'; end if;
   select * into draft from public.category_form_revisions r
     where r.category_id=(p_payload->>'category_id')::uuid and r.status='draft' for update;
   if not found then
-    if expected<>0 then raise exception using errcode='P1002',message='stale_draft'; end if;
+    if expected_draft is not null or expected<>0 then
+      raise exception using errcode='P1002',message='stale_draft'; end if;
     select coalesce(max(revision_number),0)+1 into next_number from public.category_form_revisions r
       where r.category_id=(p_payload->>'category_id')::uuid;
     insert into public.category_form_revisions(category_id,status,revision_number,draft_definition)
       values(category_id,'draft',next_number,definition) returning * into draft;
   else
-    if draft.draft_version<>expected then raise exception using errcode='P1002',message='stale_draft'; end if;
+    if draft.id is distinct from expected_draft or draft.draft_version<>expected then
+      raise exception using errcode='P1002',message='stale_draft'; end if;
     update public.category_form_revisions set draft_version=draft_version+1,draft_definition=definition
       where id=draft.id returning * into draft;
   end if;
@@ -701,22 +720,35 @@ $$;
 create function public.metadata_draft_discard(p_request_id uuid,p_payload jsonb) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
 declare actor uuid:=auth.uid(); normalized jsonb; replay jsonb; category_id uuid;
-  expected bigint; draft public.category_form_revisions%rowtype;
+  expected bigint; expected_draft uuid; expected_published uuid;
+  draft public.category_form_revisions%rowtype; category_row public.categories%rowtype;
 begin
   perform 1 from public.app_members where user_id=actor and active and role='staff'
     and can_manage_configuration for share;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
-  perform private.inventory_payload(p_payload,array['category_id','expected_draft_version']);
+  perform private.inventory_payload(p_payload,array['category_id','expected_actor_id',
+    'expected_draft_id','expected_draft_version','expected_published_revision_id']);
+  if private.inventory_uuid(p_payload,'expected_actor_id') is distinct from actor then
+    raise exception using errcode='P1001',message='actor_changed'; end if;
   category_id:=private.inventory_uuid(p_payload,'category_id');
+  expected_draft:=private.inventory_uuid(p_payload,'expected_draft_id');
   expected:=private.configuration_version(p_payload,'expected_draft_version');
-  normalized:=jsonb_build_object('category_id',category_id,'expected_draft_version',expected::text);
+  expected_published:=private.inventory_uuid(p_payload,'expected_published_revision_id');
+  normalized:=jsonb_build_object('category_id',category_id,'expected_actor_id',actor,
+    'expected_draft_id',expected_draft,'expected_draft_version',expected::text,
+    'expected_published_revision_id',expected_published);
   replay:=private.inventory_receipt(actor,p_request_id,'metadata_draft_discard',normalized);
   if replay is not null then return replay; end if;
   perform private.configuration_catalog_lock(false);
-  perform id from public.categories where id=category_id for share;
+  select * into category_row from public.categories where id=category_id for share;
+  if not found or not category_row.active or category_row.removed_at is not null then
+    raise exception using errcode='P1011',message='invalid_category'; end if;
+  if category_row.published_form_revision_id is distinct from expected_published then
+    raise exception using errcode='P1002',message='stale_form'; end if;
   select * into draft from public.category_form_revisions r
     where r.category_id=(p_payload->>'category_id')::uuid and r.status='draft' for update;
-  if not found or draft.draft_version<>expected then raise exception using errcode='P1002',message='stale_draft'; end if;
+  if not found or draft.id is distinct from expected_draft or draft.draft_version<>expected then
+    raise exception using errcode='P1002',message='stale_draft'; end if;
   delete from public.category_form_revisions where id=draft.id;
   replay:=jsonb_build_object('entity_id',draft.id,'version',null,'event_id',null,'changed',true);
   update private.mutation_requests set result=replay where actor_id=actor and request_id=p_request_id;
@@ -724,27 +756,39 @@ begin
 end;
 $$;
 
-create function public.metadata_publish_review(p_category_id uuid) returns jsonb
+create function public.metadata_publish_review(p_payload jsonb) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
 declare actor uuid:=auth.uid(); category_row public.categories%rowtype;
   draft public.category_form_revisions%rowtype; token_id uuid; q bigint; a bigint;
+  category_id uuid; expected_draft uuid; expected_published uuid; expected bigint;
 begin
   perform 1 from public.app_members where user_id=actor and active and role='staff'
     and can_manage_configuration for share;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
+  perform private.inventory_payload(p_payload,array['category_id','expected_actor_id',
+    'expected_draft_id','expected_draft_version','expected_published_revision_id']);
+  if private.inventory_uuid(p_payload,'expected_actor_id') is distinct from actor then
+    raise exception using errcode='P1001',message='actor_changed'; end if;
+  category_id:=private.inventory_uuid(p_payload,'category_id');
+  expected_draft:=private.inventory_uuid(p_payload,'expected_draft_id');
+  expected:=private.configuration_version(p_payload,'expected_draft_version');
+  expected_published:=private.inventory_uuid(p_payload,'expected_published_revision_id');
   perform private.configuration_catalog_lock(false);
-  select * into category_row from public.categories where id=p_category_id for share;
+  select * into category_row from public.categories where id=category_id for share;
   if not found or not category_row.active or category_row.removed_at is not null then
     raise exception using errcode='P1011',message='invalid_category'; end if;
-  select * into draft from public.category_form_revisions where category_id=p_category_id and status='draft';
-  if not found then raise exception using errcode='P1021',message='no_draft'; end if;
-  select count(*) into q from public.quantity_items where category_id=p_category_id;
-  select count(*) into a from public.serialized_assets where category_id=p_category_id;
+  select * into draft from public.category_form_revisions r
+    where r.category_id=(p_payload->>'category_id')::uuid and r.status='draft' for share;
+  if not found or draft.id is distinct from expected_draft or draft.draft_version<>expected
+    or category_row.published_form_revision_id is distinct from expected_published then
+    raise exception using errcode='P1002',message='stale_form'; end if;
+  select count(*) into q from public.quantity_items i where i.category_id=(p_payload->>'category_id')::uuid;
+  select count(*) into a from public.serialized_assets a1 where a1.category_id=(p_payload->>'category_id')::uuid;
   insert into private.form_impact_reviews(actor_id,category_id,draft_id,draft_version,published_id,
     affected_quantity,affected_assets,reference_fingerprint)
-    values(actor,p_category_id,draft.id,draft.draft_version,category_row.published_form_revision_id,
-      q,a,private.metadata_reference_fingerprint(p_category_id)) returning token into token_id;
-  return jsonb_build_object('token',token_id,'category_id',p_category_id,'draft_id',draft.id,
+    values(actor,category_id,draft.id,draft.draft_version,category_row.published_form_revision_id,
+      q,a,private.metadata_reference_fingerprint(category_id)) returning token into token_id;
+  return jsonb_build_object('token',token_id,'category_id',category_id,'draft_id',draft.id,
     'draft_version',draft.draft_version::text,'published_revision_id',category_row.published_form_revision_id,
     'affected_quantity',q::text,'affected_assets',a::text,
     'expires_at',clock_timestamp()+interval '15 minutes');
@@ -754,20 +798,24 @@ $$;
 create function public.metadata_publish(p_request_id uuid,p_payload jsonb) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
 declare actor uuid:=auth.uid(); actor_name text; normalized jsonb; replay jsonb;
-  category_id uuid; expected bigint; expected_published uuid; review_token uuid;
+  category_id uuid; expected bigint; expected_draft uuid; expected_published uuid; review_token uuid;
   category_row public.categories%rowtype; draft public.category_form_revisions%rowtype;
   reviewed private.form_impact_reviews%rowtype; event_id uuid;
 begin
   select display_name into actor_name from public.app_members where user_id=actor
     and active and role='staff' and can_manage_configuration for share;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
-  perform private.inventory_payload(p_payload,array['category_id','expected_draft_version',
-    'expected_published_revision_id','review_token']);
+  perform private.inventory_payload(p_payload,array['category_id','expected_actor_id',
+    'expected_draft_id','expected_draft_version','expected_published_revision_id','review_token']);
+  if private.inventory_uuid(p_payload,'expected_actor_id') is distinct from actor then
+    raise exception using errcode='P1001',message='actor_changed'; end if;
   category_id:=private.inventory_uuid(p_payload,'category_id');
+  expected_draft:=private.inventory_uuid(p_payload,'expected_draft_id');
   expected:=private.configuration_version(p_payload,'expected_draft_version');
-  expected_published:=private.inventory_uuid(p_payload,'expected_published_revision_id',false);
+  expected_published:=private.inventory_uuid(p_payload,'expected_published_revision_id');
   review_token:=private.inventory_uuid(p_payload,'review_token');
-  normalized:=jsonb_build_object('category_id',category_id,'expected_draft_version',expected::text,
+  normalized:=jsonb_build_object('category_id',category_id,'expected_actor_id',actor,
+    'expected_draft_id',expected_draft,'expected_draft_version',expected::text,
     'expected_published_revision_id',expected_published,'review_token',review_token);
   replay:=private.inventory_receipt(actor,p_request_id,'metadata_publish',normalized);
   if replay is not null then return replay; end if;
@@ -777,7 +825,7 @@ begin
     raise exception using errcode='P1011',message='invalid_category'; end if;
   select * into draft from public.category_form_revisions r
     where r.category_id=(p_payload->>'category_id')::uuid and r.status='draft' for update;
-  if not found or draft.draft_version<>expected or
+  if not found or draft.id is distinct from expected_draft or draft.draft_version<>expected or
     category_row.published_form_revision_id is distinct from expected_published then
     raise exception using errcode='P1002',message='stale_form'; end if;
   select * into reviewed from private.form_impact_reviews where token=review_token and actor_id=actor for update;
@@ -1208,12 +1256,12 @@ revoke all on function private.metadata_immutable(),private.metadata_identity_im
   private.metadata_legacy_guard(),private.metadata_mutate_v2(uuid,jsonb,text,text),
   private.metadata_option_path(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.metadata_draft_save(uuid,jsonb),public.metadata_draft_discard(uuid,jsonb),
-  public.metadata_publish_review(uuid),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
+  public.metadata_publish_review(jsonb),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
   public.metadata_describe_values(jsonb,uuid),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
   public.asset_create_v2(uuid,jsonb),public.asset_update_v2(uuid,jsonb)
   from public,anon,authenticated,service_role;
 grant execute on function public.metadata_draft_save(uuid,jsonb),public.metadata_draft_discard(uuid,jsonb),
-  public.metadata_publish_review(uuid),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
+  public.metadata_publish_review(jsonb),public.metadata_publish(uuid,jsonb),public.metadata_form_get(uuid),
   public.metadata_describe_values(jsonb,uuid),public.quantity_create_v2(uuid,jsonb),public.quantity_update_v2(uuid,jsonb),
   public.asset_create_v2(uuid,jsonb),public.asset_update_v2(uuid,jsonb) to authenticated;
 

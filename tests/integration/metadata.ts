@@ -22,6 +22,7 @@ const owner = new Client({
   application_name: 'metadata-integration',
 });
 const actors: SupabaseClient[] = [];
+const actorIds = new WeakMap<SupabaseClient, string>();
 const uid = randomUUID;
 async function actor(role: 'staff' | 'viewer', maintainer = false) {
   const email = `${uid()}@example.test`;
@@ -43,7 +44,22 @@ async function actor(role: 'staff' | 'viewer', maintainer = false) {
   });
   if (signed.error) throw signed.error;
   actors.push(client);
+  actorIds.set(client, id);
   return { id, client };
+}
+async function currentBaseline(client: SupabaseClient, categoryId: string) {
+  const { data, error } = await client.rpc(
+    'metadata_form_get' as never,
+    {
+      p_category_id: categoryId,
+    } as never,
+  );
+  assert.equal(error, null, error?.message);
+  return data as {
+    draft_id: string | null;
+    draft_version: string | null;
+    published_revision_id: string;
+  };
 }
 async function rpc(
   client: SupabaseClient,
@@ -51,6 +67,24 @@ async function rpc(
   payload: Record<string, unknown>,
   requestId = uid(),
 ) {
+  if (
+    [
+      'metadata_draft_save',
+      'metadata_draft_discard',
+      'metadata_publish',
+    ].includes(operation)
+  ) {
+    const current = await currentBaseline(
+      client,
+      payload.category_id as string,
+    );
+    payload = {
+      expected_actor_id: actorIds.get(client),
+      expected_draft_id: current.draft_id,
+      expected_published_revision_id: current.published_revision_id,
+      ...payload,
+    };
+  }
   return client.rpc(
     operation as never,
     { p_request_id: requestId, p_payload: payload } as never,
@@ -152,13 +186,23 @@ async function save(
   });
 }
 async function review(client: SupabaseClient, categoryId: string) {
+  const current = await currentBaseline(client, categoryId);
   const { data, error } = await client.rpc(
     'metadata_publish_review' as never,
-    { p_category_id: categoryId } as never,
+    {
+      p_payload: {
+        category_id: categoryId,
+        expected_actor_id: actorIds.get(client),
+        expected_draft_id: current.draft_id,
+        expected_draft_version: current.draft_version,
+        expected_published_revision_id: current.published_revision_id,
+      },
+    } as never,
   );
   assert.equal(error, null, error?.message);
   return data as {
     token: string;
+    draft_id: string;
     draft_version: string;
     published_revision_id: string;
     affected_quantity: string;
@@ -168,6 +212,7 @@ async function publish(client: SupabaseClient, categoryId: string) {
   const impact = await review(client, categoryId);
   return success(client, 'metadata_publish', {
     category_id: categoryId,
+    expected_draft_id: impact.draft_id,
     expected_draft_version: impact.draft_version,
     expected_published_revision_id: impact.published_revision_id,
     review_token: impact.token,
@@ -218,6 +263,129 @@ async function main() {
     '42501',
     directMetadataUpdate.error?.message,
   );
+
+  const originalPublished = (baseline.data as { published_revision_id: string })
+    .published_revision_id;
+  const abaRequest = uid();
+  const abaDefinition = { fields: [], layout: [] };
+  const draftX = await success(
+    maintainer.client,
+    'metadata_draft_save',
+    {
+      category_id: categoryId,
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: originalPublished,
+      definition: abaDefinition,
+    },
+    abaRequest,
+  );
+  const xId = draftX.draft_id as string;
+  await success(maintainer.client, 'metadata_draft_discard', {
+    category_id: categoryId,
+    expected_draft_id: xId,
+    expected_draft_version: '1',
+    expected_published_revision_id: originalPublished,
+  });
+  const draftY = await save(maintainer.client, categoryId, '0', abaDefinition);
+  assert.notEqual(draftY.draft_id, xId);
+  await failure(
+    maintainer.client,
+    'metadata_draft_save',
+    {
+      category_id: categoryId,
+      expected_draft_id: xId,
+      expected_draft_version: '1',
+      expected_published_revision_id: originalPublished,
+      definition: abaDefinition,
+    },
+    'P1002',
+  );
+  await failure(
+    maintainer.client,
+    'metadata_draft_discard',
+    {
+      category_id: categoryId,
+      expected_draft_id: xId,
+      expected_draft_version: '1',
+      expected_published_revision_id: originalPublished,
+    },
+    'P1002',
+  );
+  const staleDraftReview = await maintainer.client.rpc(
+    'metadata_publish_review' as never,
+    {
+      p_payload: {
+        category_id: categoryId,
+        expected_actor_id: maintainer.id,
+        expected_draft_id: xId,
+        expected_draft_version: '1',
+        expected_published_revision_id: originalPublished,
+      },
+    } as never,
+  );
+  assert.equal(staleDraftReview.error?.code, 'P1002');
+  await failure(
+    maintainer.client,
+    'metadata_publish',
+    {
+      category_id: categoryId,
+      expected_draft_id: xId,
+      expected_draft_version: '1',
+      expected_published_revision_id: originalPublished,
+      review_token: uid(),
+    },
+    'P1002',
+  );
+  const replayX = await success(
+    maintainer.client,
+    'metadata_draft_save',
+    {
+      category_id: categoryId,
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: originalPublished,
+      definition: abaDefinition,
+    },
+    abaRequest,
+  );
+  assert.deepEqual(
+    replayX,
+    draftX,
+    'authorized receipt replay precedes live draft check',
+  );
+  await failure(
+    maintainer.client,
+    'metadata_draft_save',
+    {
+      category_id: categoryId,
+      expected_actor_id: staff.id,
+      expected_draft_id: draftY.draft_id,
+      expected_draft_version: '1',
+      expected_published_revision_id: originalPublished,
+      definition: abaDefinition,
+    },
+    'P1001',
+  );
+  const wrongActorReview = await maintainer.client.rpc(
+    'metadata_publish_review' as never,
+    {
+      p_payload: {
+        category_id: categoryId,
+        expected_actor_id: staff.id,
+        expected_draft_id: draftY.draft_id,
+        expected_draft_version: '1',
+        expected_published_revision_id: originalPublished,
+      },
+    } as never,
+  );
+  assert.equal(wrongActorReview.error?.code, 'P1001');
+  await success(maintainer.client, 'metadata_draft_discard', {
+    category_id: categoryId,
+    expected_draft_id: draftY.draft_id,
+    expected_draft_version: '1',
+    expected_published_revision_id: originalPublished,
+  });
 
   const malformed = await save(maintainer.client, categoryId, '0', {
     fields: [],
@@ -515,6 +683,55 @@ async function main() {
   await save(maintainer.client, categoryId, '0', schema.definition);
   const published = await publish(maintainer.client, categoryId);
   const revision = published.published_revision_id as string;
+  await failure(
+    maintainer.client,
+    'metadata_draft_save',
+    {
+      category_id: categoryId,
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: originalPublished,
+      definition: schema.definition,
+    },
+    'P1002',
+  );
+  const afterPublicationDraft = await save(
+    maintainer.client,
+    categoryId,
+    '0',
+    schema.definition,
+  );
+  const oldPublicationReview = await maintainer.client.rpc(
+    'metadata_publish_review' as never,
+    {
+      p_payload: {
+        category_id: categoryId,
+        expected_actor_id: maintainer.id,
+        expected_draft_id: afterPublicationDraft.draft_id,
+        expected_draft_version: '1',
+        expected_published_revision_id: originalPublished,
+      },
+    } as never,
+  );
+  assert.equal(oldPublicationReview.error?.code, 'P1002');
+  await failure(
+    maintainer.client,
+    'metadata_publish',
+    {
+      category_id: categoryId,
+      expected_draft_id: afterPublicationDraft.draft_id,
+      expected_draft_version: '1',
+      expected_published_revision_id: originalPublished,
+      review_token: uid(),
+    },
+    'P1002',
+  );
+  await success(maintainer.client, 'metadata_draft_discard', {
+    category_id: categoryId,
+    expected_draft_id: afterPublicationDraft.draft_id,
+    expected_draft_version: '1',
+    expected_published_revision_id: revision,
+  });
   assert.equal(
     (
       await viewer.client.rpc(

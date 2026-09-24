@@ -1215,10 +1215,7 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
-      metadata_publish_review: {
-        Args: { p_category_id: string }
-        Returns: Json
-      }
+      metadata_publish_review: { Args: { p_payload: Json }; Returns: Json }
       quantity_adjust: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
