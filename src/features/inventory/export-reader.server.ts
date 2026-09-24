@@ -10,6 +10,10 @@ export async function readBoundedJson(
   response: Response,
   maxBytes = maxSnapshotBytes,
   checkDeadline: () => void = () => {},
+  onStage?: (
+    stage: 'raw_chunk' | 'raw_read' | 'json_parsed',
+    bytes: number,
+  ) => void,
 ): Promise<unknown> {
   checkDeadline();
   if (!response.body) throw new Error('empty_export_response');
@@ -23,7 +27,9 @@ export async function readBoundedJson(
       checkDeadline();
       if (done) break;
       bytes += value.byteLength;
+      onStage?.('raw_chunk', bytes);
       if (bytes > maxBytes) {
+        onStage?.('raw_read', bytes);
         await reader.cancel();
         throw new SnapshotTooLargeError();
       }
@@ -43,10 +49,12 @@ export async function readBoundedJson(
     checkDeadline();
   }
   checkDeadline();
+  onStage?.('raw_read', bytes);
   const parsed = JSON.parse(
     new TextDecoder('utf-8', { fatal: true }).decode(complete),
   );
   checkDeadline();
+  onStage?.('json_parsed', bytes);
   return parsed;
 }
 
@@ -57,6 +65,10 @@ export async function requestExportSnapshot(input: {
   payload: Record<string, unknown>;
   signal: AbortSignal;
   checkDeadline: () => void;
+  onStage?: (
+    stage: 'raw_chunk' | 'raw_read' | 'json_parsed',
+    bytes: number,
+  ) => void;
 }): Promise<{ data: unknown; code?: string }> {
   input.checkDeadline();
   const response = await fetch(
@@ -79,6 +91,7 @@ export async function requestExportSnapshot(input: {
     response,
     response.ok ? maxSnapshotBytes : 65536,
     input.checkDeadline,
+    input.onStage,
   );
   input.checkDeadline();
   if (!response.ok) {

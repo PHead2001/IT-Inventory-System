@@ -68,7 +68,11 @@ export class ExportTooLargeError extends Error {
   }
 }
 const csvLimit = 3 * 1024 * 1024;
-function boundedCsv(lines: Iterable<string>, checkDeadline: () => void) {
+function boundedCsv(
+  lines: Iterable<string>,
+  checkDeadline: () => void,
+  onRow?: (bytes: number) => void,
+) {
   const encoder = new TextEncoder();
   const chunks = ['\uFEFF'];
   let size = encoder.encode(chunks[0]).byteLength;
@@ -78,8 +82,14 @@ function boundedCsv(lines: Iterable<string>, checkDeadline: () => void) {
     const next = line + '\r\n';
     size += encoder.encode(next).byteLength;
     checkDeadline();
-    if (size > csvLimit) throw new ExportTooLargeError();
+    if (size > csvLimit) {
+      onRow?.(size);
+      checkDeadline();
+      throw new ExportTooLargeError();
+    }
     chunks.push(next);
+    onRow?.(size);
+    checkDeadline();
   }
   checkDeadline();
   const complete = chunks.join('');
@@ -93,6 +103,7 @@ export function exportCsv(
   environment: 'Production' | 'Preview',
   includeCustom = false,
   checkDeadline: () => void = () => {},
+  onRow?: (bytes: number) => void,
 ): { csv: string; exportedAt: string } {
   checkDeadline();
   if (type === 'inventory') {
@@ -144,7 +155,7 @@ export function exportCsv(
     }
     return {
       exportedAt,
-      csv: boundedCsv(lines(), checkDeadline),
+      csv: boundedCsv(lines(), checkDeadline, onRow),
     };
   }
   const parsed = snapshot(lowStockRow).parse(input);
@@ -195,6 +206,6 @@ export function exportCsv(
   }
   return {
     exportedAt,
-    csv: boundedCsv(lines(), checkDeadline),
+    csv: boundedCsv(lines(), checkDeadline, onRow),
   };
 }

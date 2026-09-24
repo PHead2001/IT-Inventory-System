@@ -19,18 +19,37 @@ function response(chunks: Uint8Array[]) {
 describe('bounded raw export response', () => {
   it('accepts exactly the configured UTF-8 byte limit before parsing', async () => {
     const encoded = new TextEncoder().encode('{"x":"😀"}');
+    const onStage = vi.fn();
     expect(
       await readBoundedJson(
         response([encoded.subarray(0, 5), encoded.subarray(5)]),
         encoded.length,
+        () => {},
+        onStage,
       ),
     ).toEqual({ x: '😀' });
+    expect(onStage.mock.calls).toEqual([
+      ['raw_chunk', 5],
+      ['raw_chunk', encoded.length],
+      ['raw_read', encoded.length],
+      ['json_parsed', encoded.length],
+    ]);
   });
   it('rejects a response one byte above the limit before JSON parsing', async () => {
     const encoded = new TextEncoder().encode('{"x":"😀"}');
+    const onStage = vi.fn();
     await expect(
-      readBoundedJson(response([encoded]), encoded.length - 1),
+      readBoundedJson(
+        response([encoded]),
+        encoded.length - 1,
+        () => {},
+        onStage,
+      ),
     ).rejects.toBeInstanceOf(SnapshotTooLargeError);
+    expect(onStage.mock.calls).toEqual([
+      ['raw_chunk', encoded.length],
+      ['raw_read', encoded.length],
+    ]);
   });
   it('honors the production 2 MiB UTF-8 boundary before JSON parsing', async () => {
     const exact = new TextEncoder().encode(
