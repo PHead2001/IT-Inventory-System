@@ -5,8 +5,26 @@ import QRCode from 'qrcode';
 import JsBarcode from 'jsbarcode';
 import { barcodeCompatibleTag } from '@/features/scan/targets';
 
+const qrCache = new Map<string, Promise<string>>();
+function qrImage(url: string): Promise<string> {
+  const cached = qrCache.get(url);
+  if (cached) return cached;
+  if (qrCache.size >= 500) qrCache.clear();
+  const rendered = QRCode.toDataURL(url, {
+    errorCorrectionLevel: 'M',
+    margin: 4,
+    width: 320,
+    color: { dark: '#000000', light: '#ffffff' },
+  }).catch((error: unknown) => {
+    qrCache.delete(url);
+    throw error;
+  });
+  qrCache.set(url, rendered);
+  return rendered;
+}
+
 export type LabelRecord = {
-  kind: 'location' | 'asset';
+  kind: 'location' | 'asset' | 'quantity';
   key: string;
   name: string;
   context: string;
@@ -18,6 +36,7 @@ export type LabelSize = '70x35' | '90x50';
 
 export function barcodePayload(record: LabelRecord): string | null {
   if (record.kind === 'location') return 'LOC:' + record.key;
+  if (record.kind === 'quantity') return null;
   return record.barcode && barcodeCompatibleTag(record.barcode)
     ? 'AST:' + record.barcode
     : null;
@@ -63,9 +82,9 @@ export function LabelSheet({
         className="label-print-root mt-6 flex flex-wrap content-start gap-[3mm] rounded-xl bg-white p-[3mm] text-black"
         aria-label="Print preview"
       >
-        {records.map((record) => (
+        {records.map((record, index) => (
           <LabelCard
-            key={record.kind + record.key}
+            key={record.kind + record.key + ':' + index}
             record={record}
             origin={origin}
             preview={preview}
@@ -102,12 +121,7 @@ function LabelCard({
   const url = origin + record.path;
   useEffect(() => {
     let current = true;
-    QRCode.toDataURL(url, {
-      errorCorrectionLevel: 'M',
-      margin: 4,
-      width: 320,
-      color: { dark: '#000000', light: '#ffffff' },
-    })
+    qrImage(url)
       .then((image) => {
         if (current) {
           setQr(image);
@@ -162,6 +176,7 @@ function LabelCard({
       className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
       data-code-ready={Boolean(identifierFits && (qr || useBarcode))}
+      data-code-fallback={format === 'code128' && !useBarcode}
     >
       {preview && (
         <strong className="mb-[1mm] text-[8pt] uppercase tracking-wide">

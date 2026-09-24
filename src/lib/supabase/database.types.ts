@@ -537,6 +537,19 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_label_resolve: { Args: { p_selection: Json }; Returns: Json }
+      inventory_label_search: {
+        Args: {
+          p_category_id?: string
+          p_location_code?: string
+          p_page?: number
+          p_page_size?: number
+          p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
       inventory_search: {
         Args: {
           p_category_id?: string
