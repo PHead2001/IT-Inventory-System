@@ -63,6 +63,66 @@ async function createQuantity(page: Page, name: string, count = 0) {
   ).toBe(true);
 }
 
+test('archiving stocked quantity clears every location in one reviewed operation', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  const name = 'Archive browser stock ' + crypto.randomUUID();
+  await createQuantity(page, name, 8);
+  const detailUrl = page.url();
+  const receive = await openForm(page, 'Receive stock');
+  await choose(receive, 'Receive at', 'ITC-S1B');
+  await receive.getByLabel('Quantity to receive').fill('4');
+  await receive.getByLabel('Reason (required)').fill('Second shelf delivery');
+  await confirm(receive, 'Receive stock');
+  await version(page, 2);
+  await page.reload();
+  const archive = await openForm(
+    page,
+    'Archive quantity definition and clear stock',
+  );
+  await expect(
+    archive.getByRole('heading', { name: '12 units to remove' }),
+  ).toBeVisible();
+  await expect(archive.getByText(/1A.*8 → 0 units/)).toBeVisible();
+  await expect(archive.getByText(/1B.*4 → 0 units/)).toBeVisible();
+  await archive.getByLabel('Reason (required)').fill('Obsolete item removed');
+  await archive.getByRole('checkbox', { name: /I understand/ }).check();
+  await archive
+    .getByRole('button', { name: 'Review archive and clear stock' })
+    .click();
+  await expect(
+    archive.getByRole('region', { name: 'Review changes' }),
+  ).toContainText('12 units from 2 locations');
+  await archive
+    .getByRole('button', { name: 'Confirm archive and clear stock' })
+    .click();
+  await version(page, 3);
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+  ).toBeVisible();
+  await expect(page.getByText(/Quantity inventory · Archived/)).toBeVisible();
+  await page.getByRole('link', { name: 'View all item history' }).click();
+  const event = page.locator('li').filter({
+    has: page.getByRole('heading', { name: 'Definition archived' }),
+  });
+  await expect(
+    event.getByText('Removed 12 units across 2 locations.'),
+  ).toBeVisible();
+  await expect(event.getByText(/8 → 0 units \(-8\)/)).toBeVisible();
+  await expect(event.getByText(/4 → 0 units \(-4\)/)).toBeVisible();
+  await page.goto(detailUrl);
+  const restore = await openForm(page, 'Restore quantity definition');
+  await restore.getByLabel('Reason (required)').fill('Definition needed again');
+  await confirm(restore, 'Restore quantity definition');
+  await version(page, 4);
+  await expect(
+    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+  ).toBeVisible();
+});
+
 test('inventory destination tree navigates ancestors without accepting them as destinations', async ({
   page,
 }) => {
@@ -198,11 +258,20 @@ test('quantity core persists multi-location receives, partial and all transfers,
     await version(page, 7 + index);
     await page.reload();
   }
-  form = await openForm(page, 'Archive quantity definition');
+  form = await openForm(page, 'Archive quantity definition and clear stock');
   await form
     .getByLabel('Reason (required)')
     .fill('Definition no longer needed');
-  await confirm(form, 'Archive quantity definition');
+  await form.getByRole('checkbox', { name: /I understand/ }).check();
+  await form
+    .getByRole('button', { name: 'Review archive and clear stock' })
+    .click();
+  await expect(
+    form.getByRole('region', { name: 'Review changes' }),
+  ).toBeVisible();
+  await form
+    .getByRole('button', { name: 'Confirm archive and clear stock' })
+    .click();
   await version(page, 9);
   await expect(page.getByText(/Quantity inventory · Archived/)).toBeVisible();
   form = await openForm(page, 'Restore quantity definition');

@@ -53,6 +53,46 @@ async function generatedLocationQr(page: Page, code = rootCode) {
   return { card, source: source! };
 }
 
+async function verifiedPreviewPdf(page: Page, destination: string) {
+  const cards = page.locator('.label-card');
+  await expect(page.locator('.label-card[data-code-ready="true"]')).toHaveCount(
+    await cards.count(),
+  );
+  await page.evaluate(() => {
+    window.print = () => {
+      document.body.dataset.verifiedPrint =
+        document
+          .querySelector('.label-print-root')
+          ?.getAttribute('data-print-authorized') ?? 'missing';
+      window.dispatchEvent(new Event('afterprint'));
+    };
+  });
+  await page.getByRole('button', { name: /Print selected labels/ }).click();
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-verified-print',
+    'true',
+  );
+  await expect(page.locator('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  // page.pdf bypasses the browser dialog; briefly mirror its verified print
+  // state only to inspect physical layout, then revoke it in the test harness.
+  await page
+    .locator('.label-print-root')
+    .evaluate((node) => node.setAttribute('data-print-authorized', 'true'));
+  try {
+    return await page.pdf({
+      path: destination,
+      preferCSSPageSize: true,
+      printBackground: true,
+    });
+  } finally {
+    await page
+      .locator('.label-print-root')
+      .evaluate((node) => node.removeAttribute('data-print-authorized'));
+  }
+}
+
 test('printed QR and Code 128 decode from rendered label cards with physical size and page breaks', async ({
   page,
 }, testInfo) => {
@@ -128,11 +168,13 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     .getByRole('button', { name: 'Prepare full print preview' })
     .click();
   await expect(page.locator('.label-card')).toHaveCount(11);
-  const pdf = await page.pdf({
-    path: testInfo.outputPath('labels-letter.pdf'),
-    preferCSSPageSize: true,
-    printBackground: true,
-  });
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('.label-print-root')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  const pdf = await verifiedPreviewPdf(
+    page,
+    testInfo.outputPath('labels-letter.pdf'),
+  );
   const pdfText = pdf.toString('latin1');
   expect((pdfText.match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(1);
   expect(pdfText).toMatch(/\/MediaBox\s*\[\s*0\s+0\s+612\s+792\s*\]/);
@@ -141,11 +183,25 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     path: testInfo.outputPath('labels-phone.png'),
     fullPage: true,
   });
+  const phoneLayout = await page.evaluate(() => ({
+    viewport: innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    offenders: [...document.querySelectorAll('body *')]
+      .filter(
+        (element) => element.getBoundingClientRect().right > innerWidth + 1,
+      )
+      .slice(0, 8)
+      .map((element) => ({
+        tag: element.tagName,
+        className: element.className,
+        width: Math.round(element.getBoundingClientRect().width),
+        right: Math.round(element.getBoundingClientRect().right),
+      })),
+  }));
   expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
+    phoneLayout.scrollWidth,
+    JSON.stringify(phoneLayout),
+  ).toBeLessThanOrEqual(phoneLayout.viewport);
 });
 
 test('generated QR crosses the synthetic camera frame path and releases its stream', async ({
@@ -573,11 +629,10 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
       }),
     ),
   ).toBe(process.env.APP_ORIGIN + '/inventory/quantity/' + quantityId);
-  const pdf = await page.pdf({
-    path: testInfo.outputPath('mixed-label-queue.pdf'),
-    preferCSSPageSize: true,
-    printBackground: true,
-  });
+  const pdf = await verifiedPreviewPdf(
+    page,
+    testInfo.outputPath('mixed-label-queue.pdf'),
+  );
   expect(
     (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length,
   ).toBeGreaterThan(1);
@@ -599,9 +654,15 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(
     editor.getByRole('heading', { name: 'Fresh ' + quantityName }),
   ).toBeVisible();
+  // The prepared preview is now stale. Browser Ctrl/Cmd+P never runs the
+  // application's revalidation, so its print media must conceal the sheet.
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('.label-print-root')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
   await page.evaluate(() => {
     window.print = () => {
       document.body.dataset.printCalled = 'yes';
+      window.dispatchEvent(new Event('afterprint'));
     };
   });
   await page.getByRole('button', { name: /Print selected labels/ }).click();

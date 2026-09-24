@@ -773,6 +773,11 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      quantity_archive_and_clear: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_archive_review: { Args: { p_item_id: string }; Returns: Json }
       quantity_create: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json

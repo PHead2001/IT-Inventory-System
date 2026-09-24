@@ -35,6 +35,12 @@ it('keeps quantity identity as the canonical QR URL even when Code 128 is select
     screen.getAllByRole('img', { name: 'QR code for Cables' }),
   ).toHaveLength(2);
   expect(document.querySelectorAll('.label-card')).toHaveLength(2);
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  expect(document.querySelector('style')?.textContent).toContain(
+    '.label-print-root:not([data-print-authorized="true"]) { display: none !important; }',
+  );
 });
 
 it('shortens display text visibly while preserving the full stable identifier', () => {
