@@ -1,16 +1,24 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { PNG } from 'pngjs';
 const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
   resolve: vi.fn(),
   push: vi.fn(),
 }));
-vi.mock('@zxing/browser', () => ({
-  BrowserMultiFormatReader: class {
-    decodeFromConstraints = mocks.decode;
-  },
-}));
+vi.mock('@zxing/browser', async () => {
+  const { NotFoundException } = await import('@zxing/library');
+  return {
+    BrowserMultiFormatReader: class {
+      decodeFromConstraints = mocks.decode;
+      decodeFromCanvas() {
+        throw new NotFoundException();
+      }
+    },
+  };
+});
 vi.mock('./resolve.server', () => ({ resolveScan: mocks.resolve }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
 import { ScanPanel } from './scan-panel';
@@ -54,6 +62,55 @@ it('suppresses duplicate detections and stops before opening a record', async ()
   callback({ getText: () => 'LOC:ITC' });
   await waitFor(() => expect(mocks.push).toHaveBeenCalledTimes(1));
   expect(mocks.resolve).toHaveBeenCalledTimes(1);
+  expect(mocks.stop).toHaveBeenCalled();
+});
+it('passes a captured camera frame through the production fallback and resolver', async () => {
+  const png = PNG.sync.read(
+    readFileSync('tests/fixtures/qr/pr13-asset-label-zxing-miss.png'),
+  );
+  const canvas = {
+    width: png.width,
+    height: png.height,
+    getContext: () => ({
+      getImageData: () => ({
+        data: new Uint8ClampedArray(png.data),
+        width: png.width,
+        height: png.height,
+      }),
+    }),
+  } as unknown as HTMLCanvasElement;
+  mocks.decode.mockImplementationOnce(async function (
+    this: {
+      decodeFromCanvas: (frame: HTMLCanvasElement) => { getText(): string };
+    },
+    _constraints: unknown,
+    _video: unknown,
+    callback: (result: { getText(): string }) => void,
+  ) {
+    callback(this.decodeFromCanvas(canvas));
+    return { stop: mocks.stop };
+  });
+  mocks.resolve.mockResolvedValue({
+    status: 'found',
+    matches: [
+      {
+        path: '/inventory/assets/9fee7834-40a4-4983-94a1-6eee3ecad3ee',
+        state: 'active',
+      },
+    ],
+  });
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() =>
+    expect(mocks.resolve).toHaveBeenCalledWith(
+      'http://127.0.0.1:3000/inventory/assets/9fee7834-40a4-4983-94a1-6eee3ecad3ee',
+    ),
+  );
+  await waitFor(() =>
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/inventory/assets/9fee7834-40a4-4983-94a1-6eee3ecad3ee',
+    ),
+  );
   expect(mocks.stop).toHaveBeenCalled();
 });
 it('reports denied camera permission and leaves manual lookup usable', async () => {
