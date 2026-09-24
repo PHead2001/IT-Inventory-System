@@ -12,6 +12,7 @@ export type Database = {
       app_members: {
         Row: {
           active: boolean
+          can_manage_configuration: boolean
           created_at: string
           display_name: string
           role: string
@@ -20,6 +21,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          can_manage_configuration?: boolean
           created_at?: string
           display_name: string
           role: string
@@ -28,6 +30,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          can_manage_configuration?: boolean
           created_at?: string
           display_name?: string
           role?: string
@@ -428,6 +431,30 @@ export type Database = {
       }
     }
     Views: {
+      configuration_categories: {
+        Row: {
+          active: boolean | null
+          code: string | null
+          created_at: string | null
+          id: string | null
+          name: string | null
+          removed_at: string | null
+          sort_order: number | null
+          updated_at: string | null
+          version: string | null
+        }
+        Relationships: []
+      }
+      configuration_label_defaults: {
+        Row: {
+          format: string | null
+          page: string | null
+          size: string | null
+          updated_at: string | null
+          version: string | null
+        }
+        Relationships: []
+      }
       inventory_history_rows: {
         Row: {
           actor_name: string | null
@@ -491,6 +518,26 @@ export type Database = {
       }
     }
     Functions: {
+      category_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      category_rename: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      category_removal_review: {
+        Args: { p_category_id: string; p_replacement_id?: string }
+        Returns: Json
+      }
+      category_remove: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      label_defaults_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       asset_correct_location: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json

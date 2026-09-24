@@ -4,24 +4,27 @@ import type { LocationRef } from '@/features/inventory/contracts-ui';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { resolveScan } from '@/features/scan/resolve.server';
 import { LabelSheet, type LabelRecord, type LabelSize } from './label-sheet';
+import type { LabelDefaults } from '@/features/configuration/queries.server';
 
 export function LabelDesigner({
   locations,
   origin,
   preview,
   initial = [],
+  defaults,
 }: {
   locations: LocationRef[];
   origin: string;
   preview: boolean;
   initial?: LabelRecord[];
+  defaults: LabelDefaults;
 }) {
   const [records, setRecords] = useState<LabelRecord[]>(initial);
   const [locationCode, setLocationCode] = useState('');
   const [assetText, setAssetText] = useState('');
-  const [size, setSize] = useState<LabelSize>('90x50');
-  const [page, setPage] = useState<'A4' | 'letter'>('letter');
-  const [format, setFormat] = useState<'qr' | 'code128'>('qr');
+  const [size, setSize] = useState<LabelSize>(defaults.size);
+  const [page, setPage] = useState<'A4' | 'letter'>(defaults.page);
+  const [format, setFormat] = useState<'qr' | 'code128'>(defaults.format);
   const [message, setMessage] = useState('');
   const print = () => {
     const ready = document.querySelectorAll(

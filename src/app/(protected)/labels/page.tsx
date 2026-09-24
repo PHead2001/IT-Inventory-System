@@ -4,12 +4,17 @@ import { getAssetLabel } from '@/features/labels/queries.server';
 import { LabelDesigner } from '@/features/labels/label-designer';
 import type { LabelRecord } from '@/features/labels/label-sheet';
 import { ASSET_UUID, LOCATION_CODE } from '@/features/scan/targets';
+import { getLabelDefaults } from '@/features/configuration/queries.server';
 export default async function LabelsPage({
   searchParams,
 }: {
   searchParams: Promise<{ asset?: string; location?: string }>;
 }) {
-  const [locations, params] = await Promise.all([getLocations(), searchParams]);
+  const [locations, params, defaults] = await Promise.all([
+    getLocations(),
+    searchParams,
+    getLabelDefaults(),
+  ]);
   let config: ReturnType<typeof getLabelOrigin>;
   try {
     config = getLabelOrigin();
@@ -58,6 +63,7 @@ export default async function LabelsPage({
         origin={origin}
         preview={preview}
         initial={initial}
+        defaults={defaults}
       />
     </>
   );

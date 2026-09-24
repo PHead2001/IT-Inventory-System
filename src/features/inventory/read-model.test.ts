@@ -154,6 +154,21 @@ describe('inventory read contracts', () => {
       { field: 'Name', before: 'Old', after: 'New' },
       { field: 'Category', before: 'Other', after: 'Cables' },
     ]);
+    const captured = mapHistory(
+      {
+        ...row,
+        before_metadata: { category_id: other, category_name: 'Former Other' },
+        after_metadata: { category_id: id, category_name: 'Original Cables' },
+      },
+      [location],
+      [
+        { id: other, name: 'Renamed Other', active: false },
+        { id, name: 'Renamed Cables', active: true },
+      ],
+    );
+    expect(captured.metadataChanges).toEqual([
+      { field: 'Category', before: 'Former Other', after: 'Original Cables' },
+    ]);
   });
   it('keeps retired asset location history and serial punctuation intact', () => {
     const row = searchRow.parse({

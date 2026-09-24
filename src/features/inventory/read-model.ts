@@ -155,12 +155,18 @@ export function mapHistory(
     serial_number: 'Serial number',
     reorder_threshold: 'Reorder threshold',
   };
-  const display = (key: string, value: unknown): string | null => {
+  const display = (
+    key: string,
+    value: unknown,
+    snapshot: Record<string, unknown>,
+  ): string | null => {
     if (key === 'reorder_threshold')
       return typeof value === 'number' ? String(value) : null;
     if (typeof value !== 'string') return null;
     if (key === 'category_id')
-      return categories.find((c) => c.id === value)?.name ?? 'Unknown category';
+      return typeof snapshot.category_name === 'string'
+        ? snapshot.category_name
+        : (categories.find((c) => c.id === value)?.name ?? 'Unknown category');
     return value;
   };
   const before = row.before_metadata ?? {};
@@ -190,8 +196,8 @@ export function mapHistory(
       .filter(([key]) => (before[key] ?? null) !== (after[key] ?? null))
       .map(([key, field]) => ({
         field,
-        before: display(key, before[key]),
-        after: display(key, after[key]),
+        before: display(key, before[key], before),
+        after: display(key, after[key], after),
       })),
   };
 }

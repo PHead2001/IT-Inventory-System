@@ -5,6 +5,7 @@ import {
 } from '@/features/inventory/queries.server';
 import { MutationForm } from '@/features/inventory/components/mutation-form';
 import { panel } from '@/features/inventory/components/read-ui';
+import Link from 'next/link';
 export default async function NewQuantityPage() {
   const { member } = await requireMember();
   if (member.role !== 'staff')
@@ -15,6 +16,17 @@ export default async function NewQuantityPage() {
     getCategories(),
     getLocations(),
   ]);
+  if (!categories.some((category) => category.active))
+    return (
+      <p role="alert">
+        An active category is required before staff can create inventory. Ask a
+        configuration maintainer to add one in{' '}
+        <Link className="underline" href="/settings">
+          Settings
+        </Link>
+        .
+      </p>
+    );
   return (
     <>
       <h1 className="mb-5 text-3xl font-semibold">Create quantity inventory</h1>
