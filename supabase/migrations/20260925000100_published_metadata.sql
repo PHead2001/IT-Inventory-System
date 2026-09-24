@@ -690,7 +690,8 @@ begin
   replay:=private.inventory_receipt(actor,p_request_id,'metadata_draft_save',normalized);
   if replay is not null then return replay; end if;
   perform private.configuration_catalog_lock(false);
-  select * into category_row from public.categories where id=category_id for share;
+  -- Serialize first-draft creation on the category row as well as later saves.
+  select * into category_row from public.categories where id=category_id for update;
   if not found or not category_row.active or category_row.removed_at is not null then
     raise exception using errcode='P1011',message='invalid_category'; end if;
   if category_row.published_form_revision_id is distinct from expected_published then
@@ -797,10 +798,13 @@ $$;
 
 create function public.metadata_publish(p_request_id uuid,p_payload jsonb) returns jsonb
 language plpgsql volatile security definer set search_path='' set statement_timeout='5s' as $$
+<<publish_block>>
 declare actor uuid:=auth.uid(); actor_name text; normalized jsonb; replay jsonb;
   category_id uuid; expected bigint; expected_draft uuid; expected_published uuid; review_token uuid;
   category_row public.categories%rowtype; draft public.category_form_revisions%rowtype;
   reviewed private.form_impact_reviews%rowtype; event_id uuid;
+  item public.quantity_items%rowtype; asset public.serialized_assets%rowtype;
+  computed_needs boolean;
 begin
   select display_name into actor_name from public.app_members where user_id=actor
     and active and role='staff' and can_manage_configuration for share;
@@ -828,6 +832,14 @@ begin
   if not found or draft.id is distinct from expected_draft or draft.draft_version<>expected or
     category_row.published_form_revision_id is distinct from expected_published then
     raise exception using errcode='P1002',message='stale_form'; end if;
+  -- Stock mutations do not take the catalog lock. Lock every referenced row in
+  -- UUID order before checking the reviewed fingerprint against committed state.
+  for item in select * from public.quantity_items q where q.category_id=publish_block.category_id order by q.id for update loop
+    null;
+  end loop;
+  for asset in select * from public.serialized_assets a where a.category_id=publish_block.category_id order by a.id for update loop
+    null;
+  end loop;
   select * into reviewed from private.form_impact_reviews where token=review_token and actor_id=actor for update;
   if not found or reviewed.expires_at<=clock_timestamp() or reviewed.category_id<>category_id
     or reviewed.draft_id<>draft.id or reviewed.draft_version<>draft.draft_version
@@ -837,6 +849,18 @@ begin
   perform private.metadata_compile_form(draft.id,category_id,draft.draft_definition);
   update public.category_form_revisions set status='published',published_at=now(),published_by=actor where id=draft.id;
   update public.categories set published_form_revision_id=draft.id,version=version+1 where id=category_id;
+  -- This is a derived read cache. Preserve item versions, timestamps, events,
+  -- validated provenance and values while making publication visible atomically.
+  for item in select * from public.quantity_items q where q.category_id=publish_block.category_id order by q.id loop
+    computed_needs:=private.metadata_needs(draft.id,'quantity',item.custom_values);
+    update public.quantity_items set needs_metadata=computed_needs
+      where id=item.id and needs_metadata is distinct from computed_needs;
+  end loop;
+  for asset in select * from public.serialized_assets a where a.category_id=publish_block.category_id order by a.id loop
+    computed_needs:=private.metadata_needs(draft.id,'asset',asset.custom_values);
+    update public.serialized_assets set needs_metadata=computed_needs
+      where id=asset.id and needs_metadata is distinct from computed_needs;
+  end loop;
   insert into public.form_publication_events(actor_id,actor_name,category_id,revision_id,
     previous_revision_id,affected_quantity,affected_assets)
     values(actor,actor_name,category_id,draft.id,expected_published,
@@ -1187,6 +1211,7 @@ language plpgsql stable security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); field_key text; entry jsonb; rev uuid; field_uuid uuid;
   cfg public.form_revision_fields%rowtype; kind text; option_id uuid; paths jsonb; choice jsonb;
   result jsonb:='{}'::jsonb; choice_path text[]; path_bytes integer; current_form uuid;
+  owner_category uuid; owner_form uuid;
 begin
   perform 1 from public.app_members where user_id=actor and active;
   if not found then raise exception using errcode='P1001',message='forbidden'; end if;
@@ -1211,7 +1236,10 @@ begin
     select * into cfg from public.form_revision_fields where revision_id=rev and field_id=field_uuid;
     if not found or not private.metadata_value_valid(rev,field_uuid,entry->'value') then
       raise exception using errcode='P1012',message='invalid_custom_value'; end if;
-    select field_type into kind from public.metadata_fields where id=field_uuid;
+    select f.field_type,f.category_id,c.published_form_revision_id
+      into kind,owner_category,owner_form
+      from public.metadata_fields f join public.categories c on c.id=f.category_id
+      where f.id=field_uuid;
     paths:='[]'::jsonb;
     path_bytes:=0;
     if kind in ('single_select','hierarchical_select') and jsonb_typeof(entry->'value')='string' then
@@ -1236,6 +1264,7 @@ begin
     end if;
     result:=result||jsonb_build_object(field_key,jsonb_build_object('value',entry->'value',
       'validated_revision_id',rev,'label',cfg.label,'field_type',kind,'option_paths',paths,
+      'category_id',owner_category,'current_published_revision_id',owner_form,
       'legacy',rev is distinct from current_form or not exists(
         select 1 from public.form_revision_fields current_field
           where current_field.revision_id=current_form and current_field.field_id=field_uuid)));
@@ -1271,10 +1300,10 @@ create function public.inventory_export_snapshot(
   p_query text,p_type text,p_status text,p_category_id uuid,p_location_code text,
   p_low_stock boolean,p_export_type text,p_include_custom boolean
 ) returns jsonb language plpgsql stable security invoker set search_path='' set statement_timeout='5s' as $$
-declare r record; holding record; kv record; one_row jsonb; custom jsonb; described jsonb;
-  custom_out jsonb; current_form uuid;
+declare r record; holding record; one_row jsonb; custom jsonb; described jsonb;
   rows_json jsonb[]:=array[]::jsonb[]; used_bytes integer:=128; row_bytes integer;
   count_rows integer:=0; holdings text; response jsonb; exported_at timestamptz:=statement_timestamp();
+  key_kinds text[]; key_entities uuid[]; key_locations uuid[]; low_keys uuid[];
 begin
   if p_export_type not in ('inventory','low_stock') or p_export_type is null then
     raise exception using errcode='P1012',message='invalid_export_type'; end if;
@@ -1283,8 +1312,10 @@ begin
     or length(coalesce(p_query,''))>200 or length(coalesce(p_location_code,''))>100 then
     raise exception using errcode='P1012',message='invalid_export_filter'; end if;
   if p_export_type='inventory' then
-    for r in
-      select * from public.inventory_search_rows x
+    -- Only compact identity keys are held before the sentinel check. A wide
+    -- description or breadcrumb cannot be materialized 10,001 times first.
+    with candidates as materialized (
+      select x.kind,x.entity_id,x.location_id from public.inventory_search_rows x
       where (p_type='all' or x.kind=p_type)
         and (p_status='all' or (p_status='active' and x.status='active')
           or (p_status='historical' and x.status<>'active'))
@@ -1293,7 +1324,20 @@ begin
         and (not coalesce(p_low_stock,false) or x.stock_state in ('needs_restocking','out_of_stock'))
         and strpos(lower(concat_ws(' ',x.name,x.description,x.manufacturer,x.model,x.category_name,
           x.location_code,x.location_name,x.breadcrumb,x.asset_tag,x.serial_number)),lower(coalesce(p_query,'')))>0
-      order by lower(x.name),x.kind,x.entity_id,coalesce(x.location_code,'') limit 10001
+      limit 10001
+    )
+    select coalesce(array_agg(kind),array[]::text[]),
+      coalesce(array_agg(entity_id),array[]::uuid[]),
+      coalesce(array_agg(location_id),array[]::uuid[])
+      into key_kinds,key_entities,key_locations from candidates;
+    if cardinality(key_entities)>10000 then
+      raise exception using errcode='P1013',message='export_row_limit'; end if;
+    for r in
+      select x.* from generate_subscripts(key_entities,1) key_index(n)
+      join public.inventory_search_rows x on x.kind=key_kinds[key_index.n]
+        and x.entity_id=key_entities[key_index.n]
+        and x.location_id is not distinct from key_locations[key_index.n]
+      order by lower(x.name),x.kind,x.entity_id,coalesce(x.location_code,'')
     loop
       count_rows:=count_rows+1;
       if count_rows>10000 then raise exception using errcode='P1013',message='export_row_limit'; end if;
@@ -1303,15 +1347,7 @@ begin
           select custom_values into custom from public.quantity_items where id=r.entity_id;
         else select custom_values into custom from public.serialized_assets where id=r.entity_id; end if;
         described:=public.metadata_describe_values(custom,r.category_id);
-        select published_form_revision_id into current_form from public.categories where id=r.category_id;
-        custom_out:='{}'::jsonb;
-        for kv in select key,value from jsonb_each(described) loop
-          custom_out:=custom_out||jsonb_build_object(kv.key,kv.value||jsonb_build_object(
-            'category_id',r.category_id,'current_published_revision_id',current_form));
-          if octet_length(custom_out::text)>2096640 then
-            raise exception using errcode='P1025',message='single_export_record_too_large'; end if;
-        end loop;
-        one_row:=one_row||jsonb_build_object('custom_fields',custom_out);
+        one_row:=one_row||jsonb_build_object('custom_fields',described);
       end if;
       row_bytes:=octet_length(one_row::text)+1;
       if row_bytes>2096640 then raise exception using errcode='P1025',message='single_export_record_too_large'; end if;
@@ -1320,22 +1356,28 @@ begin
       rows_json:=array_append(rows_json,one_row);
     end loop;
   else
+    with keys as materialized (
+      select i.id from public.quantity_items i
+      where (p_type='all' or p_type='quantity') and (p_status='all' or p_status='active')
+        and exists (
+          select 1 from public.inventory_search_rows x
+          where x.kind='quantity' and x.entity_id=i.id and x.status='active'
+            and x.stock_state in ('needs_restocking','out_of_stock')
+            and (p_category_id is null or x.category_id=p_category_id)
+            and (p_location_code is null or p_location_code=any(x.ancestor_codes))
+            and strpos(lower(concat_ws(' ',x.name,x.description,x.manufacturer,x.model,x.category_name,
+              x.location_code,x.location_name,x.breadcrumb,x.asset_tag,x.serial_number)),lower(coalesce(p_query,'')))>0
+        )
+      limit 10001
+    )
+    select coalesce(array_agg(id),array[]::uuid[]) into low_keys from keys;
+    if cardinality(low_keys)>10000 then
+      raise exception using errcode='P1013',message='export_row_limit'; end if;
     for r in
-      with matches as (
-        select distinct x.entity_id from public.inventory_search_rows x
-        where x.kind='quantity' and x.status='active'
-          and x.stock_state in ('needs_restocking','out_of_stock')
-          and (p_type='all' or p_type='quantity') and (p_status='all' or p_status='active')
-          and (p_category_id is null or x.category_id=p_category_id)
-          and (p_location_code is null or p_location_code=any(x.ancestor_codes))
-          and strpos(lower(concat_ws(' ',x.name,x.description,x.manufacturer,x.model,x.category_name,
-            x.location_code,x.location_name,x.breadcrumb,x.asset_tag,x.serial_number)),lower(coalesce(p_query,'')))>0
-        limit 10001
-      )
-      select chosen.* from (
-        select distinct on (x.entity_id) x.* from matches m
-          join public.inventory_search_rows x on x.entity_id=m.entity_id and x.kind='quantity'
-        order by x.entity_id,x.location_code
+      select chosen.* from unnest(low_keys) k(id) cross join lateral (
+        select x.* from public.inventory_search_rows x
+        where x.kind='quantity' and x.entity_id=k.id
+        limit 1
       ) chosen order by lower(chosen.name),chosen.entity_id
     loop
       count_rows:=count_rows+1;
@@ -1357,15 +1399,7 @@ begin
       if p_include_custom then
         select custom_values into custom from public.quantity_items where id=r.entity_id;
         described:=public.metadata_describe_values(custom,r.category_id);
-        select published_form_revision_id into current_form from public.categories where id=r.category_id;
-        custom_out:='{}'::jsonb;
-        for kv in select key,value from jsonb_each(described) loop
-          custom_out:=custom_out||jsonb_build_object(kv.key,kv.value||jsonb_build_object(
-            'category_id',r.category_id,'current_published_revision_id',current_form));
-          if octet_length(custom_out::text)>2096640 then
-            raise exception using errcode='P1025',message='single_export_record_too_large'; end if;
-        end loop;
-        one_row:=one_row||jsonb_build_object('custom_fields',custom_out);
+        one_row:=one_row||jsonb_build_object('custom_fields',described);
       end if;
       row_bytes:=octet_length(one_row::text)+1;
       if row_bytes>2096640 then raise exception using errcode='P1025',message='single_export_record_too_large'; end if;

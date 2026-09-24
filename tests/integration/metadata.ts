@@ -230,6 +230,17 @@ async function observeCatalogWait(description: string) {
     `${description}: expected independent catalog lock holder and waiter`,
   );
 }
+async function observeRowWait(holderPid: number, description: string) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const blocked = await owner.query(
+      'select exists(select 1 from pg_stat_activity where pid<>$1 and $1=any(pg_blocking_pids(pid))) waiting',
+      [holderPid],
+    );
+    if (blocked.rows[0].waiting === true) return;
+    await delay(25);
+  }
+  assert.fail(`${description}: expected a real independent row-lock waiter`);
+}
 
 async function main() {
   await owner.connect();
@@ -248,6 +259,67 @@ async function main() {
   assert.ok(
     (baseline.data as { published_revision_id: string }).published_revision_id,
   );
+  const firstDraftCategory = await category(
+    maintainer.client,
+    'First draft race',
+  );
+  const firstDraftBaseline = await currentBaseline(
+    maintainer.client,
+    firstDraftCategory,
+  );
+  const draftHolder = new Client({
+    connectionString: db,
+    application_name: 'metadata-first-draft-holder',
+  });
+  await draftHolder.connect();
+  try {
+    await draftHolder.query('begin');
+    await draftHolder.query('set local role authenticated');
+    await draftHolder.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: maintainer.id, role: 'authenticated' }),
+    ]);
+    const holderPid = (await draftHolder.query('select pg_backend_pid() pid'))
+      .rows[0].pid as number;
+    const firstDraft = (
+      await draftHolder.query(
+        'select public.metadata_draft_save($1,$2::jsonb) result',
+        [
+          uid(),
+          JSON.stringify({
+            category_id: firstDraftCategory,
+            expected_actor_id: maintainer.id,
+            expected_draft_id: null,
+            expected_draft_version: '0',
+            expected_published_revision_id:
+              firstDraftBaseline.published_revision_id,
+            definition: { fields: [], layout: [] },
+          }),
+        ],
+      )
+    ).rows[0].result as { draft_id: string };
+    const competingDraft = rpc(maintainer.client, 'metadata_draft_save', {
+      category_id: firstDraftCategory,
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: firstDraftBaseline.published_revision_id,
+      definition: { fields: [], layout: [] },
+    });
+    await observeRowWait(holderPid, 'two null-baseline first-draft saves');
+    await draftHolder.query('commit');
+    assert.equal((await competingDraft).error?.code, 'P1002');
+    assert.equal(
+      (
+        await owner.query(
+          "select id from public.category_form_revisions where category_id=$1 and status='draft'",
+          [firstDraftCategory],
+        )
+      ).rows[0].id,
+      firstDraft.draft_id,
+    );
+  } finally {
+    await draftHolder.query('rollback').catch(() => undefined);
+    await draftHolder.end();
+  }
   await failure(
     staff.client,
     'metadata_draft_save',
@@ -805,6 +877,14 @@ async function main() {
     revision,
   );
   assert.equal(stored.needs_metadata, false);
+  const sourceAsset = await success(staff.client, 'asset_create_v2', {
+    name: 'Metadata serial',
+    category_id: categoryId,
+    location_id: location,
+    expected_published_revision_id: revision,
+    custom_patch: { set: { [schema.flag]: false }, unset: [] },
+  });
+  const assetId = sourceAsset.entity_id as string;
   const described = await viewer.client.rpc(
     'metadata_describe_values' as never,
     {
@@ -833,10 +913,240 @@ async function main() {
     'P1021',
   );
 
+  const tighteningCases: {
+    label: string;
+    type: string;
+    value?: unknown;
+    initialRules?: Record<string, unknown>;
+    nextRules?: Record<string, unknown>;
+    nextRequired?: boolean;
+    retire?: boolean;
+    options?: { id: string; label: string; active: boolean }[];
+  }[] = [
+    { label: 'required missing', type: 'boolean', nextRequired: true },
+    {
+      label: 'short text maximum',
+      type: 'short_text',
+      value: 'abc',
+      nextRules: { maxLength: 2 },
+    },
+    {
+      label: 'long text minimum',
+      type: 'long_text',
+      value: 'a',
+      nextRules: { minLength: 2 },
+    },
+    {
+      label: 'integer minimum',
+      type: 'integer',
+      value: 0,
+      nextRules: { min: 1 },
+    },
+    {
+      label: 'decimal precision',
+      type: 'decimal',
+      value: '1.234',
+      nextRules: { precision: 2 },
+    },
+    {
+      label: 'date bound',
+      type: 'date',
+      value: '2026-01-01',
+      nextRules: { min: '2026-02-01' },
+    },
+    {
+      label: 'datetime bound',
+      type: 'datetime',
+      value: '2026-01-01T00:00:00Z',
+      nextRules: { min: '2026-02-01T00:00:00Z' },
+    },
+    { label: 'URL required', type: 'url', nextRequired: true },
+    {
+      label: 'currency minimum',
+      type: 'currency',
+      value: { amount: '1.23', currency: 'USD' },
+      initialRules: { currencyCode: 'USD', precision: 2 },
+      nextRules: { currencyCode: 'USD', precision: 2, min: '2' },
+    },
+    {
+      label: 'multi choice cardinality',
+      type: 'multi_select',
+      initialRules: { maxSelections: 2 },
+      nextRules: { maxSelections: 1 },
+      options: [
+        { id: uid(), label: 'First', active: true },
+        { id: uid(), label: 'Second', active: true },
+      ],
+    },
+    {
+      label: 'retired choice',
+      type: 'single_select',
+      retire: true,
+      options: [{ id: uid(), label: 'Retired', active: true }],
+    },
+  ];
+  for (const scenario of tighteningCases) {
+    const scenarioCategory = await category(maintainer.client, scenario.label);
+    const fieldId = uid();
+    const value =
+      scenario.type === 'multi_select'
+        ? scenario.options!.map((option) => option.id)
+        : scenario.type === 'single_select'
+          ? scenario.options![0].id
+          : scenario.value;
+    const field = {
+      id: fieldId,
+      type: scenario.type,
+      label: scenario.label,
+      applies_to: ['quantity'],
+      required: false,
+      rules: scenario.initialRules ?? {},
+      options: scenario.options ?? [],
+    };
+    const initialDefinition = {
+      fields: [field],
+      layout: [
+        {
+          id: uid(),
+          label: 'Details',
+          controls: [
+            { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+            { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+            { id: uid(), kind: 'field', field_id: fieldId, width: 'Auto' },
+          ],
+        },
+      ],
+    };
+    await save(maintainer.client, scenarioCategory, '0', initialDefinition);
+    const initialRevision = (await publish(maintainer.client, scenarioCategory))
+      .published_revision_id;
+    const scenarioItem = await success(staff.client, 'quantity_create_v2', {
+      name: `Tightening ${scenario.label}`,
+      category_id: scenarioCategory,
+      initial_quantity: 0,
+      initial_location_id: null,
+      expected_published_revision_id: initialRevision,
+      custom_patch: {
+        set: value === undefined ? {} : { [fieldId]: value },
+        unset: [],
+      },
+    });
+    if (scenario.label === 'short text maximum') {
+      await owner.query(
+        'update public.quantity_items set archived=true where id=$1',
+        [scenarioItem.entity_id],
+      );
+    }
+    const before = (
+      await owner.query(
+        'select version,updated_at,custom_values from public.quantity_items where id=$1',
+        [scenarioItem.entity_id],
+      )
+    ).rows[0];
+    const stricterDefinition = structuredClone(initialDefinition);
+    stricterDefinition.fields[0].required = scenario.nextRequired ?? false;
+    stricterDefinition.fields[0].rules =
+      scenario.nextRules ?? scenario.initialRules ?? {};
+    if (scenario.retire) stricterDefinition.fields[0].options[0].active = false;
+    await save(maintainer.client, scenarioCategory, '0', stricterDefinition);
+    await publish(maintainer.client, scenarioCategory);
+    const after = (
+      await owner.query(
+        'select version,updated_at,custom_values,needs_metadata from public.quantity_items where id=$1',
+        [scenarioItem.entity_id],
+      )
+    ).rows[0];
+    assert.equal(after.needs_metadata, true, scenario.label);
+    assert.equal(
+      after.version,
+      before.version,
+      `${scenario.label}: no business version`,
+    );
+    assert.equal(
+      after.updated_at.getTime(),
+      before.updated_at.getTime(),
+      `${scenario.label}: no business timestamp`,
+    );
+    assert.deepEqual(
+      after.custom_values,
+      before.custom_values,
+      `${scenario.label}: no provenance rewrite`,
+    );
+    assert.equal(
+      (
+        await owner.query(
+          'select count(*) from public.quantity_events where item_id=$1',
+          [scenarioItem.entity_id],
+        )
+      ).rows[0].count,
+      '1',
+      `${scenario.label}: no fake inventory event`,
+    );
+  }
+  const applicabilityCategory = await category(
+    maintainer.client,
+    'Applicability tightening',
+  );
+  const applicabilityField = uid();
+  const applicabilityForm = {
+    fields: [
+      {
+        id: applicabilityField,
+        type: 'boolean',
+        label: 'Required flag',
+        applies_to: ['quantity'],
+        required: true,
+        rules: {},
+        options: [],
+      },
+    ],
+    layout: [
+      {
+        id: uid(),
+        label: 'Details',
+        controls: [
+          { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'field', field_id: applicabilityField, width: 6 },
+        ],
+      },
+    ],
+  };
+  await save(maintainer.client, applicabilityCategory, '0', applicabilityForm);
+  const applicabilityRevision = (
+    await publish(maintainer.client, applicabilityCategory)
+  ).published_revision_id;
+  const applicabilityAsset = await success(staff.client, 'asset_create_v2', {
+    name: 'Retired applicability asset',
+    category_id: applicabilityCategory,
+    location_id: location,
+    expected_published_revision_id: applicabilityRevision,
+    custom_patch: { set: {}, unset: [] },
+  });
+  await owner.query(
+    "update public.serialized_assets set status='retired' where id=$1",
+    [applicabilityAsset.entity_id],
+  );
+  const applicableToAssets = structuredClone(applicabilityForm);
+  applicableToAssets.fields[0].applies_to = ['quantity', 'asset'];
+  await save(maintainer.client, applicabilityCategory, '0', applicableToAssets);
+  await publish(maintainer.client, applicabilityCategory);
+  assert.equal(
+    (
+      await owner.query(
+        'select needs_metadata from public.serialized_assets where id=$1',
+        [applicabilityAsset.entity_id],
+      )
+    ).rows[0].needs_metadata,
+    true,
+    'retired asset reflects newly required applicable field immediately',
+  );
+
   const stricter = structuredClone(schema.definition);
   const noteField = stricter.fields.find((field) => field.id === schema.note)!;
   noteField.rules = { maxLength: 2 };
   noteField.required = true;
+  noteField.applies_to = ['quantity', 'asset'];
   await save(maintainer.client, categoryId, '0', stricter);
   const staleReview = await review(maintainer.client, categoryId);
   const same = await success(staff.client, 'quantity_update_v2', {
@@ -860,6 +1170,25 @@ async function main() {
   );
   const stricterPublished = await publish(maintainer.client, categoryId);
   const strictRevision = stricterPublished.published_revision_id as string;
+  const afterPublication = (
+    await owner.query(
+      'select needs_metadata,version,custom_values,validated_form_revision_id from public.quantity_items where id=$1',
+      [itemId],
+    )
+  ).rows[0];
+  assert.equal(afterPublication.needs_metadata, true);
+  assert.equal(afterPublication.version, same.version);
+  assert.deepEqual(afterPublication.custom_values, stored.custom_values);
+  assert.equal(afterPublication.validated_form_revision_id, revision);
+  const assetAfterPublication = (
+    await owner.query(
+      'select needs_metadata,version,custom_values,validated_form_revision_id from public.serialized_assets where id=$1',
+      [assetId],
+    )
+  ).rows[0];
+  assert.equal(assetAfterPublication.needs_metadata, true);
+  assert.equal(assetAfterPublication.version, sourceAsset.version);
+  assert.equal(assetAfterPublication.validated_form_revision_id, revision);
   await failure(
     staff.client,
     'quantity_update_v2',
@@ -920,6 +1249,10 @@ async function main() {
     'P1021',
   );
 
+  const raceDraft = structuredClone(stricter);
+  raceDraft.fields.find((field) => field.id === schema.note)!.label =
+    'Updated notes';
+  await save(maintainer.client, categoryId, '0', raceDraft);
   const independent = new Client({
     connectionString: db,
     application_name: 'metadata-catalog-race',
@@ -942,10 +1275,6 @@ async function main() {
         custom_patch: { set: {}, unset: [] },
       }),
     ]);
-    const raceDraft = structuredClone(stricter);
-    raceDraft.fields.find((field) => field.id === schema.note)!.label =
-      'Updated notes';
-    await save(maintainer.client, categoryId, '0', raceDraft);
     const raceReview = await review(maintainer.client, categoryId);
     let settled = false;
     const competing = rpc(maintainer.client, 'metadata_publish', {
@@ -1037,6 +1366,78 @@ async function main() {
     await createRace.query('rollback').catch(() => undefined);
     await createRace.end();
   }
+  const stockRaceCategory = await category(
+    maintainer.client,
+    'Stock publish race',
+  );
+  const stockRaceForm = form(stockRaceCategory);
+  await save(
+    maintainer.client,
+    stockRaceCategory,
+    '0',
+    stockRaceForm.definition,
+  );
+  const stockRaceRevision = (
+    await publish(maintainer.client, stockRaceCategory)
+  ).published_revision_id;
+  const stockRaceItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Stock publication barrier',
+    category_id: stockRaceCategory,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: stockRaceRevision,
+    custom_patch: { set: { [stockRaceForm.flag]: false }, unset: [] },
+  });
+  const changedStockForm = structuredClone(stockRaceForm.definition);
+  changedStockForm.fields[0].label = 'Changed by publication';
+  await save(maintainer.client, stockRaceCategory, '0', changedStockForm);
+  const stockReview = await review(maintainer.client, stockRaceCategory);
+  const stockHolder = new Client({
+    connectionString: db,
+    application_name: 'metadata-stock-publication-holder',
+  });
+  await stockHolder.connect();
+  try {
+    await stockHolder.query('begin');
+    await stockHolder.query('set local role authenticated');
+    await stockHolder.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+    ]);
+    const holderPid = (await stockHolder.query('select pg_backend_pid() pid'))
+      .rows[0].pid as number;
+    await stockHolder.query('select public.quantity_receive($1,$2::jsonb)', [
+      uid(),
+      JSON.stringify({
+        item_id: stockRaceItem.entity_id,
+        expected_version: stockRaceItem.version,
+        location_id: location,
+        quantity: 1,
+        reason: 'Concurrent stock receipt',
+      }),
+    ]);
+    const competingPublication = rpc(maintainer.client, 'metadata_publish', {
+      category_id: stockRaceCategory,
+      expected_draft_id: stockReview.draft_id,
+      expected_draft_version: stockReview.draft_version,
+      expected_published_revision_id: stockReview.published_revision_id,
+      review_token: stockReview.token,
+    });
+    await observeRowWait(holderPid, 'stock mutation before publication');
+    await stockHolder.query('commit');
+    assert.equal((await competingPublication).error?.code, 'P1017');
+    assert.equal(
+      (
+        await owner.query(
+          'select published_form_revision_id from public.categories where id=$1',
+          [stockRaceCategory],
+        )
+      ).rows[0].published_form_revision_id,
+      stockRaceRevision,
+    );
+  } finally {
+    await stockHolder.query('rollback').catch(() => undefined);
+    await stockHolder.end();
+  }
   const isolated = new Client({
     connectionString: db,
     application_name: 'metadata-isolation-rejection',
@@ -1105,14 +1506,6 @@ async function main() {
   await save(maintainer.client, replacement, '0', replacementSchema.definition);
   const replacementRevision = (await publish(maintainer.client, replacement))
     .published_revision_id;
-  const sourceAsset = await success(staff.client, 'asset_create_v2', {
-    name: 'Metadata serial',
-    category_id: categoryId,
-    location_id: location,
-    expected_published_revision_id: strictRevision,
-    custom_patch: { set: { [schema.flag]: false }, unset: [] },
-  });
-  const assetId = sourceAsset.entity_id as string;
   const removalReview = await maintainer.client.rpc(
     'category_removal_review' as never,
     {
@@ -1469,6 +1862,54 @@ async function main() {
     migratedRow.custom_values[optionalField].validated_revision_id,
     migrationRevision,
   );
+  await owner.query(
+    'update public.quantity_items set reorder_threshold=1 where id=$1',
+    [migrating.entity_id],
+  );
+  for (const exportType of ['inventory', 'low_stock']) {
+    const retainedExport = await viewer.client.rpc(
+      'inventory_export_snapshot' as never,
+      {
+        p_query: 'Legacy label item',
+        p_type: 'quantity',
+        p_status: 'active',
+        p_category_id: migrationTarget,
+        p_location_code: null,
+        p_low_stock: false,
+        p_export_type: exportType,
+        p_include_custom: true,
+      } as never,
+    );
+    assert.equal(retainedExport.error, null, retainedExport.error?.message);
+    const row = (
+      retainedExport.data as {
+        total: string;
+        rows: {
+          category_id: string;
+          custom_fields: Record<
+            string,
+            {
+              category_id: string;
+              current_published_revision_id: string;
+              validated_revision_id: string;
+              legacy: boolean;
+            }
+          >;
+        }[];
+      }
+    ).rows[0];
+    assert.equal(row.category_id, migrationTarget);
+    assert.equal(row.custom_fields[optionalField].category_id, migrationSource);
+    assert.equal(
+      row.custom_fields[optionalField].current_published_revision_id,
+      migrationRevision,
+    );
+    assert.equal(
+      row.custom_fields[optionalField].validated_revision_id,
+      migrationRevision,
+    );
+    assert.equal(row.custom_fields[optionalField].legacy, true);
+  }
   const removalSource = await category(
     maintainer.client,
     'Publish removal race',
@@ -1749,6 +2190,84 @@ async function main() {
     } as never,
   );
   assert.equal(tooLargeBudget.error?.code, 'P1025');
+  const sentinelCategory = await category(maintainer.client, 'Export sentinel');
+  const insertedSentinels = await owner.query(
+    "insert into public.quantity_items(name,category_id,reorder_threshold) select 'Sentinel export '||g.n,$1,1 from generate_series(1,10001) g(n)",
+    [sentinelCategory],
+  );
+  assert.equal(insertedSentinels.rowCount, 10001);
+  for (const exportType of ['inventory', 'low_stock']) {
+    const overCap = await viewer.client.rpc(
+      'inventory_export_snapshot' as never,
+      {
+        p_query: 'Sentinel export',
+        p_type: 'quantity',
+        p_status: 'active',
+        p_category_id: sentinelCategory,
+        p_location_code: null,
+        p_low_stock: false,
+        p_export_type: exportType,
+        p_include_custom: false,
+      } as never,
+    );
+    assert.equal(
+      overCap.error?.code,
+      'P1013',
+      `${exportType} must stop at the 10001st key`,
+    );
+  }
+  const inventoryPlan = (
+    await owner.query(
+      `explain (format json) with candidates as materialized (
+        select x.kind,x.entity_id,x.location_id from public.inventory_search_rows x
+        where x.category_id=$1 limit 10001
+      ) select array_agg(kind),array_agg(entity_id),array_agg(location_id) from candidates`,
+      [sentinelCategory],
+    )
+  ).rows[0]['QUERY PLAN'][0].Plan as {
+    'Node Type': string;
+    Plans: {
+      'Node Type': string;
+      'Subplan Name'?: string;
+      Plans?: unknown[];
+    }[];
+  };
+  assert.equal(inventoryPlan['Node Type'], 'Aggregate');
+  assert.ok(
+    inventoryPlan.Plans.some(
+      (plan) =>
+        plan['Node Type'] === 'Limit' &&
+        plan['Subplan Name'] === 'CTE candidates',
+    ),
+    'inventory export identity-key cap appears before aggregation or hydration',
+  );
+  const lowStockPlan = (
+    await owner.query(
+      `explain (format json) with keys as materialized (
+        select i.id from public.quantity_items i where exists (
+          select 1 from public.inventory_search_rows x
+          where x.kind='quantity' and x.entity_id=i.id and x.category_id=$1
+            and x.status='active' and x.stock_state in ('needs_restocking','out_of_stock')
+        ) limit 10001
+      ) select array_agg(k.id) from keys k`,
+      [sentinelCategory],
+    )
+  ).rows[0]['QUERY PLAN'][0].Plan as {
+    'Node Type': string;
+    Plans: {
+      'Node Type': string;
+      'Subplan Name'?: string;
+      Plans?: unknown[];
+    }[];
+  };
+  assert.equal(lowStockPlan['Node Type'], 'Aggregate');
+  assert.ok(
+    lowStockPlan.Plans.some(
+      (plan) =>
+        plan['Node Type'] === 'Limit' && plan['Subplan Name'] === 'CTE keys',
+    ),
+    'low-stock key cap appears before aggregation or hydration',
+  );
   // PostgREST must hoist the function setting before executing the statement.
   await owner.query(
     "create function public.metadata_timeout_probe() returns text language plpgsql volatile set search_path='' set statement_timeout='5s' as $$ begin perform pg_catalog.pg_sleep(6); return 'late'; end $$",
