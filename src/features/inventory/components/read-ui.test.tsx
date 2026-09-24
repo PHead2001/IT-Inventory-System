@@ -97,4 +97,41 @@ it('shows record corrections as human readable history distinct from movement', 
   ).toBeVisible();
   expect(screen.getByText('Reason: Found in drawer')).toBeVisible();
   expect(screen.queryByText('Physically moved')).not.toBeInTheDocument();
+  expect(screen.getByText('From:')).toBeInTheDocument();
+  expect(screen.getByText('To:')).toBeInTheDocument();
+});
+
+it('does not present legacy category metadata events as asset movement', () => {
+  render(
+    <HistoryList
+      events={[
+        {
+          id: 'legacy-category-event',
+          kind: 'asset',
+          entityId: 'asset',
+          entityName: 'Switch',
+          eventType: 'metadata_updated',
+          at: '2026-09-05T12:00:00Z',
+          actorName: 'IT Staff',
+          reason: 'Category removed: Old category',
+          lines: [],
+          fromLocation: location,
+          toLocation: location,
+          metadataChanges: [
+            {
+              field: 'Category',
+              before: 'Old category',
+              after: 'New category',
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  expect(
+    screen.getByRole('heading', { name: 'Metadata edited' }),
+  ).toBeVisible();
+  expect(screen.getByText('Old category → New category')).toBeVisible();
+  expect(screen.queryByText('From:')).not.toBeInTheDocument();
+  expect(screen.queryByText('To:')).not.toBeInTheDocument();
 });

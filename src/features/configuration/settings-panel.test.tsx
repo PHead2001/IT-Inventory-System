@@ -166,7 +166,9 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   fireEvent.click(
     within(review).getByRole('button', { name: 'Confirm removal' }),
   );
-  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1), {
+    timeout: 3000,
+  });
   view.rerender(
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );

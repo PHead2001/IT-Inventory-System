@@ -1076,6 +1076,8 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   page,
 }) => {
   test.setTimeout(60_000);
+  // Install before navigation so performance.now and animation frames share a clock.
+  await page.clock.install();
   await page.setViewportSize({ width: 1280, height: 1100 });
   await login(page);
   await page.goto('/room?location=ITC-D01');
@@ -1091,7 +1093,16 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await toolbar.locator('summary').click();
   const displaced = await camera(page);
   const completedBefore = Number(await viewer.getAttribute('data-focus-count'));
+  // CI input delivery can exceed the whole 300 ms animation. Control elapsed
+  // time, while still exercising the real focus button and trusted pointer drag.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 10_000));
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
+  await page.clock.runFor(100);
+  const inFlight = await camera(page);
+  expect(inFlight.target).not.toEqual(displaced.target);
+  expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
+    completedBefore,
+  );
   await page.mouse.move(
     bounds!.x + bounds!.width * 0.5,
     bounds!.y + bounds!.height * 0.5,
@@ -1104,13 +1115,20 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   );
   await page.mouse.up({ button: 'right' });
   const stopped = await camera(page);
-  expect(stopped.target).not.toEqual(displaced.target);
-  await page.waitForTimeout(400);
+  expect(stopped.target).not.toEqual(inFlight.target);
+  await page.clock.runFor(400);
   near((await camera(page)).target, stopped.target);
   expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
     completedBefore,
   );
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
+  // A subsequent uninterrupted request must still complete under the same clock.
+  await toolbar.getByRole('button', { name: 'Center selected' }).click();
+  await page.clock.runFor(400);
+  await expect(viewer).toHaveAttribute(
+    'data-focus-count',
+    String(completedBefore + 1),
+  );
 });
 
 test('captures four room sides and searchable picker at desktop and phone widths without console errors', async ({
