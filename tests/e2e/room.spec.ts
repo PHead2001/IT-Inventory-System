@@ -239,6 +239,39 @@ function expectFramed(reading: CameraReading, code: string) {
     expect(Math.abs(y), `${code} vertical clip coordinate`).toBeLessThan(0.99);
   }
 }
+/** Independent room-JSON geometry witness for a pointer ray, not scene hover state. */
+async function pointerRayIntersectsBinding(
+  page: Page,
+  point: { x: number; y: number },
+  code: string,
+) {
+  const binding = bindingBounds.find(
+    (entry) => entry.code === code && entry.primary,
+  );
+  expect(binding, `primary room geometry for ${code}`).toBeTruthy();
+  const frame = await page
+    .locator('[aria-label="Interactive room canvas"] canvas')
+    .boundingBox();
+  expect(frame).toBeTruthy();
+  const reading = await camera(page);
+  const inverse = new Matrix4()
+    .multiplyMatrices(
+      new Matrix4().fromArray(reading.projection),
+      new Matrix4().fromArray(reading.view),
+    )
+    .invert();
+  const x = ((point.x - frame!.x) / frame!.width) * 2 - 1;
+  const y = 1 - ((point.y - frame!.y) / frame!.height) * 2;
+  const nearPoint = new Vector3(x, y, -1).applyMatrix4(inverse);
+  const farPoint = new Vector3(x, y, 1).applyMatrix4(inverse);
+  const ray = new Ray(nearPoint, farPoint.sub(nearPoint).normalize());
+  const bounds = binding!.bounds;
+  const sceneBounds = new Box3(
+    new Vector3(bounds.min[0], bounds.min[2], -bounds.max[1]),
+    new Vector3(bounds.max[0], bounds.max[2], -bounds.min[1]),
+  );
+  return ray.intersectBox(sceneBounds, new Vector3()) !== null;
+}
 function near(actual: number[], expected: number[], tolerance = 0.001) {
   expect(actual).toHaveLength(expected.length);
   actual.forEach((value, index) =>
@@ -282,12 +315,7 @@ async function hoverSceneMesh(page: Page, code: string) {
       )
         continue;
       await page.mouse.move(point.x, point.y);
-      if (
-        await viewer
-          .locator(`[data-location-code="${code}"]`)
-          .first()
-          .isVisible()
-      ) {
+      if ((await canvas.getAttribute('data-hover-visible-code')) === code) {
         hit = point;
         break;
       }
@@ -296,6 +324,40 @@ async function hoverSceneMesh(page: Page, code: string) {
   }
   expect(hit, `normal pointer hover reaches ${code} mesh`).toBeTruthy();
   return hit!;
+}
+
+/** Discover a genuinely exposed storage face with real pointer events. */
+async function hoverAnyVisibleStorage(page: Page) {
+  const viewer = page.getByTestId('room-viewer');
+  const canvas = viewer.locator('canvas');
+  await canvas.scrollIntoViewIfNeeded();
+  const frame = await canvas.boundingBox();
+  expect(frame).toBeTruthy();
+  const codes = /^(ITC-(S[1-4][ABC]|D\d\d|RACK|RED|BLACK|CLEAR))$/;
+  for (let row = 1; row < 11; row++) {
+    for (let column = 1; column < 15; column++) {
+      const point = {
+        x: frame!.x + (frame!.width * column) / 15,
+        y: frame!.y + (frame!.height * row) / 11,
+      };
+      if (
+        (await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.tagName,
+          point,
+        )) !== 'CANVAS'
+      )
+        continue;
+      await page.mouse.move(point.x, point.y);
+      const code = await canvas.getAttribute('data-hover-visible-code');
+      if (!code || !codes.test(code)) continue;
+      if (!(await pointerRayIntersectsBinding(page, point, code))) continue;
+      const tooltip = viewer.locator('[data-hover-tooltip="true"]');
+      await expect(tooltip).toHaveAttribute('data-location-code', code);
+      await expect(tooltip).toBeVisible();
+      return { code, point };
+    }
+  }
+  throw new Error('No exposed storage face found at this camera angle');
 }
 
 async function clickSceneLocation(page: Page, code: string, viaLabel = false) {
@@ -411,6 +473,126 @@ test('room labels appear on real mesh hover and Show all labels restores keyboar
   await showAll.click();
   await expect(showAll).toHaveAttribute('aria-pressed', 'false');
   await expect(buttons).toHaveCount(0);
+});
+
+test('Free Orbit labels follow exposed storage under actual pointer movement from oblique, top, bottom and panned views', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await login(page);
+  await page.goto('/room?location=ITC');
+  const viewer = await ready(page);
+  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await toolbar.locator('summary').click();
+  const rotate = toolbar.getByRole('button', { name: 'Rotate right' });
+  const up = toolbar.getByRole('button', { name: 'Tilt up' });
+  const down = toolbar.getByRole('button', { name: 'Tilt down' });
+  for (let index = 0; index < 3; index++) await rotate.click();
+  await toolbar.locator('summary').click();
+  for (const view of ['oblique', 'overhead', 'underside', 'panned'] as const) {
+    if (view === 'overhead') {
+      await toolbar.locator('summary').click();
+      for (let index = 0; index < 5; index++) await up.click();
+      await toolbar.locator('summary').click();
+    } else if (view === 'underside') {
+      await toolbar.locator('summary').click();
+      for (let index = 0; index < 12; index++) await down.click();
+      await toolbar.locator('summary').click();
+    } else if (view === 'panned') {
+      await toolbar.getByRole('button', { name: 'Fit room' }).click();
+      await toolbar.locator('summary').click();
+      await toolbar.getByRole('button', { name: 'Pan right' }).click();
+      await toolbar.locator('summary').click();
+    }
+    const { code } = await hoverAnyVisibleStorage(page);
+    expect(code, `visible storage target at ${view}`).toMatch(/^ITC-/);
+    await expect(viewer).toHaveAttribute('data-selected-code', 'ITC');
+    await viewer.screenshot({ path: testInfo.outputPath(`hover-${view}.png`) });
+    await page.mouse.move(15, 15);
+    await expect(viewer.locator('[data-hover-tooltip="true"]')).toHaveCount(0);
+  }
+});
+
+test('hover tooltip survives DOM handoff and a stationary pointer tracks camera changes', async ({
+  page,
+}) => {
+  test.setTimeout(75_000);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await login(page);
+  await page.goto('/room?location=ITC');
+  const viewer = await ready(page);
+  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  const { code } = await hoverAnyVisibleStorage(page);
+  const tooltip = viewer.locator('[data-hover-tooltip="true"]');
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC');
+  await tooltip.hover();
+  await expect(tooltip).toHaveAttribute('data-location-code', code);
+  await expect(tooltip).toBeVisible();
+  await tooltip.click();
+  await selected(page, code);
+  await page.goto('/room?location=ITC');
+  await ready(page);
+  await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await toolbar.locator('summary').click();
+  const shelfPoint = await hoverSceneMesh(page, 'ITC-S1A');
+  await expect(tooltip).toHaveAttribute('data-location-code', 'ITC-S1A');
+  expect(await pointerRayIntersectsBinding(page, shelfPoint, 'ITC-S1A')).toBe(
+    true,
+  );
+  const canvas = viewer.locator('canvas');
+  const pan = toolbar.getByRole('button', { name: 'Pan right' });
+  // DOM activation keeps the real pointer fixed. Pan until an independent
+  // room-geometry ray no longer intersects the originally hovered shelf.
+  let leftOldSurface = false;
+  for (let step = 0; step < 12; step++) {
+    const previousTarget = (await camera(page)).target;
+    await pan.evaluate((element) => (element as HTMLButtonElement).click());
+    await expect
+      .poll(async () =>
+        Math.hypot(
+          ...(await camera(page)).target.map(
+            (value, index) => value - previousTarget[index],
+          ),
+        ),
+      )
+      .toBeGreaterThan(5);
+    if (!(await pointerRayIntersectsBinding(page, shelfPoint, 'ITC-S1A'))) {
+      leftOldSurface = true;
+      break;
+    }
+  }
+  expect(
+    leftOldSurface,
+    'camera pan must move the shelf off the fixed ray',
+  ).toBe(true);
+  await expect
+    .poll(async () =>
+      (await tooltip.count())
+        ? tooltip.getAttribute('data-location-code')
+        : null,
+    )
+    .not.toBe('ITC-S1A');
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC');
+
+  await page.setViewportSize({ width: 320, height: 640 });
+  await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await hoverAnyVisibleStorage(page);
+  const tooltipBounds = await tooltip.boundingBox();
+  const canvasBounds = await canvas.boundingBox();
+  expect(tooltipBounds).toBeTruthy();
+  expect(canvasBounds).toBeTruthy();
+  expect(tooltipBounds!.x).toBeGreaterThanOrEqual(canvasBounds!.x + 7);
+  expect(tooltipBounds!.y).toBeGreaterThanOrEqual(canvasBounds!.y + 7);
+  expect(tooltipBounds!.x + tooltipBounds!.width).toBeLessThanOrEqual(
+    canvasBounds!.x + canvasBounds!.width - 7,
+  );
+  expect(tooltipBounds!.y + tooltipBounds!.height).toBeLessThanOrEqual(
+    canvasBounds!.y + canvasBounds!.height - 7,
+  );
 });
 
 test('real WebGL room raycasting selects shelf and drawer inventory', async ({

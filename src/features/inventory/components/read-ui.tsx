@@ -177,6 +177,17 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
               Reason: {event.reason}
             </p>
           )}
+          {event.kind === 'quantity' &&
+            event.eventType === 'archived' &&
+            event.lines.length > 0 && (
+              <p className="mt-2 text-sm text-amber-100">
+                Removed{' '}
+                {event.lines
+                  .reduce((total, line) => total + BigInt(-line.delta), 0n)
+                  .toLocaleString('en-US')}{' '}
+                units across {event.lines.length} locations.
+              </p>
+            )}
           {event.fromLocation && (
             <p className="mt-2 text-sm">
               From: <LocationLink location={event.fromLocation} />

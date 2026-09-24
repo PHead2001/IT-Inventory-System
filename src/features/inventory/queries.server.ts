@@ -47,6 +47,22 @@ const categorySchema = z.object({
   name: z.string(),
   active: z.boolean(),
 });
+const archiveReviewSchema = z.object({
+  item_id: z.uuid(),
+  version: z.string().regex(/^[1-9][0-9]*$/),
+  archived: z.boolean(),
+  removed_total: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  locations: z.array(
+    z.object({
+      location_id: z.uuid(),
+      code: z.string(),
+      breadcrumb: z.string(),
+      active: z.boolean(),
+      quantity: z.number().int().positive(),
+    }),
+  ),
+});
+export type QuantityArchiveReview = z.infer<typeof archiveReviewSchema>;
 function requireData<T>(data: T | null, error: unknown, message: string): T {
   if (error || data === null) throw new Error(message);
   return data;
@@ -241,6 +257,19 @@ export async function getQuantityDetail(
     })),
     history: history.rows,
   };
+}
+export async function getQuantityArchiveReview(
+  id: string,
+): Promise<QuantityArchiveReview | null> {
+  const { supabase } = await requireMember();
+  if (!z.uuid().safeParse(id).success) return null;
+  // One SQL statement captures item version and every positive balance,
+  // including stock at inactive locations, in the same read snapshot.
+  const { data, error } = await supabase.rpc('quantity_archive_review', {
+    p_item_id: id,
+  });
+  if (error) throw new Error('Archive stock review could not be loaded.');
+  return data === null ? null : archiveReviewSchema.parse(data);
 }
 export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
   const { supabase } = await requireMember();

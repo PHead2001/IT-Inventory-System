@@ -40,6 +40,12 @@ const payloads: Record<Operation, Record<string, unknown>> = {
   quantity_update: { ...quantity, ...metadata },
   quantity_update_v2: { ...quantity, ...metadata, expected_published_revision_id: publishedId },
   quantity_archive: { ...quantity, reason: 'No longer stocked' },
+  quantity_archive_and_clear: {
+    ...quantity,
+    expected_version: '1',
+    confirm_clear_stock: true,
+    reason: 'No longer stocked',
+  },
   quantity_restore: { ...quantity, reason: 'Stocking again' },
   asset_create: { ...metadata, location_id: locationId },
   asset_create_v2: { ...metadata, location_id: locationId, expected_published_revision_id: publishedId },
@@ -204,6 +210,7 @@ describe('inventory mutation input contracts', () => {
     'quantity_receive',
     'quantity_adjust',
     'quantity_archive',
+    'quantity_archive_and_clear',
     'quantity_restore',
     'asset_correct_location',
     'asset_retire',
@@ -324,13 +331,58 @@ describe('safe mutation responses', () => {
       changed: false,
     };
     expect(mutationResultSchema.safeParse(result).success).toBe(true);
+    expect(mutationResultSchema.parse(result).version).toBe('1');
+    expect(
+      mutationResultSchema.parse({ ...result, version: '9007199254740993' })
+        .version,
+    ).toBe('9007199254740993');
     for (const invalid of [
       { ...result, entity_id: 'invalid' },
       { ...result, version: 0 },
-      { ...result, version: '1' },
+      { ...result, version: '01' },
+      { ...result, version: Number.MAX_SAFE_INTEGER + 1 },
       { ...result, changed: 'false' },
       { ...result, event_id: 2 },
     ])
       expect(mutationResultSchema.safeParse(invalid).success).toBe(false);
+  });
+  it('requires a distinct confirmed archive request bound to its reviewed version', () => {
+    const confirmed = payloads.quantity_archive_and_clear;
+    expect(command('quantity_archive_and_clear', confirmed).success).toBe(true);
+    expect(
+      command('quantity_archive_and_clear', {
+        ...confirmed,
+        confirm_clear_stock: false,
+      }).success,
+    ).toBe(false);
+    expect(
+      command('quantity_archive_and_clear', {
+        ...confirmed,
+        confirm_clear_stock: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      command('quantity_archive_and_clear', {
+        ...confirmed,
+        expected_version: '01',
+      }).success,
+    ).toBe(false);
+    expect(
+      command('quantity_archive_and_clear', {
+        ...confirmed,
+        expected_version: '2147483648',
+      }).success,
+    ).toBe(false);
+    const parsed = command('quantity_archive_and_clear', {
+      ...confirmed,
+      expected_version: 1,
+      reason: '  obsolete  ',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success)
+      expect(parsed.data.payload).toMatchObject({
+        expected_version: '1',
+        reason: 'obsolete',
+      });
   });
 });

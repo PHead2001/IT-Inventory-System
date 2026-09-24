@@ -53,6 +53,8 @@ Inventory pgTAP tests cover RLS, direct-write grants, hardened RPC privileges, o
 
 Playwright proves the conventional staff workflows against real local persistence, including multi-location stock, partial/Move All moves, count correction, archive/restore, serialized transitions, duplicate warning, search/location/history, reload persistence, viewer restrictions and stale editing. Keep the existing real Auth workflows. A component mock is not a substitute for database or browser proof.
 
+The opt-in archive-and-clear workflow also needs one-snapshot review, inactive-location balances, explicit confirmation, stale-version rejection, decimal-string totals, one archived event with per-location negative lines, duplicate-request replay, concurrent receive/archive serialization, rollback on line failure, and zero-stock restore/threshold preservation. Keep a positive-stock rejection test for the legacy archive RPC.
+
 ## Room proof
 
 See [room navigation](room-navigation.md#validation) for graphics-specific contracts. `npm run test:e2e -- tests/e2e/room.spec.ts` forwards focused Playwright arguments while retaining the local backend build. The default `npm run validate` still runs every test. Real WebGL rendering/raycast interaction and forced graphics failure supplement pure and component tests; visual inspection is required for proportions and label readability.

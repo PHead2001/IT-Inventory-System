@@ -6,7 +6,7 @@ select no_plan();
 create temporary table inventory_test_operations(name text primary key);
 insert into inventory_test_operations values
   ('quantity_create'), ('quantity_receive'), ('quantity_move'), ('quantity_adjust'),
-  ('quantity_update'), ('quantity_archive'), ('quantity_restore'),
+  ('quantity_update'), ('quantity_archive'), ('quantity_archive_and_clear'), ('quantity_restore'),
   ('asset_create'), ('asset_move'), ('asset_correct_location'), ('asset_update'),
   ('asset_retire'), ('asset_restore');
 grant select on inventory_test_operations to authenticated, anon;
@@ -48,6 +48,13 @@ select ok(not exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p
                      where a.grantee=0 and a.privilege_type='EXECUTE'),
           t.name||' does not grant PUBLIC execution')
 from inventory_test_operations t join pg_proc p on p.oid=to_regprocedure('public.'||t.name||'(uuid,jsonb)');
+select has_function('public','quantity_archive_review',array['uuid'],'archive review has one-argument read signature');
+select ok(not (select prosecdef from pg_proc where oid='public.quantity_archive_review(uuid)'::regprocedure),
+          'archive review uses caller RLS');
+select ok(has_function_privilege('authenticated','public.quantity_archive_review(uuid)','EXECUTE'),
+          'authenticated members may request an RLS-filtered archive review');
+select ok(not has_function_privilege('anon','public.quantity_archive_review(uuid)','EXECUTE'),
+          'anonymous users cannot request archive reviews');
 
 create temporary table inventory_test_actors(kind text primary key,id uuid not null default gen_random_uuid());
 insert into inventory_test_actors(kind) values ('staff'),('viewer'),('inactive'),('nonmember');
@@ -64,16 +71,23 @@ select public.quantity_create(gen_random_uuid(),jsonb_build_object(
 select public.asset_create(gen_random_uuid(),jsonb_build_object(
   'name','SQL asset fixture','category_id',(select id from public.categories where code='COMPUTERS'),
   'location_id',(select id from public.locations where code='ITC-D01')));
+create temporary table inventory_test_item as
+select id from public.quantity_items where name='SQL inventory fixture';
+grant select on inventory_test_item to authenticated, anon;
 
 set local role authenticated;
 select ok((select count(*) from public.quantity_items)>0,'staff reads quantity definitions');
 select ok((select count(*) from public.asset_events)>0,'staff reads asset history');
+select is((public.quantity_archive_review((select id from inventory_test_item))->>'removed_total'),
+          '2','archive review reports the same stock as the item snapshot');
 reset role;
 
 select set_config('request.jwt.claims',json_build_object('sub',(select id from inventory_test_actors where kind='viewer'),'role','authenticated')::text,true);
 set local role authenticated;
 select results_eq(format('select count(*) > 0 from public.%I',name),array[true],
                   'viewer reads seeded '||name) from inventory_test_tables;
+select is((public.quantity_archive_review((select id from inventory_test_item))->>'removed_total'),
+          '2','viewer can read but not mutate the archive review');
 select throws_ok(format('select public.%I(%L::uuid,%L::jsonb)',name,gen_random_uuid(),'{}'),
                  'P1001',null,'viewer is forbidden from '||name) from inventory_test_operations;
 select throws_ok(format('update public.%I set %I=%I',name,
@@ -86,6 +100,8 @@ select set_config('request.jwt.claims',json_build_object('sub',(select id from i
 set local role authenticated;
 select results_eq(format('select count(*) from public.%I',name),array[0::bigint],
                   'inactive member cannot read '||name) from inventory_test_tables;
+select is(public.quantity_archive_review((select id from inventory_test_item)),
+          null::jsonb,'inactive member cannot read archive review');
 select throws_ok(format('select public.%I(%L::uuid,%L::jsonb)',name,gen_random_uuid(),'{}'),
                  'P1001',null,'inactive member is forbidden from '||name) from inventory_test_operations;
 reset role;
@@ -94,6 +110,8 @@ select set_config('request.jwt.claims',json_build_object('sub',(select id from i
 set local role authenticated;
 select results_eq(format('select count(*) from public.%I',name),array[0::bigint],
                   'nonmember cannot read '||name) from inventory_test_tables;
+select is(public.quantity_archive_review((select id from inventory_test_item)),
+          null::jsonb,'nonmember cannot read archive review');
 select throws_ok(format('select public.%I(%L::uuid,%L::jsonb)',name,gen_random_uuid(),'{}'),
                  'P1001',null,'nonmember is forbidden from '||name) from inventory_test_operations;
 reset role;
@@ -161,6 +179,14 @@ select throws_ok(format('select public.quantity_receive(%L::uuid,%L::jsonb)',qua
   'P1999','Injected history failure','history-line failure aborts the quantity transaction')
 from inventory_rollback_state;
 drop trigger inventory_test_quantity_failure on public.quantity_event_lines;
+create trigger inventory_test_archive_failure before insert on public.quantity_event_lines
+for each row execute function pg_temp.inventory_fail_history();
+select throws_ok(format('select public.quantity_archive_and_clear(%L::uuid,%L::jsonb)',quantity_request,
+  jsonb_build_object('item_id',quantity_before->>'id','expected_version','1',
+    'confirm_clear_stock',true,'reason','Rollback archive proof')),
+  'P1999','Injected history failure','archive line failure aborts stock removal and archive state')
+from inventory_rollback_state;
+drop trigger inventory_test_archive_failure on public.quantity_event_lines;
 create trigger inventory_test_asset_failure before insert on public.asset_events
 for each row execute function pg_temp.inventory_fail_history();
 select throws_ok(format('select public.asset_move(%L::uuid,%L::jsonb)',asset_request,
