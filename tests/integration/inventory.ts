@@ -12,6 +12,7 @@ const operations = [
   'quantity_adjust',
   'quantity_update',
   'quantity_archive',
+  'quantity_archive_and_clear',
   'quantity_restore',
   'asset_create',
   'asset_move',
@@ -27,6 +28,19 @@ type Mutation = {
   version: number;
   event_id: string | null;
   changed: boolean;
+};
+type ArchiveClearResult = {
+  entity_id: string;
+  version: string;
+  event_id: string;
+  changed: true;
+  removed_total: string;
+  location_deltas: {
+    location_id: string;
+    before: number;
+    delta: number;
+    after: number;
+  }[];
 };
 type Actor = { id: string; client: SupabaseClient; name: string };
 type SearchRow = {
@@ -124,6 +138,25 @@ async function fail(
   assert.equal(data, null, 'failed mutations do not return successful state');
   assertions++;
 }
+async function archiveClear(
+  client: SupabaseClient,
+  payload: Payload,
+  requestId = randomUUID(),
+): Promise<ArchiveClearResult> {
+  const { data, error } = await invoke(
+    client,
+    'quantity_archive_and_clear',
+    payload,
+    requestId,
+  );
+  assert.equal(error, null, error?.message);
+  assert.match(data.version, /^[1-9][0-9]*$/);
+  assert.match(data.removed_total, /^(0|[1-9][0-9]*)$/);
+  assert.equal(data.changed, true);
+  assert.ok(Array.isArray(data.location_deltas));
+  assertions++;
+  return data as ArchiveClearResult;
+}
 async function actor(
   kind: 'staff' | 'viewer' | 'inactive' | 'nonmember',
 ): Promise<Actor> {
@@ -210,18 +243,18 @@ async function search(
 }
 
 // Explicit row locks keep both requests in flight, rather than hoping scheduling overlaps.
-async function concurrent(
+async function concurrent<T, U>(
   staff: Actor,
   itemId: string,
-  first: () => PromiseLike<unknown>,
-  second: () => PromiseLike<unknown>,
-) {
+  first: () => PromiseLike<T>,
+  second: () => PromiseLike<U>,
+): Promise<[T, U]> {
   const blocker = new Client({
     connectionString: dbUrl,
     application_name: 'inventory-integration-blocker',
   });
   await blocker.connect();
-  let pending: Promise<unknown[]> | undefined;
+  let pending: Promise<[T, U]> | undefined;
   try {
     await blocker.query('begin');
     await blocker.query(
@@ -777,11 +810,15 @@ async function main() {
       }),
     );
   }
-  advanced(
-    await succeed(staff.client, 'quantity_archive', {
-      ...base(),
-      reason: 'Definition retired',
-    }),
+  const legacyArchivePayload = { ...base(), reason: 'Definition retired' };
+  const legacyArchiveRequest = randomUUID();
+  const legacyArchive = advanced(
+    await succeed(
+      staff.client,
+      'quantity_archive',
+      legacyArchivePayload,
+      legacyArchiveRequest,
+    ),
   );
   assert.equal((await quantitySnapshot(itemId)).item.archived, true);
   await fail(
@@ -806,9 +843,340 @@ async function main() {
   assert.equal(snapshot.item.archived, false);
   assert.ok(snapshot.balances.every((row) => row.quantity === 0));
   assert.deepEqual(
+    await succeed(
+      staff.client,
+      'quantity_archive',
+      legacyArchivePayload,
+      legacyArchiveRequest,
+    ),
+    legacyArchive,
+    'an old successful archive receipt replays even after restore',
+  );
+  assert.deepEqual(
     snapshot.events.map((event) => event.version),
     Array.from({ length: version }, (_, index) => index + 1),
   );
+
+  // The opt-in operation keeps the legacy archive's positive-stock rejection,
+  // but clears every reviewed balance in one event and one version increment.
+  const clearItem = await succeed(staff.client, 'quantity_create', {
+    ...metadata,
+    name: prefix + ' archive clear',
+    initial_location_id: a,
+    initial_quantity: 8,
+    reorder_threshold: 5,
+  });
+  await succeed(staff.client, 'quantity_receive', {
+    item_id: clearItem.entity_id,
+    expected_version: 1,
+    location_id: b,
+    quantity: 4,
+    reason: 'Additional stock',
+  });
+  const clearPayload = {
+    item_id: clearItem.entity_id,
+    expected_version: '2',
+    confirm_clear_stock: true,
+    reason: 'Removed obsolete stock',
+  };
+  await owner.query('update public.locations set active=false where id=$1', [
+    b,
+  ]);
+  try {
+    const review = await viewer.client.rpc('quantity_archive_review', {
+      p_item_id: clearItem.entity_id,
+    });
+    assert.equal(review.error, null);
+    assert.equal(review.data.version, '2');
+    assert.equal(review.data.removed_total, '12');
+    assert.deepEqual(
+      review.data.locations
+        .map((row: { quantity: number }) => row.quantity)
+        .sort(),
+      [4, 8],
+    );
+    assert.equal(
+      review.data.locations.find(
+        (row: { location_id: string }) => row.location_id === b,
+      ).active,
+      false,
+    );
+    assert.equal(
+      (
+        await anon.rpc('quantity_archive_review', {
+          p_item_id: clearItem.entity_id,
+        })
+      ).error?.code,
+      '42501',
+    );
+    await fail(
+      staff.client,
+      'quantity_archive',
+      {
+        item_id: clearItem.entity_id,
+        expected_version: 2,
+        reason: 'Old-client attempt',
+      },
+      'P1008',
+    );
+    const beforeInvalidConfirmation = await quantitySnapshot(
+      clearItem.entity_id,
+    );
+    for (const confirmation of [undefined, null, false, 'true']) {
+      const invalid: Payload = { ...clearPayload };
+      if (confirmation === undefined) delete invalid.confirm_clear_stock;
+      else invalid.confirm_clear_stock = confirmation;
+      const deniedRequest = randomUUID();
+      await fail(
+        staff.client,
+        'quantity_archive_and_clear',
+        invalid,
+        'P1012',
+        deniedRequest,
+      );
+      assert.deepEqual(
+        await quantitySnapshot(clearItem.entity_id),
+        beforeInvalidConfirmation,
+        'invalid confirmation cannot change state or history',
+      );
+      assert.deepEqual(
+        await receipt(staff.id, deniedRequest),
+        [],
+        'invalid confirmation cannot commit a receipt',
+      );
+    }
+    await fail(
+      staff.client,
+      'quantity_archive_and_clear',
+      {
+        ...clearPayload,
+        expected_version: '1',
+      },
+      'P1002',
+    );
+    const clearRequest = randomUUID();
+    const cleared = await archiveClear(
+      staff.client,
+      clearPayload,
+      clearRequest,
+    );
+    assert.equal(cleared.version, '3');
+    assert.equal(cleared.removed_total, '12');
+    assert.deepEqual(
+      cleared.location_deltas
+        .map((line) => [line.before, line.delta, line.after])
+        .sort(),
+      [
+        [4, -4, 0],
+        [8, -8, 0],
+      ],
+    );
+    const afterClear = await quantitySnapshot(clearItem.entity_id);
+    assert.equal(afterClear.item.archived, true);
+    assert.equal(afterClear.item.version, 3);
+    assert.equal(afterClear.item.reorder_threshold, 5);
+    assert.deepEqual(
+      afterClear.balances.map((row) => row.quantity),
+      [0, 0],
+    );
+    const archiveEvent = afterClear.events.find(
+      (event) => event.id === cleared.event_id,
+    );
+    assert.equal(archiveEvent.kind, 'archived');
+    assert.equal(archiveEvent.reason, clearPayload.reason);
+    assert.equal(
+      afterClear.lines.filter((line) => line.event_id === cleared.event_id)
+        .length,
+      2,
+    );
+    assert.deepEqual(
+      await archiveClear(
+        staff.client,
+        {
+          ...clearPayload,
+          expected_version: 2,
+          reason: ' Removed obsolete stock ',
+        },
+        clearRequest,
+      ),
+      cleared,
+      'normalized successful replay returns the original result',
+    );
+    await fail(
+      staff.client,
+      'quantity_archive_and_clear',
+      {
+        ...clearPayload,
+        reason: 'Different reason',
+      },
+      'P1009',
+      clearRequest,
+    );
+    await fail(
+      staff.client,
+      'quantity_archive_and_clear',
+      clearPayload,
+      'P1002',
+    );
+    const restoredClear = await succeed(staff.client, 'quantity_restore', {
+      item_id: clearItem.entity_id,
+      expected_version: 3,
+      reason: 'Definition needed again',
+    });
+    assert.equal(restoredClear.version, 4);
+    assert.equal(
+      (await quantitySnapshot(clearItem.entity_id)).item.reorder_threshold,
+      5,
+    );
+    assert.ok(
+      (await quantitySnapshot(clearItem.entity_id)).balances.every(
+        (row) => row.quantity === 0,
+      ),
+    );
+    const activeSearch = await staff.client.rpc('inventory_search_v2', {
+      p_query: prefix + ' archive clear',
+    });
+    assert.equal(activeSearch.error, null);
+    assert.ok(
+      activeSearch.data.rows.every(
+        (row: { quantity: number | null }) => row.quantity === null,
+      ),
+    );
+  } finally {
+    await owner.query('update public.locations set active=true where id=$1', [
+      b,
+    ]);
+  }
+
+  const alreadyZero = await succeed(staff.client, 'quantity_create', {
+    ...metadata,
+    name: prefix + ' archive zero',
+    reorder_threshold: 3,
+  });
+  const zeroPayload = {
+    item_id: alreadyZero.entity_id,
+    expected_version: '1',
+    confirm_clear_stock: true,
+    reason: 'Retire unused definition',
+  };
+  const zeroRequest = randomUUID();
+  const zeroArchive = await archiveClear(
+    staff.client,
+    zeroPayload,
+    zeroRequest,
+  );
+  assert.equal(zeroArchive.removed_total, '0');
+  assert.deepEqual(zeroArchive.location_deltas, []);
+  await fail(
+    staff.client,
+    'quantity_archive_and_clear',
+    {
+      ...zeroPayload,
+      expected_version: '2',
+    },
+    'P1008',
+  );
+  assert.deepEqual(
+    await archiveClear(staff.client, zeroPayload, zeroRequest),
+    zeroArchive,
+  );
+
+  const largeStock = await succeed(staff.client, 'quantity_create', {
+    ...metadata,
+    name: prefix + ' archive bigint total',
+    initial_location_id: a,
+    initial_quantity: 2147483647,
+  });
+  await succeed(staff.client, 'quantity_receive', {
+    item_id: largeStock.entity_id,
+    expected_version: 1,
+    location_id: b,
+    quantity: 2147483647,
+    reason: 'Large second balance',
+  });
+  const largeArchive = await archiveClear(staff.client, {
+    item_id: largeStock.entity_id,
+    expected_version: '2',
+    confirm_clear_stock: true,
+    reason: 'Remove both large balances',
+  });
+  assert.equal(largeArchive.removed_total, '4294967294');
+  assert.ok(
+    (await quantitySnapshot(largeStock.entity_id)).balances.every(
+      (row) => row.quantity === 0,
+    ),
+  );
+
+  const competing = await succeed(staff.client, 'quantity_create', {
+    ...metadata,
+    name: prefix + ' archive race',
+    initial_location_id: a,
+    initial_quantity: 5,
+  });
+  const [archiveRace, receiveRace] = await concurrent(
+    staff,
+    competing.entity_id,
+    () =>
+      invoke(staff.client, 'quantity_archive_and_clear', {
+        item_id: competing.entity_id,
+        expected_version: '1',
+        confirm_clear_stock: true,
+        reason: 'Concurrent archive',
+      }),
+    () =>
+      invoke(otherStaff.client, 'quantity_receive', {
+        item_id: competing.entity_id,
+        expected_version: 1,
+        location_id: b,
+        quantity: 1,
+        reason: 'Concurrent receive',
+      }),
+  );
+  assert.equal([archiveRace, receiveRace].filter((r) => !r.error).length, 1);
+  assert.equal(
+    [archiveRace, receiveRace].filter((r) => r.error?.code === 'P1002').length,
+    1,
+  );
+  const raceSnapshot = await quantitySnapshot(competing.entity_id);
+  assert.equal(raceSnapshot.item.version, 2);
+  assert.equal(raceSnapshot.events.length, 2);
+  assert.equal(raceSnapshot.item.archived, !archiveRace.error);
+
+  const duplicate = await succeed(staff.client, 'quantity_create', {
+    ...metadata,
+    name: prefix + ' archive duplicate',
+    initial_location_id: a,
+    initial_quantity: 6,
+  });
+  const duplicateRequest = randomUUID();
+  const duplicatePayload = {
+    item_id: duplicate.entity_id,
+    expected_version: '1',
+    confirm_clear_stock: true,
+    reason: 'Duplicate archive submission',
+  };
+  const [firstArchive, secondArchive] = await concurrent(
+    staff,
+    duplicate.entity_id,
+    () =>
+      invoke(
+        staff.client,
+        'quantity_archive_and_clear',
+        duplicatePayload,
+        duplicateRequest,
+      ),
+    () =>
+      invoke(
+        staff.client,
+        'quantity_archive_and_clear',
+        duplicatePayload,
+        duplicateRequest,
+      ),
+  );
+  assert.equal(firstArchive.error, null);
+  assert.equal(secondArchive.error, null);
+  assert.deepEqual(firstArchive.data, secondArchive.data);
+  assert.equal((await quantitySnapshot(duplicate.entity_id)).events.length, 2);
 
   // Replay must return the original creation result even after current state advances.
   await succeed(staff.client, 'quantity_receive', {
