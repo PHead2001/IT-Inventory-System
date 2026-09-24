@@ -3,7 +3,39 @@ import { render, screen, waitFor } from '@testing-library/react';
 vi.mock('qrcode', () => ({
   default: { toDataURL: async () => 'data:image/png;base64,iVBORw0KGgo=' },
 }));
-import { LabelSheet, printExcerpt } from './label-sheet';
+import { LabelSheet, barcodePayload, printExcerpt } from './label-sheet';
+
+it('keeps quantity identity as the canonical QR URL even when Code 128 is selected', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  const quantity = {
+    kind: 'quantity' as const,
+    key: id,
+    name: 'Cables',
+    context: 'Cables',
+    path: '/inventory/quantity/' + id,
+    state: 'active',
+  };
+  expect(barcodePayload(quantity)).toBeNull();
+  render(
+    <LabelSheet
+      records={[quantity, quantity]}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="90x50"
+      page="letter"
+      format="code128"
+    />,
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelectorAll('.label-card[data-code-ready="true"]'),
+    ).toHaveLength(2),
+  );
+  expect(
+    screen.getAllByRole('img', { name: 'QR code for Cables' }),
+  ).toHaveLength(2);
+  expect(document.querySelectorAll('.label-card')).toHaveLength(2);
+});
 
 it('shortens display text visibly while preserving the full stable identifier', () => {
   const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';

@@ -42,6 +42,9 @@ async function decodeScreenshot(page: Page, png: Buffer): Promise<string> {
 
 async function generatedLocationQr(page: Page, code = rootCode) {
   await page.goto('/labels?location=' + code);
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   const card = page.locator('.label-card').first();
   const qr = card.getByRole('img', { name: /QR code for/ });
   await expect(qr).toBeVisible();
@@ -80,6 +83,9 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     .locator('select')
     .filter({ has: page.locator('option[value="code128"]') });
   await codeFormat.selectOption('code128');
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   const barcode = card.getByRole('img', { name: 'Code 128 LOC:ITC' });
   await expect(barcode).toBeVisible();
   await expect(barcode).not.toHaveClass(/hidden/);
@@ -96,6 +102,9 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     ),
   ).toBe('LOC:ITC');
   await codeFormat.selectOption('qr');
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   for (const code of [
     'ITC-L',
     'ITC-R',
@@ -110,11 +119,14 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
   ]) {
     await chooseLocation(
       page.locator('section').filter({ hasText: 'Add a location' }).first(),
-      'Choose a location or group',
+      'Location',
       code,
     );
     await page.getByRole('button', { name: 'Add location label' }).click();
   }
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   await expect(page.locator('.label-card')).toHaveCount(11);
   const pdf = await page.pdf({
     path: testInfo.outputPath('labels-letter.pdf'),
@@ -378,6 +390,9 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     ).toBeVisible();
   }
   await page.goto('/labels?asset=' + id);
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   const card = page.locator('.label-card').first();
   await expect(card).toContainText(id);
   const initialCode = await decodeScreenshot(
@@ -446,6 +461,9 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     page.getByRole('heading', { name: 'Renamed ' + originalName, exact: true }),
   ).toBeVisible();
   await page.goto('/labels?asset=' + id);
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
   await expect(card).toContainText('Renamed Label asset');
   expect(
     await decodeScreenshot(
@@ -471,6 +489,165 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await input.fill('AST:ITC');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page).toHaveURL(new RegExp('/inventory/assets/' + id + '$'));
+});
+
+test('mixed queue retains copies across navigation, decodes quantity QR, and prints a multipage job', async ({
+  page,
+  context,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const suffix = crypto.randomUUID();
+  const quantityName = 'Queue adapters ' + suffix;
+  const assetName = 'Queue laptop ' + suffix;
+  await page.goto('/inventory/quantity/new');
+  let form = page.getByRole('form', { name: 'Create quantity inventory' });
+  await form.getByLabel('Name', { exact: true }).fill(quantityName);
+  await form.getByLabel('Initial quantity').fill('3');
+  await chooseLocation(form, 'Initial location', 'ITC-S1A');
+  await form
+    .getByRole('button', { name: 'Review create quantity inventory' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm create quantity inventory' })
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const quantityId = page.url().split('/').at(-1)!;
+
+  await page.goto('/inventory/assets/new');
+  form = page.getByRole('form', { name: 'Create serialized asset' });
+  await form.getByLabel('Name', { exact: true }).fill(assetName);
+  await form.getByLabel('Asset tag').fill('Q-' + suffix);
+  await chooseLocation(form, 'Destination location', 'ITC-D01');
+  await form
+    .getByRole('button', { name: 'Review create serialized asset' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm create serialized asset' })
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  const assetId = page.url().split('/').at(-1)!;
+
+  await page.goto('/labels');
+  const search = page.getByRole('form', { name: 'Search label records' });
+  await search.getByRole('textbox').fill(quantityName);
+  await search.getByRole('button', { name: 'Search' }).click();
+  await expect(page.getByRole('link', { name: quantityName })).toBeVisible();
+  await expect(page.getByText('Holdings: ITC-S1A: 3')).toBeVisible();
+  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await search.getByRole('textbox').fill(assetName);
+  await search.getByRole('button', { name: 'Search' }).click();
+  await expect(page.getByRole('link', { name: assetName })).toBeVisible();
+  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await chooseLocation(
+    page.locator('section').filter({ hasText: 'Add a location' }).first(),
+    'Location',
+    'ITC-S1B',
+  );
+  await page.getByRole('button', { name: 'Add location label' }).click();
+  await expect(page.getByRole('region', { name: 'Label queue' })).toContainText(
+    '3 distinct records',
+  );
+  await page.getByRole('link', { name: 'Inventory', exact: true }).click();
+  await page.goto('/labels');
+  await expect(page.getByRole('region', { name: 'Label queue' })).toContainText(
+    '3 distinct records',
+  );
+  const copies = page.getByRole('spinbutton');
+  await copies.first().fill('10');
+  await page
+    .getByRole('button', { name: 'Prepare full print preview' })
+    .click();
+  await expect(page.locator('.label-card')).toHaveCount(12);
+  const quantityCard = page
+    .locator('.label-card')
+    .filter({ hasText: quantityId })
+    .first();
+  const quantityQr = quantityCard.getByRole('img', { name: /QR code for/ });
+  await expect(quantityQr).toBeVisible();
+  expect(
+    await decodeScreenshot(
+      page,
+      await quantityCard.screenshot({
+        path: testInfo.outputPath('quantity-qr.png'),
+      }),
+    ),
+  ).toBe(process.env.APP_ORIGIN + '/inventory/quantity/' + quantityId);
+  const pdf = await page.pdf({
+    path: testInfo.outputPath('mixed-label-queue.pdf'),
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+  expect(
+    (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length,
+  ).toBeGreaterThan(1);
+
+  const editor = await context.newPage();
+  await editor.goto('/inventory/quantity/' + quantityId);
+  await editor
+    .locator('summary')
+    .filter({ hasText: /^Edit quantity metadata$/ })
+    .click();
+  form = editor.getByRole('form', { name: 'Edit quantity metadata' });
+  await form.getByLabel('Name', { exact: true }).fill('Fresh ' + quantityName);
+  await form
+    .getByRole('button', { name: 'Review edit quantity metadata' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm edit quantity metadata' })
+    .click();
+  await expect(
+    editor.getByRole('heading', { name: 'Fresh ' + quantityName }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.print = () => {
+      document.body.dataset.printCalled = 'yes';
+    };
+  });
+  await page.getByRole('button', { name: /Print selected labels/ }).click();
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-print-called',
+    'yes',
+  );
+  await expect(page.getByRole('status')).toContainText(
+    'Label information refreshed',
+  );
+  await expect(quantityCard).toContainText('Fresh Queue adapters');
+
+  await editor.goto('/inventory/assets/' + assetId);
+  await editor
+    .locator('summary')
+    .filter({ hasText: /^Edit asset metadata$/ })
+    .click();
+  form = editor.getByRole('form', { name: 'Edit asset metadata' });
+  await form.getByLabel('Asset tag').fill('Q2-' + suffix);
+  await form
+    .getByRole('button', { name: 'Review edit asset metadata' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm edit asset metadata' })
+    .click();
+  await page.evaluate(() => {
+    delete document.body.dataset.printCalled;
+  });
+  await page.getByRole('button', { name: /Print selected labels/ }).click();
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  await expect(page.locator('body')).not.toHaveAttribute(
+    'data-print-called',
+    'yes',
+  );
+  await editor.close();
+
+  await page.goto('/scan');
+  await page
+    .getByLabel('Paste a label URL, barcode text, or exact identifier')
+    .fill(process.env.APP_ORIGIN + '/inventory/quantity/' + quantityId);
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(page).toHaveURL(
+    new RegExp('/inventory/quantity/' + quantityId + '$'),
+  );
 });
 
 test('staff threshold persists into dashboard, inventory filter, and real CSV download; viewer can read and export', async ({
