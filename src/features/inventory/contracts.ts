@@ -7,6 +7,7 @@ export const operations = [
   'quantity_adjust',
   'quantity_update',
   'quantity_archive',
+  'quantity_archive_and_clear',
   'quantity_restore',
   'asset_create',
   'asset_move',
@@ -22,7 +23,7 @@ export type MutationCommand = {
   payload: Record<string, unknown>;
 };
 export type MutationState =
-  | { ok: true; entityId: string; version: number; changed: boolean }
+  | { ok: true; entityId: string; version: string; changed: boolean }
   | {
       ok: false;
       kind: 'validation' | 'domain' | 'unexpected';
@@ -34,6 +35,12 @@ export type MutationState =
 const uuid = z.uuid();
 const count = z.number().int().min(0).max(2147483647);
 const positive = count.min(1);
+const versionWire = z
+  .union([z.string().regex(/^[1-9][0-9]*$/), z.number().int().safe().min(1)])
+  .transform(String);
+const archiveVersion = versionWire.refine(
+  (v) => v.length <= 10 && Number(v) <= 2147483647,
+);
 const reorderThreshold = count.nullable().optional();
 const optionalText = (max: number) =>
   z
@@ -103,6 +110,12 @@ export const payloadSchemas = {
     reorder_threshold: reorderThreshold,
   }),
   quantity_archive: z.strictObject({ ...quantity, reason }),
+  quantity_archive_and_clear: z.strictObject({
+    item_id: uuid,
+    expected_version: archiveVersion,
+    confirm_clear_stock: z.literal(true),
+    reason,
+  }),
   quantity_restore: z.strictObject({ ...quantity, reason }),
   asset_create: z.strictObject({
     ...metadata,
@@ -197,7 +210,7 @@ export function mutationError(code: string | undefined): MutationState {
 }
 export const mutationResultSchema = z.object({
   entity_id: uuid,
-  version: positive,
+  version: versionWire,
   event_id: uuid.nullable(),
   changed: z.boolean(),
 });

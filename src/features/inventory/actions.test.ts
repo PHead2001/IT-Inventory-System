@@ -91,7 +91,7 @@ describe('inventory server-action boundary', () => {
     expect(await submitInventory(command)).toEqual({
       ok: true,
       entityId: itemId,
-      version: 2,
+      version: '2',
       changed: true,
     });
     expect(mocks.createClient).toHaveBeenCalledWith(true);
@@ -230,7 +230,7 @@ describe('inventory server-action boundary', () => {
   it.each([
     null,
     { ...success, entity_id: 'bad' },
-    { ...success, version: '2' },
+    { ...success, version: '02' },
     { ...success, changed: 'yes' },
     { ...success, event_id: 'bad' },
   ])(
@@ -255,7 +255,7 @@ describe('inventory server-action boundary', () => {
     expect(first).toEqual({
       ok: true,
       entityId: itemId,
-      version: 1,
+      version: '1',
       changed: false,
     });
     expect(second).toEqual(first);
