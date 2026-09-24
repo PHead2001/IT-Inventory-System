@@ -373,7 +373,9 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     await form
       .getByRole('button', { name: 'Confirm edit asset metadata' })
       .click();
-    await expect(form.getByRole('status')).toContainText('Saved successfully');
+    await expect(
+      page.getByRole('heading', { name: originalName, exact: true }),
+    ).toBeVisible();
   }
   await page.goto('/labels?asset=' + id);
   const card = page.locator('.label-card').first();
@@ -410,7 +412,21 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await chooseLocation(form, 'Destination location', destination);
   await form.getByRole('button', { name: 'Review move asset' }).click();
   await form.getByRole('button', { name: 'Confirm move asset' }).click();
-  await expect(form.getByRole('status')).toContainText('Saved successfully');
+  // History can already contain the destination; wait for the current record.
+  await expect(
+    page
+      .locator('section')
+      .filter({
+        has: page.getByRole('heading', {
+          name: 'Current location',
+          exact: true,
+        }),
+      })
+      .getByRole('link', {
+        name: 'Show ' + destination + ' in room',
+        exact: true,
+      }),
+  ).toBeVisible();
   await page.reload();
   await page
     .locator('summary')
@@ -426,7 +442,9 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await form
     .getByRole('button', { name: 'Confirm edit asset metadata' })
     .click();
-  await expect(form.getByRole('status')).toContainText('Saved successfully');
+  await expect(
+    page.getByRole('heading', { name: 'Renamed ' + originalName, exact: true }),
+  ).toBeVisible();
   await page.goto('/labels?asset=' + id);
   await expect(card).toContainText('Renamed Label asset');
   expect(
