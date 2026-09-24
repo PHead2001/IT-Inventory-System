@@ -400,6 +400,64 @@ async function main() {
   });
   assert.equal(removed.quantity_count, '2');
   assert.equal(removed.asset_count, '1');
+  const categoryAssetEvent = (
+    await owner.query(
+      `select e.id,e.from_location_id,e.to_location_id,
+              h.from_location_id as shown_from,h.to_location_id as shown_to,h.location_ids
+       from public.asset_events e join public.inventory_history_rows h on h.id=e.id
+       where e.asset_id=$1 and e.kind='metadata_updated'`,
+      [asset.entity_id],
+    )
+  ).rows[0];
+  assert.ok(categoryAssetEvent);
+  assert.equal(categoryAssetEvent.from_location_id, null);
+  assert.equal(categoryAssetEvent.to_location_id, null);
+  assert.equal(categoryAssetEvent.shown_from, null);
+  assert.equal(categoryAssetEvent.shown_to, null);
+  assert.deepEqual(categoryAssetEvent.location_ids, []);
+  const locationHistory = await viewer.client.rpc('inventory_history', {
+    p_type: 'asset',
+    p_entity_id: asset.entity_id,
+    p_location_code: 'ITC-D01',
+  });
+  assert.equal(locationHistory.error, null);
+  assert.ok(
+    (locationHistory.data as { rows: { id: string }[] }).rows.every(
+      (event) => event.id !== categoryAssetEvent.id,
+    ),
+  );
+  // A pre-fix category event cannot be rewritten: project its unchanged
+  // location as metadata, not as a physical movement or location history hit.
+  await owner.query('begin');
+  try {
+    const legacyId = uuid();
+    await owner.query(
+      `insert into public.asset_events
+        (id,asset_id,kind,actor_id,actor_name,reason,from_location_id,to_location_id,version)
+       values($1,$2,'metadata_updated',$3,$4,'Legacy category reassignment',$5,$5,
+              (select max(version)+1 from public.asset_events where asset_id=$2))`,
+      [legacyId, asset.entity_id, maintainer.id, prefix + 'staff', location],
+    );
+    const legacyProjection = (
+      await owner.query(
+        `select from_location_id,to_location_id,location_ids
+         from public.inventory_history_rows where id=$1`,
+        [legacyId],
+      )
+    ).rows[0];
+    assert.equal(legacyProjection.from_location_id, null);
+    assert.equal(legacyProjection.to_location_id, null);
+    assert.deepEqual(legacyProjection.location_ids, []);
+    assert.equal(
+      await count(
+        'select count(*) from public.inventory_history_rows where id=$1 and $2=any(location_ids)',
+        [legacyId, location],
+      ),
+      0,
+    );
+  } finally {
+    await owner.query('rollback');
+  }
   assert.equal(
     await count(
       'select count(*) from public.quantity_items where category_id=$1',
