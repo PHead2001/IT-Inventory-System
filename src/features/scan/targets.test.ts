@@ -3,6 +3,7 @@ import {
   assetLabelPath,
   locationLabelPath,
   parseScan,
+  quantityLabelPath,
   validReturnPath,
 } from './targets';
 const origin = 'https://inventory.example.test';
@@ -18,6 +19,11 @@ describe('label destinations', () => {
       kind: 'asset',
       id,
       path: '/inventory/assets/' + id,
+    });
+    expect(parseScan(origin + quantityLabelPath(id), origin)).toEqual({
+      kind: 'quantity',
+      id,
+      path: '/inventory/quantity/' + id,
     });
     expect(parseScan('LOC:ITC', origin)?.kind).toBe('location');
     expect(parseScan('AST:tag-001', origin)).toEqual({
@@ -60,6 +66,9 @@ describe('label destinations', () => {
     expect(validReturnPath('/locations/ITC')).toBe('/locations/ITC');
     expect(validReturnPath('/inventory/assets/' + id)).toBe(
       '/inventory/assets/' + id,
+    );
+    expect(validReturnPath('/inventory/quantity/' + id)).toBe(
+      '/inventory/quantity/' + id,
     );
     expect(validReturnPath('/scan')).toBeNull();
     expect(

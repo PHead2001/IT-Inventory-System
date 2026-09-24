@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   location: vi.fn(),
   asset: vi.fn(),
+  quantity: vi.fn(),
   origin: vi.fn(),
 }));
 vi.mock('server-only', () => ({}));
@@ -17,7 +18,9 @@ vi.mock('@/lib/auth/session.server', () => ({
             maybeSingle: () =>
               table === 'inventory_locations'
                 ? db.location(value)
-                : db.asset(value),
+                : table === 'quantity_items'
+                  ? db.quantity(value)
+                  : db.asset(value),
           }),
         }),
       }),
@@ -28,6 +31,7 @@ import { resolveScan } from './resolve.server';
 beforeEach(() => {
   db.location.mockReset().mockResolvedValue({ data: null, error: null });
   db.asset.mockReset().mockResolvedValue({ data: null, error: null });
+  db.quantity.mockReset().mockResolvedValue({ data: null, error: null });
   db.origin.mockReset().mockReturnValue({
     origin: 'https://inventory.example.test',
     preview: false,
@@ -112,6 +116,29 @@ it('resolves bare asset UUIDs and de-duplicates a matching tag record', async ()
     matches: [{ path: '/inventory/assets/' + id }],
   });
   expect(db.asset).toHaveBeenCalledWith(id);
+});
+it('resolves quantity QR URLs and keeps archived records identifiable', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  db.quantity.mockResolvedValue({
+    data: { id, name: 'Retired adapter definition', archived: true },
+    error: null,
+  });
+  expect(
+    await resolveScan(
+      'https://inventory.example.test/inventory/quantity/' + id,
+    ),
+  ).toEqual({
+    status: 'found',
+    matches: [
+      {
+        kind: 'quantity',
+        path: '/inventory/quantity/' + id,
+        label: 'Retired adapter definition',
+        state: 'archived',
+      },
+    ],
+  });
+  expect(await resolveScan(id)).toMatchObject({ status: 'found' });
 });
 it('keeps manual lookup usable without a configured label origin', async () => {
   db.origin.mockImplementation(() => {
