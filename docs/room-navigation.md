@@ -30,6 +30,8 @@ Normal location selection and inventory links stay available outside the canvas.
 
 The renderer is dynamically imported with server rendering disabled. Loading, unavailable graphics, initialization errors and context loss keep the conventional UI usable. Retry recreates the graphics surface. Hide/show clears readiness until the remounted scene actually renders.
 
+Hover labels follow the nearest visible scene mesh under the pointer, resolving child furniture through its logical storage owner. Opaque floor and furniture surfaces block targets behind them; invisible convenience hitboxes cannot create a hover label. The hover label is a screen-space button near the pointer, so camera-facing 3D anchor occlusion and label collisions cannot hide an exposed storage target. Camera motion rechecks the same pointer position. The brief mesh-to-button handoff preserves the label without changing selection. Show all labels retains the separate occlusion-aware, collision-managed 3D label renderer. When its label is already exposed and clickable, that label serves the hover; otherwise the screen-space button appears. Hidden labels neither receive clicks nor remain keyboard-focusable. Door decoration is not a logical inventory target.
+
 Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Only controls and bounded focus transitions request extra frames. No external fonts, heavy postprocessing or persistent animation is needed. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
 
 ## Validation
@@ -37,5 +39,7 @@ Use simple reusable geometry and restrained lighting, a capped device pixel rati
 Pure tests prove transforms, canonical bindings, database-derived descendants, strict URL selection and camera limits. Component tests prove the scene/application contract, coherent pending navigation, aggregate selection, repeated focus, missing bindings, retry/failure and located/unlocated links.
 
 Real local Supabase Playwright tests cover authentication, actual WebGL rendering/raycast selection, shelf and drawer stock, search-to-room, aggregates, history navigation, repeated focus, viewer access, phone usability and forced graphics failure. A passing mocked scene is not evidence that WebGL works. Inspect actual screenshots for clipping, label overlap and proportions; avoid pixel-perfect assertions.
+
+Hover regression tests move the pointer over actual visible geometry at oblique, overhead, underside and panned Free Orbit views, then verify the resolved location, projected binding intersection and tooltip; each angle is captured for visual review. With a stationary pointer, UI pan commands move a known shelf off its independently computed ray, and the old hover label must clear or change. Tests also cover opaque occluders, invisible hitboxes, DOM label handoff, hover without selection, and Show all label accessibility. Camera telemetry is read-only and does not replace pointer interaction.
 
 For focused browser iteration use `npm run test:e2e -- tests/e2e/room.spec.ts`. This still builds with the local public backend environment. Final certification remains fresh `npm ci` followed by the complete `npm run validate`, exact-head CI, fresh Codex review and the configured nonproduction preview smoke.
