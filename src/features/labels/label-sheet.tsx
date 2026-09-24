@@ -72,7 +72,8 @@ export function LabelSheet({
       html, body, body > * { background: #fff !important; }
       body { color: #000 !important; }
       body > * { visibility: hidden !important; }
-      .label-print-root, .label-print-root * { visibility: visible !important; }
+      .label-print-root:not([data-print-authorized="true"]) { display: none !important; }
+      .label-print-root[data-print-authorized="true"], .label-print-root[data-print-authorized="true"] * { visibility: visible !important; }
       .label-print-root { position: absolute !important; inset: 0 auto auto 0; width: 100%; margin: 0; padding: 0; border: 0; background: white; }
       .label-print-root .label-card { border: 0.2mm solid #222; }
       .label-print-root .label-card, .label-print-root .label-card * { color: black !important; background: white !important; }
