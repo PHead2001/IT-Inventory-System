@@ -1,5 +1,7 @@
 # Validation
 
+The metadata database gate includes `supabase/tests/metadata.test.sql` and `tests/integration/metadata.ts`. It proves publication validation, direct-write denial, value evolution, stale revisions and an independent-connection catalog race. Export limits also require a real authenticated Data API download and hosted PostgREST timeout evidence before release; unit tests alone do not establish those bounds.
+
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
 | Command                       | Responsibility                                                            |

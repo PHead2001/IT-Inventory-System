@@ -1,5 +1,7 @@
 # Application architecture
 
+Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
+
 The approved v0.1 plan and amendments govern Foundation and Inventory Core. PR3 implements the R3F room navigation surface.
 
 ## System boundaries
