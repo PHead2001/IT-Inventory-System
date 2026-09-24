@@ -5,6 +5,7 @@ try {
     'lint',
     'format:check',
     'test',
+    'test:preview-access',
     'test:e2e:list',
     'build',
   ])
