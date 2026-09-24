@@ -46,7 +46,6 @@ export async function getConfiguration() {
   if (categories.error || defaults.error)
     throw new Error('Settings could not be loaded.');
   return {
-    memberId: member.user_id,
     categories: z.array(category).parse(categories.data),
     labelDefaults: labelDefaults.parse(defaults.data),
     canManage: member.role === 'staff' && member.can_manage_configuration,

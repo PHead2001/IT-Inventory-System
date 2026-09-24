@@ -1513,9 +1513,14 @@ export function MetadataSettings({
                     type="button"
                     variant="outline"
                     disabled={
-                      operationPending || pending || dirty || issues.length > 0
+                      operationPending ||
+                      pending ||
+                      dirty ||
+                      issues.length > 0 ||
+                      !draftId
                     }
                     onClick={() => {
+                      if (!draftId) return;
                       if (busy.current) return;
                       busy.current = true;
                       setOperationPending(true);

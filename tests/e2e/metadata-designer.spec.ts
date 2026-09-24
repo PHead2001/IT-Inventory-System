@@ -93,6 +93,12 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
       .getByRole('combobox', { name: 'Category' })
       .first()
       .selectOption({ label: name });
+    other.once('dialog', (dialog) => dialog.accept());
+    await second.getByRole('button', { name: 'Discard saved draft' }).click();
+    await expect(second.getByRole('status')).toContainText(
+      'Saved draft discarded',
+    );
+    await second.getByRole('button', { name: 'Add field' }).click();
     await second.getByLabel('Label', { exact: true }).fill('Connector type');
     await second.getByRole('button', { name: 'Save draft' }).click();
     await expect(second.getByRole('status')).toContainText('Draft saved');
@@ -115,6 +121,7 @@ test('phone and desktop designer saves, publishes, and rejects a stale draft wit
     await expect(designer.getByLabel('Label', { exact: true })).toHaveValue(
       'Connector family retained',
     );
+    page.once('dialog', (dialog) => dialog.accept());
     await page.goBack();
     await expect(
       page.getByRole('heading', { name: 'Inventory workspace' }),
