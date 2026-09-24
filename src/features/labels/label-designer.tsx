@@ -102,6 +102,7 @@ export function LabelDesigner({
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const queueEpoch = useRef(0);
+  const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
@@ -110,6 +111,7 @@ export function LabelDesigner({
   useEffect(
     () => () => {
       queueEpoch.current++;
+      clearPrintAuthorization.current?.();
     },
     [],
   );
@@ -184,6 +186,7 @@ export function LabelDesigner({
 
   const invalidate = () => {
     queueEpoch.current++;
+    clearPrintAuthorization.current?.();
     setPrepared(null);
     setPrintRows(null);
     setPendingChanges([]);
@@ -363,7 +366,32 @@ export function LabelDesigner({
         );
         return;
       }
-      window.print();
+      const sheet = document.querySelector<HTMLElement>('.label-print-root');
+      if (!sheet) {
+        setMessage('Print preview is unavailable. Prepare it again.');
+        return;
+      }
+      // Ctrl/Cmd+P skips the final inventory check. Some browsers return from
+      // print() before capture; keep the sheet available until afterprint,
+      // with a bounded fallback for browsers that never dispatch it.
+      clearPrintAuthorization.current?.();
+      const clear = () => {
+        window.removeEventListener('afterprint', clear);
+        window.clearTimeout(timeout);
+        delete sheet.dataset.printAuthorized;
+        if (clearPrintAuthorization.current === clear)
+          clearPrintAuthorization.current = null;
+      };
+      clearPrintAuthorization.current = clear;
+      window.addEventListener('afterprint', clear, { once: true });
+      const timeout = window.setTimeout(clear, 30_000);
+      sheet.dataset.printAuthorized = 'true';
+      try {
+        window.print();
+      } catch (error) {
+        clear();
+        throw error;
+      }
     } catch {
       if (epoch !== queueEpoch.current) return;
       invalidate();
@@ -422,7 +450,7 @@ export function LabelDesigner({
           />
         </label>
         <div className="flex flex-wrap gap-3">
-          <label>
+          <label className="min-w-0 max-w-full">
             Type{' '}
             <select
               value={draft.type}
@@ -432,14 +460,14 @@ export function LabelDesigner({
                   type: event.target.value as LabelSearchFilters['type'],
                 })
               }
-              className="rounded bg-slate-800 p-2"
+              className="max-w-full rounded bg-slate-800 p-2"
             >
               <option value="all">All</option>
               <option value="quantity">Quantity</option>
               <option value="asset">Asset</option>
             </select>
           </label>
-          <label>
+          <label className="min-w-0 max-w-full">
             Status{' '}
             <select
               value={draft.status}
@@ -449,7 +477,7 @@ export function LabelDesigner({
                   status: event.target.value as LabelSearchFilters['status'],
                 })
               }
-              className="rounded bg-slate-800 p-2"
+              className="max-w-full rounded bg-slate-800 p-2"
             >
               <option value="active">Active</option>
               <option value="historical">Archived / retired</option>

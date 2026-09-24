@@ -40,6 +40,12 @@ export function SettingsPanel({
   const [page, setPage] = useState(labelDefaults.page);
   const [format, setFormat] = useState(labelDefaults.format);
   const active = categories.filter((item) => item.active && !item.removed_at);
+  const reviewedHasReferences =
+    review !== null &&
+    (review.quantity_count !== '0' ||
+      review.asset_count !== '0' ||
+      review.historical_quantity_count !== '0' ||
+      review.historical_asset_count !== '0');
   const submit = (
     operation:
       | 'category_create'
@@ -228,7 +234,8 @@ export function SettingsPanel({
                     }}
                   >
                     <option value="">
-                      None, only if no records reference this category
+                      None, only if no current or historical inventory
+                      references
                     </option>
                     {active
                       .filter((item) => item.id !== category.id)
@@ -265,24 +272,38 @@ export function SettingsPanel({
                     >
                       <p>
                         <strong>
-                          {review.quantity_count} quantity definitions
+                          {review.quantity_count} current quantity definitions
                         </strong>{' '}
                         and{' '}
-                        <strong>{review.asset_count} serialized assets</strong>{' '}
-                        will move from {review.source_name}{' '}
+                        <strong>
+                          {review.asset_count} current serialized assets
+                        </strong>{' '}
                         {review.target_name
-                          ? 'to ' + review.target_name
-                          : 'and the unreferenced category will be deleted'}
+                          ? 'will be reassigned to ' + review.target_name
+                          : 'use ' + review.source_name}
                         .
+                      </p>
+                      <p>
+                        <strong>
+                          {review.historical_quantity_count} historical quantity
+                          definitions
+                        </strong>{' '}
+                        and{' '}
+                        <strong>
+                          {review.historical_asset_count} historical serialized
+                          assets
+                        </strong>{' '}
+                        also reference this category.{' '}
+                        {reviewedHasReferences
+                          ? 'The category will be removed from active choices but retained for readable history.'
+                          : 'This truly unreferenced category will be deleted.'}
                       </p>
                       <p className="text-sm text-slate-400">
                         This review expires at{' '}
                         {new Date(review.expires_at).toLocaleTimeString()}. New
                         or changed records require another review.
                       </p>
-                      {Number(review.quantity_count) +
-                        Number(review.asset_count) >
-                        0 && !review.target_id ? (
+                      {reviewedHasReferences && !review.target_id ? (
                         <p role="alert">Choose a replacement before removal.</p>
                       ) : (
                         <Button

@@ -70,9 +70,25 @@ describe('configuration command boundaries', () => {
         target_version: null,
         quantity_count: 0,
         asset_count: 0,
+        historical_quantity_count: '0',
+        historical_asset_count: '1',
         expires_at: new Date().toISOString(),
       }).success,
     ).toBe(true);
+    expect(
+      removalReviewSchema.safeParse({
+        token: requestId,
+        source_id: category,
+        source_name: 'Other',
+        source_version: '1',
+        target_id: null,
+        target_name: null,
+        target_version: null,
+        quantity_count: '0',
+        asset_count: '0',
+        expires_at: new Date().toISOString(),
+      }).success,
+    ).toBe(false);
     expect(configurationError('P1017')).toMatchObject({
       ok: false,
       code: 'P1017',

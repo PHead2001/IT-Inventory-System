@@ -108,6 +108,8 @@ async function review(
     token: string;
     quantity_count: string;
     asset_count: string;
+    historical_quantity_count: string;
+    historical_asset_count: string;
     source_version: string;
     expires_at: string;
   };
@@ -455,11 +457,14 @@ async function main() {
     Number(emptyImpact.quantity_count) + Number(emptyImpact.asset_count),
     0,
   );
-  await success(maintainer.client, 'category_remove', {
+  assert.equal(emptyImpact.historical_quantity_count, '0');
+  assert.equal(emptyImpact.historical_asset_count, '0');
+  const emptyRemoval = await success(maintainer.client, 'category_remove', {
     category_id: empty.id,
     replacement_id: null,
     review_token: emptyImpact.token,
   });
+  assert.equal(emptyRemoval.tombstoned, false);
   assert.equal(
     await count('select count(*) from public.categories where id=$1', [
       empty.id,
@@ -473,6 +478,193 @@ async function main() {
     ),
     1,
   );
+
+  const historySource = await newCategory(
+    maintainer.client,
+    prefix + ' History only',
+  );
+  const historyTarget = await newCategory(
+    maintainer.client,
+    prefix + ' History target',
+  );
+  const historyItem = await success(staff.client, 'quantity_create', {
+    name: prefix + ' History quantity',
+    category_id: historySource.id,
+    initial_quantity: 0,
+    initial_location_id: null,
+  });
+  const historyAsset = await success(staff.client, 'asset_create', {
+    name: prefix + ' History asset',
+    category_id: historySource.id,
+    location_id: location,
+  });
+  await success(staff.client, 'quantity_update', {
+    item_id: historyItem.entity_id,
+    expected_version: historyItem.version,
+    name: prefix + ' History quantity',
+    category_id: historyTarget.id,
+    description: null,
+    manufacturer: null,
+    model: null,
+  });
+  await success(staff.client, 'asset_update', {
+    asset_id: historyAsset.entity_id,
+    expected_version: historyAsset.version,
+    name: prefix + ' History asset',
+    category_id: historyTarget.id,
+    description: null,
+    manufacturer: null,
+    model: null,
+    asset_tag: null,
+    serial_number: null,
+  });
+  const historyReview = await review(maintainer.client, historySource.id, null);
+  assert.equal(historyReview.quantity_count, '0');
+  assert.equal(historyReview.asset_count, '0');
+  assert.equal(historyReview.historical_quantity_count, '1');
+  assert.equal(historyReview.historical_asset_count, '1');
+  const historyNoTarget = {
+    category_id: historySource.id,
+    replacement_id: null,
+    review_token: historyReview.token,
+  };
+  const rejectedRequest = uuid();
+  await failure(
+    maintainer.client,
+    'category_remove',
+    historyNoTarget,
+    'P1018',
+    rejectedRequest,
+  );
+  assert.equal(
+    await count(
+      'select count(*) from private.mutation_requests where actor_id=$1 and request_id=$2',
+      [maintainer.id, rejectedRequest],
+    ),
+    0,
+  );
+  assert.equal(
+    await count(
+      'select count(*) from public.categories where id=$1 and active',
+      [historySource.id],
+    ),
+    1,
+  );
+  const reviewedWithTarget = await review(
+    maintainer.client,
+    historySource.id,
+    historyTarget.id,
+  );
+  assert.equal(reviewedWithTarget.historical_quantity_count, '1');
+  assert.equal(reviewedWithTarget.historical_asset_count, '1');
+  const historicalQuantityEvents = await count(
+    'select count(*) from public.quantity_events where item_id=$1',
+    [historyItem.entity_id],
+  );
+  const historicalAssetEvents = await count(
+    'select count(*) from public.asset_events where asset_id=$1',
+    [historyAsset.entity_id],
+  );
+  const historyRemoval = await success(maintainer.client, 'category_remove', {
+    category_id: historySource.id,
+    replacement_id: historyTarget.id,
+    review_token: reviewedWithTarget.token,
+  });
+  assert.equal(historyRemoval.quantity_count, '0');
+  assert.equal(historyRemoval.asset_count, '0');
+  assert.equal(historyRemoval.historical_quantity_count, '1');
+  assert.equal(historyRemoval.historical_asset_count, '1');
+  assert.equal(historyRemoval.tombstoned, true);
+  assert.equal(
+    await count(
+      'select count(*) from public.categories where id=$1 and not active and removed_at is not null',
+      [historySource.id],
+    ),
+    1,
+  );
+  assert.equal(
+    await count(
+      'select count(*) from public.quantity_events where item_id=$1',
+      [historyItem.entity_id],
+    ),
+    historicalQuantityEvents,
+  );
+  assert.equal(
+    await count('select count(*) from public.asset_events where asset_id=$1', [
+      historyAsset.entity_id,
+    ]),
+    historicalAssetEvents,
+  );
+
+  // A final active, truly unreferenced category can be removed without an
+  // invented fallback. Keep the temporary empty-catalog state in a rollback.
+  const lastCatalogCategory = await newCategory(
+    maintainer.client,
+    prefix + ' Last empty',
+  );
+  const isolated = new Client({
+    connectionString: db,
+    application_name: 'configuration-last-category',
+  });
+  await isolated.connect();
+  try {
+    await isolated.query('begin');
+    await isolated.query(
+      'update public.categories set active=false where active and id<>$1',
+      [lastCatalogCategory.id],
+    );
+    await isolated.query('set local role authenticated');
+    await isolated.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: maintainer.id, role: 'authenticated' }),
+    ]);
+    const lastReview = (
+      await isolated.query(
+        'select public.category_removal_review($1,$2) as impact',
+        [lastCatalogCategory.id, null],
+      )
+    ).rows[0].impact as {
+      token: string;
+      historical_quantity_count: string;
+      historical_asset_count: string;
+    };
+    assert.equal(lastReview.historical_quantity_count, '0');
+    assert.equal(lastReview.historical_asset_count, '0');
+    const lastRemoval = (
+      await isolated.query(
+        'select public.category_remove($1,$2::jsonb) as result',
+        [
+          uuid(),
+          JSON.stringify({
+            category_id: lastCatalogCategory.id,
+            replacement_id: null,
+            review_token: lastReview.token,
+          }),
+        ],
+      )
+    ).rows[0].result as Record<string, unknown>;
+    assert.equal(lastRemoval.tombstoned, false);
+    assert.equal(
+      (
+        await isolated.query(
+          'select count(*) from public.categories where active',
+        )
+      ).rows[0].count,
+      '0',
+    );
+  } finally {
+    await isolated.query('rollback');
+    await isolated.end();
+  }
+  const lastCleanup = await review(
+    maintainer.client,
+    lastCatalogCategory.id,
+    null,
+  );
+  await success(maintainer.client, 'category_remove', {
+    category_id: lastCatalogCategory.id,
+    replacement_id: null,
+    review_token: lastCleanup.token,
+  });
 
   const stale = await newCategory(maintainer.client, prefix + ' Stale');
   const staleReview = await review(maintainer.client, stale.id, target.id);
