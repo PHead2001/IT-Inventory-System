@@ -5,6 +5,7 @@ playwright-report
 test-results
 package-lock.json
 src/lib/supabase/database.types.ts
+tests/fixtures/speed-insights-script.js
 supabase/.temp
 
 

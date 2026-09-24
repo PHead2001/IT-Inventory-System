@@ -14,16 +14,23 @@ Development/CI use disposable local Supabase. Previews use the already-configure
 
 Record the preview branch and applied repository migration revision when certifying a schema-changing preview. Do not reuse a production database or create replacement hosted projects.
 
-| Variable                                                  | Boundary                                      |
-| --------------------------------------------------------- | --------------------------------------------- |
-| NEXT_PUBLIC_SUPABASE_URL                                  | Environment-specific public backend URL       |
-| NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY                      | Public key; RLS remains mandatory             |
-| APP_ORIGIN                                                | Optional server-only origin override          |
-| APP_ENV                                                   | Server-only environment label                 |
-| Supabase access token/project reference/database password | GitHub `production-database` environment only |
-| Service-role credential                                   | Owner administration/local fixtures only      |
+| Variable                                                  | Boundary                                                |
+| --------------------------------------------------------- | ------------------------------------------------------- |
+| NEXT_PUBLIC_SUPABASE_URL                                  | Environment-specific public backend URL                 |
+| NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY                      | Public key; RLS remains mandatory                       |
+| APP_ORIGIN                                                | Optional server-only origin override                    |
+| APP_ENV                                                   | Server-only environment label                           |
+| SPEED_INSIGHTS_ENABLED                                    | Optional server-only explicit telemetry opt-in (`true`) |
+| Supabase access token/project reference/database password | GitHub `production-database` environment only           |
+| Service-role credential                                   | Owner administration/local fixtures only                |
 
 Commit placeholders only. Public values are build inputs; do not reuse an artifact built for another backend. Never run migrations inside Next build.
+
+### Private Speed Insights
+
+The application includes pinned `@vercel/speed-insights@2.0.0` instrumentation in its protected layout. Collection is off unless `SPEED_INSIGHTS_ENABLED=true` and Vercel provides `VERCEL_ENV=preview` or `production`. Set this server-only variable separately for an approved Vercel environment; do not add it to local/CI or expose it through `NEXT_PUBLIC_`. This repository change does not enable Speed Insights in a hosted project or change its plan or billing. Check the project setting and a signed-in preview before claiming hosted telemetry works.
+
+The application reports only exact static `/dashboard`, `/inventory`, `/locations`, `/room`, and `/labels` routes. Auth/token query or fragment parameters reject the whole event; ordinary search parameters are removed from accepted URLs. A queued event is dropped if the browser has since reached an auth, unknown, or token-bearing URL. Auth, scan, dynamic record, export and unknown routes are dropped. [Vercel's package guide](https://vercel.com/docs/speed-insights/package) describes `beforeSend`; its [privacy page](https://vercel.com/docs/speed-insights/privacy-policy) lists URL, route and element selector among event fields. [Current limits and pricing](https://vercel.com/docs/speed-insights/limits-and-pricing) distinguish the free tier from Speed Insights Plus; this work does not activate Plus.
 
 ## Auth provisioning
 

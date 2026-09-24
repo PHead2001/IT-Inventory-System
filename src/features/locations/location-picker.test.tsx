@@ -62,6 +62,30 @@ const leftDrawer: LocationRef = {
 };
 
 describe('LocationPicker', () => {
+  it('uses opaque tree DOM IDs while preserving keyboard aria relationships', async () => {
+    const user = userEvent.setup();
+    const uuid = '00000000-0000-4000-8000-000000000001';
+    render(
+      <LocationPicker
+        mode="browse"
+        label="Location"
+        locations={[root, { ...drawer, id: uuid }]}
+      />,
+    );
+    await user.click(screen.getByLabelText('Location'));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    const activeId = search.getAttribute('aria-activedescendant');
+    expect(activeId).toBeTruthy();
+    expect(document.getElementById(activeId!)).toBe(
+      screen.getByRole('treeitem', { name: /Drawer 7/ }),
+    );
+    expect(
+      [...document.querySelectorAll('[id]')]
+        .map((element) => element.id)
+        .join(' '),
+    ).not.toContain(uuid);
+  });
   it('searches and selects by keyboard without submitting the parent form; Escape returns focus', async () => {
     const user = userEvent.setup();
     const submit = vi.fn((event: React.FormEvent) => event.preventDefault());

@@ -45,6 +45,12 @@ Active viewers/staff may read reference data and their own active membership. No
 
 Email confirmation GET only displays a form. Explicit POST verifies invite/recovery tokens and redirects to a fixed password route. Password setup requires verified Auth but not membership. Recovery responses do not reveal account existence. Server Actions retain Next origin checks; auth responses are private/no-store and token pages use no-referrer policy.
 
+## Private performance telemetry
+
+The protected server layout mounts one `@vercel/speed-insights/next` client wrapper only when `SPEED_INSIGHTS_ENABLED=true` and `VERCEL_ENV` is `preview` or `production`. Local development and CI remain off. The root layout, login, recovery, confirmation, and access-denied pages have no instrumentation mount. On client navigation, `beforeSend` accepts only exact original framework routes and URL paths `/dashboard`, `/inventory`, `/locations`, `/room`, and `/labels`. It rejects scan, record detail, export, auth, unknown and mismatched routes. An auth/token parameter in the event query or fragment rejects the whole event before URL normalization; ordinary search queries/fragments are removed. A metric queued on a protected page is also dropped if the actual browser location has since moved to an auth/unknown path or gained auth/token parameters. The official intake script retains its original route, so both values must be safe before any URL rewrite.
+
+[Vercel documents](https://vercel.com/docs/speed-insights/privacy-policy) that events can include URL, route, and an element selector for Web Vital attribution. Measured surfaces therefore keep DOM IDs and CSS classes free of inventory identifiers and user text. The location picker uses local row ordinals for tree DOM IDs while retaining immutable location IDs in React state and keys. This is a route-scoped performance signal, not user analytics or a substitute for application authorization. No Web Analytics package, custom events, or paid tier is enabled here.
+
 ## Inventory Core
 
 Quantity inventory and serialized assets are separate models. No tracking-type conversion or hard-delete workflow exists.
