@@ -257,6 +257,7 @@ async function main() {
       string,
       unknown
     >[];
+  const withLetter = (id: unknown) => 'a' + String(id).slice(1);
   const invalidCases: Array<
     [string, string, (d: Record<string, unknown>) => void]
   > = [
@@ -279,6 +280,105 @@ async function main() {
       'P1021',
       (d) => {
         firstField(d).id = '-'.repeat(36);
+      },
+    ],
+    [
+      'uppercase field identity and matching control reference',
+      'P1021',
+      (d) => {
+        const uppercase = withLetter(firstField(d).id).toUpperCase();
+        firstField(d).id = uppercase;
+        controls(d)[2].field_id = uppercase;
+      },
+    ],
+    [
+      'uppercase field control reference',
+      'P1021',
+      (d) => {
+        const canonical = withLetter(firstField(d).id);
+        firstField(d).id = canonical;
+        controls(d)[2].field_id = canonical.toUpperCase();
+      },
+    ],
+    [
+      'uppercase option identity and parent reference',
+      'P1021',
+      (d) => {
+        const hierarchy = (d.fields as Record<string, unknown>[])[2];
+        const options = hierarchy.options as Record<string, unknown>[];
+        options[0].id = withLetter(options[0].id).toUpperCase();
+        options[1].parent_id = options[0].id;
+      },
+    ],
+    [
+      'uppercase option parent reference',
+      'P1021',
+      (d) => {
+        const hierarchy = (d.fields as Record<string, unknown>[])[2];
+        const options = hierarchy.options as Record<string, unknown>[];
+        options[0].id = withLetter(options[0].id);
+        options[1].parent_id = String(options[0].id).toUpperCase();
+      },
+    ],
+    [
+      'uppercase selection default',
+      'P1021',
+      (d) => {
+        const hierarchy = (d.fields as Record<string, unknown>[])[2];
+        const options = hierarchy.options as Record<string, unknown>[];
+        options[0].id = withLetter(options[0].id);
+        options[1].parent_id = options[0].id;
+        hierarchy.default = String(options[0].id).toUpperCase();
+      },
+    ],
+    [
+      'uppercase section identity',
+      'P1021',
+      (d) => {
+        (d.layout as Record<string, unknown>[])[0].id = withLetter(
+          (d.layout as Record<string, unknown>[])[0].id,
+        ).toUpperCase();
+      },
+    ],
+    [
+      'uppercase control identity',
+      'P1021',
+      (d) => {
+        controls(d)[0].id = withLetter(controls(d)[0].id).toUpperCase();
+      },
+    ],
+    [
+      'builtin with null help',
+      'P1021',
+      (d) => {
+        controls(d)[0].help = null;
+      },
+    ],
+    [
+      'builtin with invalid field reference',
+      'P1021',
+      (d) => {
+        controls(d)[0].field_id = 'garbage';
+      },
+    ],
+    [
+      'field with extraneous builtin',
+      'P1021',
+      (d) => {
+        controls(d)[2].builtin = 'name';
+      },
+    ],
+    [
+      'help with extraneous field',
+      'P1021',
+      (d) => {
+        controls(d).push({
+          id: uid(),
+          kind: 'help',
+          help: 'Instructions',
+          field_id: firstField(d).id,
+          width: 12,
+        });
       },
     ],
     [

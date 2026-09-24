@@ -15,14 +15,16 @@ export const fieldTypes = [
   'hierarchical_select',
 ] as const;
 export type FieldType = (typeof fieldTypes)[number];
-const uuid = z.uuid();
-const option = z.object({
+const uuid = z.uuid().refine((value) => value === value.toLowerCase(), {
+  message: 'Use a canonical lowercase UUID.',
+});
+const option = z.strictObject({
   id: uuid,
   label: z.string(),
   parent_id: uuid.nullish(),
   active: z.boolean(),
 });
-export const metadataField = z.object({
+export const metadataField = z.strictObject({
   id: uuid,
   type: z.enum(fieldTypes),
   label: z.string(),
@@ -33,26 +35,44 @@ export const metadataField = z.object({
   rules: z.record(z.string(), z.unknown()).default({}),
   options: z.array(option).default([]),
 });
-const control = z.object({
-  id: uuid,
-  kind: z.enum(['field', 'builtin', 'help']),
-  field_id: uuid.optional(),
-  builtin: z.string().optional(),
-  help: z.string().optional(),
-  width: z.union([
-    z.literal('Auto'),
-    z.literal(3),
-    z.literal(4),
-    z.literal(6),
-    z.literal(8),
-    z.literal(9),
-    z.literal(12),
-  ]),
-});
-export const metadataDefinition = z.object({
+const control = z
+  .strictObject({
+    id: uuid,
+    kind: z.enum(['field', 'builtin', 'help']),
+    field_id: uuid.optional(),
+    builtin: z.string().optional(),
+    help: z.string().optional(),
+    width: z.union([
+      z.literal('Auto'),
+      z.literal(3),
+      z.literal(4),
+      z.literal(6),
+      z.literal(8),
+      z.literal(9),
+      z.literal(12),
+    ]),
+  })
+  .superRefine((value, context) => {
+    const expected =
+      value.kind === 'field'
+        ? 'field_id'
+        : value.kind === 'builtin'
+          ? 'builtin'
+          : 'help';
+    for (const key of ['field_id', 'builtin', 'help'] as const) {
+      const present = Object.hasOwn(value, key);
+      if (present !== (key === expected))
+        context.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${value.kind} controls require only ${expected}.`,
+        });
+    }
+  });
+export const metadataDefinition = z.strictObject({
   fields: z.array(metadataField),
   layout: z.array(
-    z.object({
+    z.strictObject({
       id: uuid,
       label: z.string(),
       controls: z.array(control),

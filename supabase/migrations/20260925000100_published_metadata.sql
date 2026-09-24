@@ -345,7 +345,7 @@ begin
     return n>=coalesce((cfg.rules->>'min')::numeric,-999999999999999999999999::numeric)
       and n<=coalesce((cfg.rules->>'max')::numeric,999999999999999999999999::numeric);
   elsif kind in ('single_select','hierarchical_select') then
-    if jsonb_typeof(value)<>'string' or (value#>>'{}') !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then return false; end if;
+    if jsonb_typeof(value)<>'string' or (value#>>'{}') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return false; end if;
     begin selected_option:=(value#>>'{}')::uuid; exception when others then return false; end;
     return exists(select 1 from public.form_revision_options where revision_id=rev
       and field_id=field and option_id=selected_option and active);
@@ -353,7 +353,7 @@ begin
     if jsonb_typeof(value)<>'array' or jsonb_array_length(value)>
        coalesce((cfg.rules->>'maxSelections')::integer,1000) then return false; end if;
     if exists(select 1 from jsonb_array_elements(value) x where jsonb_typeof(x)<>'string'
-      or (x#>>'{}') !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then return false; end if;
+      or (x#>>'{}') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then return false; end if;
     select array_agg((x#>>'{}')::uuid) into options from jsonb_array_elements(value) x;
     if options is null then return true; end if;
     return cardinality(options)=(select count(distinct x) from unnest(options) x)
@@ -491,7 +491,7 @@ begin
     if not (f ?& array['id','type','label','applies_to','required']) or
       exists(select 1 from jsonb_object_keys(f) k where k not in
         ('id','type','label','help','applies_to','required','default','rules','options')) or
-      not coalesce((f->>'id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false)
+      not coalesce((f->>'id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false)
       or not coalesce((f->>'type') in ('short_text','long_text','integer','decimal','boolean','date','datetime','url',
         'currency','single_select','multi_select','hierarchical_select')
         ,false)
@@ -538,12 +538,12 @@ begin
       if not (o ?& array['id','label','active']) or
         exists(select 1 from jsonb_object_keys(o) k where k not in
           ('id','label','parent_id','active')) or
-        not coalesce((o->>'id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false)
+        not coalesce((o->>'id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false)
         or jsonb_typeof(o->'label') is distinct from 'string'
         or not coalesce(length(btrim(o->>'label')) between 1 and 200,false)
         or jsonb_typeof(o->'active') is distinct from 'boolean' or
         (o ? 'parent_id' and o->'parent_id'<>'null'::jsonb and
-          not coalesce((o->>'parent_id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false)) then
+          not coalesce((o->>'parent_id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false)) then
         raise exception using errcode='P1021',message='invalid_option'; end if;
       option_uuid:=(o->>'id')::uuid;
       if exists(select 1 from public.metadata_options where id=option_uuid and field_id<>field_uuid) then
@@ -584,7 +584,7 @@ begin
       raise exception using errcode='P1021',message='invalid_section'; end if;
     if not (s ?& array['id','label','controls']) or
       exists(select 1 from jsonb_object_keys(s) k where k not in ('id','label','controls')) or
-      not coalesce((s->>'id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false)
+      not coalesce((s->>'id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false)
       or jsonb_typeof(s->'label') is distinct from 'string'
       or not coalesce(length(btrim(s->>'label')) between 1 and 200,false)
       or coalesce(jsonb_array_length(s->'controls'),0)>200 then
@@ -599,14 +599,18 @@ begin
       if not (c ?& array['id','kind','width']) or
         exists(select 1 from jsonb_object_keys(c) k where k not in
           ('id','kind','field_id','builtin','help','width')) or
-        not coalesce((c->>'id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false)
+        not coalesce((c->>'id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false)
         or not coalesce(c->>'kind' in ('field','builtin','help'),false)
         or not ((jsonb_typeof(c->'width')='string' and c->>'width'='Auto')
           or (jsonb_typeof(c->'width')='number' and c->>'width' ~ '^(3|4|6|8|9|12)$')) then
         raise exception using errcode='P1021',message='invalid_control'; end if;
       control_uuid:=(c->>'id')::uuid;
       kind:=c->>'kind';
-      if kind='field' and (not coalesce((c->>'field_id') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',false) or
+      if (kind='field' and (not (c ? 'field_id') or c ? 'builtin' or c ? 'help')) or
+        (kind='builtin' and (not (c ? 'builtin') or c ? 'field_id' or c ? 'help')) or
+        (kind='help' and (not (c ? 'help') or c ? 'field_id' or c ? 'builtin')) then
+        raise exception using errcode='P1021',message='invalid_control_properties'; end if;
+      if kind='field' and (not coalesce((c->>'field_id') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',false) or
         not exists(select 1 from public.form_revision_fields where revision_id=rev
           and field_id=(c->>'field_id')::uuid)) then
         raise exception using errcode='P1021',message='unknown_layout_field'; end if;
