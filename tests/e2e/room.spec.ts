@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { Box3, Matrix4, Ray, Vector3 } from 'three';
@@ -1135,6 +1136,22 @@ test('captures four room sides and searchable picker at desktop and phone widths
   page,
 }, testInfo) => {
   test.setTimeout(120_000);
+  // The all-spec run enables private telemetry. Serve its pinned intake script
+  // locally so this console check still catches actual room errors.
+  const speedInsightsScript = readFileSync(
+    new URL('../fixtures/speed-insights-script.js', import.meta.url),
+    'utf8',
+  );
+  await page.route('**/_vercel/speed-insights/script.js', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/javascript',
+      body: speedInsightsScript,
+    }),
+  );
+  await page.route('**/_vercel/speed-insights/vitals', (route) =>
+    route.fulfill({ status: 204 }),
+  );
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
