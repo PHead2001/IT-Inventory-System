@@ -152,7 +152,11 @@ describe('inventory read contracts', () => {
     });
     expect(result.metadataChanges).toEqual([
       { field: 'Name', before: 'Old', after: 'New' },
-      { field: 'Category', before: 'Other', after: 'Cables' },
+      {
+        field: 'Category',
+        before: 'Category at event time not recorded (current name: Other)',
+        after: 'Category at event time not recorded (current name: Cables)',
+      },
     ]);
     const captured = mapHistory(
       {

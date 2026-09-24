@@ -120,8 +120,10 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          removed_at: string | null
           sort_order: number
           updated_at: string
+          version: number
         }
         Insert: {
           active?: boolean
@@ -129,8 +131,10 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          removed_at?: string | null
           sort_order?: number
           updated_at?: string
+          version?: number
         }
         Update: {
           active?: boolean
@@ -138,8 +142,84 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          removed_at?: string | null
           sort_order?: number
           updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      configuration_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          affected_assets: number
+          affected_quantity: number
+          after_state: Json | null
+          before_state: Json | null
+          category_id: string | null
+          created_at: string
+          id: string
+          kind: string
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          affected_assets?: number
+          affected_quantity?: number
+          after_state?: Json | null
+          before_state?: Json | null
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          affected_assets?: number
+          affected_quantity?: number
+          after_state?: Json | null
+          before_state?: Json | null
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "configuration_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      label_defaults: {
+        Row: {
+          format: string
+          page: string
+          singleton: boolean
+          size: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          format?: string
+          page?: string
+          singleton?: boolean
+          size?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          format?: string
+          page?: string
+          singleton?: boolean
+          size?: string
+          updated_at?: string
+          version?: number
         }
         Relationships: []
       }
@@ -331,6 +411,13 @@ export type Database = {
             referencedRelation: "categories"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "quantity_items_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "configuration_categories"
+            referencedColumns: ["id"]
+          },
         ]
       }
       serialized_assets: {
@@ -385,6 +472,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "serialized_assets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "configuration_categories"
             referencedColumns: ["id"]
           },
           {
@@ -443,6 +537,28 @@ export type Database = {
           updated_at: string | null
           version: string | null
         }
+        Insert: {
+          active?: boolean | null
+          code?: string | null
+          created_at?: string | null
+          id?: string | null
+          name?: string | null
+          removed_at?: string | null
+          sort_order?: number | null
+          updated_at?: string | null
+          version?: never
+        }
+        Update: {
+          active?: boolean | null
+          code?: string | null
+          created_at?: string | null
+          id?: string | null
+          name?: string | null
+          removed_at?: string | null
+          sort_order?: number | null
+          updated_at?: string | null
+          version?: never
+        }
         Relationships: []
       }
       configuration_label_defaults: {
@@ -452,6 +568,20 @@ export type Database = {
           size: string | null
           updated_at: string | null
           version: string | null
+        }
+        Insert: {
+          format?: string | null
+          page?: string | null
+          size?: string | null
+          updated_at?: string | null
+          version?: never
+        }
+        Update: {
+          format?: string | null
+          page?: string | null
+          size?: string | null
+          updated_at?: string | null
+          version?: never
         }
         Relationships: []
       }
@@ -518,26 +648,6 @@ export type Database = {
       }
     }
     Functions: {
-      category_create: {
-        Args: { p_payload: Json; p_request_id: string }
-        Returns: Json
-      }
-      category_rename: {
-        Args: { p_payload: Json; p_request_id: string }
-        Returns: Json
-      }
-      category_removal_review: {
-        Args: { p_category_id: string; p_replacement_id?: string }
-        Returns: Json
-      }
-      category_remove: {
-        Args: { p_payload: Json; p_request_id: string }
-        Returns: Json
-      }
-      label_defaults_update: {
-        Args: { p_payload: Json; p_request_id: string }
-        Returns: Json
-      }
       asset_correct_location: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -559,6 +669,22 @@ export type Database = {
         Returns: Json
       }
       asset_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      category_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      category_removal_review: {
+        Args: { p_category_id: string; p_replacement_id?: string }
+        Returns: Json
+      }
+      category_remove: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      category_rename: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
@@ -630,6 +756,10 @@ export type Database = {
           name: string
           status: string
         }[]
+      }
+      label_defaults_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
       }
       low_stock_dashboard: {
         Args: { p_page?: number; p_page_size?: number }

@@ -84,15 +84,32 @@ beforeEach(() => {
 });
 
 it('starts a new job from shared defaults while retaining valid saved-job choices', async () => {
-  const defaults = { size: '70x35' as const, page: 'A4' as const, format: 'code128' as const };
+  const defaults = {
+    size: '70x35' as const,
+    page: 'A4' as const,
+    format: 'code128' as const,
+  };
   const first = render(<LabelDesigner {...props} defaults={defaults} />);
-  expect(screen.getByRole('combobox', { name: 'Size' })).toHaveValue('70x35');
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '70x35',
+  );
   expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
   expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('code128');
   first.unmount();
-  sessionStorage.setItem(queueStorageKey(props.origin, props.memberId), JSON.stringify({ entries: [], filters: defaultFilters, job: { size: '90x50', page: 'letter', format: 'qr' } }));
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: { size: '90x50', page: 'letter', format: 'qr' },
+    }),
+  );
   render(<LabelDesigner {...props} defaults={defaults} />);
-  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Size' })).toHaveValue('90x50'));
+  await waitFor(() =>
+    expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+      '90x50',
+    ),
+  );
   expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('letter');
   expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('qr');
 });

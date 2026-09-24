@@ -166,7 +166,7 @@ export function mapHistory(
     if (key === 'category_id')
       return typeof snapshot.category_name === 'string'
         ? snapshot.category_name
-        : (categories.find((c) => c.id === value)?.name ?? 'Unknown category');
+        : `Category at event time not recorded (current name: ${categories.find((c) => c.id === value)?.name ?? 'unavailable'})`;
     return value;
   };
   const before = row.before_metadata ?? {};

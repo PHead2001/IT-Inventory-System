@@ -116,6 +116,26 @@ async function count(query: string, params: unknown[]) {
   const result = await owner.query(query, params);
   return Number(result.rows[0].count);
 }
+async function waitForBlockedRpc(blockerPid: number, operations: string[]) {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    const { rows } = await owner.query(
+      `select query from pg_stat_activity
+       where $1=any(pg_blocking_pids(pid)) and state='active'`,
+      [blockerPid],
+    );
+    if (
+      operations.every((operation) =>
+        rows.some((row) => String(row.query).includes(operation)),
+      )
+    )
+      return;
+    await delay(25);
+  }
+  throw new Error(
+    `RPCs were not visibly blocked by the independent writer: ${operations.join(', ')}`,
+  );
+}
 
 async function main() {
   await owner.connect();
@@ -524,6 +544,107 @@ async function main() {
     'P1017',
   );
 
+  const firstCategory = await newCategory(maintainer.client, prefix + ' First');
+  const middleCategory = await newCategory(
+    maintainer.client,
+    prefix + ' Middle',
+  );
+  const lastCategory = await newCategory(maintainer.client, prefix + ' Last');
+  const switchingItem = await success(staff.client, 'quantity_create', {
+    name: prefix + ' Switching item',
+    category_id: firstCategory.id,
+    initial_quantity: 0,
+    initial_location_id: null,
+  });
+  const switchingAsset = await success(staff.client, 'asset_create', {
+    name: prefix + ' Switching asset',
+    category_id: firstCategory.id,
+    location_id: location,
+  });
+  const writer = new Client({
+    connectionString: db,
+    application_name: 'configuration-metadata-interleave',
+  });
+  await writer.connect();
+  try {
+    await writer.query('begin');
+    const writerPid = (await writer.query('select pg_backend_pid() as pid'))
+      .rows[0].pid as number;
+    await writer.query('set local role authenticated');
+    await writer.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+    ]);
+    await writer.query('select public.quantity_update($1,$2::jsonb)', [
+      uuid(),
+      JSON.stringify({
+        item_id: switchingItem.entity_id,
+        expected_version: 1,
+        name: prefix + ' Switching item',
+        description: null,
+        category_id: middleCategory.id,
+        manufacturer: null,
+        model: null,
+      }),
+    ]);
+    await writer.query('select public.asset_update($1,$2::jsonb)', [
+      uuid(),
+      JSON.stringify({
+        asset_id: switchingAsset.entity_id,
+        expected_version: 1,
+        name: prefix + ' Switching asset',
+        description: null,
+        category_id: middleCategory.id,
+        manufacturer: null,
+        model: null,
+        asset_tag: null,
+        serial_number: null,
+      }),
+    ]);
+    const itemUpdate = rpc(staff.client, 'quantity_update', {
+      item_id: switchingItem.entity_id,
+      expected_version: 2,
+      name: prefix + ' Switching item',
+      description: null,
+      category_id: lastCategory.id,
+      manufacturer: null,
+      model: null,
+    });
+    const assetUpdate = rpc(staff.client, 'asset_update', {
+      asset_id: switchingAsset.entity_id,
+      expected_version: 2,
+      name: prefix + ' Switching asset',
+      description: null,
+      category_id: lastCategory.id,
+      manufacturer: null,
+      model: null,
+      asset_tag: null,
+      serial_number: null,
+    });
+    await waitForBlockedRpc(writerPid, ['quantity_update', 'asset_update']);
+    await writer.query('commit');
+    assert.equal((await itemUpdate).error, null);
+    assert.equal((await assetUpdate).error, null);
+    const itemEvent = (
+      await owner.query(
+        'select before_metadata from public.quantity_events where item_id=$1 and version=3',
+        [switchingItem.entity_id],
+      )
+    ).rows[0].before_metadata;
+    const assetEvent = (
+      await owner.query(
+        'select before_metadata from public.asset_events where asset_id=$1 and version=3',
+        [switchingAsset.entity_id],
+      )
+    ).rows[0].before_metadata;
+    assert.equal(itemEvent.category_id, middleCategory.id);
+    assert.equal(itemEvent.category_name, middleCategory.name);
+    assert.equal(assetEvent.category_id, middleCategory.id);
+    assert.equal(assetEvent.category_name, middleCategory.name);
+  } finally {
+    await writer.query('rollback').catch(() => undefined);
+    await writer.end();
+  }
+
   const rollback = await newCategory(maintainer.client, prefix + ' Rollback');
   const a = await success(staff.client, 'quantity_create', {
     name: prefix + ' A',
@@ -577,6 +698,9 @@ async function main() {
   await independent.connect();
   try {
     await independent.query('begin');
+    const independentPid = (
+      await independent.query('select pg_backend_pid() as pid')
+    ).rows[0].pid as number;
     await independent.query('set local role authenticated');
     await independent.query("select set_config('request.jwt.claims',$1,true)", [
       JSON.stringify({ sub: staff.id, role: 'authenticated' }),
@@ -590,21 +714,12 @@ async function main() {
         initial_location_id: null,
       }),
     ]);
-    let settled = false;
     const competing = rpc(maintainer.client, 'category_remove', {
       category_id: race.id,
       replacement_id: target.id,
       review_token: raceReview.token,
-    }).then((value) => {
-      settled = true;
-      return value;
     });
-    await delay(100);
-    assert.equal(
-      settled,
-      false,
-      'removal waits for the independent creator transaction',
-    );
+    await waitForBlockedRpc(independentPid, ['category_remove']);
     await independent.query('commit');
     assert.equal((await competing).error?.code, 'P1017');
   } finally {
@@ -707,15 +822,28 @@ async function main() {
     await transaction.query('rollback');
     await transaction.end();
   }
-  const blocker = new Client({ connectionString: db, application_name: 'configuration-lock-budget' });
+  const blocker = new Client({
+    connectionString: db,
+    application_name: 'configuration-lock-budget',
+  });
   await blocker.connect();
   try {
     await blocker.query('begin');
     await blocker.query('select pg_advisory_xact_lock(91081,5)');
     const started = Date.now();
-    const blocked = await maintainer.client.rpc('category_removal_review', { p_category_id: isolation.id, p_replacement_id: target.id });
-    assert.equal(blocked.error?.code, '55P03', 'catalog lock wait stops after the two-second budget');
-    assert.ok(Date.now() - started < 5000, 'lock timeout precedes the execution budget');
+    const blocked = await maintainer.client.rpc('category_removal_review', {
+      p_category_id: isolation.id,
+      p_replacement_id: target.id,
+    });
+    assert.equal(
+      blocked.error?.code,
+      '55P03',
+      'catalog lock wait stops after the two-second budget',
+    );
+    assert.ok(
+      Date.now() - started < 5000,
+      'lock timeout precedes the execution budget',
+    );
   } finally {
     await blocker.query('rollback');
     await blocker.end();
@@ -725,7 +853,9 @@ async function main() {
     "create function public.configuration_timeout_probe() returns text language plpgsql volatile set search_path='' set statement_timeout='100ms' as $$ begin perform pg_catalog.pg_sleep(1); return 'late'; end $$",
   );
   try {
-    await owner.query('revoke all on function public.configuration_timeout_probe() from public,anon,authenticated');
+    await owner.query(
+      'revoke all on function public.configuration_timeout_probe() from public,anon,authenticated',
+    );
     await owner.query(
       'grant execute on function public.configuration_timeout_probe() to authenticated',
     );
@@ -747,9 +877,21 @@ async function main() {
     await owner.query('drop function public.configuration_timeout_probe()');
     await owner.query("notify pgrst, 'reload schema'");
   }
-  await owner.query('update public.app_members set active=false where user_id=$1', [maintainer.id]);
-  await failure(maintainer.client, 'category_rename', receiptPayload, 'P1001', receiptId);
-  await owner.query('update public.app_members set active=true where user_id=$1', [maintainer.id]);
+  await owner.query(
+    'update public.app_members set active=false where user_id=$1',
+    [maintainer.id],
+  );
+  await failure(
+    maintainer.client,
+    'category_rename',
+    receiptPayload,
+    'P1001',
+    receiptId,
+  );
+  await owner.query(
+    'update public.app_members set active=true where user_id=$1',
+    [maintainer.id],
+  );
   console.log(
     'Configuration authorization, lifecycle, impact, rollback, receipt, isolation and race checks passed.',
   );

@@ -98,7 +98,10 @@ export function clearLabelQueueSession(): void {
   }
 }
 
-export function parseStoredQueue(raw: string | null, fallbackJob: JobSettings = defaultJob): {
+export function parseStoredQueue(
+  raw: string | null,
+  fallbackJob: JobSettings = defaultJob,
+): {
   entries: QueueEntry[];
   filters: LabelSearchFilters;
   job: JobSettings;
