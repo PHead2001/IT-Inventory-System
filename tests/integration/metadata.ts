@@ -218,6 +218,18 @@ async function publish(client: SupabaseClient, categoryId: string) {
     review_token: impact.token,
   });
 }
+async function observeCatalogWait(description: string) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const locks = await owner.query(
+      "select bool_or(granted) holder,bool_or(not granted) waiter from pg_locks where locktype='advisory' and classid=91081::oid and objid=5::oid",
+    );
+    if (locks.rows[0].holder === true && locks.rows[0].waiter === true) return;
+    await delay(25);
+  }
+  assert.fail(
+    `${description}: expected independent catalog lock holder and waiter`,
+  );
+}
 
 async function main() {
   await owner.connect();
@@ -971,6 +983,60 @@ async function main() {
     await independent.query('rollback').catch(() => undefined);
     await independent.end();
   }
+  const createRaceReview = await review(maintainer.client, categoryId);
+  const createRace = new Client({
+    connectionString: db,
+    application_name: 'metadata-create-race',
+  });
+  await createRace.connect();
+  try {
+    await createRace.query('begin');
+    await createRace.query('set local role authenticated');
+    await createRace.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+    ]);
+    const created = (
+      await createRace.query(
+        'select public.quantity_create_v2($1,$2::jsonb) result',
+        [
+          uid(),
+          JSON.stringify({
+            name: 'Race-created metadata item',
+            category_id: categoryId,
+            initial_quantity: 0,
+            initial_location_id: null,
+            expected_published_revision_id: strictRevision,
+            custom_patch: {
+              set: { [schema.flag]: false, [schema.note]: 'ok' },
+              unset: [],
+            },
+          }),
+        ],
+      )
+    ).rows[0].result as { entity_id: string };
+    const competingPublication = rpc(maintainer.client, 'metadata_publish', {
+      category_id: categoryId,
+      expected_draft_id: createRaceReview.draft_id,
+      expected_draft_version: createRaceReview.draft_version,
+      expected_published_revision_id: createRaceReview.published_revision_id,
+      review_token: createRaceReview.token,
+    });
+    await observeCatalogWait('item creation before publication');
+    await createRace.query('commit');
+    assert.equal((await competingPublication).error?.code, 'P1017');
+    assert.equal(
+      (
+        await owner.query(
+          'select custom_values from public.quantity_items where id=$1',
+          [created.entity_id],
+        )
+      ).rows[0].custom_values[schema.flag].value,
+      false,
+    );
+  } finally {
+    await createRace.query('rollback').catch(() => undefined);
+    await createRace.end();
+  }
   const isolated = new Client({
     connectionString: db,
     application_name: 'metadata-isolation-rejection',
@@ -1064,8 +1130,8 @@ async function main() {
     will_tombstone: boolean;
   };
   assert.equal(removal.authored_revision_count, '2');
-  assert.equal(removal.retained_value_count, '2');
-  assert.equal(removal.quantity_needs_metadata_count, '1');
+  assert.equal(removal.retained_value_count, '3');
+  assert.equal(removal.quantity_needs_metadata_count, '2');
   assert.equal(removal.asset_needs_metadata_count, '1');
   assert.equal(removal.will_tombstone, true);
   const removed = await success(maintainer.client, 'category_remove', {
@@ -1403,6 +1469,177 @@ async function main() {
     migratedRow.custom_values[optionalField].validated_revision_id,
     migrationRevision,
   );
+  const removalSource = await category(
+    maintainer.client,
+    'Publish removal race',
+  );
+  const removalSchema = form(removalSource);
+  await save(maintainer.client, removalSource, '0', removalSchema.definition);
+  const removalRevision = (await publish(maintainer.client, removalSource))
+    .published_revision_id;
+  const removalItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Publish removal race item',
+    category_id: removalSource,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: removalRevision,
+    custom_patch: { set: { [removalSchema.flag]: false }, unset: [] },
+  });
+  const nextRemovalDefinition = structuredClone(removalSchema.definition);
+  nextRemovalDefinition.fields[0].label = 'New inspected label';
+  await save(maintainer.client, removalSource, '0', nextRemovalDefinition);
+  const removalPublishReview = await review(maintainer.client, removalSource);
+  const removalImpact = await maintainer.client.rpc('category_removal_review', {
+    p_category_id: removalSource,
+    p_replacement_id: migrationTarget,
+  });
+  assert.equal(removalImpact.error, null, removalImpact.error?.message);
+  const removalToken = (removalImpact.data as { token: string }).token;
+  const remover = new Client({
+    connectionString: db,
+    application_name: 'metadata-removal-race',
+  });
+  await remover.connect();
+  try {
+    await remover.query('begin');
+    await remover.query('set local role authenticated');
+    await remover.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: maintainer.id, role: 'authenticated' }),
+    ]);
+    const removed = (
+      await remover.query(
+        'select public.category_remove($1,$2::jsonb) result',
+        [
+          uid(),
+          JSON.stringify({
+            category_id: removalSource,
+            replacement_id: migrationTarget,
+            review_token: removalToken,
+          }),
+        ],
+      )
+    ).rows[0].result as { tombstoned: boolean };
+    assert.equal(removed.tombstoned, true);
+    const competingPublish = rpc(maintainer.client, 'metadata_publish', {
+      category_id: removalSource,
+      expected_draft_id: removalPublishReview.draft_id,
+      expected_draft_version: removalPublishReview.draft_version,
+      expected_published_revision_id:
+        removalPublishReview.published_revision_id,
+      review_token: removalPublishReview.token,
+    });
+    await observeCatalogWait('category removal before publication');
+    await remover.query('commit');
+    assert.equal((await competingPublish).error?.code, 'P1011');
+  } finally {
+    await remover.query('rollback').catch(() => undefined);
+    await remover.end();
+  }
+  const removalAfter = (
+    await owner.query(
+      'select category_id,custom_values from public.quantity_items where id=$1',
+      [removalItem.entity_id],
+    )
+  ).rows[0];
+  assert.equal(removalAfter.category_id, migrationTarget);
+  assert.equal(removalAfter.custom_values[removalSchema.flag].value, false);
+  assert.equal(
+    removalAfter.custom_values[removalSchema.flag].validated_revision_id,
+    removalRevision,
+  );
+  assert.equal(
+    (
+      await owner.query(
+        'select published_form_revision_id from public.categories where id=$1',
+        [removalSource],
+      )
+    ).rows[0].published_form_revision_id,
+    removalRevision,
+    'losing publication did not change the removed category form',
+  );
+
+  const publishFirstSource = await category(
+    maintainer.client,
+    'Removal stale race',
+  );
+  const publishFirstSchema = form(publishFirstSource);
+  await save(
+    maintainer.client,
+    publishFirstSource,
+    '0',
+    publishFirstSchema.definition,
+  );
+  await publish(maintainer.client, publishFirstSource);
+  const nextFirstDefinition = structuredClone(publishFirstSchema.definition);
+  nextFirstDefinition.fields[0].label = 'Published first';
+  await save(maintainer.client, publishFirstSource, '0', nextFirstDefinition);
+  const publishFirstReview = await review(
+    maintainer.client,
+    publishFirstSource,
+  );
+  const staleRemovalImpact = await maintainer.client.rpc(
+    'category_removal_review',
+    {
+      p_category_id: publishFirstSource,
+      p_replacement_id: migrationTarget,
+    },
+  );
+  assert.equal(
+    staleRemovalImpact.error,
+    null,
+    staleRemovalImpact.error?.message,
+  );
+  const publisher = new Client({
+    connectionString: db,
+    application_name: 'metadata-publish-first-race',
+  });
+  await publisher.connect();
+  try {
+    await publisher.query('begin');
+    await publisher.query('set local role authenticated');
+    await publisher.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: maintainer.id, role: 'authenticated' }),
+    ]);
+    const firstPublished = (
+      await publisher.query(
+        'select public.metadata_publish($1,$2::jsonb) result',
+        [
+          uid(),
+          JSON.stringify({
+            category_id: publishFirstSource,
+            expected_actor_id: maintainer.id,
+            expected_draft_id: publishFirstReview.draft_id,
+            expected_draft_version: publishFirstReview.draft_version,
+            expected_published_revision_id:
+              publishFirstReview.published_revision_id,
+            review_token: publishFirstReview.token,
+          }),
+        ],
+      )
+    ).rows[0].result as { published_revision_id: string };
+    const competingRemoval = rpc(maintainer.client, 'category_remove', {
+      category_id: publishFirstSource,
+      replacement_id: migrationTarget,
+      review_token: (staleRemovalImpact.data as { token: string }).token,
+    });
+    await observeCatalogWait('publication before category removal');
+    await publisher.query('commit');
+    assert.equal((await competingRemoval).error?.code, 'P1017');
+    const finalCategory = (
+      await owner.query(
+        'select active,published_form_revision_id from public.categories where id=$1',
+        [publishFirstSource],
+      )
+    ).rows[0];
+    assert.equal(finalCategory.active, true);
+    assert.equal(
+      finalCategory.published_form_revision_id,
+      firstPublished.published_revision_id,
+    );
+  } finally {
+    await publisher.query('rollback').catch(() => undefined);
+    await publisher.end();
+  }
   const budgetCategory = await category(maintainer.client, 'Export bytes');
   const budgetFields = Array.from({ length: 27 }, (_, index) => ({
     id: uid(),
@@ -1542,8 +1779,102 @@ async function main() {
     await owner.query('drop function public.metadata_timeout_probe()');
     await owner.query("notify pgrst, 'reload schema'");
   }
+  const snapshotCategory = await category(
+    maintainer.client,
+    'Export snapshot race',
+  );
+  const snapshotItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Snapshot race item old',
+    category_id: snapshotCategory,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: (
+      await currentBaseline(staff.client, snapshotCategory)
+    ).published_revision_id,
+    custom_patch: { set: {}, unset: [] },
+  });
+  const oldCategoryName = (
+    await owner.query('select name from public.categories where id=$1', [
+      snapshotCategory,
+    ])
+  ).rows[0].name as string;
+  const snapshotWriter = new Client({
+    connectionString: db,
+    application_name: 'metadata-export-writer',
+  });
+  const snapshotReader = new Client({
+    connectionString: db,
+    application_name: 'metadata-export-reader',
+  });
+  await snapshotWriter.connect();
+  await snapshotReader.connect();
+  const exportCall =
+    "public.inventory_export_snapshot('Snapshot race item','quantity','active',$1,null,false,'inventory',true)";
+  try {
+    await snapshotWriter.query('begin');
+    await snapshotWriter.query(
+      'update public.categories set name=$1,version=version+1 where id=$2',
+      [oldCategoryName + ' updated', snapshotCategory],
+    );
+    await snapshotWriter.query(
+      'update public.quantity_items set name=$1,version=version+1 where id=$2',
+      ['Snapshot race item new', snapshotItem.entity_id],
+    );
+    await snapshotReader.query('begin isolation level read committed');
+    await snapshotReader.query('set local role authenticated');
+    await snapshotReader.query(
+      "select set_config('request.jwt.claims',$1,true)",
+      [JSON.stringify({ sub: viewer.id, role: 'authenticated' })],
+    );
+    const readerPid = (
+      await snapshotReader.query('select pg_backend_pid() pid')
+    ).rows[0].pid as number;
+    const pendingSnapshot = snapshotReader.query(
+      `with first as materialized (select ${exportCall} doc),
+       pause as materialized (select pg_sleep(1.2) from first),
+       second as materialized (select ${exportCall} doc from pause)
+       select first.doc before_doc,second.doc after_doc from first cross join second`,
+      [snapshotCategory],
+    );
+    let observedPause = false;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const state = await owner.query(
+        'select wait_event from pg_stat_activity where pid=$1',
+        [readerPid],
+      );
+      observedPause = state.rows[0]?.wait_event === 'PgSleep';
+      if (observedPause) break;
+      await delay(25);
+    }
+    assert.equal(
+      observedPause,
+      true,
+      'writer commits while both export reads share one statement',
+    );
+    await snapshotWriter.query('commit');
+    const snapshots = (await pendingSnapshot).rows[0] as {
+      before_doc: { rows: { name: string; category_name: string }[] };
+      after_doc: { rows: { name: string; category_name: string }[] };
+    };
+    assert.deepEqual(snapshots.after_doc, snapshots.before_doc);
+    assert.equal(snapshots.before_doc.rows[0].name, 'Snapshot race item old');
+    assert.equal(snapshots.before_doc.rows[0].category_name, oldCategoryName);
+    const nextStatement = (
+      await snapshotReader.query(`select ${exportCall} doc`, [snapshotCategory])
+    ).rows[0].doc as { rows: { name: string; category_name: string }[] };
+    assert.equal(nextStatement.rows[0].name, 'Snapshot race item new');
+    assert.equal(
+      nextStatement.rows[0].category_name,
+      oldCategoryName + ' updated',
+    );
+  } finally {
+    await snapshotReader.query('rollback').catch(() => undefined);
+    await snapshotWriter.query('rollback').catch(() => undefined);
+    await snapshotReader.end();
+    await snapshotWriter.end();
+  }
   console.log(
-    'Published metadata authorization, draft validation, value evolution, stale revisions, observed lock race, isolation, REST timeout and bounded export checks passed.',
+    'Published metadata authorization, draft validation, value evolution, ABA baselines, item create/update and category removal/publication races, stable export snapshot, isolation, REST timeout and bounded export checks passed.',
   );
 }
 main()
