@@ -188,12 +188,12 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
                 units across {event.lines.length} locations.
               </p>
             )}
-          {event.fromLocation && (
+          {event.eventType !== 'metadata_updated' && event.fromLocation && (
             <p className="mt-2 text-sm">
               From: <LocationLink location={event.fromLocation} />
             </p>
           )}
-          {event.toLocation && (
+          {event.eventType !== 'metadata_updated' && event.toLocation && (
             <p className="mt-2 text-sm">
               To: <LocationLink location={event.toLocation} />
             </p>
