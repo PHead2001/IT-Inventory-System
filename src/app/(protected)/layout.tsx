@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import { PrivateSpeedInsights } from '@/features/telemetry/private-speed-insights';
+import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
 export const dynamic = 'force-dynamic';
 export default async function ApplicationLayout({
   children,
@@ -114,6 +116,10 @@ export default async function ApplicationLayout({
           {children}
         </main>
       </div>
+      {speedInsightsEnabled({
+        VERCEL_ENV: process.env.VERCEL_ENV,
+        SPEED_INSIGHTS_ENABLED: process.env.SPEED_INSIGHTS_ENABLED,
+      }) && <PrivateSpeedInsights />}
     </div>
   );
 }
