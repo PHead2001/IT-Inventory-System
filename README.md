@@ -34,3 +34,5 @@ Production release uses a required Vercel GitHub Deployment Check on the main-on
 PR6 adds local QR/optional Code 128 labels, scan-to-open navigation, item-wide reorder thresholds, a low-stock overview and authenticated CSV downloads. See [labels, scanning and stock status](docs/labels-and-stock.md) for user and data contracts.
 
 Private Speed Insights instrumentation is available for selected authenticated overview routes when explicitly enabled on Vercel. It is off in local development and CI by default; see [deployment](docs/deployment.md#private-speed-insights) for the opt-in and privacy boundary.
+
+Settings lets active members read categories and shared label defaults. An active staff member with the separately provisioned `can_manage_configuration` grant can create, rename, or remove categories and edit label defaults. Referenced category removal requires an impact review and replacement; inventory identity, stock and history are preserved.

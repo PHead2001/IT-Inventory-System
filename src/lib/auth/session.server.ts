@@ -20,7 +20,7 @@ export async function requireMember() {
   }
   const { data: member, error } = await supabase
     .from('app_members')
-    .select('user_id, display_name, role, active')
+    .select('user_id, display_name, role, active, can_manage_configuration')
     .eq('user_id', user.id)
     .maybeSingle();
   if (error || !isActiveMember(member)) redirect('/access-denied');

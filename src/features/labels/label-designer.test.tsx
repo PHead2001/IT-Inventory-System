@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { LiveLabel } from './queue.server';
+import { defaultFilters, queueStorageKey } from './queue-model';
 
 const mocks = vi.hoisted(() => ({
   getQueueRecords: vi.fn(),
@@ -82,7 +83,47 @@ beforeEach(() => {
   vi.stubGlobal('print', vi.fn());
 });
 
+it('starts a new job from shared defaults while retaining valid saved-job choices', async () => {
+  const defaults = {
+    size: '70x35' as const,
+    page: 'A4' as const,
+    format: 'code128' as const,
+  };
+  const first = render(<LabelDesigner {...props} defaults={defaults} />);
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '70x35',
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('code128');
+  first.unmount();
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: { size: '90x50', page: 'letter', format: 'qr' },
+    }),
+  );
+  render(<LabelDesigner {...props} defaults={defaults} />);
+  await waitFor(() =>
+    expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+      '90x50',
+    ),
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('letter');
+  expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('qr');
+});
+
 it('prints every mixed-queue copy only after a fresh exact-ID read', async () => {
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      expect(document.querySelector('.label-print-root')).toHaveAttribute(
+        'data-print-authorized',
+        'true',
+      );
+    }),
+  );
   render(<LabelDesigner {...props} />);
   await waitFor(() =>
     expect(screen.getAllByRole('spinbutton')).toHaveLength(2),
@@ -104,6 +145,14 @@ it('prints every mixed-queue copy only after a fresh exact-ID read', async () =>
     screen.getByRole('button', { name: /Print selected labels/ }),
   );
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(document.querySelector('.label-print-root')).toHaveAttribute(
+    'data-print-authorized',
+    'true',
+  );
+  window.dispatchEvent(new Event('afterprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
   expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2);
 });
 
@@ -189,18 +238,83 @@ it('prints refreshed descriptive text in the same action without confirmation', 
       expect(
         screen.getByText(/Renamed laptop \/ d6a2c785/),
       ).toBeInTheDocument();
+      expect(document.querySelector('.label-print-root')).toHaveAttribute(
+        'data-print-authorized',
+        'true',
+      );
     }),
   );
   fireEvent.click(
     screen.getByRole('button', { name: /Print selected labels/ }),
   );
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(document.querySelector('.label-print-root')).toHaveAttribute(
+    'data-print-authorized',
+    'true',
+  );
+  window.dispatchEvent(new Event('afterprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
   expect(screen.getByRole('status')).toHaveTextContent(
     'Label information refreshed',
   );
   expect(
     screen.queryByRole('button', { name: 'Acknowledge changes' }),
   ).toBeNull();
+});
+
+it('clears print authorization even when the browser print call throws', async () => {
+  let sheet: Element | null = null;
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      sheet = document.querySelector('.label-print-root');
+      throw new Error('print unavailable');
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Prepare full print preview' }),
+  );
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: /Print selected labels/ }),
+  );
+  await screen.findByText(
+    'Final label check failed. Printing is blocked; retry.',
+  );
+  expect(sheet).not.toHaveAttribute('data-print-authorized');
+});
+
+it('closes authorization after a bounded wait if the browser omits afterprint', async () => {
+  const scheduled = vi.spyOn(window, 'setTimeout');
+  render(<LabelDesigner {...props} />);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Prepare full print preview' }),
+  );
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: /Print selected labels/ }),
+  );
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  const deadline = scheduled.mock.calls.find(
+    ([, delay]) => delay === 30_000,
+  )?.[0];
+  expect(deadline).toBeTypeOf('function');
+  expect(document.querySelector('.label-print-root')).toHaveAttribute(
+    'data-print-authorized',
+    'true',
+  );
+  (deadline as () => void)();
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  scheduled.mockRestore();
 });
 
 it('requires one explicit acknowledgement for an initially archived record', async () => {
