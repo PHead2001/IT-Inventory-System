@@ -441,6 +441,13 @@ test('schedule discovery emits separate jobs for an early slow PR and a later re
       /timeout-minutes: 5[\s\S]*environment: preview-access/,
     );
     assert.match(workflow, /fail-fast: false/);
+    assert.doesNotMatch(workflow.split('\njobs:')[0], /\bconcurrency:/);
+    const provisionJob = workflow.split('  provision:')[1];
+    assert.ok(provisionJob, 'the per-PR provisioning job must exist');
+    assert.match(
+      provisionJob,
+      /concurrency:\s*\n\s*group: preview-staff-access-\$\{\{ matrix\.pr \}\}\s*\n\s*cancel-in-progress: false/,
+    );
     const discoveryJob = workflow
       .split('  discover:')[1]
       ?.split('  provision:')[0];
