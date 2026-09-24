@@ -23,6 +23,7 @@ export async function submitMetadataDraft(input: {
   operation:
     'metadata_draft_save' | 'metadata_draft_discard' | 'metadata_publish';
   requestId: string;
+  expectedActorId: string;
   payload: Record<string, unknown>;
 }): Promise<Result> {
   try {
@@ -30,7 +31,12 @@ export async function submitMetadataDraft(input: {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return { ok: false, code: 'P1001', message: messages.P1001 };
+    if (
+      !user ||
+      user.id !== input.expectedActorId ||
+      input.payload.expected_actor_id !== user.id
+    )
+      return { ok: false, code: 'P1001', message: messages.P1001 };
     const { data: member } = await supabase
       .from('app_members')
       .select('user_id,display_name,role,active,can_manage_configuration')
@@ -73,11 +79,39 @@ export async function submitMetadataDraft(input: {
   }
 }
 
-export async function reviewMetadataPublish(categoryId: string) {
+export async function reviewMetadataPublish(input: {
+  categoryId: string;
+  expectedActorId: string;
+  expectedDraftId: string;
+  expectedDraftVersion: string;
+  expectedPublishedRevisionId: string;
+}) {
   try {
     const supabase = await createSupabaseServerClient(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user || user.id !== input.expectedActorId)
+      return { ok: false as const, code: 'P1001', message: messages.P1001 };
+    const { data: member } = await supabase
+      .from('app_members')
+      .select('user_id,display_name,role,active,can_manage_configuration')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (
+      !isActiveMember(member) ||
+      member.role !== 'staff' ||
+      !member.can_manage_configuration
+    )
+      return { ok: false as const, code: 'P1001', message: messages.P1001 };
     const { data, error } = await supabase.rpc('metadata_publish_review', {
-      p_category_id: categoryId,
+      p_payload: {
+        category_id: input.categoryId,
+        expected_actor_id: input.expectedActorId,
+        expected_draft_id: input.expectedDraftId,
+        expected_draft_version: input.expectedDraftVersion,
+        expected_published_revision_id: input.expectedPublishedRevisionId,
+      },
     });
     if (error)
       return {
@@ -91,6 +125,37 @@ export async function reviewMetadataPublish(categoryId: string) {
       ok: false as const,
       code: 'unexpected',
       message: 'Impact could not be reviewed.',
+    };
+  }
+}
+
+export async function verifyMetadataDesignerIdentity(
+  expectedActorId: string,
+): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  try {
+    const supabase = await createSupabaseServerClient(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user || user.id !== expectedActorId)
+      return { ok: false, code: 'P1001', message: messages.P1001 };
+    const { data: member } = await supabase
+      .from('app_members')
+      .select('user_id,display_name,role,active,can_manage_configuration')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (
+      !isActiveMember(member) ||
+      member.role !== 'staff' ||
+      !member.can_manage_configuration
+    )
+      return { ok: false, code: 'P1001', message: messages.P1001 };
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      code: 'unexpected',
+      message: 'Identity could not be confirmed. Refresh before editing.',
     };
   }
 }

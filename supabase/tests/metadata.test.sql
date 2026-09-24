@@ -34,6 +34,9 @@ select ok(not has_table_privilege('authenticated','public.form_revision_options'
   'clients cannot delete published options directly');
 select ok(not has_function_privilege('anon','public.metadata_publish(uuid,jsonb)','EXECUTE'),
   'anonymous publication is unavailable');
+select ok(has_function_privilege('authenticated','public.metadata_publish_review(jsonb)','EXECUTE') and
+  not has_function_privilege('anon','public.metadata_publish_review(jsonb)','EXECUTE'),
+  'only authenticated callers can request a baseline-bound publication review');
 select ok(not has_function_privilege('anon','public.quantity_create_v2(uuid,jsonb)','EXECUTE'),
   'anonymous v2 creation is unavailable');
 select ok(not has_function_privilege('authenticated','private.metadata_mutate_v2(uuid,jsonb,text,text)','EXECUTE'),

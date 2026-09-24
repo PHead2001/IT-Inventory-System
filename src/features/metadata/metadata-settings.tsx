@@ -12,9 +12,11 @@ type Category = { id: string; name: string; active: boolean };
 export function MetadataSettings({
   categories,
   forms,
+  memberId,
 }: {
   categories: Category[];
   forms: Record<string, MetadataForm>;
+  memberId: string;
 }) {
   const router = useRouter();
   const active = categories.filter((category) => category.active);
@@ -30,6 +32,12 @@ export function MetadataSettings({
   );
   const [draftVersion, setDraftVersion] = useState(
     selected?.draft_version ?? '0',
+  );
+  const [draftId, setDraftId] = useState<string | null>(
+    selected?.draft_id ?? null,
+  );
+  const [publishedRevisionId, setPublishedRevisionId] = useState(
+    selected?.published_revision_id ?? '',
   );
   const [review, setReview] = useState<Review | null>(null);
   const [message, setMessage] = useState('');
@@ -49,6 +57,8 @@ export function MetadataSettings({
       ),
     );
     setDraftVersion(form?.draft_version ?? '0');
+    setDraftId(form?.draft_id ?? null);
+    setPublishedRevisionId(form?.published_revision_id ?? '');
     setReview(null);
     setMessage('');
     setReceipt(null);
@@ -58,7 +68,15 @@ export function MetadataSettings({
       'metadata_draft_save' | 'metadata_draft_discard' | 'metadata_publish',
     payload: Record<string, unknown>,
   ) => {
-    const key = JSON.stringify([operation, payload]);
+    const submittedPayload = {
+      category_id: categoryId,
+      expected_actor_id: memberId,
+      expected_draft_id: draftId,
+      expected_draft_version: draftVersion,
+      expected_published_revision_id: publishedRevisionId,
+      ...payload,
+    };
+    const key = JSON.stringify([operation, submittedPayload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
     setMessage('');
@@ -66,7 +84,8 @@ export function MetadataSettings({
       const response = await submitMetadataDraft({
         operation,
         requestId,
-        payload,
+        expectedActorId: memberId,
+        payload: submittedPayload,
       });
       if (!response.ok) {
         setMessage(response.message);
@@ -77,14 +96,18 @@ export function MetadataSettings({
       setReceipt(null);
       if (operation === 'metadata_draft_save') {
         setDraftVersion(String(response.data.version));
+        setDraftId(String(response.data.draft_id));
         setMessage('Draft saved. Review its impact before publishing.');
       } else if (operation === 'metadata_draft_discard') {
         setDraftVersion('0');
+        setDraftId(null);
         setReview(null);
         setEditor(JSON.stringify(selected.published_definition, null, 2));
         setMessage('Draft discarded.');
       } else {
         setDraftVersion('0');
+        setDraftId(null);
+        setPublishedRevisionId(String(response.data.published_revision_id));
         setReview(null);
         setMessage(
           'Published form revision ' + String(response.data.version) + '.',
@@ -111,7 +134,14 @@ export function MetadataSettings({
   const reviewImpact = () => {
     setMessage('');
     startTransition(async () => {
-      const result = await reviewMetadataPublish(categoryId);
+      if (!draftId) return;
+      const result = await reviewMetadataPublish({
+        categoryId,
+        expectedActorId: memberId,
+        expectedDraftId: draftId,
+        expectedDraftVersion: draftVersion,
+        expectedPublishedRevisionId: publishedRevisionId,
+      });
       if (!result.ok) {
         setMessage(result.message);
         setReview(null);
@@ -229,6 +259,7 @@ export function MetadataSettings({
                 onClick={() =>
                   submit('metadata_publish', {
                     category_id: categoryId,
+                    expected_draft_id: review.draft_id,
                     expected_draft_version: review.draft_version,
                     expected_published_revision_id:
                       review.published_revision_id,

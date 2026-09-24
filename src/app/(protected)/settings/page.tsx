@@ -17,7 +17,11 @@ export default async function SettingsPage() {
       <SettingsPanel {...settings} />
       {settings.canManage && (
         <div className="mt-8">
-          <MetadataSettings categories={settings.categories} forms={forms} />
+          <MetadataSettings
+            categories={settings.categories}
+            forms={forms}
+            memberId={settings.memberId}
+          />
         </div>
       )}
     </>
