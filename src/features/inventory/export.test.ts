@@ -210,6 +210,39 @@ describe('inventory CSV', () => {
       exportCsv('inventory', input(boundaryName + 'A'), 'Preview'),
     ).toThrow(ExportTooLargeError);
   });
+  it('samples cumulative UTF-8 bytes for each appended CSV line without changing the file', () => {
+    const row = {
+      entity_id: id,
+      kind: 'quantity' as const,
+      name: '😀',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: 0,
+      location_name: null,
+      location_code: null,
+      breadcrumb: null,
+    };
+    const bytes: number[] = [];
+    const input = { rows: [row, row], total: '2', exported_at: at };
+    const plain = exportCsv('inventory', input, 'Preview').csv;
+    const sampled = exportCsv(
+      'inventory',
+      input,
+      'Preview',
+      false,
+      () => {},
+      (count) => bytes.push(count),
+    ).csv;
+    expect(sampled).toBe(plain);
+    expect(bytes).toHaveLength(3);
+    expect(bytes[0]).toBeLessThan(bytes[1]);
+    expect(bytes[1]).toBeLessThan(bytes[2]);
+    expect(bytes[2]).toBe(new TextEncoder().encode(sampled).byteLength);
+  });
   it('stops synchronous CSV encoding when the monotonic deadline is crossed', () => {
     let checks = 0;
     expect(() =>

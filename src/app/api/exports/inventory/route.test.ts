@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getUser: vi.fn(),
@@ -205,6 +206,178 @@ describe('authenticated inventory downloads', () => {
       'export_timeout',
     );
     expect(response.headers.get('Content-Disposition')).toBeNull();
+  });
+  it('emits only bounded, anonymous diagnostics with explicit preview opt-in', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'true');
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const secret = 'PRIVATE-INVENTORY-NAME-XYZ';
+    mocks.snapshot.mockImplementation(
+      async ({
+        onStage,
+      }: {
+        onStage?: (
+          stage: 'raw_chunk' | 'raw_read' | 'json_parsed',
+          bytes: number,
+        ) => void;
+      }) => {
+        onStage?.('raw_chunk', 256);
+        onStage?.('raw_chunk', 512);
+        onStage?.('raw_read', 512);
+        onStage?.('json_parsed', 512);
+        return {
+          data: {
+            rows: [
+              {
+                entity_id: id,
+                kind: 'quantity',
+                name: secret,
+                category_name: 'Secret category',
+                manufacturer: null,
+                model: null,
+                asset_tag: null,
+                serial_number: null,
+                status: 'active',
+                quantity: 0,
+                location_name: null,
+                location_code: null,
+                breadcrumb: null,
+                custom_fields: { secret: 'Sensitive custom value' },
+              },
+            ],
+            total: '1',
+            exported_at: '2026-09-24T15:18:37+00:00',
+          },
+        };
+      },
+    );
+    try {
+      const response = await GET(request('?q=secret-filter&customFields=true'));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(secret);
+      expect(log).toHaveBeenCalledOnce();
+      const diagnostic = JSON.parse(String(log.mock.calls[0][0])) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(diagnostic).sort()).toEqual([
+        'csv_bytes',
+        'diagnostic_id',
+        'elapsed_ms',
+        'event',
+        'raw_response_bytes',
+        'sampled_heap_external_delta_bytes',
+        'sampled_rss_delta_bytes',
+      ]);
+      expect(diagnostic.event).toBe('inventory_export_diagnostic');
+      expect(diagnostic.diagnostic_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(response.headers.get('X-Inventory-Export-Diagnostic-Id')).toBe(
+        diagnostic.diagnostic_id,
+      );
+      expect(diagnostic.raw_response_bytes).toBe(512);
+      expect(diagnostic.csv_bytes).toBeGreaterThan(0);
+      expect(
+        diagnostic.sampled_heap_external_delta_bytes,
+      ).toBeGreaterThanOrEqual(0);
+      expect(diagnostic.sampled_rss_delta_bytes).toBeGreaterThanOrEqual(0);
+      expect(diagnostic.elapsed_ms).toMatchObject({
+        raw_read: expect.any(Number),
+        raw_chunk: expect.any(Number),
+        json_parsed: expect.any(Number),
+        csv_row: expect.any(Number),
+        csv_encoded: expect.any(Number),
+        complete: expect.any(Number),
+      });
+      const logged = String(log.mock.calls[0][0]);
+      for (const forbidden of [
+        secret,
+        'secret-filter',
+        'Sensitive custom value',
+        'test-token',
+        id,
+      ])
+        expect(logged).not.toContain(forbidden);
+    } finally {
+      log.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+  it('keeps diagnostics silent outside preview or without server opt-in', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'true');
+      expect((await GET(request())).status).toBe(200);
+      vi.stubEnv('VERCEL_ENV', 'preview');
+      vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'false');
+      expect((await GET(request())).status).toBe(200);
+      expect(log).not.toHaveBeenCalled();
+      expect(
+        (await GET(request())).headers.get('X-Inventory-Export-Diagnostic-Id'),
+      ).toBeNull();
+    } finally {
+      log.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+  it('keeps the completed CSV when preview logging fails', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'true');
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('log sink unavailable');
+    });
+    try {
+      const response = await GET(request('?customFields=true'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Disposition')).toContain('.csv');
+      expect(await response.text()).toContain('Custom Fields JSON');
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+  it('falls back to ordinary export when diagnostic baseline sampling fails', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'true');
+    const memory = vi.spyOn(process, 'memoryUsage').mockImplementation(() => {
+      throw new Error('memory sampler unavailable');
+    });
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const response = await GET(request());
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Disposition')).toContain('.csv');
+      expect(
+        response.headers.get('X-Inventory-Export-Diagnostic-Id'),
+      ).toBeNull();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      memory.mockRestore();
+      log.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+  it('keeps a preview timeout file-free while emitting one anonymous diagnostic', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('EXPORT_DIAGNOSTICS_ENABLED', 'true');
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocks.snapshot.mockResolvedValue({ data: null, code: '57014' });
+    try {
+      const response = await GET(request('?q=private-timeout-filter'));
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Content-Disposition')).toBeNull();
+      expect(log).toHaveBeenCalledOnce();
+      expect(response.headers.get('X-Inventory-Export-Diagnostic-Id')).toBe(
+        JSON.parse(String(log.mock.calls[0][0])).diagnostic_id,
+      );
+      expect(String(log.mock.calls[0][0])).not.toContain(
+        'private-timeout-filter',
+      );
+    } finally {
+      log.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
   it('checks the monotonic deadline during synchronous CSV encoding before success headers', async () => {
     mocks.snapshot.mockResolvedValue({

@@ -11,6 +11,7 @@ import {
   SnapshotTooLargeError,
 } from '@/features/inventory/export-reader.server';
 import { readFilters } from '@/features/inventory/read-model';
+import { createExportDiagnostics } from '@/features/inventory/export-diagnostics.server';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0' };
@@ -30,6 +31,7 @@ async function buildExport(
   request: Request,
   signal: AbortSignal,
   checkDeadline: () => void,
+  diagnostics: ReturnType<typeof createExportDiagnostics>,
 ) {
   try {
     checkDeadline();
@@ -40,6 +42,7 @@ async function buildExport(
       error: authError,
     } = await supabase.auth.getUser();
     checkDeadline();
+    diagnostics?.sample('authenticated');
     if (authError || !user)
       return errorResponse(
         'Sign in to export inventory.',
@@ -52,6 +55,7 @@ async function buildExport(
       .eq('user_id', user.id)
       .maybeSingle();
     checkDeadline();
+    diagnostics?.sample('member_checked');
     if (memberError || !isActiveMember(member))
       return errorResponse('Inventory access denied.', 403, 'access_denied');
     const {
@@ -59,6 +63,7 @@ async function buildExport(
       error: sessionError,
     } = await supabase.auth.getSession();
     checkDeadline();
+    diagnostics?.sample('session_checked');
     if (sessionError || !session?.access_token)
       return errorResponse(
         'Sign in to export inventory.',
@@ -83,12 +88,14 @@ async function buildExport(
     const filter = readFilters(params);
     const includeCustom = url.searchParams.get('customFields') === 'true';
     const { url: backendUrl, key } = supabaseConfig();
+    diagnostics?.sample('snapshot_requested');
     const { data, code } = await requestExportSnapshot({
       url: backendUrl,
       key,
       accessToken: session.access_token,
       signal,
       checkDeadline,
+      onStage: diagnostics?.readerStage,
       payload: {
         p_query: filter.query,
         p_type: filter.type,
@@ -101,6 +108,7 @@ async function buildExport(
       },
     });
     checkDeadline();
+    diagnostics?.sample('snapshot_finished');
     if (code === 'P1013')
       return errorResponse(
         'Export exceeds 10,000 rows. Narrow the filters and retry.',
@@ -134,7 +142,16 @@ async function buildExport(
       preview ? 'Preview' : 'Production',
       includeCustom,
       checkDeadline,
+      diagnostics?.csvRow,
     );
+    checkDeadline();
+    if (diagnostics) {
+      try {
+        diagnostics.csvEncoded(Buffer.byteLength(csv, 'utf8'));
+      } catch {
+        // Preview measurements cannot change a completed export.
+      }
+    }
     checkDeadline();
     const timestamp = new Date(exportedAt)
       .toISOString()
@@ -154,6 +171,8 @@ async function buildExport(
         'X-Content-Type-Options': 'nosniff',
       },
     });
+    checkDeadline();
+    diagnostics?.sample('response_ready');
     checkDeadline();
     return response;
   } catch (error) {
@@ -184,12 +203,18 @@ export async function GET(request: Request) {
   const deadlineAt = performance.now() + 10000;
   const deadline = AbortSignal.timeout(10000);
   const signal = AbortSignal.any([request.signal, deadline]);
+  let diagnostics: ReturnType<typeof createExportDiagnostics> = null;
+  try {
+    diagnostics = createExportDiagnostics();
+  } catch {
+    // Preview diagnostics cannot prevent an export from starting.
+  }
   const checkDeadline = () => {
     if (signal.aborted || performance.now() >= deadlineAt)
       throw new ExportDeadlineError('export_timeout');
   };
-  return Promise.race([
-    buildExport(request, signal, checkDeadline),
+  const response = await Promise.race([
+    buildExport(request, signal, checkDeadline, diagnostics),
     new Promise<Response>((resolve) =>
       signal.addEventListener(
         'abort',
@@ -205,4 +230,21 @@ export async function GET(request: Request) {
       ),
     ),
   ]);
+  diagnostics?.emit();
+  const terminal =
+    signal.aborted || performance.now() >= deadlineAt
+      ? errorResponse(
+          'Export timed out. Retry with narrower filters.',
+          503,
+          'export_timeout',
+        )
+      : response;
+  if (diagnostics) {
+    try {
+      terminal.headers.set('X-Inventory-Export-Diagnostic-Id', diagnostics.id);
+    } catch {
+      // The diagnostic header is optional; preserve the export response.
+    }
+  }
+  return terminal;
 }
