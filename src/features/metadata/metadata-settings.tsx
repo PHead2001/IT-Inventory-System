@@ -375,6 +375,9 @@ export function MetadataSettings({
   const [pending, startTransition] = useTransition();
   const [operationPending, setOperationPending] = useState(false);
   const [recovery, setRecovery] = useState<DesignerRecovery | null>(null);
+  const [recoveryLoadedScope, setRecoveryLoadedScope] = useState<string | null>(
+    null,
+  );
   const [storageWarning, setStorageWarning] = useState('');
   const [identityStatus, setIdentityStatus] = useState<
     'verified' | 'checking' | 'blocked'
@@ -401,6 +404,7 @@ export function MetadataSettings({
   } | null>(null);
   const refreshRequested = useRef(false);
   const dirty = definition !== null && JSON.stringify(definition) !== saved;
+  const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
     ? designerIssues(definition)
     : [
@@ -439,6 +443,7 @@ export function MetadataSettings({
     queueMicrotask(() => {
       if (!active) return;
       setRecovery(result.item);
+      setRecoveryLoadedScope(recoveryScope);
       setStorageWarning(
         result.available
           ? ''
@@ -448,9 +453,15 @@ export function MetadataSettings({
     return () => {
       active = false;
     };
-  }, [memberId, categoryId]);
+  }, [memberId, categoryId, recoveryScope]);
   useEffect(() => {
-    if (!dirty || !definition) return;
+    // Wait for the entry read before clearing anything: an older unsaved draft
+    // must remain available for explicit recovery on a fresh mount.
+    if (recoveryLoadedScope !== recoveryScope) return;
+    if (!dirty || !definition) {
+      if (!recovery) clearDesignerRecovery(memberId, categoryId);
+      return;
+    }
     const stored = writeDesignerRecovery({
       memberId,
       categoryId,
@@ -475,6 +486,9 @@ export function MetadataSettings({
     draftVersion,
     draftId,
     publishedBaseline,
+    recovery,
+    recoveryLoadedScope,
+    recoveryScope,
   ]);
   useEffect(() => {
     if (!dirty) return;

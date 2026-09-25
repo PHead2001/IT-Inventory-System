@@ -342,6 +342,87 @@ describe('category form designer', () => {
       confirm.mockRestore();
     }
   });
+  it('clears obsolete recovery when undo returns to the saved baseline, including after a category switch', async () => {
+    const other = { ...form, category_id: id(20) };
+    const mountTwo = () =>
+      render(
+        <MetadataSettings
+          memberId={id(50)}
+          categories={[
+            { id: id(1), name: 'Cables', active: true },
+            { id: id(20), name: 'Adapters', active: true },
+          ]}
+          forms={{ [id(1)]: form, [id(20)]: other }}
+        />,
+      );
+    mountTwo();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    cleanup();
+    mountTwo();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('region', { name: 'Recover unsaved form edits' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
+  });
+  it('clears recovery after a manual reversal to the saved field value', async () => {
+    const savedForm: MetadataForm = {
+      ...form,
+      published_definition: {
+        ...form.published_definition,
+        fields: [
+          {
+            id: id(31),
+            type: 'short_text',
+            label: 'Saved label',
+            applies_to: ['quantity', 'asset'],
+            required: false,
+            rules: {},
+            options: [],
+          },
+        ],
+      },
+    };
+    const mountSaved = () =>
+      render(
+        <MetadataSettings
+          memberId={id(50)}
+          categories={[{ id: id(1), name: 'Cables', active: true }]}
+          forms={{ [id(1)]: savedForm }}
+        />,
+      );
+    mountSaved();
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'Temporary' },
+    });
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
+    );
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'Saved label' },
+    });
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
+    );
+    cleanup();
+    mountSaved();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('region', { name: 'Recover unsaved form edits' }),
+      ).not.toBeInTheDocument(),
+    );
+  });
   it('remounts on authenticated member change without carrying or copying dirty state', async () => {
     const view = (memberId: string) => (
       <MetadataSettings
