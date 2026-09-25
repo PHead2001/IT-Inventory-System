@@ -3,6 +3,7 @@ export const PARENT_REF = 'dndqydmuqoduwaoujfki';
 export const FIXTURE_EMAIL = 'test@gmail.com';
 export const CHECK_NAME = 'Supabase Preview';
 export const CHECK_APP = 'supabase';
+export const MAX_CHECK_RUNS = 100;
 
 const refPattern = /^[a-z0-9]{20}$/;
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -67,7 +68,66 @@ export function selectPreviewBranch(branches, pr) {
   return branch;
 }
 
-export function assertReady(branch, check, sha) {
+export function selectDeploymentCheck(response, sha, childRef) {
+  if (
+    !Number.isSafeInteger(response?.total_count) ||
+    response.total_count < 0 ||
+    response.total_count > MAX_CHECK_RUNS ||
+    !Array.isArray(response.check_runs) ||
+    response.check_runs.length !== response.total_count
+  )
+    throw new PreviewAccessError(
+      'CHECKS_INVALID',
+      'Supabase check-run listing is incomplete or exceeds its bound',
+    );
+  const matches = response.check_runs.filter(
+    (check) =>
+      check?.head_sha === sha &&
+      check.name === CHECK_NAME &&
+      check.app?.slug === CHECK_APP,
+  );
+  if (matches.length === 0)
+    throw new PreviewAccessError(
+      'DEPLOYMENT_PENDING',
+      'Supabase deployment for this PR revision is not available',
+      true,
+    );
+  if (matches.some((check) => !Number.isSafeInteger(check.id) || check.id < 1))
+    throw new PreviewAccessError('CHECKS_INVALID', 'Check-run ID is invalid');
+  matches.sort((a, b) => b.id - a.id);
+  if (matches.length > 1 && matches[0].id === matches[1].id)
+    throw new PreviewAccessError(
+      'CHECKS_AMBIGUOUS',
+      'Supabase check-run IDs are duplicated',
+    );
+  const check = matches[0];
+  let url;
+  try {
+    url = new URL(check.details_url);
+  } catch {
+    throw new PreviewAccessError(
+      'CHECK_TARGET_DENIED',
+      'Supabase check is not associated with the selected child project',
+    );
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.hostname !== 'supabase.com' ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search ||
+    url.hash ||
+    url.pathname !== `/dashboard/project/${childRef}`
+  )
+    throw new PreviewAccessError(
+      'CHECK_TARGET_DENIED',
+      'Supabase check is not associated with the selected child project',
+    );
+  return check;
+}
+
+export function assertReady(branch, checks, sha) {
   if (
     branch.status !== 'ACTIVE_HEALTHY' &&
     branch.preview_project_status !== 'ACTIVE_HEALTHY'
@@ -77,44 +137,14 @@ export function assertReady(branch, check, sha) {
       'Preview branch is not healthy',
       true,
     );
-  if (
-    !Number.isSafeInteger(branch.latest_check_run_id) ||
-    branch.latest_check_run_id < 1 ||
-    check?.id !== branch.latest_check_run_id ||
-    check.head_sha !== sha ||
-    check.name !== CHECK_NAME ||
-    check.app?.slug !== CHECK_APP ||
-    check.status !== 'completed' ||
-    check.conclusion !== 'success'
-  ) {
+  const check = selectDeploymentCheck(checks, sha, branch.project_ref);
+  if (check.status !== 'completed' || check.conclusion !== 'success') {
     throw new PreviewAccessError(
       'DEPLOYMENT_PENDING',
       'Supabase deployment for this PR revision has not succeeded',
       true,
     );
   }
-}
-
-function checkId(branch) {
-  if (
-    branch.status !== 'ACTIVE_HEALTHY' &&
-    branch.preview_project_status !== 'ACTIVE_HEALTHY'
-  )
-    throw new PreviewAccessError(
-      'BRANCH_PENDING',
-      'Preview branch is not healthy',
-      true,
-    );
-  if (
-    !Number.isSafeInteger(branch.latest_check_run_id) ||
-    branch.latest_check_run_id < 1
-  )
-    throw new PreviewAccessError(
-      'DEPLOYMENT_PENDING',
-      'Preview deployment check is not available',
-      true,
-    );
-  return branch.latest_check_run_id;
 }
 
 export function authPolicyPatch(config, password, allowMinimumReduction) {
@@ -198,7 +228,7 @@ export async function provisionPreview({
     pr = assertPullRequest(await github.pull(number), repository, expectedSha);
     try {
       branch = selectPreviewBranch(await management.branches(PARENT_REF), pr);
-      assertReady(branch, await github.check(checkId(branch)), pr.head.sha);
+      assertReady(branch, await github.checks(pr.head.sha), pr.head.sha);
       const target = project(branch.project_ref);
       const probeKeys = selectKeys(await management.keys(branch.project_ref));
       try {
@@ -236,7 +266,7 @@ export async function provisionPreview({
       throw new Error('Preview branch identity changed');
     assertReady(
       freshBranch,
-      await github.check(checkId(freshBranch)),
+      await github.checks(freshPr.head.sha),
       freshPr.head.sha,
     );
   };

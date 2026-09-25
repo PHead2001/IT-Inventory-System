@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises';
-import { provisionPreview, PARENT_REF } from './preview-access-core.mjs';
+import {
+  provisionPreview,
+  PARENT_REF,
+  CHECK_NAME,
+} from './preview-access-core.mjs';
 
 async function main() {
   const repository = 'PHead2001/IT-Inventory-System';
@@ -70,10 +74,11 @@ async function main() {
       request(`https://api.github.com/repos/${repository}/pulls/${number}`, {
         headers: ghHeaders,
       }),
-    check: (id) =>
-      request(`https://api.github.com/repos/${repository}/check-runs/${id}`, {
-        headers: ghHeaders,
-      }),
+    checks: (sha) =>
+      request(
+        `https://api.github.com/repos/${repository}/commits/${sha}/check-runs?check_name=${encodeURIComponent(CHECK_NAME)}&filter=all&per_page=100&page=1`,
+        { headers: ghHeaders },
+      ),
   };
   const management = {
     branches: (ref) =>
