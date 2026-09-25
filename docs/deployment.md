@@ -38,6 +38,28 @@ The application reports only exact static `/dashboard`, `/inventory`, `/location
 
 Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Set custom SMTP before real invitations and apply the checked-in invite/recovery templates. Invitations do not grant data access until the owner creates an active viewer/staff membership.
 
+Configuration editing is a separate, owner-granted membership capability. An owner must first verify the intended person's Auth UUID in the correct environment and read both records in the SQL editor (replace the placeholder; do not commit a real UUID):
+
+```sql
+select id, email, email_confirmed_at from auth.users
+where id = '<verified-auth-uuid>'::uuid;
+select user_id, display_name, role, active, can_manage_configuration
+from public.app_members
+where user_id = '<verified-auth-uuid>'::uuid;
+```
+
+Confirm that exactly one intended Auth user and one **active staff** membership match. Stop on a missing, inactive, viewer, or unexpected account; resolve membership identity and role separately with the owner before granting configuration access. In particular, never promote the shared preview staff fixture, every staff member, the first user, or an email domain. Only after that read-first check, the owner may grant the single capability and verify the returned row:
+
+```sql
+update public.app_members
+set can_manage_configuration = true
+where user_id = '<verified-auth-uuid>'::uuid
+  and role = 'staff' and active = true
+returning user_id, role, active, can_manage_configuration;
+```
+
+Require exactly one returned row; zero means no grant occurred and needs investigation. To revoke this capability without removing ordinary inventory access, the owner sets `can_manage_configuration=false` for the same verified UUID. Application clients have no direct membership-update grant and there is no self-grant route. A production maintainer grant is an owner action outside feature-branch validation.
+
 Origin precedence is explicit APP_ORIGIN → VERCEL_BRANCH_URL → http://localhost:3000. The branch hostname is normalized to HTTPS with no trailing slash; commit-specific VERCEL_URL is not used. Enable access to [Vercel system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables). Leave APP_ORIGIN unset in the Preview environment so every Git branch resolves automatically; remove any inherited localhost or production override there. Set APP_ORIGIN explicitly for the production custom domain and non-Vercel hosted deployments.
 
 In the separate nonproduction Supabase project's Auth redirect allowlist, configure a Vercel preview wildcard once: `https://<project-slug>-git-*-<team-or-account-slug>.vercel.app/auth/confirm`. Replace the placeholders using the actual stable branch hostname and verify that it matches; do not include literal angle brackets. This scopes the wildcard to this project's branch previews and the exact callback path. Supabase supports [preview redirect wildcards](https://supabase.com/docs/guides/auth/redirect-urls). Keep production's Site URL and redirect allowlist exact (for example, `https://inventory.example.com` and `https://inventory.example.com/auth/confirm`); do not add preview wildcards to the production project.

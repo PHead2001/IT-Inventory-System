@@ -125,6 +125,8 @@ describe('inventory read contracts', () => {
       reason: 'Physical count',
       before_metadata: { category_id: other, name: 'Old' },
       after_metadata: { category_id: id, name: 'New', version: 999 },
+      custom_present: false,
+      custom_changed: false,
       from_location_id: null,
       to_location_id: null,
       lines: [
@@ -207,6 +209,8 @@ describe('inventory read contracts', () => {
       reason: null,
       before_metadata: { reorder_threshold: null },
       after_metadata: { reorder_threshold: 0 },
+      custom_present: false,
+      custom_changed: false,
       from_location_id: null,
       to_location_id: null,
       lines: [],

@@ -90,6 +90,8 @@ export type HistoryEvent = {
     before: string | null;
     after: string | null;
   }[];
+  customMetadataPresent: boolean;
+  customMetadataChanged: boolean;
 };
 export type DuplicateSerial = {
   id: string;

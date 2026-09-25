@@ -8,7 +8,7 @@ export type ControlWidth =
 // Controls wrap in document order when their minimum usable width will not fit.
 const GAP_REM = 0.75;
 const NORMAL_MIN_REM = 14;
-const SHORT_MIN_REM = 7;
+const SHORT_MIN_REM = 5.5;
 
 export function controlLayoutStyle(
   width: ControlWidth,

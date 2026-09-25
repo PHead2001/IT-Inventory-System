@@ -104,6 +104,17 @@ export function SettingsPanel({
   };
   return (
     <div className="space-y-8">
+      {!canManage && (
+        <p
+          role="note"
+          className="rounded border border-slate-700 p-4 text-sm text-slate-300"
+        >
+          Settings are read-only for your account. You can view categories and
+          shared label defaults. Editing categories, form fields, and shared
+          defaults requires an active staff membership with configuration
+          access. Ask the application owner if you need that access.
+        </p>
+      )}
       {message && (
         <p role="status" className="rounded border border-cyan-700 p-3 text-sm">
           {message}

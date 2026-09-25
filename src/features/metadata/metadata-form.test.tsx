@@ -108,6 +108,10 @@ describe('published metadata form', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
     expect(screen.getByLabelText(/Inspected/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Inspected/ })).toHaveAttribute(
+      'aria-checked',
+      'mixed',
+    );
     expect(
       [...container.querySelectorAll('label')].map(
         (label) => label.textContent,
@@ -122,6 +126,27 @@ describe('published metadata form', () => {
     );
     expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
     expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('keeps missing, false, and true boolean values distinct with an explicit Unset', () => {
+    render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={form().published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    const checkbox = screen.getByRole('checkbox', { name: /Inspected/ });
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(screen.getByText('Not set')).toBeInTheDocument();
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('No')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Unset' }));
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(screen.getByText('Not set')).toBeInTheDocument();
   });
   it('preserves false, zero and empty strings as values distinct from missing', () => {
     const definition = {
@@ -168,9 +193,8 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Edited cable' },
     });
-    fireEvent.change(screen.getByLabelText(/Inspected/), {
-      target: { value: 'false' },
-    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Inspected/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Inspected/ }));
     rerender(
       <MetadataForm
         {...props}
@@ -206,9 +230,10 @@ describe('published metadata form', () => {
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
       'Edited cable',
     );
-    expect(
-      (screen.getByLabelText(/Inspected/) as HTMLSelectElement).value,
-    ).toBe('false');
+    expect(screen.getByRole('checkbox', { name: /Inspected/ })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
   it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
     const choiceId = '00000000-0000-4000-8000-000000000020';

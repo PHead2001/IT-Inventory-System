@@ -224,6 +224,18 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
               ))}
             </dl>
           )}
+          {event.customMetadataPresent && (
+            <p className="mt-3 text-sm">
+              <Link
+                className="text-cyan-300 underline"
+                href={`/history?event=${event.kind}:${event.id}`}
+              >
+                {event.customMetadataChanged
+                  ? 'Custom metadata changed — inspect before and after'
+                  : 'Inspect custom metadata snapshots'}
+              </Link>
+            </p>
+          )}
         </li>
       ))}
     </ol>

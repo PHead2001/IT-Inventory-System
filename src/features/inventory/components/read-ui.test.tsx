@@ -88,6 +88,8 @@ it('shows record corrections as human readable history distinct from movement', 
             breadcrumb: 'IT Closet / Drawer 1',
           },
           metadataChanges: [],
+          customMetadataPresent: true,
+          customMetadataChanged: true,
         },
       ]}
     />,
@@ -99,6 +101,9 @@ it('shows record corrections as human readable history distinct from movement', 
   expect(screen.queryByText('Physically moved')).not.toBeInTheDocument();
   expect(screen.getByText('From:')).toBeInTheDocument();
   expect(screen.getByText('To:')).toBeInTheDocument();
+  expect(
+    screen.getByRole('link', { name: /Custom metadata changed/ }),
+  ).toHaveAttribute('href', '/history?event=asset:event');
 });
 
 it('does not present legacy category metadata events as asset movement', () => {
@@ -124,6 +129,8 @@ it('does not present legacy category metadata events as asset movement', () => {
               after: 'New category',
             },
           ],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
         },
       ]}
     />,

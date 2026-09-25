@@ -1002,6 +1002,8 @@ export type Database = {
           after_metadata: Json | null
           before_metadata: Json | null
           created_at: string | null
+          custom_changed: boolean | null
+          custom_present: boolean | null
           entity_id: string | null
           entity_name: string | null
           event_type: string | null
@@ -1198,6 +1200,10 @@ export type Database = {
         Args: { p_page?: number; p_page_size?: number }
         Returns: Json
       }
+      metadata_describe_batch: {
+        Args: { p_keys: Json; p_mode: string }
+        Returns: Json
+      }
       metadata_describe_values: {
         Args: { p_current_category: string; p_values: Json }
         Returns: Json
@@ -1208,6 +1214,16 @@ export type Database = {
       }
       metadata_draft_save: {
         Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      metadata_event_custom_page: {
+        Args: {
+          p_event_id: string
+          p_field_id?: string
+          p_kind: string
+          p_option_offset?: number
+          p_side: string
+        }
         Returns: Json
       }
       metadata_form_get: { Args: { p_category_id: string }; Returns: Json }

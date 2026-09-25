@@ -85,6 +85,8 @@ export const historyRow = z.object({
   reason: nullableText,
   before_metadata: z.record(z.string(), z.unknown()).nullable(),
   after_metadata: z.record(z.string(), z.unknown()).nullable(),
+  custom_present: z.boolean(),
+  custom_changed: z.boolean(),
   from_location_id: id.nullable(),
   to_location_id: id.nullable(),
   lines: z.array(
@@ -191,6 +193,8 @@ export function mapHistory(
     at: row.created_at,
     actorName: row.actor_name,
     reason: row.reason,
+    customMetadataPresent: row.custom_present,
+    customMetadataChanged: row.custom_changed,
     lines: row.lines.map((l) => ({
       location: locationById(locations, l.location_id),
       delta: l.delta,
