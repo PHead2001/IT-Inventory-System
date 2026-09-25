@@ -113,6 +113,140 @@ export type Database = {
           },
         ]
       }
+      assignment_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          asset_event_id: string | null
+          asset_id: string | null
+          created_at: string
+          from_label: string | null
+          from_location_id: string | null
+          from_site_id: string | null
+          id: string
+          item_id: string | null
+          kind: string
+          quantity: number | null
+          quantity_event_id: string | null
+          reason: string | null
+          reference: string | null
+          to_label: string | null
+          to_location_id: string | null
+          to_site_id: string | null
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          asset_event_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          from_label?: string | null
+          from_location_id?: string | null
+          from_site_id?: string | null
+          id?: string
+          item_id?: string | null
+          kind: string
+          quantity?: number | null
+          quantity_event_id?: string | null
+          reason?: string | null
+          reference?: string | null
+          to_label?: string | null
+          to_location_id?: string | null
+          to_site_id?: string | null
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          asset_event_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          from_label?: string | null
+          from_location_id?: string | null
+          from_site_id?: string | null
+          id?: string
+          item_id?: string | null
+          kind?: string
+          quantity?: number | null
+          quantity_event_id?: string | null
+          reason?: string | null
+          reference?: string | null
+          to_label?: string | null
+          to_location_id?: string | null
+          to_site_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assignment_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "assignment_events_asset_event_id_fkey"
+            columns: ["asset_event_id"]
+            isOneToOne: true
+            referencedRelation: "asset_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "serialized_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_from_location_id_fkey"
+            columns: ["from_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_from_site_id_fkey"
+            columns: ["from_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "assignment_events_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_quantity_event_id_fkey"
+            columns: ["quantity_event_id"]
+            isOneToOne: true
+            referencedRelation: "quantity_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_to_location_id_fkey"
+            columns: ["to_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assignment_events_to_site_id_fkey"
+            columns: ["to_site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           active: boolean
@@ -540,6 +674,57 @@ export type Database = {
         }
         Relationships: []
       }
+      location_configuration_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          after_state: Json
+          before_state: Json | null
+          created_at: string
+          id: string
+          kind: string
+          location_id: string
+          version: number
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          after_state: Json
+          before_state?: Json | null
+          created_at?: string
+          id?: string
+          kind: string
+          location_id: string
+          version: number
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          after_state?: Json
+          before_state?: Json | null
+          created_at?: string
+          id?: string
+          kind?: string
+          location_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_configuration_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "location_configuration_events_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       locations: {
         Row: {
           active: boolean
@@ -552,6 +737,7 @@ export type Database = {
           parent_id: string | null
           sort_order: number
           updated_at: string
+          version: number
         }
         Insert: {
           active?: boolean
@@ -564,6 +750,7 @@ export type Database = {
           parent_id?: string | null
           sort_order?: number
           updated_at?: string
+          version?: number
         }
         Update: {
           active?: boolean
@@ -576,6 +763,7 @@ export type Database = {
           parent_id?: string | null
           sort_order?: number
           updated_at?: string
+          version?: number
         }
         Relationships: [
           {
@@ -737,6 +925,13 @@ export type Database = {
             foreignKeyName: "quantity_events_item_id_fkey"
             columns: ["item_id"]
             isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "quantity_events_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
             referencedRelation: "quantity_items"
             referencedColumns: ["id"]
           },
@@ -823,12 +1018,13 @@ export type Database = {
           custom_values: Json
           description: string | null
           id: string
-          location_id: string
+          location_id: string | null
           manufacturer: string | null
           model: string | null
           name: string
           needs_metadata: boolean
           serial_number: string | null
+          site_id: string | null
           status: string
           updated_at: string
           validated_form_revision_id: string | null
@@ -841,12 +1037,13 @@ export type Database = {
           custom_values?: Json
           description?: string | null
           id?: string
-          location_id: string
+          location_id?: string | null
           manufacturer?: string | null
           model?: string | null
           name: string
           needs_metadata?: boolean
           serial_number?: string | null
+          site_id?: string | null
           status?: string
           updated_at?: string
           validated_form_revision_id?: string | null
@@ -859,12 +1056,13 @@ export type Database = {
           custom_values?: Json
           description?: string | null
           id?: string
-          location_id?: string
+          location_id?: string | null
           manufacturer?: string | null
           model?: string | null
           name?: string
           needs_metadata?: boolean
           serial_number?: string | null
+          site_id?: string | null
           status?: string
           updated_at?: string
           validated_form_revision_id?: string | null
@@ -893,6 +1091,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "serialized_assets_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "serialized_assets_validated_form_revision_id_fkey"
             columns: ["validated_form_revision_id"]
             isOneToOne: false
@@ -900,6 +1105,169 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      site_configuration_events: {
+        Row: {
+          actor_id: string
+          actor_name: string
+          after_state: Json
+          before_state: Json | null
+          created_at: string
+          id: string
+          kind: string
+          site_id: string
+          version: number
+        }
+        Insert: {
+          actor_id: string
+          actor_name: string
+          after_state: Json
+          before_state?: Json | null
+          created_at?: string
+          id?: string
+          kind: string
+          site_id: string
+          version: number
+        }
+        Update: {
+          actor_id?: string
+          actor_name?: string
+          after_state?: Json
+          before_state?: Json | null
+          created_at?: string
+          id?: string
+          kind?: string
+          site_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_configuration_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "site_configuration_events_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      site_quantity_event_lines: {
+        Row: {
+          after_quantity: number
+          before_quantity: number
+          delta: number
+          event_id: string
+          site_id: string
+        }
+        Insert: {
+          after_quantity: number
+          before_quantity: number
+          delta: number
+          event_id: string
+          site_id: string
+        }
+        Update: {
+          after_quantity?: number
+          before_quantity?: number
+          delta?: number
+          event_id?: string
+          site_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_quantity_event_lines_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_quantity_event_lines_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      site_quantity_holdings: {
+        Row: {
+          item_id: string
+          quantity: number
+          site_id: string
+        }
+        Insert: {
+          item_id: string
+          quantity: number
+          site_id: string
+        }
+        Update: {
+          item_id?: string
+          quantity?: number
+          site_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_quantity_holdings_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "site_quantity_holdings_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_quantity_holdings_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sites: {
+        Row: {
+          active: boolean
+          code: string
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          code: string
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          code?: string
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
       }
       stock_balances: {
         Row: {
@@ -918,6 +1286,13 @@ export type Database = {
           quantity?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "stock_balances_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
           {
             foreignKeyName: "stock_balances_item_id_fkey"
             columns: ["item_id"]
@@ -1034,6 +1409,16 @@ export type Database = {
         }
         Relationships: []
       }
+      inventory_quantity_totals: {
+        Row: {
+          assigned_quantity: string | null
+          available_quantity: string | null
+          item_id: string | null
+          recorded_quantity: string | null
+          stock_state: string | null
+        }
+        Relationships: []
+      }
       inventory_search_rows: {
         Row: {
           ancestor_codes: string[] | null
@@ -1056,6 +1441,24 @@ export type Database = {
           serial_number: string | null
           status: string | null
           stock_state: string | null
+        }
+        Relationships: []
+      }
+      site_current_holdings: {
+        Row: {
+          asset_tag: string | null
+          category_name: string | null
+          entity_id: string | null
+          inventory_kind: string | null
+          manufacturer: string | null
+          model: string | null
+          name: string | null
+          quantity: number | null
+          serial_number: string | null
+          site_active: boolean | null
+          site_code: string | null
+          site_id: string | null
+          site_name: string | null
         }
         Relationships: []
       }
@@ -1082,6 +1485,14 @@ export type Database = {
         Returns: Json
       }
       asset_retire: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_site_change: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_site_open: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
@@ -1196,6 +1607,14 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      location_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      location_update: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       low_stock_dashboard: {
         Args: { p_page?: number; p_page_size?: number }
         Returns: Json
@@ -1265,11 +1684,31 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      quantity_site_change: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      quantity_site_open: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       quantity_update: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
       quantity_update_v2: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      site_activity_summary: {
+        Args: { p_from?: string; p_site_id: string; p_until?: string }
+        Returns: Json
+      }
+      site_create: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      site_update: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }

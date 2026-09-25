@@ -61,6 +61,10 @@ const test = () => {
     ['--import', 'tsx', 'tests/integration/metadata.ts'],
     localTestEnv(status),
   );
+  node(
+    ['--import', 'tsx', 'tests/integration/custody.ts'],
+    localTestEnv(status),
+  );
 };
 try {
   if (command === 'start') cli('start');

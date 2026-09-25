@@ -4,9 +4,9 @@ set local search_path = public, extensions;
 select no_plan();
 
 select is((select count(*)::integer from public.categories),8,'eight categories');
-select is((select count(*)::integer from public.locations),35,'35 logical locations');
-select is((select count(*)::integer from public.locations where can_hold_inventory),28,'28 destination flags');
-select is((select count(*)::integer from public.locations where not can_hold_inventory),7,'seven aggregate flags');
+select is((select count(*)::integer from public.locations where code='ITC' or code like 'ITC-%'),35,'35 closet logical locations');
+select is((select count(*)::integer from public.locations where (code='ITC' or code like 'ITC-%') and can_hold_inventory),28,'28 closet destination flags');
+select is((select count(*)::integer from public.locations where (code='ITC' or code like 'ITC-%') and not can_hold_inventory),7,'seven closet aggregate flags');
 select results_eq(
   'select name from public.categories order by sort_order',
   $$values ('Computers'),('Networking'),('Cables'),('Adapters'),('Peripherals'),('Parts'),('Tools'),('Other')$$,
@@ -15,19 +15,23 @@ select results_eq(
 select ok((select bool_and(relrowsecurity) from pg_class where oid in ('public.app_members'::regclass,'public.categories'::regclass,'public.locations'::regclass)),'all application tables use RLS');
 select throws_ok($$update public.locations set code='ITC-RENAMED' where code='ITC-RACK'$$,'23514','Location identity is immutable','code cannot change');
 select throws_ok($$update public.locations set id=gen_random_uuid() where code='ITC-RACK'$$,'23514','Location identity is immutable','UUID cannot change');
-select throws_ok($$update public.locations set parent_id=id where code='ITC-D01'$$,'23514',null,'self-parent denied');
-select throws_ok($$update public.locations set parent_id=gen_random_uuid() where code='ITC-D01'$$,'23503',null,'missing parent denied');
-select throws_ok($$update public.locations set parent_id=(select id from public.locations where code='ITC') where code='ITC-S1'$$,'23514','Invalid location parent kind','parent kind enforced');
-select throws_ok($$update public.locations set parent_id=case code when 'ITC-S1' then (select id from public.locations where code='ITC-S2') else (select id from public.locations where code='ITC-S1') end where code in ('ITC-S1','ITC-S2')$$,'23514','Location hierarchy cannot contain cycles','multirow cycle denied');
+select throws_ok($$update public.locations set parent_id=id where code='ITO-GENERAL'$$,'23514',null,'self-parent denied');
+select throws_ok($$update public.locations set parent_id=gen_random_uuid() where code='ITO-GENERAL'$$,'23503',null,'missing parent denied');
+select throws_ok($$update public.locations set parent_id=(select id from public.locations where code='ITC') where code='ITC-S1'$$,'P1008','modeled_location_shape_immutable','closet geometry binding cannot be reparented');
+select throws_ok($$update public.locations set parent_id=(select id from public.locations where code='ITC-S1') where code='ITO-GENERAL'$$,'23514','Invalid location parent kind','unmodeled parent kind enforced');
+insert into public.locations(code,name,parent_id,kind) select 'ITO-CYCLE-A','Cycle A',id,'storage_area' from public.locations where code='ITO';
+insert into public.locations(code,name,parent_id,kind) select 'ITO-CYCLE-B','Cycle B',id,'storage_area' from public.locations where code='ITO';
+select throws_ok($$update public.locations set parent_id=case code when 'ITO-CYCLE-A' then (select id from public.locations where code='ITO-CYCLE-B') else (select id from public.locations where code='ITO-CYCLE-A') end where code in ('ITO-CYCLE-A','ITO-CYCLE-B')$$,'23514','Location hierarchy cannot contain cycles','multirow cycle denied');
 select throws_ok($$insert into public.categories(code,name) values ('DUPLICATE','computers')$$,'23505',null,'category normalized uniqueness');
 select throws_ok($$insert into public.app_members(user_id,display_name,role) values(gen_random_uuid(),'Test','admin')$$,'23514',null,'only approved roles');
 
 -- The boolean is independently editable; kind does not imply capability.
-update public.locations set can_hold_inventory=false where code='ITC-D01';
-select ok((select kind='drawer' and not can_hold_inventory from public.locations where code='ITC-D01'),'drawer kind does not force capability');
-update public.locations set can_hold_inventory=true,active=false where code='ITC-D01';
-select is((select count(*)::integer from public.locations where active and can_hold_inventory),27,'inactive destinations are ineligible');
-update public.locations set active=true where code='ITC-D01';
+update public.locations set can_hold_inventory=false where code='ITO-GENERAL';
+select ok((select kind='storage_area' and not can_hold_inventory from public.locations where code='ITO-GENERAL'),'location kind does not force capability');
+update public.locations set can_hold_inventory=true,active=false where code='ITO-GENERAL';
+select is((select count(*)::integer from public.locations where (code='ITC' or code like 'ITC-%') and active and can_hold_inventory),28,'closet destinations stay eligible');
+select ok((select not active from public.locations where code='ITO-GENERAL'),'inactive office destination is ineligible');
+update public.locations set active=true where code='ITO-GENERAL';
 
 create temporary table test_identities(kind text primary key, id uuid not null default gen_random_uuid());
 insert into test_identities(kind) values ('viewer'),('staff'),('inactive'),('nonmember');
@@ -39,7 +43,7 @@ from test_identities where kind<>'nonmember';
 select set_config('request.jwt.claims',json_build_object('sub',(select id from test_identities where kind='viewer'),'role','authenticated')::text,true);
 set local role authenticated;
 select is((select count(*)::integer from public.categories),8,'viewer reads categories');
-select is((select count(*)::integer from public.locations),35,'viewer reads locations');
+select ok((select count(*)::integer from public.locations)>=37,'viewer reads closet plus office locations');
 select is((select count(*)::integer from public.app_members),1,'viewer reads only own active membership');
 select throws_ok($$insert into public.categories(code,name) values('NEW','New')$$,'42501',null,'viewer cannot insert');
 select throws_ok($$update public.app_members set role='staff'$$,'42501',null,'viewer cannot escalate membership');
@@ -51,7 +55,7 @@ reset role;
 select set_config('request.jwt.claims',json_build_object('sub',(select id from test_identities where kind='staff'),'role','authenticated')::text,true);
 set local role authenticated;
 select is((select count(*)::integer from public.categories),8,'staff reads categories');
-select is((select count(*)::integer from public.locations),35,'staff reads locations');
+select ok((select count(*)::integer from public.locations)>=37,'staff reads closet plus office locations');
 select is((select count(*)::integer from public.app_members),1,'staff reads own membership');
 select throws_ok($$insert into public.locations(code,name,kind) values('ROOM2','Other room','room')$$,'42501',null,'staff cannot insert directly');
 select throws_ok($$update public.locations set can_hold_inventory=true$$,'42501',null,'staff cannot update directly');

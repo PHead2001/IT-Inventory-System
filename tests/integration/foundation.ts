@@ -25,7 +25,10 @@ async function main() {
     categories.map((c) => c.name),
     expectedCategories,
   );
-  assert.equal(locations.length, 35);
+  const closetLocations = locations.filter(
+    (location) => location.code === 'ITC' || location.code.startsWith('ITC-'),
+  );
+  assert.equal(closetLocations.length, 35);
   const byCode = new Map(locations.map((l) => [l.code, l]));
   const byId = new Map(locations.map((l) => [l.id, l]));
   for (const [code, name, parent, kind, cap, sort] of expectedLocations) {
@@ -40,7 +43,7 @@ async function main() {
       parent,
     );
   }
-  assert.equal(locations.filter(canHoldInventory).length, 28);
+  assert.equal(closetLocations.filter(canHoldInventory).length, 28);
   const room = loadItCloset(),
     bound = new Set([room.locationCode]),
     primary = new Set<string>();
@@ -75,12 +78,13 @@ async function main() {
   assert.equal(bound.size, 35);
   assert.deepEqual(
     [...primary].sort(),
-    locations
+    closetLocations
       .filter((l) => l.can_hold_inventory)
       .map((l) => l.code)
       .sort(),
   );
-  // Privileged hierarchy edits also serialize stale snapshots.
+  // Privileged direct hierarchy edits also reject higher-isolation snapshots
+  // before changing topology, since placement visibility requires READ COMMITTED.
   const a = new Client({ connectionString: process.env.LOCAL_DB_URL });
   const b = new Client({ connectionString: process.env.LOCAL_DB_URL });
   await a.connect();
@@ -98,7 +102,7 @@ async function main() {
       );
     await a.query('commit');
     const error = await competing;
-    assert.equal(error?.code, '40001', 'stale hierarchy writer must abort');
+    assert.equal(error?.code, 'P1016', 'higher-isolation hierarchy writer must abort');
     await b.query('rollback');
   } finally {
     await a.end();

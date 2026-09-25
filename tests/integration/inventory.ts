@@ -675,27 +675,36 @@ async function main() {
       'P1004',
     );
   }
-  const oldLocation = locations.rows.find((row) => row.id === c)!;
+  // Managed-location lifecycle now refuses to strand stock or change modeled
+  // closet capability. Exercise invalid destination behavior on an empty,
+  // unmodeled destination instead of mutating a stocked closet shelf.
+  const eligibility = await owner.query(
+    `insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
+     select $1,'Fictional eligibility location',id,'storage_area',true
+     from public.locations where code='ITO' returning id`,
+    ['TEST-ELIG-' + randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()],
+  );
+  const eligibilityLocationId = eligibility.rows[0].id as string;
   try {
     await owner.query('update public.locations set active=false where id=$1', [
-      c,
+      eligibilityLocationId,
     ]);
     await fail(
       staff.client,
       'quantity_receive',
-      { ...base(), location_id: c, quantity: 1, reason: 'Inactive' },
+      { ...base(), location_id: eligibilityLocationId, quantity: 1, reason: 'Inactive' },
       'P1004',
     );
     await owner.query(
       'update public.locations set active=true,can_hold_inventory=false where id=$1',
-      [c],
+      [eligibilityLocationId],
     );
     await fail(
       staff.client,
       'quantity_receive',
       {
         ...base(),
-        location_id: c,
+        location_id: eligibilityLocationId,
         quantity: 1,
         reason: 'Not inventory-bearing',
       },
@@ -703,8 +712,8 @@ async function main() {
     );
   } finally {
     await owner.query(
-      'update public.locations set active=$2,can_hold_inventory=$3 where id=$1',
-      [c, oldLocation.active, oldLocation.can_hold_inventory],
+      'update public.locations set active=true,can_hold_inventory=true where id=$1',
+      [eligibilityLocationId],
     );
   }
   assert.deepEqual(
@@ -879,9 +888,19 @@ async function main() {
     confirm_clear_stock: true,
     reason: 'Removed obsolete stock',
   };
-  await owner.query('update public.locations set active=false where id=$1', [
-    b,
-  ]);
+  // Simulate a legacy inactive holding from before managed-location guards.
+  // Such preexisting stock remains visible to archive review and evacuable;
+  // new deactivation is correctly rejected by the current topology trigger.
+  await owner.query(
+    'alter table public.locations disable trigger locations_affected_holdings',
+  );
+  try {
+    await owner.query('update public.locations set active=false where id=$1', [b]);
+  } finally {
+    await owner.query(
+      'alter table public.locations enable trigger locations_affected_holdings',
+    );
+  }
   try {
     const review = await viewer.client.rpc('quantity_archive_review', {
       p_item_id: clearItem.entity_id,

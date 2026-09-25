@@ -393,9 +393,20 @@ async function main() {
     initial_location_id: inactive_location,
     initial_quantity: 3,
   });
-  await owner.query('update public.locations set active=false where id=$1', [
-    inactive_location,
-  ]);
+  // Model a supported legacy inactive holding created before the new
+  // placement lifecycle guard; current deactivation cannot strand stock.
+  await owner.query(
+    'alter table public.locations disable trigger locations_affected_holdings',
+  );
+  try {
+    await owner.query('update public.locations set active=false where id=$1', [
+      inactive_location,
+    ]);
+  } finally {
+    await owner.query(
+      'alter table public.locations enable trigger locations_affected_holdings',
+    );
+  }
   try {
     const state = await search(viewer.client, {
       p_query: prefix + ' inactive holding',
