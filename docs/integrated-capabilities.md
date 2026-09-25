@@ -102,6 +102,27 @@ byte inspection, normalized photo variants, original validated PDFs, server-only
 HMAC evidence, terminal cleanup claims, quotas, restricted grants and replay rules.
 No service-role client is added to normal application requests.
 
+Each parent has one attachment collection row with a positive bigint revision and
+exactly one nonnull quantity/asset foreign key, unique per parent. Create it lazily
+under a conflict-safe insert/row lock or at inventory creation; absence reads as
+the initial revision. Reservations and byte-validation progress do not advance
+the collection revision. Publication, rename, replacement and removal do, once
+per changed operation, together with a separate append-only attachment event and
+retry result. Replacement/removal/rename additionally bind the reviewed file
+revision. A concurrent collection change requires explicit renewed review; it does
+not discard immutable staged bytes. Completed authorized retries return the saved
+result before checking expired signatures or later collection versions.
+
+Attachment events identify parent, file/replacement UUIDs, actor, timestamp,
+action, title/type/size and collection revision; they contain no secrets or signed
+download URLs. Retained metadata is not a promise to retain removed file bytes.
+Renaming changes a bounded display title, never the immutable object path or
+inspection provenance. Files use membership/receipt, quota/lifecycle guard,
+collection and file/object locks in a documented consistent order; no catalog or
+placement lock is needed because they never alter inventory custody. Parent
+deletion is already prohibited by referential history, while archive/retirement
+does not prohibit supporting-file management.
+
 Replace parent stock-version coupling with a separate attachment-collection
 revision per inventory parent. Reserve, replace, rename, remove and finalize use
 that reviewed revision and file identity; a new attestation format version prevents
