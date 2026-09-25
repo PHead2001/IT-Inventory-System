@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MetadataDefinition } from './contracts';
 import {
@@ -5,6 +7,7 @@ import {
   designerIssues,
   moveControl,
   optionPath,
+  supportedCurrencyCodes,
 } from './designer-model';
 
 const id = (n: number) =>
@@ -131,6 +134,35 @@ describe('form designer model', () => {
       'Location type has inverted date bounds.',
     );
   });
+  it('compares datetime rules at exact UTC microsecond precision', () => {
+    const draft = definition();
+    const field = draft.fields[0];
+    field.type = 'datetime';
+    field.options = [];
+    field.rules = {
+      min: '2026-09-25T10:00:00.000002+02:00',
+      max: '2026-09-25T08:00:00.000003Z',
+    };
+    expect(designerIssues(draft)).not.toContain(
+      'Location type has inverted date bounds.',
+    );
+    field.rules.max = '2026-09-25T08:00:00.000001Z';
+    expect(designerIssues(draft)).toContain(
+      'Location type has inverted date bounds.',
+    );
+    field.rules.max = '2026-09-25T08:00:00.000002Z';
+    expect(designerIssues(draft)).not.toContain(
+      'Location type has inverted date bounds.',
+    );
+    field.rules.min = '2026-09-25T08:00:00.0000001Z';
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid date bounds.',
+    );
+    field.rules.min = '0000-01-01T00:00:00Z';
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid date bounds.',
+    );
+  });
   it('enforces configured fractional precision and the database 24-digit bound cap', () => {
     const draft = definition();
     const field = draft.fields[0];
@@ -179,5 +211,142 @@ describe('form designer model', () => {
     expect(designerIssues(draft)).toContain(
       'Location type has invalid numeric bounds.',
     );
+  });
+  it('blocks defaults that violate text, numeric, calendar, URL, and choice rules before review', () => {
+    const draft = definition();
+    const field = draft.fields[0];
+    const invalid =
+      'Location type has a default that violates its field rules.';
+    field.type = 'short_text';
+    field.options = [];
+    field.rules = { minLength: 2 };
+    field.default = 'x';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = 'xy';
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.rules = { maxLength: 0 };
+    field.default = '';
+    expect(designerIssues(draft)).not.toContain(invalid);
+
+    field.type = 'decimal';
+    field.rules = { precision: 2, min: '0', max: '9.99' };
+    field.default = '1.234';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '0';
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.default = '10';
+    expect(designerIssues(draft)).toContain(invalid);
+
+    field.type = 'integer';
+    field.rules = { min: '0', max: '2' };
+    field.default = 0;
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.default = 3;
+    expect(designerIssues(draft)).toContain(invalid);
+
+    field.type = 'date';
+    field.rules = { min: '2026-09-25' };
+    field.default = '2026-09-24';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '2026-09-25';
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.default = '0000-01-01';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.rules.min = '0000-01-01';
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid date bounds.',
+    );
+
+    field.type = 'datetime';
+    field.rules = { min: '2026-09-25T10:00:00+02:00' };
+    field.default = '2026-99-99T00:00:00Z';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '2026-09-25T07:59:59Z';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '2026-09-25T08:00:00Z';
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.rules = {
+      min: '2026-09-25T10:00:00.000002+02:00',
+      max: '2026-09-25T08:00:00.000003Z',
+    };
+    field.default = '2026-09-25T08:00:00.000001Z';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '2026-09-25T08:00:00.000002Z';
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.default = '2026-09-25T08:00:00.000004Z';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '2026-09-25T08:00:00.0000001Z';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = '0000-01-01T00:00:00Z';
+    expect(designerIssues(draft)).toContain(invalid);
+
+    field.type = 'url';
+    field.rules = {};
+    field.default = 'https://user:pass@example.com';
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = 'https://example.com/path';
+    expect(designerIssues(draft)).not.toContain(invalid);
+
+    field.type = 'multi_select';
+    field.options = [
+      { id: id(11), label: 'First', active: true },
+      { id: id(12), label: 'Second', active: true },
+    ];
+    field.rules = { maxSelections: 1 };
+    field.default = [id(11), id(12)];
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = [id(11), id(11)];
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = [];
+    expect(designerIssues(draft)).not.toContain(invalid);
+
+    field.type = 'boolean';
+    field.options = [];
+    field.rules = {};
+    field.default = false;
+    expect(designerIssues(draft)).not.toContain(invalid);
+    field.default = undefined;
+    expect(designerIssues(draft)).not.toContain(invalid);
+  });
+  it('requires a supported currency code and validates the complete currency default', () => {
+    const draft = definition();
+    const field = draft.fields[0];
+    const invalid =
+      'Location type has a default that violates its field rules.';
+    const invalidCode =
+      'Location type needs an ISO currency code and precision from 0 to 4.';
+    field.type = 'currency';
+    field.options = [];
+    field.rules = { currencyCode: 'ZZZ', precision: 2 };
+    expect(designerIssues(draft)).toContain(invalidCode);
+    field.rules = { currencyCode: 'USD', precision: 2, min: '1.00' };
+    expect(designerIssues(draft)).not.toContain(invalidCode);
+    field.default = { amount: '0.99', currency: 'USD' };
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = { amount: '1.234', currency: 'USD' };
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = { amount: '1.00', currency: 'USD', extra: true };
+    expect(designerIssues(draft)).toContain(invalid);
+    field.default = { amount: '1.00', currency: 'USD' };
+    expect(designerIssues(draft)).not.toContain(invalid);
+  });
+  it('keeps the designer ISO 4217 allowlist identical to the authoritative SQL list', () => {
+    const sql = readFileSync(
+      resolve(
+        process.cwd(),
+        'supabase/migrations/20260925000100_published_metadata.sql',
+      ),
+      'utf8',
+    );
+    const codes = sql.match(
+      /create function private\.metadata_currency_code_valid\(code text\)[\s\S]*?array\[([^\]]+)\]::text\[\]/,
+    )?.[1];
+    expect(codes).toBeDefined();
+    expect([...supportedCurrencyCodes].sort()).toEqual(
+      [...(codes?.matchAll(/'([A-Z]{3})'/g) ?? [])]
+        .map((match) => match[1])
+        .sort(),
+    );
+    expect(supportedCurrencyCodes.has('ZZZ')).toBe(false);
   });
 });

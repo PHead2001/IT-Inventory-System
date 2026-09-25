@@ -150,6 +150,24 @@ export function canReparent(
 }
 
 const numericBoundPattern = /^-?(0|[1-9]\d*)(\.\d{1,6})?$/;
+// Pinned to the same SIX ISO 4217 List One snapshot as
+// private.metadata_currency_code_valid in 20260925000100_published_metadata.sql.
+export const supportedCurrencyCodes = new Set(
+  [
+    'AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BOV',
+    'BRL BSD BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP',
+    'CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF',
+    'GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR',
+    'KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT',
+    'MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN',
+    'PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE',
+    'SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX',
+    'USD USN UYI UYU UYW UZS VED VES VND VUV WST XAD XAF XAG XAU XBA XBB XBC',
+    'XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA XXX YER ZAR ZMW ZWG',
+  ]
+    .join(' ')
+    .split(' '),
+);
 function numericBoundValid(
   value: unknown,
   precision: number,
@@ -167,6 +185,131 @@ function scaledNumericBound(value: unknown): bigint {
   const [whole, fraction = ''] = (negative ? raw.slice(1) : raw).split('.');
   const scaled = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
   return negative ? -scaled : scaled;
+}
+
+function datetimeInstantMicros(value: unknown): bigint | null {
+  if (typeof value !== 'string') return null;
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (
+    !match ||
+    value.startsWith('0000-') ||
+    !z.iso.datetime({ offset: true }).safeParse(value).success
+  )
+    return null;
+  // Date.parse normalizes the whole second and its UTC offset. Keep the
+  // fractional microseconds separately so PostgreSQL's six digits survive.
+  const wholeSecondMillis = Date.parse(`${match[1]}${match[3]}`);
+  if (!Number.isFinite(wholeSecondMillis)) return null;
+  return (
+    BigInt(wholeSecondMillis) * 1000n +
+    BigInt((match[2] ?? '').padEnd(6, '0') || '0')
+  );
+}
+
+function calendarDateValid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    !value.startsWith('0000-') &&
+    z.iso.date().safeParse(value).success
+  );
+}
+
+function numericDefaultValid(
+  raw: string,
+  rules: Field['rules'],
+  precision: number,
+  integer = false,
+): boolean {
+  if (!numericBoundValid(raw, precision, integer)) return false;
+  const min = rules.min;
+  const max = rules.max;
+  if (
+    (min !== undefined &&
+      numericBoundValid(min, precision, integer) &&
+      scaledNumericBound(raw) < scaledNumericBound(min)) ||
+    (max !== undefined &&
+      numericBoundValid(max, precision, integer) &&
+      scaledNumericBound(raw) > scaledNumericBound(max))
+  )
+    return false;
+  return true;
+}
+
+function defaultObeysRules(field: Field): boolean {
+  const value = field.default;
+  const rules = field.rules;
+  if (value === undefined || value === null) return true;
+  switch (field.type) {
+    case 'short_text':
+    case 'long_text': {
+      if (typeof value !== 'string') return true; // Type issue is reported separately.
+      const length = [...value].length;
+      return (
+        length <= (field.type === 'short_text' ? 500 : 10000) &&
+        (rules.minLength === undefined || length >= Number(rules.minLength)) &&
+        (rules.maxLength === undefined || length <= Number(rules.maxLength))
+      );
+    }
+    case 'integer':
+      return typeof value !== 'number' || !Number.isSafeInteger(value)
+        ? true
+        : numericDefaultValid(String(value), rules, 0, true);
+    case 'decimal':
+      return (
+        typeof value !== 'string' ||
+        numericDefaultValid(value, rules, Number(rules.precision ?? 6))
+      );
+    case 'date':
+      return (
+        typeof value !== 'string' ||
+        (calendarDateValid(value) &&
+          (rules.min === undefined || value >= String(rules.min)) &&
+          (rules.max === undefined || value <= String(rules.max)))
+      );
+    case 'datetime': {
+      if (typeof value !== 'string') return true;
+      const instant = datetimeInstantMicros(value);
+      if (instant === null) return false;
+      const minimum =
+        rules.min === undefined ? null : datetimeInstantMicros(rules.min);
+      const maximum =
+        rules.max === undefined ? null : datetimeInstantMicros(rules.max);
+      return (
+        (minimum === null || instant >= minimum) &&
+        (maximum === null || instant <= maximum)
+      );
+    }
+    case 'url':
+      return (
+        typeof value !== 'string' ||
+        ([...value].length <= 2048 &&
+          /^https?:\/\/[^/?#@:\s]+(:[0-9]{1,5})?([/?#][^\s]*)?$/.test(value) &&
+          !/[\x00-\x1f\x7f]/.test(value))
+      );
+    case 'currency':
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        return true; // Existing shape issue is reported separately.
+      if (!('amount' in value) || !('currency' in value)) return true;
+      return (
+        Object.keys(value).length === 2 &&
+        typeof value.amount === 'string' &&
+        typeof value.currency === 'string' &&
+        supportedCurrencyCodes.has(value.currency) &&
+        value.currency === rules.currencyCode &&
+        numericDefaultValid(value.amount, rules, Number(rules.precision))
+      );
+    case 'multi_select':
+      return (
+        !Array.isArray(value) ||
+        (value.length <= Number(rules.maxSelections ?? 1000) &&
+          new Set(value).size === value.length)
+      );
+    default:
+      return true;
+  }
 }
 
 export function designerIssues(def: MetadataDefinition): string[] {
@@ -258,7 +401,9 @@ export function designerIssues(def: MetadataDefinition): string[] {
       if (
         !minValid ||
         !maxValid ||
-        (min !== undefined &&
+        (minValid &&
+          maxValid &&
+          min !== undefined &&
           max !== undefined &&
           scaledNumericBound(min) > scaledNumericBound(max))
       )
@@ -277,8 +422,8 @@ export function designerIssues(def: MetadataDefinition): string[] {
       const max = field.rules.max;
       const valid = (value: unknown) =>
         field.type === 'date'
-          ? z.iso.date().safeParse(value).success
-          : z.iso.datetime({ offset: true }).safeParse(value).success;
+          ? calendarDateValid(value)
+          : datetimeInstantMicros(value) !== null;
       if (
         (min !== undefined && !valid(min)) ||
         (max !== undefined && !valid(max))
@@ -289,7 +434,7 @@ export function designerIssues(def: MetadataDefinition): string[] {
         max !== undefined &&
         (field.type === 'date'
           ? String(min) > String(max)
-          : Date.parse(String(min)) > Date.parse(String(max)))
+          : datetimeInstantMicros(min)! > datetimeInstantMicros(max)!)
       )
         issues.push(`${field.label || 'A field'} has inverted date bounds.`);
     }
@@ -358,6 +503,10 @@ export function designerIssues(def: MetadataDefinition): string[] {
         issues.push(
           `${field.label || 'A field'} has an invalid currency default.`,
         );
+      if (!defaultObeysRules(field))
+        issues.push(
+          `${field.label || 'A field'} has a default that violates its field rules.`,
+        );
     }
     if (
       field.required &&
@@ -370,7 +519,7 @@ export function designerIssues(def: MetadataDefinition): string[] {
       );
     if (
       field.type === 'currency' &&
-      (!/^[A-Z]{3}$/.test(String(field.rules.currencyCode ?? '')) ||
+      (!supportedCurrencyCodes.has(String(field.rules.currencyCode ?? '')) ||
         !Number.isInteger(field.rules.precision) ||
         Number(field.rules.precision) < 0 ||
         Number(field.rules.precision) > 4)

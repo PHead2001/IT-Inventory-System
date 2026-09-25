@@ -30,6 +30,8 @@ package.json is the canonical command source. Iterate cheaply; certify the final
 
 Start Supabase before database/full validation. Final certification runs fresh `npm ci` then `npm run validate`. E2E rebuilds with local public backend values because they are build inputs.
 
+The database gate uses the repository `db:start` bootstrap to install the local-only Storage `v1.77.9` override, then verifies the actual running image before reset and integration tests. `npm run test:local-storage` covers fresh-checkout creation, cache drift, linked-cache preservation and wrong-image rejection without Docker; CI's database job additionally exercises the real clean-checkout start. This override never enters the production migration-delivery command.
+
 ## Proof by layer
 
 Unit/component tests cover strict room parsing, measured/default classifications, coordinate mapping, capability predicates, auth validation, explicit confirmation, and cookie refresh behavior.

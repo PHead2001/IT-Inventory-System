@@ -29,10 +29,29 @@ the product timeout, file-size limit, authorization policy, or required journey
 was waived. The retained local evidence is
 `test-results/final-e2e-1b3997a.log` and its Playwright failure trace. Passing
 Linux CI and the isolated-preview journey do not make this local gate green.
-On September 25, 2026, the owner explicitly accepted this documented local
-exception: green exact-SHA Linux CI and signed-in isolated-preview proof
-substitute **only** for the local Supabase Storage denial/reused-connection
-failure. The local gate remains red; no other failed gate is waived.
+On September 25, 2026, the owner briefly accepted a narrow exception for this
+local Supabase Storage denial/reused-connection failure, then explicitly
+withdrew it later the same day. Green Linux CI and signed-in isolated-preview
+proof do not substitute for the failing local gate. The local gate remains red
+and is again an acceptance blocker until fixed and verified green.
+
+### Local runtime repair checkpoint
+
+Supabase Storage [v1.77.9](https://github.com/supabase/storage/releases/tag/v1.77.9)
+contains the vendor fix for rejected requests with unread bodies. On the local
+CLI 2.116.0 stack, the same-agent discriminator now observes the denial closing
+its connection, the next authorized upload completing in 75 ms, and a subsequent
+download reusing the healthy connection with an exact 2 MiB hash match. The
+unchanged three-test Files browser suite passed in 19 seconds; the formerly
+failing denial-to-near-20 MiB journey passed in 5.7 seconds.
+
+The repository local-start helper now materializes and verifies this version
+pin; reset and database tests reject a mismatched runtime. Hosted/production
+delivery is unchanged. Artifacts are `test-results/files-fixed-provider-1779.log`
+and `test-results/files-browser-1779.log`. This focused repair proof does not
+replace the complete local gate, exact-SHA CI and fresh review for the successor.
+The successor also validates designer defaults and supported currency codes
+before publication review, including exact microsecond datetime comparisons.
 
 ## Signed-in isolated-preview journeys
 
@@ -77,10 +96,10 @@ tombstones remain; cleanup is not a history rewrite or hosted reset.
 The browser smoke used a simulated camera stream. A physical camera, physical
 phone, printer, barcode scanner and real-world device placement were not
 tested. Worker IPC and hosted PDF/image handling do not by themselves prove a
-total native-process memory ceiling. Under the dated owner acceptance above,
-the local Storage transport failure is no longer an acceptance blocker after
-the final exact-SHA CI and review pass. It remains a recorded failing local
-test. No provider patch or timeout waiver was applied.
+total native-process memory ceiling. The local Storage transport failure
+remains an explicit acceptance blocker despite green Linux CI and hosted
+preview evidence. No provider patch or timeout waiver was applied to the
+recorded test run.
 
 Production remains untouched and unverified. Before a production release, the
 owner must complete the normal PR merge and protected-main delivery, provision
