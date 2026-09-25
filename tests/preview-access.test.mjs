@@ -12,12 +12,26 @@ import {
   CHECK_NAME,
   CHECK_APP,
   authPolicyPatch,
+  selectDeploymentCheck,
 } from '../scripts/preview-access-core.mjs';
 
 const repository = 'PHead2001/IT-Inventory-System';
 const sha = 'a'.repeat(40);
 const ref = 'b'.repeat(20);
 const password = '123456'; // Dummy test value; production secret is never embedded.
+const successfulCheck = {
+  id: 41,
+  head_sha: sha,
+  name: CHECK_NAME,
+  app: { slug: CHECK_APP },
+  details_url: `https://supabase.com/dashboard/project/${ref}`,
+  status: 'completed',
+  conclusion: 'success',
+};
+const listing = (...check_runs) => ({
+  total_count: check_runs.length,
+  check_runs,
+});
 
 function fixture(overrides = {}) {
   const writes = [];
@@ -37,7 +51,6 @@ function fixture(overrides = {}) {
       git_branch: 'feature',
       pr_number: 9,
       status: 'ACTIVE_HEALTHY',
-      latest_check_run_id: 41,
     },
   };
   const pr = {
@@ -51,15 +64,7 @@ function fixture(overrides = {}) {
   const github = {
     pull: async () =>
       overrides.pullSequence?.[pullCalls++] ?? overrides.pr ?? pr,
-    check: async () =>
-      overrides.check ?? {
-        id: 41,
-        head_sha: sha,
-        name: CHECK_NAME,
-        app: { slug: CHECK_APP },
-        status: 'completed',
-        conclusion: 'success',
-      },
+    checks: async () => overrides.checks ?? listing(successfulCheck),
   };
   const management = {
     branches: async () =>
@@ -153,7 +158,6 @@ test('supports a stacked same-repository PR and waits for its branch to appear',
     git_branch: 'feature',
     pr_number: 9,
     status: 'ACTIVE_HEALTHY',
-    latest_check_run_id: 41,
   };
   const { run, writes } = fixture({
     pr: stacked,
@@ -173,7 +177,7 @@ test('supports a stacked same-repository PR and waits for its branch to appear',
   );
 });
 
-test('waits for a check-run ID without querying an undefined check', async () => {
+test('waits for the current SHA check when the branch response has no check ID', async () => {
   const baseBranch = {
     project_ref: ref,
     parent_project_ref: PARENT_REF,
@@ -182,13 +186,9 @@ test('waits for a check-run ID without querying an undefined check', async () =>
     pr_number: 9,
     status: 'ACTIVE_HEALTHY',
   };
-  const { run, writes } = fixture({
-    branchSequence: [
-      [baseBranch],
-      [{ ...baseBranch, latest_check_run_id: 41 }],
-    ],
-  });
+  const { run, writes } = fixture({ branches: [baseBranch] });
   const checked = [];
+  let calls = 0;
   await run({
     attempts: 2,
     pause: async () => {},
@@ -199,24 +199,86 @@ test('waits for a check-run ID without querying an undefined check', async () =>
         head: { ref: 'feature', sha, repo: { full_name: repository } },
         base: { ref: 'main', repo: { full_name: repository } },
       }),
-      check: async (id) => {
-        checked.push(id);
-        return {
-          id: 41,
-          head_sha: sha,
-          name: CHECK_NAME,
-          app: { slug: CHECK_APP },
-          status: 'completed',
-          conclusion: 'success',
-        };
+      checks: async (headSha) => {
+        checked.push(headSha);
+        return calls++ === 0 ? listing() : listing(successfulCheck);
       },
     },
   });
-  assert.deepEqual(checked, [41, 41, 41, 41, 41]);
+  assert.deepEqual(checked, Array(6).fill(sha));
   assert.deepEqual(
     writes.map(([operation]) => operation),
     ['policy', 'create', 'member'],
   );
+});
+
+test('latest Supabase check for the exact SHA controls readiness with no older green fallback', async (t) => {
+  const cases = [
+    {
+      name: 'newer queued after green',
+      checks: listing(successfulCheck, {
+        ...successfulCheck,
+        id: 42,
+        status: 'queued',
+        conclusion: null,
+      }),
+    },
+    {
+      name: 'newer failed after green',
+      checks: listing(successfulCheck, {
+        ...successfulCheck,
+        id: 42,
+        conclusion: 'failure',
+      }),
+    },
+    {
+      name: 'only an old SHA passed',
+      checks: listing({ ...successfulCheck, head_sha: 'c'.repeat(40) }),
+    },
+    {
+      name: 'newest check points at a different child',
+      checks: listing(successfulCheck, {
+        ...successfulCheck,
+        id: 42,
+        details_url: `https://supabase.com/dashboard/project/${'c'.repeat(20)}`,
+      }),
+    },
+    {
+      name: 'newest check has a deceptive URL',
+      checks: listing({
+        ...successfulCheck,
+        details_url: `https://supabase.com.evil.example/dashboard/project/${ref}`,
+      }),
+    },
+    {
+      name: 'same ID is duplicated',
+      checks: listing(successfulCheck, { ...successfulCheck }),
+    },
+    {
+      name: 'listing exceeds the explicit one-page bound',
+      checks: { total_count: 101, check_runs: [successfulCheck] },
+    },
+    {
+      name: 'truncated listing hides a newer check',
+      checks: { total_count: 2, check_runs: [successfulCheck] },
+    },
+  ];
+  for (const { name, checks } of cases)
+    await t.test(name, async () => {
+      const { run, writes } = fixture({ checks });
+      await assert.rejects(run());
+      assert.equal(writes.length, 0);
+    });
+  const selected = selectDeploymentCheck(
+    listing(successfulCheck, {
+      ...successfulCheck,
+      id: 42,
+      status: 'completed',
+    }),
+    sha,
+    ref,
+  );
+  assert.equal(selected.id, 42);
 });
 
 test('rejects a fork, closed PR, stale event, parent/default/wrong-parent branch, wrong check, and schema mismatch before writes', async (t) => {
@@ -267,27 +329,13 @@ test('rejects a fork, closed PR, stale event, parent/default/wrong-parent branch
     {
       name: 'wrong check app',
       overrides: {
-        check: {
-          id: 41,
-          head_sha: sha,
-          name: CHECK_NAME,
-          app: { slug: 'other' },
-          status: 'completed',
-          conclusion: 'success',
-        },
+        checks: listing({ ...successfulCheck, app: { slug: 'other' } }),
       },
     },
     {
       name: 'stale check',
       overrides: {
-        check: {
-          id: 41,
-          head_sha: 'c'.repeat(40),
-          name: CHECK_NAME,
-          app: { slug: CHECK_APP },
-          status: 'completed',
-          conclusion: 'success',
-        },
+        checks: listing({ ...successfulCheck, head_sha: 'c'.repeat(40) }),
       },
     },
     { name: 'schema unavailable', overrides: { schemaError: true } },

@@ -427,32 +427,20 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   let form;
   if (!id) {
     await page.goto('/inventory/assets/new');
-    form = page.getByRole('form', { name: 'Create serialized asset' });
+    form = page.getByRole('form', { name: 'Create asset inventory' });
     await form.getByLabel('Name', { exact: true }).fill(originalName);
     await form.getByLabel('Asset tag').fill('ITC');
-    await chooseLocation(form, 'Destination location', 'ITC-RACK');
-    await form
-      .getByRole('button', { name: 'Review create serialized asset' })
-      .click();
-    await form
-      .getByRole('button', { name: 'Confirm create serialized asset' })
-      .click();
+    await chooseLocation(form, 'Current location', 'ITC-RACK');
+    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await form.getByRole('button', { name: 'Confirm save' }).click();
     await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
     id = page.url().split('/').at(-1)!;
   } else {
     await page.goto('/inventory/assets/' + id);
-    await page
-      .locator('summary')
-      .filter({ hasText: /^Edit asset metadata$/ })
-      .click();
     form = page.getByRole('form', { name: 'Edit asset metadata' });
     await form.getByLabel('Name', { exact: true }).fill(originalName);
-    await form
-      .getByRole('button', { name: 'Review edit asset metadata' })
-      .click();
-    await form
-      .getByRole('button', { name: 'Confirm edit asset metadata' })
-      .click();
+    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await form.getByRole('button', { name: 'Confirm save' }).click();
     await expect(
       page.getByRole('heading', { name: originalName, exact: true }),
     ).toBeVisible();
@@ -511,20 +499,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
       }),
   ).toBeVisible();
   await page.reload();
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Edit asset metadata$/ })
-    .click();
   form = page.getByRole('form', { name: 'Edit asset metadata' });
   await form
     .getByLabel('Name', { exact: true })
     .fill('Renamed ' + originalName);
-  await form
-    .getByRole('button', { name: 'Review edit asset metadata' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm edit asset metadata' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(
     page.getByRole('heading', { name: 'Renamed ' + originalName, exact: true }),
   ).toBeVisible();
@@ -573,26 +553,18 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await form.getByLabel('Name', { exact: true }).fill(quantityName);
   await form.getByLabel('Initial quantity').fill('3');
   await chooseLocation(form, 'Initial location', 'ITC-S1A');
-  await form
-    .getByRole('button', { name: 'Review create quantity inventory' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm create quantity inventory' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   const quantityId = page.url().split('/').at(-1)!;
 
   await page.goto('/inventory/assets/new');
-  form = page.getByRole('form', { name: 'Create serialized asset' });
+  form = page.getByRole('form', { name: 'Create asset inventory' });
   await form.getByLabel('Name', { exact: true }).fill(assetName);
   await form.getByLabel('Asset tag').fill('Q-' + suffix);
-  await chooseLocation(form, 'Destination location', 'ITC-D01');
-  await form
-    .getByRole('button', { name: 'Review create serialized asset' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm create serialized asset' })
-    .click();
+  await chooseLocation(form, 'Current location', 'ITC-D01');
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const assetId = page.url().split('/').at(-1)!;
 
@@ -651,18 +623,10 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
 
   const editor = await context.newPage();
   await editor.goto('/inventory/quantity/' + quantityId);
-  await editor
-    .locator('summary')
-    .filter({ hasText: /^Edit quantity metadata$/ })
-    .click();
   form = editor.getByRole('form', { name: 'Edit quantity metadata' });
   await form.getByLabel('Name', { exact: true }).fill('Fresh ' + quantityName);
-  await form
-    .getByRole('button', { name: 'Review edit quantity metadata' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm edit quantity metadata' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(
     editor.getByRole('heading', { name: 'Fresh ' + quantityName }),
   ).toBeVisible();
@@ -688,18 +652,10 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(quantityCard).toContainText('Fresh Queue adapters');
 
   await editor.goto('/inventory/assets/' + assetId);
-  await editor
-    .locator('summary')
-    .filter({ hasText: /^Edit asset metadata$/ })
-    .click();
   form = editor.getByRole('form', { name: 'Edit asset metadata' });
   await form.getByLabel('Asset tag').fill('Q2-' + suffix);
-  await form
-    .getByRole('button', { name: 'Review edit asset metadata' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm edit asset metadata' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await page.evaluate(() => {
     delete document.body.dataset.printCalled;
   });
@@ -733,12 +689,8 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   const form = page.getByRole('form', { name: 'Create quantity inventory' });
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Reorder threshold (optional)').fill('0');
-  await form
-    .getByRole('button', { name: 'Review create quantity inventory' })
-    .click();
-  await form
-    .getByRole('button', { name: 'Confirm create quantity inventory' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   const id = page.url().split('/').at(-1)!;
   await expect(page.getByText(/Reorder threshold/).first()).toBeVisible();

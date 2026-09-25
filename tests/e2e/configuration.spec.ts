@@ -66,12 +66,11 @@ test('phone Settings reviews referenced removal and shares label defaults with n
       .getByLabel('Name', { exact: true })
       .fill('Settings referenced ' + unique);
     await form.getByLabel('Category').selectOption({ label: renamed });
-    await form
-      .getByRole('button', { name: 'Review create quantity inventory' })
-      .click();
-    await form
-      .getByRole('button', { name: 'Confirm create quantity inventory' })
-      .click();
+    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await expect(
+      form.getByRole('region', { name: 'Metadata review' }),
+    ).toBeVisible();
+    await form.getByRole('button', { name: 'Confirm save' }).click();
     await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
     await page.goto('/settings');
     const current = page.locator('li').filter({ hasText: code });

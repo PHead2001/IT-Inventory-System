@@ -2191,83 +2191,104 @@ async function main() {
   );
   assert.equal(tooLargeBudget.error?.code, 'P1025');
   const sentinelCategory = await category(maintainer.client, 'Export sentinel');
-  const insertedSentinels = await owner.query(
-    "insert into public.quantity_items(name,category_id,reorder_threshold) select 'Sentinel export '||g.n,$1,1 from generate_series(1,10001) g(n)",
-    [sentinelCategory],
-  );
-  assert.equal(insertedSentinels.rowCount, 10001);
-  for (const exportType of ['inventory', 'low_stock']) {
-    const overCap = await viewer.client.rpc(
-      'inventory_export_snapshot' as never,
-      {
-        p_query: 'Sentinel export',
-        p_type: 'quantity',
-        p_status: 'active',
-        p_category_id: sentinelCategory,
-        p_location_code: null,
-        p_low_stock: false,
-        p_export_type: exportType,
-        p_include_custom: false,
-      } as never,
+  try {
+    const insertedSentinels = await owner.query(
+      "insert into public.quantity_items(name,category_id,reorder_threshold) select 'Sentinel export '||g.n,$1,1 from generate_series(1,10001) g(n)",
+      [sentinelCategory],
     );
-    assert.equal(
-      overCap.error?.code,
-      'P1013',
-      `${exportType} must stop at the 10001st key`,
-    );
-  }
-  const inventoryPlan = (
-    await owner.query(
-      `explain (format json) with candidates as materialized (
+    assert.equal(insertedSentinels.rowCount, 10001);
+    for (const exportType of ['inventory', 'low_stock']) {
+      const overCap = await viewer.client.rpc(
+        'inventory_export_snapshot' as never,
+        {
+          p_query: 'Sentinel export',
+          p_type: 'quantity',
+          p_status: 'active',
+          p_category_id: sentinelCategory,
+          p_location_code: null,
+          p_low_stock: false,
+          p_export_type: exportType,
+          p_include_custom: false,
+        } as never,
+      );
+      assert.equal(
+        overCap.error?.code,
+        'P1013',
+        `${exportType} must stop at the 10001st key`,
+      );
+    }
+    const inventoryPlan = (
+      await owner.query(
+        `explain (format json) with candidates as materialized (
         select x.kind,x.entity_id,x.location_id from public.inventory_search_rows x
         where x.category_id=$1 limit 10001
       ) select array_agg(kind),array_agg(entity_id),array_agg(location_id) from candidates`,
-      [sentinelCategory],
-    )
-  ).rows[0]['QUERY PLAN'][0].Plan as {
-    'Node Type': string;
-    Plans: {
+        [sentinelCategory],
+      )
+    ).rows[0]['QUERY PLAN'][0].Plan as {
       'Node Type': string;
-      'Subplan Name'?: string;
-      Plans?: unknown[];
-    }[];
-  };
-  assert.equal(inventoryPlan['Node Type'], 'Aggregate');
-  assert.ok(
-    inventoryPlan.Plans.some(
-      (plan) =>
-        plan['Node Type'] === 'Limit' &&
-        plan['Subplan Name'] === 'CTE candidates',
-    ),
-    'inventory export identity-key cap appears before aggregation or hydration',
-  );
-  const lowStockPlan = (
-    await owner.query(
-      `explain (format json) with keys as materialized (
+      Plans: {
+        'Node Type': string;
+        'Subplan Name'?: string;
+        Plans?: unknown[];
+      }[];
+    };
+    assert.equal(inventoryPlan['Node Type'], 'Aggregate');
+    assert.ok(
+      inventoryPlan.Plans.some(
+        (plan) =>
+          plan['Node Type'] === 'Limit' &&
+          plan['Subplan Name'] === 'CTE candidates',
+      ),
+      'inventory export identity-key cap appears before aggregation or hydration',
+    );
+    const lowStockPlan = (
+      await owner.query(
+        `explain (format json) with keys as materialized (
         select i.id from public.quantity_items i where exists (
           select 1 from public.inventory_search_rows x
           where x.kind='quantity' and x.entity_id=i.id and x.category_id=$1
             and x.status='active' and x.stock_state in ('needs_restocking','out_of_stock')
         ) limit 10001
       ) select array_agg(k.id) from keys k`,
-      [sentinelCategory],
-    )
-  ).rows[0]['QUERY PLAN'][0].Plan as {
-    'Node Type': string;
-    Plans: {
+        [sentinelCategory],
+      )
+    ).rows[0]['QUERY PLAN'][0].Plan as {
       'Node Type': string;
-      'Subplan Name'?: string;
-      Plans?: unknown[];
-    }[];
-  };
-  assert.equal(lowStockPlan['Node Type'], 'Aggregate');
-  assert.ok(
-    lowStockPlan.Plans.some(
-      (plan) =>
-        plan['Node Type'] === 'Limit' && plan['Subplan Name'] === 'CTE keys',
-    ),
-    'low-stock key cap appears before aggregation or hydration',
-  );
+      Plans: {
+        'Node Type': string;
+        'Subplan Name'?: string;
+        Plans?: unknown[];
+      }[];
+    };
+    assert.equal(lowStockPlan['Node Type'], 'Aggregate');
+    assert.ok(
+      lowStockPlan.Plans.some(
+        (plan) =>
+          plan['Node Type'] === 'Limit' && plan['Subplan Name'] === 'CTE keys',
+      ),
+      'low-stock key cap appears before aggregation or hydration',
+    );
+  } finally {
+    const removed = await owner.query(
+      'delete from public.quantity_items where category_id=$1',
+      [sentinelCategory],
+    );
+    assert.equal(
+      removed.rowCount,
+      10001,
+      'export sentinel fixture must be removed',
+    );
+    const remaining = await owner.query(
+      'select count(*)::int as total from public.quantity_items where category_id=$1',
+      [sentinelCategory],
+    );
+    assert.equal(
+      remaining.rows[0].total,
+      0,
+      'export sentinel cleanup is complete',
+    );
+  }
   // PostgREST must hoist the function setting before executing the statement.
   await owner.query(
     "create function public.metadata_timeout_probe() returns text language plpgsql volatile set search_path='' set statement_timeout='5s' as $$ begin perform pg_catalog.pg_sleep(6); return 'late'; end $$",

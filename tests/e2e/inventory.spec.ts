@@ -15,6 +15,8 @@ async function choose(form: Locator, label: string, code: string) {
   await chooseLocation(form, label, code);
 }
 async function openForm(page: Page, name: string) {
+  if (name === 'Edit quantity metadata' || name === 'Edit asset metadata')
+    return page.getByRole('form', { name, exact: true });
   await page
     .locator('summary')
     .filter({ hasText: new RegExp('^' + name + '$') })
@@ -22,6 +24,19 @@ async function openForm(page: Page, name: string) {
   return page.getByRole('form', { name, exact: true });
 }
 async function confirm(form: Locator, name: string) {
+  if (
+    name === 'Create quantity inventory' ||
+    name === 'Create serialized asset' ||
+    name === 'Edit quantity metadata' ||
+    name === 'Edit asset metadata'
+  ) {
+    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await expect(
+      form.getByRole('region', { name: 'Metadata review' }),
+    ).toBeVisible();
+    await form.getByRole('button', { name: 'Confirm save' }).click();
+    return;
+  }
   await form
     .getByRole('button', { name: 'Review ' + name.toLowerCase(), exact: true })
     .click();
@@ -214,6 +229,12 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await confirm(form, 'Correct physical count');
   await version(page, 5);
   form = await openForm(page, 'Edit quantity metadata');
+  await expect(form.getByRole('alert')).toContainText(
+    'This record changed from version 4 to 5',
+  );
+  await form
+    .getByRole('button', { name: 'Use reviewed record version' })
+    .click();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
@@ -327,13 +348,13 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   async function create(name: string, tag: string) {
     await page.goto('/inventory/assets/new');
     const form = page.getByRole('form', {
-      name: 'Create serialized asset',
+      name: 'Create asset inventory',
       exact: true,
     });
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Asset tag').fill(tag);
     await form.getByLabel('Serial number').fill(serial);
-    await choose(form, 'Destination location', 'ITC-RACK');
+    await choose(form, 'Current location', 'ITC-RACK');
     return form;
   }
   let form = await create(name, 'A-' + suffix);
@@ -341,13 +362,12 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const first = page.url();
   form = await create(name + ' duplicate', 'B-' + suffix);
-  await form
-    .getByRole('button', { name: 'Review create serialized asset' })
-    .click();
-  await expect(form.getByRole('status')).toContainText(name);
-  await form
-    .getByRole('button', { name: 'Confirm create serialized asset' })
-    .click();
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await expect(
+    form.getByRole('region', { name: 'Metadata review' }),
+  ).toContainText(name);
+  await expect(form.getByText(/Serial also recorded on/)).toContainText(name);
+  await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   await expect(
     page.getByRole('heading', { name: 'Duplicate serial warning' }),
@@ -363,6 +383,12 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await confirm(form, 'Correct recorded location');
   await version(page, 3);
   form = await openForm(page, 'Edit asset metadata');
+  await expect(form.getByRole('alert')).toContainText(
+    'This record changed from version 1 to 3',
+  );
+  await form
+    .getByRole('button', { name: 'Use reviewed record version' })
+    .click();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
@@ -439,21 +465,17 @@ test('stale two-page edits require explicit re-review and viewers retain read-on
     name + ' my edit',
   );
   await firstForm
-    .getByRole('button', { name: 'Refresh latest record' })
+    .getByRole('button', { name: 'Use reviewed record version' })
     .click();
   await version(page, 2);
   await expect(
-    firstForm.getByRole('button', { name: 'Review edit quantity metadata' }),
+    firstForm.getByRole('button', { name: 'Review metadata' }),
   ).toBeEnabled();
-  await firstForm
-    .getByRole('button', { name: 'Review edit quantity metadata' })
-    .click();
+  await firstForm.getByRole('button', { name: 'Review metadata' }).click();
   await expect(
-    firstForm.getByRole('region', { name: 'Review changes' }),
-  ).toContainText(name + ' concurrent → ' + name + ' my edit');
-  await firstForm
-    .getByRole('button', { name: 'Confirm edit quantity metadata' })
-    .click();
+    firstForm.getByRole('region', { name: 'Metadata review' }),
+  ).toContainText(name + ' my edit');
+  await firstForm.getByRole('button', { name: 'Confirm save' }).click();
   await version(page, 3);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await login(page, 'viewer');
