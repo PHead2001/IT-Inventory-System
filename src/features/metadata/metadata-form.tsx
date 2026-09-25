@@ -9,6 +9,8 @@ import {
   findDuplicateSerials,
 } from '@/features/inventory/actions';
 import type { MutationState } from '@/features/inventory/contracts';
+import { submitCustody } from '@/features/custody/actions';
+import type { CustodyState } from '@/features/custody/contracts';
 import type {
   AssetItem,
   CategoryRef,
@@ -32,6 +34,7 @@ type Props = {
   item?: QuantityItem;
   asset?: AssetItem;
   preview?: boolean;
+  openingSite?: { id: string; code: string; name: string };
 };
 const labels: Record<string, string> = {
   name: 'Name',
@@ -192,6 +195,7 @@ export function MetadataForm({
   item,
   asset,
   preview = false,
+  openingSite,
 }: Props) {
   const router = useRouter();
   const latest = item ?? asset;
@@ -209,7 +213,10 @@ export function MetadataForm({
   );
   const [review, setReview] = useState(false);
   const [ackLegacy, setAckLegacy] = useState(false);
-  const [state, setState] = useState<MutationState | null>(null);
+  const [state, setState] = useState<MutationState | CustodyState | null>(null);
+  const [openingQuantity, setOpeningQuantity] = useState('1');
+  const [openingReason, setOpeningReason] = useState('');
+  const [openingReference, setOpeningReference] = useState('');
   const [pending, startTransition] = useTransition();
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -269,7 +276,7 @@ export function MetadataForm({
         : undefined;
     const inputId = 'metadata-' + id;
     const help = config.help ? (
-      <p className="text-xs text-slate-400">{config.help}</p>
+      <p className="break-words text-xs text-slate-400">{config.help}</p>
     ) : null;
     const type = config.type;
     const rules = config.rules;
@@ -278,34 +285,41 @@ export function MetadataForm({
       className: fieldClass,
       'aria-describedby': config.help ? inputId + '-help' : undefined,
     };
-    const clear = !config.required && value !== undefined && (
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => updateCustom(id, undefined)}
-      >
-        Unset
-      </Button>
-    );
+    const clear = (config.type === 'boolean' || !config.required) &&
+      value !== undefined && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => updateCustom(id, undefined)}
+        >
+          Unset
+        </Button>
+      );
     let control: React.ReactNode;
     if (type === 'boolean') {
       control = (
-        <select
-          {...common}
-          value={value === undefined ? '' : String(value)}
-          onChange={(event) =>
-            updateCustom(
-              id,
-              event.target.value === ''
-                ? undefined
-                : event.target.value === 'true',
-            )
-          }
-        >
-          <option value="">Choose</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
+        <div className="flex min-h-11 flex-wrap items-center gap-1">
+          <input
+            id={inputId}
+            type="checkbox"
+            className="h-11 w-11 shrink-0 accent-cyan-400"
+            aria-checked={value === undefined ? 'mixed' : value === true}
+            aria-describedby={config.help ? inputId + '-help' : undefined}
+            ref={(element) => {
+              if (element) element.indeterminate = value === undefined;
+            }}
+            checked={value === true}
+            onChange={(event) =>
+              updateCustom(
+                id,
+                value === undefined ? true : event.target.checked,
+              )
+            }
+          />
+          <span className="min-w-0 break-words text-xs text-slate-400">
+            {value === undefined ? 'Not set' : value === true ? 'Yes' : 'No'}
+          </span>
+        </div>
       );
     } else if (type === 'single_select' || type === 'hierarchical_select') {
       const rows = optionRows(config.options);
@@ -432,8 +446,8 @@ export function MetadataForm({
       );
     }
     return (
-      <div className="space-y-2" key={id}>
-        <label htmlFor={inputId}>
+      <div className="min-w-0 space-y-2" key={id}>
+        <label htmlFor={inputId} className="break-words">
           {config.label}
           {config.required ? ' (required)' : ''}
         </label>
@@ -534,24 +548,30 @@ export function MetadataForm({
       if (creating || thresholdTouched)
         result.reorder_threshold =
           core.reorder_threshold === '' ? null : Number(core.reorder_threshold);
-      if (creating) {
+      if (creating && !openingSite) {
         result.initial_quantity = Number(core.initial_quantity);
         result.initial_location_id =
           Number(core.initial_quantity) > 0 ? core.initial_location_id : null;
-      } else {
+      } else if (!creating) {
         result.item_id = baseline?.id;
         result.expected_version = baseline?.version;
       }
     } else {
       result.asset_tag = core.asset_tag || null;
       result.serial_number = core.serial_number || null;
-      if (creating) result.location_id = core.location_id;
-      else {
+      if (creating && !openingSite) result.location_id = core.location_id;
+      else if (!creating) {
         result.asset_id = baseline?.id;
         result.expected_version = baseline?.version;
       }
     }
     if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
+    if (creating && openingSite) {
+      result.site_id = openingSite.id;
+      result.reason = openingReason.trim() || null;
+      result.reference = openingReference.trim() || null;
+      if (kind === 'quantity') result.quantity = Number(openingQuantity);
+    }
     return result;
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -581,16 +601,26 @@ export function MetadataForm({
     if (legacyMigration && !ackLegacy) return;
     const commandPayload = payload();
     if (!commandPayload) return;
-    const operation = `${kind}_${creating ? 'create' : 'update'}_v2` as const;
+    const operation =
+      openingSite && creating
+        ? (`${kind}_site_open` as const)
+        : (`${kind}_${creating ? 'create' : 'update'}_v2` as const);
     const key = JSON.stringify([operation, commandPayload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
     startTransition(async () => {
-      const result = await submitInventory({
-        operation,
-        requestId,
-        payload: commandPayload,
-      });
+      const result =
+        openingSite && creating
+          ? await submitCustody({
+              operation,
+              requestId,
+              payload: commandPayload,
+            })
+          : await submitInventory({
+              operation,
+              requestId,
+              payload: commandPayload,
+            });
       setState(result);
       if (result.ok) {
         setReview(false);
@@ -604,6 +634,7 @@ export function MetadataForm({
           );
         router.refresh();
       } else if (
+        result.code === 'P1024' ||
         result.code === 'stale_schema' ||
         result.code === 'stale_version'
       ) {
@@ -618,7 +649,9 @@ export function MetadataForm({
         preview
           ? `Preview ${kind} metadata`
           : creating
-            ? `Create ${kind} inventory`
+            ? openingSite
+              ? `Record opening ${kind} at site`
+              : `Create ${kind} inventory`
             : `Edit ${kind} metadata`
       }
       onSubmit={preview ? (event) => event.preventDefault() : submit}
@@ -706,11 +739,13 @@ export function MetadataForm({
       )}
       <fieldset
         disabled={pending || schemaStale || itemStale}
-        className="space-y-5"
+        className="min-w-0 w-full max-w-full space-y-5"
       >
         {definition?.layout.map((section) => (
-          <section key={section.id} className="space-y-3">
-            <h3 className="text-lg font-semibold">{section.label}</h3>
+          <section key={section.id} className="min-w-0 space-y-3">
+            <h3 className="break-words text-lg font-semibold">
+              {section.label}
+            </h3>
             <div className="flex flex-wrap gap-3">
               {section.controls.map((control) => {
                 const content =
@@ -719,7 +754,7 @@ export function MetadataForm({
                   ) : control.kind === 'builtin' ? (
                     builtin(control.builtin ?? '')
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm text-slate-400">
+                    <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
                       {control.help}
                     </p>
                   );
@@ -737,6 +772,7 @@ export function MetadataForm({
                   <div
                     key={control.id}
                     style={controlLayoutStyle(control.width, booleanShort)}
+                    className="min-w-0 break-words"
                   >
                     {content}
                   </div>
@@ -745,7 +781,7 @@ export function MetadataForm({
             </div>
           </section>
         ))}
-        {creating && !preview && kind === 'quantity' && (
+        {creating && !preview && !openingSite && kind === 'quantity' && (
           <div className="space-y-3">
             <label htmlFor="metadata-initial-quantity">Initial quantity</label>
             <Input
@@ -774,7 +810,7 @@ export function MetadataForm({
             )}
           </div>
         )}
-        {creating && !preview && kind === 'asset' && (
+        {creating && !preview && !openingSite && kind === 'asset' && (
           <LocationPicker
             id="metadata-location"
             label="Current location"
@@ -784,6 +820,57 @@ export function MetadataForm({
             required
             onValueChange={(value) => updateCore('location_id', value)}
           />
+        )}
+        {creating && !preview && openingSite && (
+          <div className="space-y-3 rounded border border-slate-700 p-4">
+            <p className="font-medium">
+              Opening holding at {openingSite.name} ({openingSite.code})
+            </p>
+            <p className="text-sm text-slate-400">
+              This creates a current assignment without inventing a past closet
+              issue or historical date.
+            </p>
+            {kind === 'quantity' && (
+              <label className="block space-y-2">
+                Units already at this site
+                <Input
+                  type="number"
+                  min={1}
+                  max={2147483647}
+                  step={1}
+                  required
+                  value={openingQuantity}
+                  onChange={(event) => {
+                    setOpeningQuantity(event.target.value);
+                    setReview(false);
+                  }}
+                />
+              </label>
+            )}
+            <label className="block space-y-2">
+              Reason (optional)
+              <textarea
+                className={fieldClass}
+                maxLength={2000}
+                value={openingReason}
+                onChange={(event) => {
+                  setOpeningReason(event.target.value);
+                  setReview(false);
+                }}
+              />
+            </label>
+            <label className="block space-y-2">
+              Reference (optional)
+              <Input
+                maxLength={200}
+                value={openingReference}
+                onChange={(event) => {
+                  setOpeningReference(event.target.value);
+                  setReview(false);
+                }}
+              />
+            </label>
+          </div>
         )}
       </fieldset>
       {!preview && review && (
@@ -815,15 +902,16 @@ export function MetadataForm({
             </p>
           )}
           <p className="text-sm text-slate-400">
-            Custom values and core details save together as one record version
-            and history event.
+            {openingSite
+              ? 'Opening details, custom values and site custody save together as one version and event.'
+              : 'Custom values and core details save together as one record version and history event.'}
           </p>
         </div>
       )}
       {!preview && state && !state.ok && (
         <p
           role="alert"
-          className="rounded border border-amber-700 p-3 text-amber-100"
+          className="break-words rounded border border-amber-700 p-3 text-amber-100"
         >
           {state.message}
         </p>

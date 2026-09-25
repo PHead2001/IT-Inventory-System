@@ -107,6 +107,9 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await signIn(page, 'viewer');
     await page.goto('/settings');
     await expect(page.getByText(renamed)).toBeVisible();
+    await expect(page.getByRole('note')).toContainText(
+      'Settings are read-only for your account',
+    );
     await expect(
       page.getByRole('button', { name: 'Add category' }),
     ).toHaveCount(0);

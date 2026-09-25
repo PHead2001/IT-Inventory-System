@@ -54,10 +54,15 @@ export type InventoryResult = {
   categoryName: string;
   status: string;
   location: LocationRef | null;
+  site?: { id: string; code: string; name: string } | null;
+  custodyKind?: 'storage' | 'site' | 'unlocated' | 'retired';
   quantity: number | null;
   assetTag: string | null;
   serialNumber: string | null;
   recordedTotal: number | null;
+  availableQuantity?: string | null;
+  assignedQuantity?: string | null;
+  ownedQuantity?: string | null;
   reorderThreshold: number | null;
   stockState: StockState | null;
   customSummary?: string;
@@ -77,6 +82,22 @@ export type HistoryEvent = {
   at: string;
   actorName: string;
   reason: string | null;
+  assignment: {
+    eventId: string;
+    kind: string;
+    from: {
+      locationId: string | null;
+      siteId: string | null;
+      label: string | null;
+    };
+    to: {
+      locationId: string | null;
+      siteId: string | null;
+      label: string | null;
+    };
+    quantity: number | null;
+    reference: string | null;
+  } | null;
   lines: {
     location: LocationRef;
     delta: number;
@@ -90,6 +111,8 @@ export type HistoryEvent = {
     before: string | null;
     after: string | null;
   }[];
+  customMetadataPresent: boolean;
+  customMetadataChanged: boolean;
 };
 export type DuplicateSerial = {
   id: string;
@@ -100,7 +123,9 @@ export type DuplicateSerial = {
 export type QuantityDetail = {
   item: QuantityItem;
   stockSummary: {
-    recordedTotal: number;
+    availableQuantity: string;
+    assignedQuantity: string;
+    ownedQuantity: string;
     reorderThreshold: number | null;
     stockState: StockState;
   };
@@ -109,7 +134,8 @@ export type QuantityDetail = {
 };
 export type AssetDetail = {
   asset: AssetItem;
-  location: LocationRef;
+  location: LocationRef | null;
+  site: { id: string; code: string; name: string } | null;
   history: HistoryEvent[];
   duplicateSerialMatches: DuplicateSerial[];
 };

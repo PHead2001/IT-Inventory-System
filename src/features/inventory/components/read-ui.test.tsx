@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { HistoryList, InventoryRows } from './read-ui';
 const location = {
@@ -62,8 +62,61 @@ it('labels item-wide low stock while retaining the location holding quantity', (
   );
   expect(screen.getByText('2 units')).toBeVisible();
   expect(
-    screen.getByText(/Needs restocking · Item-wide total 3 \/ threshold 4/),
+    screen.getByText(
+      /Needs restocking · Available in storage 3 \/ threshold 4/,
+    ),
   ).toBeVisible();
+});
+it('shows per-definition photo and PDF counts without inventing file counts for other rows', () => {
+  const base = {
+    categoryName: 'Equipment',
+    status: 'active' as const,
+    location,
+    quantity: null,
+    assetTag: null,
+    serialNumber: null,
+    recordedTotal: null,
+    reorderThreshold: null,
+    stockState: null,
+  };
+  render(
+    <InventoryRows
+      rows={[
+        { ...base, kind: 'asset', id: 'asset-a', name: 'Camera' },
+        { ...base, kind: 'asset', id: 'asset-b', name: 'Router' },
+        { ...base, kind: 'quantity', id: 'item-c', name: 'Adapters' },
+      ]}
+      fileSummaries={[
+        {
+          kind: 'asset',
+          id: 'asset-a',
+          thumbnail_path: null,
+          photo_name: null,
+          photo_count: 1,
+          document_count: 2,
+        },
+        {
+          kind: 'quantity',
+          id: 'item-c',
+          thumbnail_path: null,
+          photo_name: null,
+          photo_count: 3,
+          document_count: 0,
+        },
+      ]}
+    />,
+  );
+  const cameraFiles = screen.getByRole('group', { name: 'Files for Camera' });
+  expect(within(cameraFiles).getByText('1 photo')).toBeVisible();
+  expect(within(cameraFiles).getByText('2 PDFs')).toBeVisible();
+  const adapterFiles = screen.getByRole('group', {
+    name: 'Files for Adapters',
+  });
+  expect(within(adapterFiles).getByText('3 photos')).toBeVisible();
+  expect(within(adapterFiles).getByText('0 PDFs')).toBeVisible();
+  expect(
+    screen.queryByRole('group', { name: 'Files for Router' }),
+  ).not.toBeInTheDocument();
 });
 it('shows record corrections as human readable history distinct from movement', () => {
   render(
@@ -78,6 +131,7 @@ it('shows record corrections as human readable history distinct from movement', 
           at: '2026-09-05T12:00:00Z',
           actorName: 'IT Staff',
           reason: 'Found in drawer',
+          assignment: null,
           lines: [],
           fromLocation: location,
           toLocation: {
@@ -88,6 +142,8 @@ it('shows record corrections as human readable history distinct from movement', 
             breadcrumb: 'IT Closet / Drawer 1',
           },
           metadataChanges: [],
+          customMetadataPresent: true,
+          customMetadataChanged: true,
         },
       ]}
     />,
@@ -99,6 +155,9 @@ it('shows record corrections as human readable history distinct from movement', 
   expect(screen.queryByText('Physically moved')).not.toBeInTheDocument();
   expect(screen.getByText('From:')).toBeInTheDocument();
   expect(screen.getByText('To:')).toBeInTheDocument();
+  expect(
+    screen.getByRole('link', { name: /Custom metadata changed/ }),
+  ).toHaveAttribute('href', '/history?event=asset:event');
 });
 
 it('does not present legacy category metadata events as asset movement', () => {
@@ -114,6 +173,7 @@ it('does not present legacy category metadata events as asset movement', () => {
           at: '2026-09-05T12:00:00Z',
           actorName: 'IT Staff',
           reason: 'Category removed: Old category',
+          assignment: null,
           lines: [],
           fromLocation: location,
           toLocation: location,
@@ -124,6 +184,8 @@ it('does not present legacy category metadata events as asset movement', () => {
               after: 'New category',
             },
           ],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
         },
       ]}
     />,
@@ -134,4 +196,50 @@ it('does not present legacy category metadata events as asset movement', () => {
   expect(screen.getByText('Old category → New category')).toBeVisible();
   expect(screen.queryByText('From:')).not.toBeInTheDocument();
   expect(screen.queryByText('To:')).not.toBeInTheDocument();
+});
+
+it('renders historical custody labels and quantity on the full item history page', () => {
+  render(
+    <HistoryList
+      events={[
+        {
+          id: 'old-site-issue',
+          kind: 'quantity',
+          entityId: 'item',
+          entityName: 'Cable',
+          eventType: 'site_issued',
+          at: '2026-09-05T12:00:00Z',
+          actorName: 'IT Staff',
+          reason: null,
+          assignment: {
+            eventId: 'assignment',
+            kind: 'issued',
+            from: {
+              locationId: 'storage',
+              siteId: null,
+              label: 'Old closet label',
+            },
+            to: { locationId: null, siteId: 'site', label: 'Old site label' },
+            quantity: 3,
+            reference: 'Ticket 001',
+          },
+          lines: [],
+          fromLocation: null,
+          toLocation: null,
+          metadataChanges: [],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole('heading', { name: 'Issued to site' })).toBeVisible();
+  expect(
+    screen.getByText('Custody: Old closet label → Old site label'),
+  ).toBeVisible();
+  expect(screen.getByText('Custody quantity: 3 units')).toBeVisible();
+  expect(screen.getByText('Reference: Ticket 001')).toBeVisible();
+  expect(
+    screen.getByText('Custody: Old closet label → Old site label'),
+  ).toHaveClass('[overflow-wrap:anywhere]');
 });

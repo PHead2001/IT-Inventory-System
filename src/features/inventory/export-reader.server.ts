@@ -72,7 +72,7 @@ export async function requestExportSnapshot(input: {
 }): Promise<{ data: unknown; code?: string }> {
   input.checkDeadline();
   const response = await fetch(
-    new URL('/rest/v1/rpc/inventory_export_snapshot', input.url),
+    new URL('/rest/v1/rpc/inventory_export_snapshot_v3', input.url),
     {
       method: 'POST',
       headers: {

@@ -25,12 +25,8 @@ import {
 } from './read-model';
 import {
   describeValues,
-  type DescribedValue,
+  describeSearchBatch,
 } from '@/features/metadata/queries.server';
-import {
-  formatCustomValue,
-  storedCustomSchema,
-} from '@/features/metadata/contracts';
 
 const dashboardSchema = z.object({
   configured_count: z.number().int().nonnegative(),
@@ -43,6 +39,9 @@ const dashboardSchema = z.object({
       name: z.string(),
       category_name: z.string(),
       recorded_total: z.number().int().nonnegative(),
+      available_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+      assigned_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+      recorded_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
       reorder_threshold: z.number().int().nonnegative(),
       stock_state: z.enum(['needs_restocking', 'out_of_stock']),
     }),
@@ -109,12 +108,13 @@ export async function getInventory(
   const { supabase } = await requireMember();
   const filter = readFilters(input);
   const [{ data, error }, locations] = await Promise.all([
-    supabase.rpc('inventory_search_v2', {
+    supabase.rpc('inventory_search_v3', {
       p_query: filter.query,
       p_type: filter.type,
       p_status: filter.status,
       p_category_id: filter.category,
       p_location_code: filter.location,
+      p_site_id: filter.site,
       p_page: filter.page,
       p_page_size: pageSize,
       p_low_stock: filter.lowStock,
@@ -124,61 +124,19 @@ export async function getInventory(
   const result = searchPage.parse(
     requireData(data, error, 'Inventory could not be loaded.'),
   );
-  const quantityIds = [
-    ...new Set(
-      result.rows
-        .filter((row) => row.kind === 'quantity')
-        .map((row) => row.entity_id),
-    ),
+  const uniqueKeys = [
+    ...new Map(
+      result.rows.map((row) => [
+        `${row.kind}:${row.entity_id}`,
+        { kind: row.kind, id: row.entity_id },
+      ]),
+    ).values(),
   ];
-  const assetIds = [
-    ...new Set(
-      result.rows
-        .filter((row) => row.kind === 'asset')
-        .map((row) => row.entity_id),
-    ),
-  ];
-  const [quantityCustom, assetCustom] = await Promise.all([
-    quantityIds.length
-      ? supabase
-          .from('quantity_items')
-          .select('id,category_id,custom_values')
-          .in('id', quantityIds)
-      : Promise.resolve({ data: [], error: null }),
-    assetIds.length
-      ? supabase
-          .from('serialized_assets')
-          .select('id,category_id,custom_values')
-          .in('id', assetIds)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
-  if (quantityCustom.error || assetCustom.error)
-    throw new Error('Inventory metadata could not be loaded.');
-  const customRows = [
-    ...(quantityCustom.data ?? []),
-    ...(assetCustom.data ?? []),
-  ] as unknown as { id: string; category_id: string; custom_values: unknown }[];
-  const summaries = new Map(
-    await Promise.all(
-      customRows.map(async (row) => {
-        const values = storedCustomSchema.parse(row.custom_values);
-        const described = await describeValues(values, row.category_id);
-        const summary = Object.entries(described)
-          .map(
-            ([id, entry]) =>
-              `${entry.label || id}: ${formatCustomValue(entry.value, entry.option_paths)}` +
-              ` [revision ${entry.validated_revision_id}]` +
-              (entry.legacy ? ' (legacy)' : ''),
-          )
-          .join(' · ');
-        return [row.id, summary] as const;
-      }),
-    ),
-  );
+  const summaries = await describeSearchBatch(supabase, uniqueKeys);
   return {
     rows: result.rows.map((r) => ({
       ...mapSearch(r, locations),
-      customSummary: summaries.get(r.entity_id),
+      customSummary: summaries[`${r.kind}:${r.entity_id}`],
     })),
     total: result.total,
     page: filter.page,
@@ -208,6 +166,9 @@ export async function getLowStockDashboard(page = 1) {
       recordedTotal: row.recorded_total,
       reorderThreshold: row.reorder_threshold,
       stockState: row.stock_state,
+      availableQuantity: row.available_quantity,
+      assignedQuantity: row.assigned_quantity,
+      ownedQuantity: row.recorded_quantity,
     })),
     total: result.total,
     page: safePage,
@@ -233,52 +194,7 @@ export async function getHistory(
   const result = historyPage.parse(
     requireData(data, error, 'History could not be loaded.'),
   );
-  const rows = await Promise.all(
-    result.rows.map(async (row) => {
-      const mapped = mapHistory(row, locations, categories);
-      const before = row.before_metadata ?? {};
-      const after = row.after_metadata ?? {};
-      const beforeValues = storedCustomSchema.parse(before.custom_values ?? {});
-      const afterValues = storedCustomSchema.parse(after.custom_values ?? {});
-      if (!Object.keys(beforeValues).length && !Object.keys(afterValues).length)
-        return mapped;
-      const [beforeDisplay, afterDisplay] = await Promise.all([
-        Object.keys(beforeValues).length &&
-        typeof before.category_id === 'string'
-          ? describeValues(beforeValues, before.category_id)
-          : Promise.resolve({} as Record<string, DescribedValue>),
-        Object.keys(afterValues).length && typeof after.category_id === 'string'
-          ? describeValues(afterValues, after.category_id)
-          : Promise.resolve({} as Record<string, DescribedValue>),
-      ]);
-      const keys = new Set([
-        ...Object.keys(beforeDisplay),
-        ...Object.keys(afterDisplay),
-      ]);
-      for (const id of keys) {
-        const previous = beforeDisplay[id];
-        const next = afterDisplay[id];
-        if (
-          JSON.stringify(beforeValues[id]) === JSON.stringify(afterValues[id])
-        )
-          continue;
-        mapped.metadataChanges.push({
-          field:
-            (next?.label || previous?.label || id) +
-            (next?.legacy ? ' (legacy)' : ''),
-          before: previous
-            ? formatCustomValue(previous.value, previous.option_paths) +
-              ` [revision ${previous.validated_revision_id}]`
-            : null,
-          after: next
-            ? formatCustomValue(next.value, next.option_paths) +
-              ` [revision ${next.validated_revision_id}]`
-            : null,
-        });
-      }
-      return mapped;
-    }),
-  );
+  const rows = result.rows.map((row) => mapHistory(row, locations, categories));
   return {
     rows,
     total: result.total,
@@ -333,16 +249,17 @@ export async function getQuantityDetail(
       .eq('item_id', id)
       .order('location_id'),
     supabase
-      .from('inventory_search_rows')
-      .select('recorded_total,reorder_threshold,stock_state')
-      .eq('entity_id', id)
-      .eq('kind', 'quantity')
+      .from('inventory_quantity_totals')
+      .select(
+        'available_quantity,assigned_quantity,recorded_quantity,stock_state',
+      )
+      .eq('item_id', id)
       .limit(1)
       .maybeSingle(),
     getLocations(),
     getCategories(),
     getHistory({ type: 'quantity', entityId: id }),
-    describeValues(row.custom_values, row.category_id),
+    describeValues(supabase, row.custom_values, row.category_id),
   ]);
   return {
     item: {
@@ -351,13 +268,16 @@ export async function getQuantityDetail(
       archived: row.archived,
       reorderThreshold: row.reorder_threshold,
     },
-    stockSummary: mapQuantityStockSummary(
-      requireData(
-        stockSummary,
-        stockSummaryError,
-        'Stock state could not be loaded.',
+    stockSummary: {
+      ...mapQuantityStockSummary(
+        requireData(
+          stockSummary,
+          stockSummaryError,
+          'Stock state could not be loaded.',
+        ),
       ),
-    ),
+      reorderThreshold: row.reorder_threshold,
+    },
     balances: requireData(
       balances,
       balanceError,
@@ -399,13 +319,22 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
     history,
     duplicateSerialMatches,
     customDisplay,
+    siteResult,
   ] = await Promise.all([
     getLocations(),
     getCategories(),
     getHistory({ type: 'asset', entityId: id }),
     duplicateSerials(row.serial_number ?? '', id),
-    describeValues(row.custom_values, row.category_id),
+    describeValues(supabase, row.custom_values, row.category_id),
+    row.site_id
+      ? supabase
+          .from('sites')
+          .select('id,code,name')
+          .eq('id', row.site_id)
+          .single()
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  if (siteResult.error) throw new Error('Asset site could not be loaded.');
   return {
     asset: {
       ...metadata(row, categories),
@@ -414,7 +343,8 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
       assetTag: row.asset_tag,
       serialNumber: row.serial_number,
     },
-    location: locationById(locations, row.location_id),
+    location: row.location_id ? locationById(locations, row.location_id) : null,
+    site: siteResult.data,
     history: history.rows,
     duplicateSerialMatches,
   };

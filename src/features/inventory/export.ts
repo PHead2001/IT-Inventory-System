@@ -23,6 +23,14 @@ const inventoryRow = z.object({
   location_name: text,
   location_code: text,
   breadcrumb: text,
+  location_id: identity.nullable().optional(),
+  custody_kind: z.string().nullable().optional(),
+  site_id: identity.nullable().optional(),
+  site_code: text.optional(),
+  site_name: text.optional(),
+  available_quantity: safeDecimal.nullable().optional(),
+  assigned_quantity: safeDecimal.nullable().optional(),
+  recorded_quantity: safeDecimal.nullable().optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const lowStockRow = z.object({
@@ -31,6 +39,8 @@ const lowStockRow = z.object({
   reorder_threshold: z.number().int().nonnegative(),
   stock_state: z.enum(['needs_restocking', 'out_of_stock']),
   holding_context: z.string(),
+  available_quantity: safeDecimal.optional(),
+  assigned_quantity: safeDecimal.optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const snapshot = <T extends z.ZodType>(row: T) =>
@@ -126,8 +136,16 @@ export function exportCsv(
       'Location Breadcrumb',
       'Exported At (UTC)',
       'Environment',
+      ...(includeCustom ? ['Custom Fields JSON'] : []),
+      'Location ID',
+      'Custody',
+      'Site ID',
+      'Site Code',
+      'Site Name',
+      'Available in Storage (Item-wide)',
+      'Assigned to Sites (Item-wide)',
+      'Total Recorded (Item-wide)',
     ];
-    if (includeCustom) headers.push('Custom Fields JSON');
     function* lines() {
       yield headers.map(csvText).join(',');
       for (const row of rows) {
@@ -150,6 +168,16 @@ export function exportCsv(
         ];
         if (includeCustom)
           cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+        cells.push(
+          csvText(row.location_id),
+          csvText(row.custody_kind),
+          csvText(row.site_id),
+          csvText(row.site_code),
+          csvText(row.site_name),
+          csvNumber(row.available_quantity),
+          csvNumber(row.assigned_quantity),
+          csvNumber(row.recorded_quantity),
+        );
         yield cells.join(',');
       }
     }
@@ -175,8 +203,10 @@ export function exportCsv(
     'All Current Holdings and Locations',
     'Exported At (UTC)',
     'Environment',
+    ...(includeCustom ? ['Custom Fields JSON'] : []),
+    'Available in Storage',
+    'Assigned to Sites',
   ];
-  if (includeCustom) headers.push('Custom Fields JSON');
   function* lines() {
     yield headers.map(csvText).join(',');
     for (const row of rows) {
@@ -201,6 +231,10 @@ export function exportCsv(
       ];
       if (includeCustom)
         cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+      cells.push(
+        csvNumber(row.available_quantity),
+        csvNumber(row.assigned_quantity),
+      );
       yield cells.join(',');
     }
   }

@@ -49,10 +49,20 @@ it('adds room navigation to located search results using the location code, neve
 it('preserves unlocated definitions without fabricating a room link', () => {
   render(<InventoryRows rows={[{ ...row, location: null, quantity: null }]} />);
   expect(
-    screen.getByText('No positive stock — unlocated definition'),
+    screen.getByText(
+      'No positive stock or active site holding — unlocated definition',
+    ),
   ).toBeVisible();
   expect(
     screen.queryByRole('link', { name: /in room/i }),
   ).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Cable' })).toBeVisible();
+});
+
+it('does not direct unmodeled office or site custody into closet geometry', () => {
+  render(<ShowInRoom code="ITO-GENERAL" />);
+  expect(screen.getByText('No room model for this location')).toBeVisible();
+  expect(
+    screen.queryByRole('link', { name: /in room/i }),
+  ).not.toBeInTheDocument();
 });

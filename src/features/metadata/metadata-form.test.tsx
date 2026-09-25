@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { submitInventory } from '@/features/inventory/actions';
+import { submitCustody } from '@/features/custody/actions';
 import {
   MetadataForm,
   MetadataFormPreview,
@@ -15,6 +16,7 @@ vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
 }));
+vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
 vi.mock('@/features/locations/location-picker', () => ({
   LocationPicker: () => <div>Location picker</div>,
 }));
@@ -108,6 +110,10 @@ describe('published metadata form', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
     expect(screen.getByLabelText(/Inspected/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Inspected/ })).toHaveAttribute(
+      'aria-checked',
+      'mixed',
+    );
     expect(
       [...container.querySelectorAll('label')].map(
         (label) => label.textContent,
@@ -122,6 +128,27 @@ describe('published metadata form', () => {
     );
     expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
     expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('keeps missing, false, and true boolean values distinct with an explicit Unset', () => {
+    render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={form().published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    const checkbox = screen.getByRole('checkbox', { name: /Inspected/ });
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(screen.getByText('Not set')).toBeInTheDocument();
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('No')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Unset' }));
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(screen.getByText('Not set')).toBeInTheDocument();
   });
   it('preserves false, zero and empty strings as values distinct from missing', () => {
     const definition = {
@@ -161,6 +188,94 @@ describe('published metadata form', () => {
       {},
     );
   });
+  it('records an opening site assignment with the same published custom form and no fictional storage source', async () => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    render(
+      <MetadataForm
+        kind="quantity"
+        categories={props.categories}
+        locations={[]}
+        forms={{ [categoryId]: form() }}
+        openingSite={{
+          id: item.id,
+          code: 'PROPERTY-A',
+          name: 'Example Property',
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Existing adapters' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Inspected/ }));
+    fireEvent.change(screen.getByLabelText('Units already at this site'), {
+      target: { value: '3' },
+    });
+    expect(screen.queryByLabelText('Initial location')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitCustody).toHaveBeenCalled());
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
+      operation: 'quantity_site_open',
+      payload: {
+        name: 'Existing adapters',
+        site_id: item.id,
+        quantity: 3,
+        expected_published_revision_id: firstRevision,
+        custom_patch: { set: { [fieldId]: true }, unset: [] },
+      },
+    });
+    const payload = vi.mocked(submitCustody).mock.calls[0][0] as {
+      payload: Record<string, unknown>;
+    };
+    expect(payload.payload).not.toHaveProperty('initial_location_id');
+    expect(payload.payload).not.toHaveProperty('item_id');
+    expect(payload.payload).not.toHaveProperty('expected_version');
+  });
+  it('opens a serialized asset at a site without an edit baseline or storage location', async () => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    render(
+      <MetadataForm
+        kind="asset"
+        categories={props.categories}
+        locations={[]}
+        forms={{ [categoryId]: form() }}
+        openingSite={{
+          id: item.id,
+          code: 'PROPERTY-A',
+          name: 'Example Property',
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Existing tablet' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitCustody).toHaveBeenCalled());
+    const command = vi.mocked(submitCustody).mock.calls[0][0] as {
+      operation: string;
+      payload: Record<string, unknown>;
+    };
+    expect(command.operation).toBe('asset_site_open');
+    expect(command.payload).toMatchObject({
+      name: 'Existing tablet',
+      site_id: item.id,
+      expected_published_revision_id: firstRevision,
+    });
+    expect(command.payload).not.toHaveProperty('asset_id');
+    expect(command.payload).not.toHaveProperty('expected_version');
+    expect(command.payload).not.toHaveProperty('location_id');
+  });
   it('keeps entered values and original item baseline until explicit schema and item review', () => {
     const { rerender } = render(
       <MetadataForm {...props} forms={{ [categoryId]: form() }} />,
@@ -168,9 +283,8 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Edited cable' },
     });
-    fireEvent.change(screen.getByLabelText(/Inspected/), {
-      target: { value: 'false' },
-    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Inspected/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Inspected/ }));
     rerender(
       <MetadataForm
         {...props}
@@ -206,9 +320,10 @@ describe('published metadata form', () => {
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
       'Edited cable',
     );
-    expect(
-      (screen.getByLabelText(/Inspected/) as HTMLSelectElement).value,
-    ).toBe('false');
+    expect(screen.getByRole('checkbox', { name: /Inspected/ })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
   it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
     const choiceId = '00000000-0000-4000-8000-000000000020';

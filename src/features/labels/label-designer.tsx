@@ -519,24 +519,24 @@ export function LabelDesigner({
         {search?.rows.map((record) => (
           <div
             key={record.kind + record.key}
-            className="flex flex-wrap items-center justify-between gap-3 rounded border border-slate-700 p-3"
+            className="flex max-w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded border border-slate-700 p-3"
           >
-            <div>
+            <div className="min-w-0 flex-1 basis-56 [overflow-wrap:anywhere]">
               <Link
                 href={
                   record.kind === 'quantity'
                     ? '/inventory/quantity/' + record.key
                     : '/inventory/assets/' + record.key
                 }
-                className="text-cyan-300 underline"
+                className="text-cyan-300 underline [overflow-wrap:anywhere]"
               >
                 {record.name}
               </Link>
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-slate-400 [overflow-wrap:anywhere]">
                 {record.kind} · {record.categoryName} · {record.status} ·{' '}
                 {record.key}
               </p>
-              <p className="break-words text-xs text-slate-400">
+              <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                 {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
                 {record.holdingContext}
               </p>
@@ -544,7 +544,7 @@ export function LabelDesigner({
                 record.serialNumber ||
                 record.manufacturer ||
                 record.model) && (
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                   {[
                     record.assetTag,
                     record.serialNumber,

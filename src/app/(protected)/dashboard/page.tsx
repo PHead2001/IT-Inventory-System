@@ -17,15 +17,17 @@ export default async function DashboardPage({
   return (
     <>
       <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
-        IT Closet · Overview
+        Storage availability · Overview
       </p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-3xl font-semibold">Low-stock overview</h1>
         <RefreshButton />
       </div>
       <p className="mt-3 text-slate-400">
-        Item-wide recorded totals include stock at inactive locations. Out of
-        stock is included in needs restocking.
+        Restocking uses available storage across all locations, including
+        inactive ones. Assigned site holdings remain part of total recorded
+        equipment, but cannot be issued from storage. Out of stock is included
+        in needs restocking.
       </p>
       <dl className="mt-6 grid gap-3 sm:grid-cols-3">
         <div className={panel}>
@@ -64,7 +66,7 @@ export default async function DashboardPage({
       {result.configuredCount === 0 ? (
         <p className={panel}>
           No active quantity items have a reorder threshold. Staff can set one
-          on a quantity item; 0 alerts when its recorded total reaches zero.
+          on a quantity item; 0 alerts when available storage reaches zero.
         </p>
       ) : result.needsRestockingCount === 0 ? (
         <p className={panel}>No monitored items need restocking.</p>
@@ -95,7 +97,9 @@ export default async function DashboardPage({
                   </strong>
                 </div>
                 <p className="mt-2 text-sm">
-                  Recorded total: {row.recordedTotal} · Reorder threshold:{' '}
+                  Available in storage: {row.availableQuantity} · Assigned to
+                  sites: {row.assignedQuantity} · Total recorded:{' '}
+                  {row.ownedQuantity} · Reorder threshold:{' '}
                   {row.reorderThreshold}
                 </p>
                 <Link

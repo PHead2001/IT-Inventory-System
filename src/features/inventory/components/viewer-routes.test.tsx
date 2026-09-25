@@ -2,6 +2,7 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import QuantityPage from '@/app/(protected)/inventory/quantity/[id]/page';
 import AssetPage from '@/app/(protected)/inventory/assets/[id]/page';
+vi.mock('server-only', () => ({}));
 const fixture = vi.hoisted(() => ({
   metadata: {
     id: 'item',
@@ -29,11 +30,21 @@ vi.mock('@/lib/auth/session.server', () => ({
 vi.mock('@/features/metadata/queries.server', () => ({
   getPublishedForms: async () => ({}),
 }));
+vi.mock('@/features/custody/queries.server', () => ({
+  getSites: async () => [],
+  getEntitySiteHoldings: async () => [],
+  getEntityAssignments: async () => [],
+}));
+vi.mock('@/features/files/files-panel', () => ({
+  FilesPanel: () => null,
+}));
 vi.mock('../queries.server', () => ({
   getQuantityDetail: async () => ({
     item: { ...fixture.metadata, archived: false, reorderThreshold: null },
     stockSummary: {
-      recordedTotal: 2,
+      availableQuantity: '2',
+      assignedQuantity: '0',
+      ownedQuantity: '2',
       reorderThreshold: 3,
       stockState: 'needs_restocking',
     },
@@ -48,6 +59,7 @@ vi.mock('../queries.server', () => ({
       serialNumber: null,
     },
     location: fixture.location,
+    site: null,
     history: [],
     duplicateSerialMatches: [],
   }),
@@ -68,7 +80,7 @@ it('viewers can read both detail types and history links without mutation panels
   render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
   expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
   expect(
-    screen.getByText(/Needs restocking \(item-wide total 2\)/),
+    screen.getByText(/Needs restocking.*available in storage 2/),
   ).toBeVisible();
   expect(
     screen.getByRole('link', { name: 'View all item history' }),

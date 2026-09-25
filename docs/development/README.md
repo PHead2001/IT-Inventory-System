@@ -17,7 +17,11 @@ Local SMTP permits 100 captured messages/hour for repeatable email tests; this i
 
 Local ports: app 3000, API 54321, PostgreSQL 54322, Studio 54323, email capture 54324. CLI status contains local administrative credentials: never publish its full output. The deployed application needs no service-role key.
 
+Use the repository `db:start` command for a clean checkout. It writes the ignored local Supabase Storage version override (`v1.77.9`) before starting the pinned CLI and verifies that the running Storage container uses that exact tag from one of the CLI's official registries. Local reset and database tests fail before running against a different Storage image. If an older local stack is already running, use `npm run db:stop` followed by `npm run db:start`; this local image override does not change a linked or hosted Supabase project. A CLI `link` may refresh the ignored cache, so the next `db:start` restores the local override.
+
 Production compilation can use nonsecret URL/key placeholders without Supabase running. Runtime authentication needs a working backend.
+
+Private inventory files additionally need local Supabase Storage and a server-only `INVENTORY_FILE_KEYS_JSON` entry matching an active row in `private.file_keys`; the migration deliberately installs no secret. For ordinary local browser use, keep the JSON map in ignored `.env.local` and add a distinct local key through the local database, never through browser code. `npm run test:e2e` provisions its own ephemeral loopback-only key for the child build/browser run, then disables it and replaces the database secret in `finally`. An inert key-ID tombstone may remain because published test files retain a foreign-key reference. See [private inventory files](../inventory-files.md) for the attestation, Storage and cleanup contract.
 
 Vercel previews derive their HTTPS origin from VERCEL_BRANCH_URL when APP_ORIGIN is unset. Do not copy the local APP_ORIGIN into Vercel Preview settings. See [deployment](../deployment.md) for the one-time Supabase preview wildcard and exact production redirects.
 

@@ -30,6 +30,8 @@ package.json is the canonical command source. Iterate cheaply; certify the final
 
 Start Supabase before database/full validation. Final certification runs fresh `npm ci` then `npm run validate`. E2E rebuilds with local public backend values because they are build inputs.
 
+The database gate uses the repository `db:start` bootstrap to install the local-only Storage `v1.77.9` override, then verifies the actual running image before reset and integration tests. `npm run test:local-storage` covers fresh-checkout creation, cache drift, linked-cache preservation and wrong-image rejection without Docker; CI's database job additionally exercises the real clean-checkout start. This override never enters the production migration-delivery command.
+
 ## Proof by layer
 
 Unit/component tests cover strict room parsing, measured/default classifications, coordinate mapping, capability predicates, auth validation, explicit confirmation, and cookie refresh behavior.
@@ -51,6 +53,12 @@ PR jobs check out the exact head SHA. Main jobs report the actual post-merge SHA
 Ready means: complete gates, exact-SHA green CI, clean worktree, local/remote HEAD agreement, latest fresh clean Codex review, and zero unresolved actionable threads. Verify a matching preview when configured. Code changes require new affected validation and fresh review.
 
 Infrastructure failures are not passes. Report missing runtime/hosted prerequisites separately.
+
+## Private inventory files proof
+
+The [file contract](inventory-files.md) is checked through real Supabase Storage as well as PostgreSQL. `npm run validate:db` applies the file migration on a clean local stack, runs pgTAP and `tests/integration/files.ts`, and checks authenticated upload/download/delete policies, direct-write denial, versioned attestation, collection revisions, replacement/rename/history, quotas, physical-byte accounting, receipt replay, concurrency and cleanup. Keep the deliberate upload/cancel race and near-20 MiB false-size cases; a SQL-only pass cannot establish the Storage boundary. `npm run test:e2e` provisions a loopback-only per-run HMAC key and exercises the staff file panel with the production Next build. The runner disables the key and shreds its secret on completion; an inert database key-ID tombstone is expected.
+
+Hosted acceptance needs an explicitly authorized, verified isolated preview with its own server-only key and applied bucket/policies, then a real authenticated browser → Storage → validation → publication/download/cleanup check using fictional records. Capture the preview branch and migration revision, authorization denials and any timeout or resource failure. Production key installation and release remain owner prerequisites. Local tests, a passing build or a preview without a working private bucket do not establish hosted file acceptance.
 
 ## Inventory Core proof
 

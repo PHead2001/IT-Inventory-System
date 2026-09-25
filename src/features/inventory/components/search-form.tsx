@@ -2,16 +2,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
 import type { CategoryRef, LocationRef } from '../contracts-ui';
+import type { Site } from '@/features/custody/queries.server';
 import { field, panel } from './read-ui';
 export function SearchForm({
   params,
   categories,
   locations,
+  sites,
   action = '/inventory',
 }: {
   params: Record<string, string | undefined>;
   categories: CategoryRef[];
   locations: LocationRef[];
+  sites: Site[];
   action?: string;
 }) {
   return (
@@ -89,6 +92,24 @@ export function SearchForm({
           defaultValue={params.location ?? ''}
           allowAll
         />
+        <div>
+          <label htmlFor="inventory-site" className="text-sm">
+            Property / site
+          </label>
+          <select
+            className={field}
+            id="inventory-site"
+            name="site"
+            defaultValue={params.site ?? ''}
+          >
+            <option value="">All sites and storage</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name} ({site.code}){site.active ? '' : ' — archived'}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       <label className="flex min-h-11 items-center gap-2 text-sm">
         <input
@@ -97,7 +118,7 @@ export function SearchForm({
           value="true"
           defaultChecked={params.lowStock === 'true'}
         />
-        Needs restocking only (item-wide total)
+        Needs restocking only (available in storage)
       </label>
       <Button type="submit">Search</Button>
     </form>

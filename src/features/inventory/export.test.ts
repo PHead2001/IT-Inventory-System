@@ -3,6 +3,38 @@ import { csvText, exportCsv, ExportTooLargeError } from './export';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const at = '2026-09-24T15:18:37+00:00';
+const legacyInventoryHeaders = [
+  'Record ID',
+  'Type',
+  'Name',
+  'Category',
+  'Manufacturer',
+  'Model',
+  'Asset Tag',
+  'Serial Number',
+  'Status',
+  'Quantity at Location',
+  'Location Name',
+  'Location Code',
+  'Location Breadcrumb',
+  'Exported At (UTC)',
+  'Environment',
+];
+const legacyLowStockHeaders = [
+  'Record ID',
+  'Type',
+  'Name',
+  'Category',
+  'Manufacturer',
+  'Model',
+  'Status',
+  'Recorded Total',
+  'Reorder Threshold',
+  'Stock State',
+  'All Current Holdings and Locations',
+  'Exported At (UTC)',
+  'Environment',
+];
 describe('inventory CSV', () => {
   it('quotes comma, quotes and newlines while neutralizing formula prefixes', () => {
     expect(csvText('a,"b"\nc')).toBe('"a,""b""\nc"');
@@ -24,7 +56,9 @@ describe('inventory CSV', () => {
     );
     expect(result.exportedAt).toBe(at);
     expect(result.csv).toMatch(/^\uFEFF"Record ID","Type"/);
-    expect(result.csv).toContain('"Exported At (UTC)","Environment"\r\n');
+    expect(
+      result.csv.slice(1).split('\r\n')[0].split(',').slice(0, 15),
+    ).toEqual(legacyInventoryHeaders.map(csvText));
   });
   it('exports one low-stock row per definition and no global total in holding rows', () => {
     const low = exportCsv(
@@ -49,7 +83,9 @@ describe('inventory CSV', () => {
       },
       'Production',
     ).csv;
-    expect(low).toContain('"Recorded Total","Reorder Threshold"');
+    expect(low).toContain(
+      '"Recorded Total","Reorder Threshold","Stock State","All Current Holdings and Locations","Exported At (UTC)","Environment","Available in Storage","Assigned to Sites"',
+    );
     expect(low).toContain('"\'=Danger"');
     expect(low).toContain('"1A [ITC-S1A]: 1; 1B [ITC-S1B]: 2"');
     const inventory = exportCsv(
@@ -82,6 +118,100 @@ describe('inventory CSV', () => {
     expect(inventory).toContain('"Preview"');
     expect(low).toContain('"Production"');
     expect(low).toContain('"All Current Holdings and Locations"');
+  });
+  it('exports site custody and item-wide decimal-string totals without formula execution', () => {
+    const csv = exportCsv(
+      'inventory',
+      {
+        rows: [
+          {
+            entity_id: id,
+            kind: 'quantity',
+            name: 'Adapters',
+            category_name: 'Parts',
+            manufacturer: null,
+            model: null,
+            status: 'active',
+            asset_tag: null,
+            serial_number: null,
+            quantity: 3,
+            location_name: null,
+            location_code: null,
+            breadcrumb: null,
+            custody_kind: 'site',
+            site_id: id,
+            site_code: 'PROPERTY-A',
+            site_name: '=Unsafe',
+            available_quantity: '7',
+            assigned_quantity: '3',
+            recorded_quantity: '10',
+          },
+        ],
+        total: 1,
+        exported_at: at,
+      },
+      'Preview',
+    ).csv;
+    expect(csv).toContain(
+      '"site","00000000-0000-4000-8000-000000000001","PROPERTY-A","\'=Unsafe",7,3,10',
+    );
+  });
+  it('keeps each physical holding while leaving repeated item-wide total cells blank', () => {
+    const base = {
+      entity_id: id,
+      kind: 'quantity',
+      name: 'Adapters',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      location_name: 'Storage',
+      breadcrumb: 'Office / Storage',
+      custody_kind: 'storage',
+    };
+    const csv = exportCsv(
+      'inventory',
+      {
+        rows: [
+          {
+            ...base,
+            quantity: 2,
+            location_code: 'ITO-A',
+            available_quantity: '7',
+            assigned_quantity: '3',
+            recorded_quantity: '10',
+          },
+          {
+            ...base,
+            quantity: 5,
+            location_code: 'ITO-B',
+            available_quantity: null,
+            assigned_quantity: null,
+            recorded_quantity: null,
+          },
+        ],
+        total: 2,
+        exported_at: at,
+      },
+      'Preview',
+    ).csv;
+    const [header, first, second] = csv.slice(1).split('\r\n');
+    const columns = header.split(',');
+    const firstCells = first.split(',');
+    const secondCells = second.split(',');
+    expect(firstCells[columns.indexOf('"Quantity at Location"')]).toBe('2');
+    expect(secondCells[columns.indexOf('"Quantity at Location"')]).toBe('5');
+    for (const [name, value] of [
+      ['"Available in Storage (Item-wide)"', '7'],
+      ['"Assigned to Sites (Item-wide)"', '3'],
+      ['"Total Recorded (Item-wide)"', '10'],
+    ]) {
+      const index = columns.indexOf(name);
+      expect(firstCells[index]).toBe(value);
+      expect(secondCells[index]).toBe('');
+    }
   });
   it('rejects malformed or oversized snapshots instead of publishing partial data', () => {
     expect(() =>
@@ -141,10 +271,79 @@ describe('inventory CSV', () => {
       true,
     ).csv;
     expect(plain).not.toContain('Custom Fields JSON');
-    expect(withCustom).toContain('"Environment","Custom Fields JSON"');
+    const plainLines = plain.slice(1).split('\r\n');
+    const customLines = withCustom.slice(1).split('\r\n');
+    expect(plainLines[0].split(',').slice(0, 15)).toEqual(
+      legacyInventoryHeaders.map(csvText),
+    );
+    expect(customLines[0].split(',').slice(0, 16)).toEqual(
+      [...legacyInventoryHeaders, 'Custom Fields JSON'].map(csvText),
+    );
+    expect(customLines[0]).toContain('"Custom Fields JSON"');
+    expect(customLines[0].split(',')[16]).toBe('"Location ID"');
+    const legacyRowPrefix = [
+      csvText(id),
+      csvText('Serialized asset'),
+      csvText('Laptop'),
+      csvText('Computers'),
+      csvText(null),
+      csvText(null),
+      csvText(null),
+      csvText(null),
+      csvText('active'),
+      '',
+      csvText('1A'),
+      csvText('ITC-S1A'),
+      csvText('Closet / 1A'),
+      csvText(at),
+      csvText('Preview'),
+    ];
+    expect(plainLines[1].split(',').slice(0, 15)).toEqual(legacyRowPrefix);
+    expect(customLines[1].split(',').slice(0, 15)).toEqual(legacyRowPrefix);
+    expect(plainLines[1].split(',')[15]).toBe(csvText(null));
     expect(withCustom).toContain(id);
     expect(withCustom).toContain(csvText(JSON.stringify(custom)));
     expect(withCustom).toContain('=Child');
+    const lowStockRow = {
+      entity_id: id,
+      name: 'Adapters',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      recorded_total: '3',
+      reorder_threshold: 4,
+      stock_state: 'needs_restocking',
+      holding_context: '1A: 3',
+      available_quantity: '3',
+      assigned_quantity: '0',
+      custom_fields: custom,
+    };
+    const lowPlain = exportCsv(
+      'low_stock',
+      { rows: [lowStockRow], total: '1', exported_at: at },
+      'Preview',
+    ).csv;
+    const lowCustom = exportCsv(
+      'low_stock',
+      { rows: [lowStockRow], total: '1', exported_at: at },
+      'Preview',
+      true,
+    ).csv;
+    const lowPlainLines = lowPlain.slice(1).split('\r\n');
+    const lowCustomLines = lowCustom.slice(1).split('\r\n');
+    expect(lowPlainLines[0].split(',').slice(0, 13)).toEqual(
+      legacyLowStockHeaders.map(csvText),
+    );
+    expect(lowCustomLines[0].split(',').slice(0, 14)).toEqual(
+      [...legacyLowStockHeaders, 'Custom Fields JSON'].map(csvText),
+    );
+    expect(lowCustomLines[0].split(',')[14]).toBe('"Available in Storage"');
+    expect(lowPlainLines[1].split(',').slice(0, 13)).toEqual(
+      lowCustomLines[1].split(',').slice(0, 13),
+    );
+    expect(lowPlainLines[1].split(',')[11]).toBe(csvText(at));
+    expect(lowPlainLines[1].split(',')[12]).toBe(csvText('Preview'));
   });
   it('measures UTF-8 CSV bytes including BOM and neutralized formula text before completing a file', () => {
     const row = {

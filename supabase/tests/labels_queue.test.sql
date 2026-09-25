@@ -59,7 +59,8 @@ select is((public.inventory_label_search('QueueSearch','all','active',null,null,
 select is((public.inventory_label_search('QueueSearch Zero')->>'total')::integer,1,
  'zero-stock definition remains searchable');
 select is((public.inventory_label_search('QueueSearch Cables')->'rows'->0->>'holding_context'),
- 'ITC-S1A: 5; ITC-S1B: 5','deduplicated quantity search shows all holdings');
+ 'IT Closet / Left Storage / Shelf 1 / 1A: 5; IT Closet / Left Storage / Shelf 1 / 1B: 5',
+ 'deduplicated quantity search shows both readable holding paths and counts');
 select is((public.inventory_label_search('QueueSearch Zero')->'rows'->0->>'holding_context'),
  'No positive stock','zero-stock result explains its unlocated state');
 select is((public.inventory_label_search('QueueSearch','all','historical')->>'total')::integer,1,
@@ -82,11 +83,19 @@ select is(jsonb_array_length(public.inventory_label_resolve(jsonb_build_array(
  jsonb_build_object('kind','asset','key',
   (select id::text from public.serialized_assets where name='QueueSearch Asset'))))),3,
  'one caller-scoped snapshot resolves mixed exact IDs');
+select is(public.inventory_label_resolve('[{"kind":"location","key":"ITC"}]'::jsonb)
+ ->0->>'key','ITC','location QR target retains its stable code');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'key'),
+ (select id::text from public.quantity_items where name='QueueSearch Cables'),
+ 'quantity QR target retains its immutable UUID');
 select ok((public.inventory_label_resolve(jsonb_build_array(
  jsonb_build_object('kind','quantity','key',
   (select id::text from public.quantity_items where name='QueueSearch Cables'))))
- ->0->>'context') like '%ITC-S1A: 5; ITC-S1B: 5%',
- 'queued quantity context contains current holdings from all locations');
+ ->0->>'context') like '%IT Closet / Left Storage / Shelf 1 / 1A: 5; IT Closet / Left Storage / Shelf 1 / 1B: 5%',
+ 'queued quantity context contains both readable holding paths and counts');
 select throws_ok($$select public.inventory_label_resolve('[{"key":"ITC"}]'::jsonb)$$,
  '22023','invalid_label_selection','missing kind is rejected');
 reset role;

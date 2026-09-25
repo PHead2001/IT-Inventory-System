@@ -1,5 +1,9 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { npm, node, localStatus, localTestEnv } from './runtime.mjs';
+import {
+  installLocalStorageVersion,
+  verifyLocalStorageRuntime,
+} from './local-storage-version.mjs';
 const command = process.argv[2];
 const cli = (...args) => npm(['exec', '--', 'supabase', ...args]);
 const types = (check) => {
@@ -36,10 +40,12 @@ const types = (check) => {
 };
 const reset = () => {
   localStatus();
+  verifyLocalStorageRuntime();
   cli('db', 'reset', '--local');
 };
 const test = () => {
   const status = localStatus();
+  verifyLocalStorageRuntime();
   cli('test', 'db');
   node(
     ['--import', 'tsx', 'tests/integration/foundation.ts'],
@@ -61,10 +67,26 @@ const test = () => {
     ['--import', 'tsx', 'tests/integration/metadata.ts'],
     localTestEnv(status),
   );
+  node(
+    ['--import', 'tsx', 'tests/integration/custody.ts'],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/custody-reads.ts'],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/files-completion.ts'],
+    localTestEnv(status),
+  );
+  node(['--import', 'tsx', 'tests/integration/files.ts'], localTestEnv(status));
 };
 try {
-  if (command === 'start') cli('start');
-  else if (command === 'stop') cli('stop');
+  if (command === 'start') {
+    installLocalStorageVersion();
+    cli('start');
+    verifyLocalStorageRuntime();
+  } else if (command === 'stop') cli('stop');
   else if (command === 'reset') reset();
   else if (command === 'types') types(false);
   else if (command === 'types-check') types(true);

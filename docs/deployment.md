@@ -23,10 +23,17 @@ Record the preview branch and applied repository migration revision when certify
 | APP_ORIGIN                                                | Optional server-only origin override                    |
 | APP_ENV                                                   | Server-only environment label                           |
 | SPEED_INSIGHTS_ENABLED                                    | Optional server-only explicit telemetry opt-in (`true`) |
+| INVENTORY_FILE_KEYS_JSON                                  | Server-only map of file HMAC key IDs to secrets         |
 | Supabase access token/project reference/database password | GitHub `production-database` environment only           |
 | Service-role credential                                   | Owner administration/local fixtures only                |
 
 Commit placeholders only. Public values are build inputs; do not reuse an artifact built for another backend. Never run migrations inside Next build.
+
+### Private inventory file configuration
+
+The [private inventory files contract](inventory-files.md) uses the private `inventory-files` Supabase Storage bucket and a per-environment HMAC key in both `private.file_keys` and server-only `INVENTORY_FILE_KEYS_JSON`. The migration creates the bucket and policies but no signing secret. Keep the JSON variable out of `NEXT_PUBLIC_`, browser code, build logs and repository files. The ID and secret must match the database row; a missing pair leaves only the file workflow unavailable. The deployed app needs no service-role credential for ordinary file operations.
+
+Provision only an explicitly authorized, **verified isolated nonproduction preview branch** with a distinct preview-only key. Confirm its project reference, branch, applied migration revision and fictional data before writing the key or exercising authenticated uploads, downloads, validation, cleanup and denial. Do not copy a local or production key, and do not use the production project as a preview. Record actual Storage and app behavior; a local passing test or successful build is not hosted proof. Production key installation and activation remain part of the owner's production release prerequisites and are not performed by preview validation.
 
 ### Private Speed Insights
 
@@ -37,6 +44,28 @@ The application reports only exact static `/dashboard`, `/inventory`, `/location
 ## Auth provisioning
 
 Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Set custom SMTP before real invitations and apply the checked-in invite/recovery templates. Invitations do not grant data access until the owner creates an active viewer/staff membership.
+
+Configuration editing is a separate, owner-granted membership capability. An owner must first verify the intended person's Auth UUID in the correct environment and read both records in the SQL editor (replace the placeholder; do not commit a real UUID):
+
+```sql
+select id, email, email_confirmed_at from auth.users
+where id = '<verified-auth-uuid>'::uuid;
+select user_id, display_name, role, active, can_manage_configuration
+from public.app_members
+where user_id = '<verified-auth-uuid>'::uuid;
+```
+
+Confirm that exactly one intended Auth user and one **active staff** membership match. Stop on a missing, inactive, viewer, or unexpected account; resolve membership identity and role separately with the owner before granting configuration access. In particular, never promote the shared preview staff fixture, every staff member, the first user, or an email domain. Only after that read-first check, the owner may grant the single capability and verify the returned row:
+
+```sql
+update public.app_members
+set can_manage_configuration = true
+where user_id = '<verified-auth-uuid>'::uuid
+  and role = 'staff' and active = true
+returning user_id, role, active, can_manage_configuration;
+```
+
+Require exactly one returned row; zero means no grant occurred and needs investigation. To revoke this capability without removing ordinary inventory access, the owner sets `can_manage_configuration=false` for the same verified UUID. Application clients have no direct membership-update grant and there is no self-grant route. A production maintainer grant is an owner action outside feature-branch validation.
 
 Origin precedence is explicit APP_ORIGIN → VERCEL_BRANCH_URL → http://localhost:3000. The branch hostname is normalized to HTTPS with no trailing slash; commit-specific VERCEL_URL is not used. Enable access to [Vercel system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables). Leave APP_ORIGIN unset in the Preview environment so every Git branch resolves automatically; remove any inherited localhost or production override there. Set APP_ORIGIN explicitly for the production custom domain and non-Vercel hosted deployments.
 

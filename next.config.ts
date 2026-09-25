@@ -1,6 +1,14 @@
 import type { NextConfig } from 'next';
 const config: NextConfig = {
   poweredByHeader: false,
+  outputFileTracingIncludes: {
+    '/api/inventory-files/validate': [
+      './src/features/files/inspect-worker.cjs',
+      './node_modules/pdf-lib/**/*',
+      './node_modules/sharp/**/*',
+      './node_modules/@img/**/*',
+    ],
+  },
   async headers() {
     return [
       {

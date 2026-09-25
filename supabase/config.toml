@@ -26,7 +26,7 @@ api_url = "http://127.0.0.1"
 enabled = true
 port = 54324
 [storage]
-enabled = false
+enabled = true
 [auth]
 enabled = true
 site_url = "http://localhost:3000"

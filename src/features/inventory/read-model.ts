@@ -50,7 +50,8 @@ export const assetRow = metadataRow.extend({
   status: z.enum(['active', 'retired']),
   asset_tag: nullableText,
   serial_number: nullableText,
-  location_id: id,
+  location_id: id.nullable(),
+  site_id: id.nullable().optional(),
 });
 export const searchRow = z.object({
   kind: z.enum(['quantity', 'asset']),
@@ -59,6 +60,25 @@ export const searchRow = z.object({
   category_name: z.string(),
   status: z.string(),
   location_id: id.nullable(),
+  site_id: id.nullable().optional(),
+  site_code: z.string().nullable().optional(),
+  site_name: z.string().nullable().optional(),
+  custody_kind: z.enum(['storage', 'site', 'unlocated', 'retired']).optional(),
+  available_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
+  assigned_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
+  recorded_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
   quantity: z.number().int().nonnegative().nullable(),
   asset_tag: nullableText,
   serial_number: nullableText,
@@ -85,6 +105,18 @@ export const historyRow = z.object({
   reason: nullableText,
   before_metadata: z.record(z.string(), z.unknown()).nullable(),
   after_metadata: z.record(z.string(), z.unknown()).nullable(),
+  custom_present: z.boolean(),
+  custom_changed: z.boolean(),
+  assignment_event_id: id.nullable(),
+  assignment_kind: z.string().nullable(),
+  assignment_from_location_id: id.nullable(),
+  assignment_to_location_id: id.nullable(),
+  assignment_from_site_id: id.nullable(),
+  assignment_to_site_id: id.nullable(),
+  assignment_from_label: nullableText,
+  assignment_to_label: nullableText,
+  assignment_quantity: z.number().int().positive().nullable(),
+  assignment_reference: nullableText,
   from_location_id: id.nullable(),
   to_location_id: id.nullable(),
   lines: z.array(
@@ -101,8 +133,9 @@ export const searchPage = z.object({
   total: z.number().int().nonnegative(),
 });
 export const quantityStockSummaryRow = z.object({
-  recorded_total: z.number().int().nonnegative(),
-  reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
+  available_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+  assigned_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+  recorded_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
   stock_state: z.enum([
     'disabled',
     'in_stock',
@@ -114,8 +147,9 @@ export const quantityStockSummaryRow = z.object({
 export function mapQuantityStockSummary(input: unknown) {
   const row = quantityStockSummaryRow.parse(input);
   return {
-    recordedTotal: row.recorded_total,
-    reorderThreshold: row.reorder_threshold,
+    availableQuantity: row.available_quantity,
+    assignedQuantity: row.assigned_quantity,
+    ownedQuantity: row.recorded_quantity,
     stockState: row.stock_state,
   };
 }
@@ -143,10 +177,18 @@ export function mapSearch(
     categoryName: row.category_name,
     status: row.status,
     location: row.location_id ? locationById(locations, row.location_id) : null,
+    site:
+      row.site_id && row.site_code && row.site_name
+        ? { id: row.site_id, code: row.site_code, name: row.site_name }
+        : null,
+    custodyKind: row.custody_kind,
     quantity: row.quantity,
     assetTag: row.asset_tag,
     serialNumber: row.serial_number,
     recordedTotal: row.recorded_total,
+    availableQuantity: row.available_quantity,
+    assignedQuantity: row.assigned_quantity,
+    ownedQuantity: row.recorded_quantity,
     reorderThreshold: row.reorder_threshold,
     stockState: row.stock_state,
   };
@@ -191,6 +233,26 @@ export function mapHistory(
     at: row.created_at,
     actorName: row.actor_name,
     reason: row.reason,
+    assignment: row.assignment_event_id
+      ? {
+          eventId: row.assignment_event_id,
+          kind: row.assignment_kind ?? 'unknown',
+          from: {
+            locationId: row.assignment_from_location_id,
+            siteId: row.assignment_from_site_id,
+            label: row.assignment_from_label,
+          },
+          to: {
+            locationId: row.assignment_to_location_id,
+            siteId: row.assignment_to_site_id,
+            label: row.assignment_to_label,
+          },
+          quantity: row.assignment_quantity,
+          reference: row.assignment_reference,
+        }
+      : null,
+    customMetadataPresent: row.custom_present,
+    customMetadataChanged: row.custom_changed,
     lines: row.lines.map((l) => ({
       location: locationById(locations, l.location_id),
       delta: l.delta,
@@ -227,6 +289,7 @@ export function readFilters(input: Record<string, string | undefined>) {
     query: (input.q ?? '').trim().slice(0, 200),
     category: id.safeParse(input.category).success ? input.category : undefined,
     location: input.location?.slice(0, 100) || undefined,
+    site: id.safeParse(input.site).success ? input.site : undefined,
     entityId: id.safeParse(input.entityId).success ? input.entityId : undefined,
     lowStock: input.lowStock === 'true',
   };

@@ -247,6 +247,28 @@ async function main() {
   const maintainer = await actor('staff', true);
   const staff = await actor('staff');
   const viewer = await actor('viewer');
+  const inactiveBatchReader = await actor('viewer');
+  await owner.query(
+    'update public.app_members set active=false where user_id=$1',
+    [inactiveBatchReader.id],
+  );
+  const inactiveBatch = await inactiveBatchReader.client.rpc(
+    'metadata_describe_batch' as never,
+    { p_mode: 'search', p_keys: [] } as never,
+  );
+  assert.equal(inactiveBatch.error?.code, 'P1001');
+  const anonymousBatch = await createClient(
+    api,
+    process.env.LOCAL_ANON_KEY!,
+    options,
+  ).rpc(
+    'metadata_describe_batch' as never,
+    {
+      p_mode: 'search',
+      p_keys: [],
+    } as never,
+  );
+  assert.equal(anonymousBatch.error?.code, '42501');
   const categoryId = await category(maintainer.client, 'Source');
   const location = (
     await owner.query("select id from public.locations where code='ITC-D01'")
@@ -899,6 +921,131 @@ async function main() {
     ].option_paths,
     [['Root']],
   );
+  const batchedSearch = await viewer.client.rpc(
+    'metadata_describe_batch' as never,
+    {
+      p_mode: 'search',
+      p_keys: [{ kind: 'quantity', id: itemId }],
+    } as never,
+  );
+  assert.equal(batchedSearch.error, null, batchedSearch.error?.message);
+  assert.match(
+    (batchedSearch.data as Record<string, string>)[`quantity:${itemId}`],
+    /Inspected: No.*Notes: abc|Notes: abc.*Inspected: No/,
+  );
+  const createdEventId = (
+    await owner.query(
+      "select id from public.quantity_events where item_id=$1 and kind='created'",
+      [itemId],
+    )
+  ).rows[0].id as string;
+  const historyProjection = await viewer.client.rpc('inventory_history', {
+    p_type: 'quantity',
+    p_entity_id: itemId,
+    p_location_code: null,
+    p_page: 1,
+    p_page_size: 25,
+  });
+  assert.equal(historyProjection.error, null, historyProjection.error?.message);
+  const createdProjection = (
+    historyProjection.data as { rows: Array<Record<string, unknown>> }
+  ).rows.find((row) => row.id === createdEventId)!;
+  assert.equal(createdProjection.custom_present, true);
+  assert.equal(createdProjection.custom_changed, true);
+  assert.equal(
+    Object.hasOwn(createdProjection.after_metadata as object, 'custom_values'),
+    false,
+  );
+  const historyBefore = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: createdEventId,
+      p_side: 'before',
+    } as never,
+  );
+  assert.equal(historyBefore.error, null, historyBefore.error?.message);
+  assert.equal((historyBefore.data as { present: boolean }).present, false);
+  const historyAfter = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: createdEventId,
+      p_side: 'after',
+      p_field_id: schema.flag,
+    } as never,
+  );
+  assert.equal(historyAfter.error, null, historyAfter.error?.message);
+  assert.equal((historyAfter.data as { value: unknown }).value, false);
+  const invalidHistoryPage = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: createdEventId,
+      p_side: 'after',
+      p_field_id: schema.flag,
+      p_option_offset: 1,
+    } as never,
+  );
+  assert.equal(invalidHistoryPage.error?.code, 'P1012');
+  const inactiveHistoryPage = await inactiveBatchReader.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: createdEventId,
+      p_side: 'after',
+    } as never,
+  );
+  assert.equal(inactiveHistoryPage.error?.code, 'P1001');
+  const anonymousHistoryPage = await createClient(
+    api,
+    process.env.LOCAL_ANON_KEY!,
+    options,
+  ).rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: createdEventId,
+      p_side: 'after',
+    } as never,
+  );
+  assert.equal(anonymousHistoryPage.error?.code, '42501');
+  const overCap = await viewer.client.rpc(
+    'metadata_describe_batch' as never,
+    {
+      p_mode: 'search',
+      p_keys: Array.from({ length: 26 }, () => ({
+        kind: 'quantity',
+        id: itemId,
+      })),
+    } as never,
+  );
+  assert.equal(overCap.error?.code, 'P1012');
+  const rejectedHistoryBatch = await viewer.client.rpc(
+    'metadata_describe_batch' as never,
+    {
+      p_mode: 'history',
+      p_keys: [{ kind: 'quantity', id: createdEventId }],
+    } as never,
+  );
+  assert.equal(rejectedHistoryBatch.error?.code, 'P1012');
+  for (const keys of [
+    [{ kind: 'quantity', id: itemId, custom_values: stored.custom_values }],
+    [
+      { kind: 'quantity', id: itemId },
+      { kind: 'quantity', id: itemId },
+    ],
+    [{ kind: 'quantity', id: 'a'.repeat(4097) }],
+  ]) {
+    const invalid = await viewer.client.rpc(
+      'metadata_describe_batch' as never,
+      {
+        p_mode: 'search',
+        p_keys: keys,
+      } as never,
+    );
+    assert.equal(invalid.error?.code, 'P1012');
+  }
   await failure(
     staff.client,
     'quantity_update_v2',
@@ -1438,6 +1585,42 @@ async function main() {
     await stockHolder.query('rollback').catch(() => undefined);
     await stockHolder.end();
   }
+  const timeoutReview = await review(maintainer.client, stockRaceCategory);
+  const timeoutHolder = new Client({
+    connectionString: db,
+    application_name: 'metadata-publication-timeout-holder',
+  });
+  await timeoutHolder.connect();
+  try {
+    await timeoutHolder.query('begin');
+    const holderPid = (await timeoutHolder.query('select pg_backend_pid() pid'))
+      .rows[0].pid as number;
+    await timeoutHolder.query(
+      'select id from public.quantity_items where id=$1 for update',
+      [stockRaceItem.entity_id],
+    );
+    const timedOut = rpc(maintainer.client, 'metadata_publish', {
+      category_id: stockRaceCategory,
+      expected_draft_id: timeoutReview.draft_id,
+      expected_draft_version: timeoutReview.draft_version,
+      expected_published_revision_id: timeoutReview.published_revision_id,
+      review_token: timeoutReview.token,
+    });
+    await observeRowWait(holderPid, 'publication row-lock timeout');
+    assert.equal((await timedOut).error?.code, '55P03');
+    const unchanged = (
+      await owner.query(
+        "select c.published_form_revision_id,(select count(*) from public.form_publication_events e where e.category_id=c.id) publication_count,(select count(*) from public.category_form_revisions r where r.category_id=c.id and r.status='draft') draft_count from public.categories c where c.id=$1",
+        [stockRaceCategory],
+      )
+    ).rows[0];
+    assert.equal(unchanged.published_form_revision_id, stockRaceRevision);
+    assert.equal(unchanged.publication_count, '1');
+    assert.equal(unchanged.draft_count, '1');
+  } finally {
+    await timeoutHolder.query('rollback').catch(() => undefined);
+    await timeoutHolder.end();
+  }
   const isolated = new Client({
     connectionString: db,
     application_name: 'metadata-isolation-rejection',
@@ -1862,6 +2045,28 @@ async function main() {
     migratedRow.custom_values[optionalField].validated_revision_id,
     migrationRevision,
   );
+  const categoryMoveEvent = (
+    await owner.query(
+      "select id from public.quantity_events where item_id=$1 and after_metadata->>'category_id'=$2 and after_metadata->'custom_values' ? $3 order by created_at desc limit 1",
+      [migrating.entity_id, migrationTarget, optionalField],
+    )
+  ).rows[0]?.id as string | undefined;
+  assert.ok(categoryMoveEvent);
+  const movedHistory = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: categoryMoveEvent,
+      p_side: 'after',
+      p_field_id: optionalField,
+    } as never,
+  );
+  assert.equal(movedHistory.error, null, movedHistory.error?.message);
+  assert.equal((movedHistory.data as { legacy: boolean }).legacy, true);
+  assert.equal(
+    (movedHistory.data as { event_category_id: string }).event_category_id,
+    migrationTarget,
+  );
   await owner.query(
     'update public.quantity_items set reorder_threshold=1 where id=$1',
     [migrating.entity_id],
@@ -1987,6 +2192,28 @@ async function main() {
   assert.equal(
     removalAfter.custom_values[removalSchema.flag].validated_revision_id,
     removalRevision,
+  );
+  const removalEvent = (
+    await owner.query(
+      "select id from public.quantity_events where item_id=$1 and after_metadata->>'category_id'=$2 and after_metadata->'custom_values' ? $3 order by created_at desc limit 1",
+      [removalItem.entity_id, migrationTarget, removalSchema.flag],
+    )
+  ).rows[0]?.id as string | undefined;
+  assert.ok(removalEvent);
+  const removedHistory = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: removalEvent,
+      p_side: 'after',
+      p_field_id: removalSchema.flag,
+    } as never,
+  );
+  assert.equal(removedHistory.error, null, removedHistory.error?.message);
+  assert.equal((removedHistory.data as { legacy: boolean }).legacy, true);
+  assert.equal(
+    (removedHistory.data as { event_category_id: string }).event_category_id,
+    migrationTarget,
   );
   assert.equal(
     (
@@ -2134,6 +2361,189 @@ async function main() {
     budgetBytes > 240000 && budgetBytes <= 262144,
     `stored ${budgetBytes} bytes`,
   );
+  const budgetEventId = (
+    await owner.query(
+      "select id from public.quantity_events where item_id=$1 and kind='created'",
+      [budgetItem.entity_id],
+    )
+  ).rows[0].id as string;
+  const budgetHistory = await viewer.client.rpc('inventory_history', {
+    p_type: 'quantity',
+    p_entity_id: budgetItem.entity_id as string,
+    p_location_code: null,
+    p_page: 1,
+    p_page_size: 25,
+  });
+  assert.equal(budgetHistory.error, null, budgetHistory.error?.message);
+  const budgetProjected = (
+    budgetHistory.data as {
+      rows: Array<{ after_metadata: Record<string, unknown> }>;
+    }
+  ).rows[0];
+  assert.equal(
+    Object.hasOwn(budgetProjected.after_metadata, 'custom_values'),
+    false,
+  );
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(budgetHistory.data), 'utf8') < 20_000,
+  );
+  const budgetFieldPage = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: budgetEventId,
+      p_side: 'after',
+      p_field_id: budgetFields[0].id,
+    } as never,
+  );
+  assert.equal(budgetFieldPage.error, null, budgetFieldPage.error?.message);
+  assert.equal((budgetFieldPage.data as { value: string }).value, largeValue);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(budgetFieldPage.data), 'utf8') <=
+      2 * 1024 * 1024,
+  );
+  const pathCategory = await category(
+    maintainer.client,
+    'History option pages',
+  );
+  const pathField = uid();
+  const hierarchyField = uid();
+  const pathOptions = Array.from({ length: 20 }, (_, index) => ({
+    id: uid(),
+    label: `Choice ${index} 😀 " \\`,
+    parent_id: null,
+    active: true,
+  }));
+  const hierarchyOptions: {
+    id: string;
+    label: string;
+    parent_id: string | null;
+    active: boolean;
+  }[] = [];
+  for (let index = 0; index < 64; index++) {
+    hierarchyOptions.push({
+      id: uid(),
+      label: `Choice ${index} ` + '😀"\\\n'.repeat(40),
+      parent_id: index === 0 ? null : hierarchyOptions[index - 1].id,
+      active: true,
+    });
+  }
+  await save(maintainer.client, pathCategory, '0', {
+    fields: [
+      {
+        id: pathField,
+        type: 'multi_select',
+        label: 'Paged choices',
+        applies_to: ['quantity'],
+        required: false,
+        rules: { maxSelections: 20 },
+        options: pathOptions,
+      },
+      {
+        id: hierarchyField,
+        type: 'hierarchical_select',
+        label: 'Deep choice',
+        applies_to: ['quantity'],
+        required: false,
+        rules: {},
+        options: hierarchyOptions,
+      },
+    ],
+    layout: [
+      {
+        id: uid(),
+        label: 'Details',
+        controls: [
+          { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'field', field_id: pathField, width: 12 },
+          { id: uid(), kind: 'field', field_id: hierarchyField, width: 12 },
+        ],
+      },
+    ],
+  });
+  const pathRevision = (await publish(maintainer.client, pathCategory))
+    .published_revision_id;
+  const pathItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Paged history choices',
+    category_id: pathCategory,
+    expected_published_revision_id: pathRevision,
+    custom_patch: {
+      set: {
+        [pathField]: pathOptions.map((option) => option.id),
+        [hierarchyField]: hierarchyOptions.at(-1)!.id,
+      },
+      unset: [],
+    },
+  });
+  const pathEvent = (
+    await owner.query(
+      "select id from public.quantity_events where item_id=$1 and kind='created'",
+      [pathItem.entity_id],
+    )
+  ).rows[0].id as string;
+  const pathFirst = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: pathEvent,
+      p_side: 'after',
+      p_field_id: pathField,
+    } as never,
+  );
+  assert.equal(pathFirst.error, null, pathFirst.error?.message);
+  assert.equal(
+    (pathFirst.data as { option_paths: unknown[] }).option_paths.length,
+    16,
+  );
+  assert.equal(
+    (pathFirst.data as { next_option_offset: number }).next_option_offset,
+    16,
+  );
+  assert.equal(
+    (pathFirst.data as { option_paths: string[][] }).option_paths[0].length,
+    1,
+  );
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(pathFirst.data), 'utf8') <=
+      2 * 1024 * 1024,
+  );
+  const pathLast = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: pathEvent,
+      p_side: 'after',
+      p_field_id: pathField,
+      p_option_offset: 16,
+    } as never,
+  );
+  assert.equal(pathLast.error, null, pathLast.error?.message);
+  assert.equal(
+    (pathLast.data as { option_paths: unknown[] }).option_paths.length,
+    4,
+  );
+  assert.equal(
+    (pathLast.data as { next_option_offset: number | null }).next_option_offset,
+    null,
+  );
+  const deepPath = await viewer.client.rpc(
+    'metadata_event_custom_page' as never,
+    {
+      p_kind: 'quantity',
+      p_event_id: pathEvent,
+      p_side: 'after',
+      p_field_id: hierarchyField,
+    } as never,
+  );
+  assert.equal(deepPath.error, null, deepPath.error?.message);
+  assert.equal(
+    (deepPath.data as { option_paths: string[][] }).option_paths[0].length,
+    64,
+  );
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(deepPath.data), 'utf8') <= 2 * 1024 * 1024,
+  );
   await failure(
     staff.client,
     'quantity_update_v2',
@@ -2168,6 +2578,22 @@ async function main() {
   );
   assert.equal(oneLarge.error, null, oneLarge.error?.message);
   assert.equal((oneLarge.data as { total: string }).total, '1');
+  const compactSearch = await viewer.client.rpc(
+    'metadata_describe_batch' as never,
+    {
+      p_mode: 'search',
+      p_keys: [{ kind: 'quantity', id: budgetItem.entity_id }],
+    } as never,
+  );
+  assert.equal(compactSearch.error, null, compactSearch.error?.message);
+  const compactSummary = (compactSearch.data as Record<string, string>)[
+    `quantity:${budgetItem.entity_id}`
+  ];
+  assert.ok(compactSummary.length < 1100);
+  assert.match(
+    compactSummary,
+    /summary abbreviated; open record for full values/,
+  );
   const copied = await owner.query(
     "insert into public.quantity_items(name,category_id,custom_values) select 'Budget export '||g.n,q.category_id,q.custom_values from public.quantity_items q cross join generate_series(1,8) g(n) where q.id=$1",
     [budgetItem.entity_id],
@@ -2289,6 +2715,41 @@ async function main() {
       'export sentinel cleanup is complete',
     );
   }
+  const scaleCategory = await category(maintainer.client, 'Publication scale');
+  const scaleRows = await owner.query(
+    "insert into public.quantity_items(name,category_id) select 'Publication scale '||g.n,$1 from generate_series(1,500) g(n)",
+    [scaleCategory],
+  );
+  assert.equal(scaleRows.rowCount, 500);
+  const scaleForm = form(scaleCategory);
+  await save(maintainer.client, scaleCategory, '0', scaleForm.definition);
+  const scaleImpact = await review(maintainer.client, scaleCategory);
+  assert.equal(scaleImpact.affected_quantity, '500');
+  const scaleStarted = performance.now();
+  await success(maintainer.client, 'metadata_publish', {
+    category_id: scaleCategory,
+    expected_draft_id: scaleImpact.draft_id,
+    expected_draft_version: scaleImpact.draft_version,
+    expected_published_revision_id: scaleImpact.published_revision_id,
+    review_token: scaleImpact.token,
+  });
+  const scaleElapsedMs = performance.now() - scaleStarted;
+  const scaleState = (
+    await owner.query(
+      'select count(*) filter(where needs_metadata) flagged,min(version) min_version,max(version) max_version from public.quantity_items where category_id=$1',
+      [scaleCategory],
+    )
+  ).rows[0];
+  assert.equal(scaleState.flagged, '500');
+  assert.equal(scaleState.min_version, 1);
+  assert.equal(scaleState.max_version, 1);
+  assert.ok(
+    scaleElapsedMs < 5000,
+    `500-row publication elapsed ${scaleElapsedMs}ms`,
+  );
+  console.log(
+    `500-row derived-flag publication: ${Math.round(scaleElapsedMs)}ms locally`,
+  );
   // PostgREST must hoist the function setting before executing the statement.
   await owner.query(
     "create function public.metadata_timeout_probe() returns text language plpgsql volatile set search_path='' set statement_timeout='5s' as $$ begin perform pg_catalog.pg_sleep(6); return 'late'; end $$",

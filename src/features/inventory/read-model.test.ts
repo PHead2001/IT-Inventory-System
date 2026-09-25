@@ -93,22 +93,59 @@ describe('inventory read contracts', () => {
       ]),
     ).toThrow('location could not be resolved');
   });
+  it('keeps a site holding separate from storage availability and room location', () => {
+    const site = mapSearch(
+      searchRow.parse({
+        kind: 'quantity',
+        entity_id: other,
+        name: 'Cable',
+        category_name: 'Cables',
+        status: 'active',
+        location_id: null,
+        site_id: id,
+        site_code: 'PROPERTY-A',
+        site_name: 'Example Property',
+        custody_kind: 'site',
+        quantity: 3,
+        available_quantity: '7',
+        assigned_quantity: '3',
+        recorded_quantity: '10',
+        asset_tag: null,
+        serial_number: null,
+        recorded_total: 7,
+        reorder_threshold: 7,
+        stock_state: 'needs_restocking',
+      }),
+      [location],
+    );
+    expect(site).toMatchObject({
+      location: null,
+      site: { code: 'PROPERTY-A' },
+      quantity: 3,
+      availableQuantity: '7',
+      assignedQuantity: '3',
+      ownedQuantity: '10',
+    });
+  });
   it('maps the authoritative item-wide stock projection independently of form metadata', () => {
     expect(
       mapQuantityStockSummary({
-        recorded_total: 2,
-        reorder_threshold: 3,
+        available_quantity: '2',
+        assigned_quantity: '3',
+        recorded_quantity: '5',
         stock_state: 'needs_restocking',
       }),
     ).toEqual({
-      recordedTotal: 2,
-      reorderThreshold: 3,
+      availableQuantity: '2',
+      assignedQuantity: '3',
+      ownedQuantity: '5',
       stockState: 'needs_restocking',
     });
     expect(() =>
       mapQuantityStockSummary({
-        recorded_total: 2,
-        reorder_threshold: 3,
+        available_quantity: '2',
+        assigned_quantity: '3',
+        recorded_quantity: '5',
         stock_state: 'guessed',
       }),
     ).toThrow();
@@ -125,6 +162,18 @@ describe('inventory read contracts', () => {
       reason: 'Physical count',
       before_metadata: { category_id: other, name: 'Old' },
       after_metadata: { category_id: id, name: 'New', version: 999 },
+      custom_present: false,
+      custom_changed: false,
+      assignment_event_id: null,
+      assignment_kind: null,
+      assignment_from_location_id: null,
+      assignment_to_location_id: null,
+      assignment_from_site_id: null,
+      assignment_to_site_id: null,
+      assignment_from_label: null,
+      assignment_to_label: null,
+      assignment_quantity: null,
+      assignment_reference: null,
       from_location_id: null,
       to_location_id: null,
       lines: [
@@ -207,6 +256,18 @@ describe('inventory read contracts', () => {
       reason: null,
       before_metadata: { reorder_threshold: null },
       after_metadata: { reorder_threshold: 0 },
+      custom_present: false,
+      custom_changed: false,
+      assignment_event_id: null,
+      assignment_kind: null,
+      assignment_from_location_id: null,
+      assignment_to_location_id: null,
+      assignment_from_site_id: null,
+      assignment_to_site_id: null,
+      assignment_from_label: null,
+      assignment_to_label: null,
+      assignment_quantity: null,
+      assignment_reference: null,
       from_location_id: null,
       to_location_id: null,
       lines: [],
@@ -215,6 +276,45 @@ describe('inventory read contracts', () => {
       metadataChanges: [
         { field: 'Reorder threshold', before: null, after: '0' },
       ],
+    });
+  });
+  it('keeps persisted site custody endpoints and quantity on an ordinary history row', () => {
+    const row = historyRow.parse({
+      id,
+      kind: 'quantity',
+      entity_id: other,
+      entity_name: 'Cable',
+      event_type: 'site_issued',
+      created_at: '2026-09-05T00:00:00Z',
+      actor_name: 'IT Staff',
+      reason: null,
+      before_metadata: null,
+      after_metadata: null,
+      custom_present: false,
+      custom_changed: false,
+      from_location_id: null,
+      to_location_id: null,
+      lines: [],
+      assignment_event_id: other,
+      assignment_kind: 'issued',
+      assignment_from_location_id: id,
+      assignment_to_location_id: null,
+      assignment_from_site_id: null,
+      assignment_to_site_id: other,
+      assignment_from_label: 'Original storage name',
+      assignment_to_label: 'Original site name',
+      assignment_quantity: 3,
+      assignment_reference: 'Ticket 001',
+    });
+    expect(mapHistory(row, [], [])).toMatchObject({
+      assignment: {
+        eventId: other,
+        kind: 'issued',
+        from: { locationId: id, label: 'Original storage name' },
+        to: { siteId: other, label: 'Original site name' },
+        quantity: 3,
+        reference: 'Ticket 001',
+      },
     });
   });
 });

@@ -6,7 +6,9 @@ try {
     'format:check',
     'test',
     'test:preview-access',
+    'test:local-storage',
     'test:export:memory',
+    'test:file:inspection',
     'test:e2e:list',
     'build',
   ])

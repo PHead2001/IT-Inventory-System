@@ -102,6 +102,7 @@ async function buildExport(
         p_status: filter.status,
         p_category_id: filter.category ?? null,
         p_location_code: filter.location ?? null,
+        p_site_id: filter.site ?? null,
         p_low_stock: filter.lowStock,
         p_export_type: exportType,
         p_include_custom: includeCustom,

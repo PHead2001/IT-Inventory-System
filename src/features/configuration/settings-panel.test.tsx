@@ -81,6 +81,25 @@ beforeEach(() => {
   mocks.refresh.mockReset();
 });
 
+it('explains read-only settings without exposing configuration mutations', () => {
+  render(
+    <SettingsPanel
+      categories={[source]}
+      labelDefaults={defaults}
+      canManage={false}
+    />,
+  );
+  expect(screen.getByRole('note')).toHaveTextContent(
+    'requires an active staff membership with configuration access',
+  );
+  expect(screen.getByText('Source')).toBeVisible();
+  expect(screen.getByRole('combobox', { name: 'Size' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Add category' })).toBeNull();
+  expect(
+    screen.queryByRole('button', { name: 'Save shared defaults' }),
+  ).toBeNull();
+});
+
 it('requires a replacement for history-only references and explains tombstone retention', async () => {
   mocks.review.mockImplementation(
     async (_source: string, replacement: string | null) =>
