@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 import { PDFDocument } from 'pdf-lib';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -13,16 +15,21 @@ async function login(page: Page, role: 'staff' | 'viewer') {
     page.getByRole('heading', { name: 'Inventory workspace' }),
   ).toBeVisible();
 }
-async function confirm(form: Locator, name: string) {
-  await form
-    .getByRole('button', { name: 'Review ' + name.toLowerCase() })
-    .click();
+async function confirm(form: Locator) {
+  await form.getByRole('button', { name: 'Review metadata' }).click();
   await expect(
-    form.getByRole('region', { name: 'Review changes' }),
+    form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form
-    .getByRole('button', { name: 'Confirm ' + name.toLowerCase() })
-    .click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
+}
+function custodyForm(page: Page, title: string) {
+  return page
+    .locator('form')
+    .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+}
+async function submitCustody(form: Locator, title: string) {
+  await form.getByRole('button', { name: title, exact: true }).click();
+  await expect(form.getByRole('status')).toContainText('Custody saved');
 }
 function png(color: number) {
   const image = new PNG({ width: 4, height: 4 });
@@ -34,11 +41,13 @@ function png(color: number) {
   }
   return PNG.sync.write(image);
 }
+const sha256 = (bytes: Uint8Array) =>
+  createHash('sha256').update(bytes).digest('hex');
 
 test('quantity recognition photo uploads, previews for viewers, replaces and removes without stock changes', async ({
   page,
   browser,
-}) => {
+}, testInfo) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'staff');
@@ -46,7 +55,7 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   const form = page.getByRole('form', { name: 'Create quantity inventory' });
   const quantityName = 'Photo browser ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(quantityName);
-  await confirm(form, 'Create quantity inventory');
+  await confirm(form);
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   const detailUrl = page.url();
   const files = page.getByRole('region', { name: 'Inventory files' });
@@ -70,6 +79,10 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await expect(
     files.getByRole('button', { name: 'Preview first.png' }).locator('img'),
   ).toBeVisible();
+  await testInfo.attach('ready-quantity-photo-mobile', {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
   await page.goto('/inventory?q=' + encodeURIComponent(quantityName));
   const listRow = page
     .locator('li')
@@ -120,6 +133,27 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     .getByLabel('Replace a ready file')
     .selectOption({ label: 'first.png' });
   await files.getByLabel('Add recognition photo').setInputFiles({
+    name: 'invalid.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('not a PNG'),
+  });
+  const rejectedValidation = page.waitForResponse(
+    (response) => response.url().includes('/api/inventory-files/validate'),
+    { timeout: 20_000 },
+  );
+  await files.getByRole('button', { name: 'Upload and review' }).click();
+  expect((await rejectedValidation).ok()).toBe(false);
+  await expect(
+    cards.getByRole('listitem').getByText('first.png', { exact: true }),
+  ).toBeVisible();
+  await expect(files.getByRole('button', { name: 'View photo' })).toBeVisible();
+  await expect(
+    files.getByRole('button', { name: 'Upload and review' }),
+  ).toBeEnabled();
+  await files
+    .getByLabel('Replace a ready file')
+    .selectOption({ label: 'first.png' });
+  await files.getByLabel('Add recognition photo').setInputFiles({
     name: 'second.png',
     mimeType: 'image/png',
     buffer: png(40),
@@ -140,21 +174,33 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await files.getByRole('button', { name: 'Remove' }).click();
   await expect(files.getByText('No ready files yet.')).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+    page.getByRole('heading', {
+      name: 'Current stock — 0 available in storage',
+    }),
   ).toBeVisible();
 });
 
 test('asset PDF is structurally validated and downloads as an attachment', async ({
   page,
-}) => {
-  test.setTimeout(90_000);
+}, testInfo) => {
+  test.setTimeout(150_000);
   await login(page, 'staff');
+  const siteCode = 'FILES-' + randomUUID().slice(0, 12).toUpperCase();
+  const siteName = 'Fictional file site ' + siteCode;
+  await page.goto('/settings/sites');
+  const siteForm = custodyForm(page, 'Add property / site');
+  await siteForm
+    .getByLabel('Permanent code (uppercase letters, digits, hyphens)')
+    .fill(siteCode);
+  await siteForm.getByLabel('Name', { exact: true }).fill(siteName);
+  await siteForm.getByRole('button', { name: 'Save site' }).click();
+  await expect(siteForm.getByRole('status')).toContainText('Site saved');
   await page.goto('/inventory/assets/new');
-  const form = page.getByRole('form', { name: 'Create serialized asset' });
+  const form = page.getByRole('form', { name: 'Create asset inventory' });
   const assetName = 'PDF browser ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(assetName);
-  await chooseLocation(form, 'Destination location', 'ITC-RACK');
-  await confirm(form, 'Create serialized asset');
+  await chooseLocation(form, 'Current location', 'ITC-RACK');
+  await confirm(form);
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const pdf = await PDFDocument.create();
   pdf.addPage([300, 300]);
@@ -176,10 +222,31 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   await expect(
     cards.getByRole('listitem').getByText('manual.pdf', { exact: true }),
   ).toBeVisible();
+  const assetUrl = page.url();
+  await testInfo.attach('ready-asset-pdf-desktop', {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
+  const assign = custodyForm(page, 'Assign asset to a site');
+  await assign
+    .getByLabel('Destination site')
+    .selectOption({ label: `${siteName} (${siteCode})` });
+  await submitCustody(assign, 'Assign asset to a site');
+  await page.reload();
+  await expect(
+    page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
+  ).toBeVisible();
+  await expect(cards.getByText('manual.pdf', { exact: true })).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
   await files.getByRole('button', { name: 'Download PDF' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('manual.pdf');
+  expect(sha256(await readFile(await download.path()))).toBe(sha256(bytes));
+  const returned = custodyForm(page, 'Return to storage');
+  await chooseLocation(returned, 'Return to storage', 'ITC-RACK');
+  await submitCustody(returned, 'Return to storage');
+  await page.goto(assetUrl);
+  await expect(cards.getByText('manual.pdf', { exact: true })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept('Updated manual title'));
   await files.getByRole('button', { name: 'Rename' }).click();
   await expect(
@@ -200,4 +267,37 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     })
     .first();
   await expect(listRow.getByText('1 PDF')).toBeVisible();
+  await page.goto(assetUrl);
+  await files
+    .getByLabel('Replace a ready file')
+    .selectOption({ label: 'Updated manual title' });
+  const replacement = await PDFDocument.create();
+  replacement.addPage([400, 400]);
+  const replacementBytes = await replacement.save();
+  await files.getByLabel('Add photo or PDF').setInputFiles({
+    name: 'replacement.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(replacementBytes),
+  });
+  const replaceValidation = page.waitForResponse(
+    (response) => response.url().includes('/api/inventory-files/validate'),
+    { timeout: 20_000 },
+  );
+  await files.getByRole('button', { name: 'Upload and review' }).click();
+  expect((await replaceValidation).ok()).toBe(true);
+  await expect(
+    cards.getByText('replacement.pdf', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    cards.getByText('Updated manual title', { exact: true }),
+  ).toHaveCount(0);
+  const replacementDownload = page.waitForEvent('download');
+  await files.getByRole('button', { name: 'Download PDF' }).click();
+  const savedReplacement = await replacementDownload;
+  expect(savedReplacement.suggestedFilename()).toBe('replacement.pdf');
+  expect(sha256(await readFile(await savedReplacement.path()))).toBe(
+    sha256(replacementBytes),
+  );
+  await files.getByRole('button', { name: 'Remove' }).click();
+  await expect(files.getByText('No ready files yet.')).toBeVisible();
 });

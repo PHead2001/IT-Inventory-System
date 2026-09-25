@@ -7,6 +7,7 @@ try {
     'test',
     'test:preview-access',
     'test:export:memory',
+    'test:file:inspection',
     'test:e2e:list',
     'build',
   ])

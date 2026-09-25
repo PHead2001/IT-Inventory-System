@@ -84,15 +84,50 @@ are worker evidence verified by the lead, not a second reviewer runtime executio
   is claimed.
 - A separate high-risk source review confirmed that Storage's preflight RLS test
   rolls back before streaming and its final metadata upsert uses elevated access.
-  RLS locks alone do not establish completion-time immutability. A bucket-scoped
-  completion guard and deterministic post-preflight race tests are in progress;
-  the Files boundary is not accepted until real local and hosted proof pass.
+  RLS locks alone do not establish completion-time immutability. The bucket-scoped
+  completion guard and deterministic post-preflight race tests are now implemented;
+  independent high-risk source re-review found no remaining issue in that boundary.
+  The Files boundary is not accepted until the full real local and hosted suites pass.
 - Read-only provider inspection confirmed PR20's nondefault Supabase child
   `bojqpqdsmjyrxlgfgqux` under `dndqydmuqoduwaoujfki`, with the integration branch
   name and PR20 association. Its latest observed migration is
   `20260925003000`. The Vercel preview `dpl_6HWPo347roSGEmWurLASMfSpiPjx` is READY
   at `4504e74`; it does not yet contain the pending custody/files work. Reverify
   the eventual candidate and child identity before hosted writes.
+- At exact `ea9cf647bd851ac30a5b9df2cecb06d3d1066ac1`, Foundation CI run
+  `36162534399` passed the app job. Its database job applied migrations, then
+  stopped at two older pgTAP label-context expectations: the new readable shelf
+  paths replaced code-only text. Those two assertions now check both paths and
+  counts, with separate stable location-code and quantity-UUID checks. Their
+  local runtime rerun and a fresh exact-SHA CI run are pending. This failure
+  occurred before the Files integration; it is not evidence of a Files result.
+- The latest Codex review `5320263765` of the `ea9cf647` candidate reported a
+  precision finding. Its focused correction passed seven tests locally. Five review
+  threads remain open until the fix is pushed, exact-SHA CI passes, and the
+  review loop confirms resolution.
+- The file-completion contract first passed 31 focused checks twice locally.
+  Its expanded 55-check run now covers ready PDF byte survival, duplicate object
+  bytes, terminal-path resurrection denial, derived cancellation, and key-lock
+  expiry. The canonical `test:db` run visibly completed 477 pgTAP assertions,
+  foundation/inventory/low-stock/configuration/metadata/custody/custody-read
+  integration, and those 55 completion checks. The PTY disappeared before the
+  following `files.ts` result, so the overall canonical database run is
+  **unverified**, not passed. The completion test is wired immediately before
+  `files.ts` in the canonical script; rerun to terminal evidence is required.
+- A standalone real worker IPC test exercised `inspect-worker.cjs` with 25
+  accepted/rejected cases in approximately 11.5 seconds: valid PDF/JPEG/PNG/
+  still WebP, content-type spoofing, EXIF orientation and stripping, animated
+  WebP/HEIC rejection, byte/pixel bounds, and malformed, encrypted, page-heavy
+  and object-heavy PDFs. Every worker was terminated after its result. It is
+  now part of `validate:app` as `test:file:inspection`. This does not prove the
+  server wrapper's 20-second timeout or ordinary Files browser/Storage flow.
+- The owner authorized preview-only HMAC setup. A matching database key is
+  installed in isolated child `bojqpqdsmjyrxlgfgqux`, and
+  `INVENTORY_FILE_KEYS_JSON` is configured as a Vercel Secret for Preview on
+  `feat/integrated-inventory-capabilities` only. Activation awaits the next
+  branch deployment and authenticated runtime proof. The current READY Vercel
+  deployment `dpl_2M8PLTu6x75uRUx1FQXJo6ZU2Uva` is at `ea9cf647`; its
+  readiness alone does not prove file lifecycle or the newly configured key.
 
 ## Capability coverage
 
@@ -122,15 +157,15 @@ capture/test location and cleanup outcome; do not store credentials or bearer UR
 
 ## Deployment prerequisites
 
-| Boundary            | Required setup or proof                                                                                                                                                                                                                                                                                                                                   | State                                                   |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| File transport      | Keep file bytes on browser-to-Supabase Storage paths; the Vercel validation request contains identifiers, not a 20 MiB body. Vercel documents a 4.5 MB function payload limit. Supabase supports standard uploads of this size but recommends resumable uploads above 6 MB; prove interruption/retry behavior.                                            | Pending hosted proof                                    |
-| Bucket and policies | Apply the additive migration, then verify the private `inventory-files` bucket, 20 MiB limit, allowed MIME types and policies through actual Storage operations. Database migration success alone is insufficient service-readiness evidence.                                                                                                             | Pending                                                 |
-| Validation keys     | Install a fresh child-specific key in the private DB key registry and the matching server-only `INVENTORY_FILE_KEYS_JSON` in the corresponding branch preview. Verify ID, activation and expiry without exposing values. No service-role client in ordinary requests. Use local `.env.*.local` material only after `git check-ignore` confirms exclusion. | Pending                                                 |
-| Linux runtime       | Verify the deployed Node validation route loads its worker, Sharp native dependencies and PDF parser. A Windows build trace is not Linux execution proof. Confirm function bundle size and the configured 60-second invocation budget.                                                                                                                    | Pending                                                 |
-| Resource bounds     | Exercise maximum-size/complexity supported image/PDF inputs and concurrent validation. Worker old-space limits do not cover ArrayBuffers or native image allocations; record process-memory and deadline behavior without claiming a total-memory sandbox.                                                                                                | Pending                                                 |
-| Access and cleanup  | Use separate temporary staff/viewer/maintainer fixtures; preserve the standing preview fixture. Verify authenticated private downloads, deactivation/removal behavior and browser-cache limitations. Delete bytes through supported Storage APIs and confirm bounded cleanup retries.                                                                     | Pending                                                 |
-| Independent PR19    | Owner merged PR19 into main `281a0f2`; integration merge `096ff10` includes it. Scheduled preview recovery is removed; delayed/reset previews require event-driven or manual reconciliation.                                                                                                                                                              | Merged and integrated; commit evidence verified by lead |
+| Boundary            | Required setup or proof                                                                                                                                                                                                                                                                                                                                   | State                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| File transport      | Keep file bytes on browser-to-Supabase Storage paths; the Vercel validation request contains identifiers, not a 20 MiB body. Vercel documents a 4.5 MB function payload limit. Supabase supports standard uploads of this size but recommends resumable uploads above 6 MB; prove interruption/retry behavior.                                            | Pending hosted proof                                                                                                                        |
+| Bucket and policies | Apply the additive migration, then verify the private `inventory-files` bucket, 20 MiB limit, allowed MIME types and policies through actual Storage operations. Database migration success alone is insufficient service-readiness evidence.                                                                                                             | Pending                                                                                                                                     |
+| Validation keys     | Install a fresh child-specific key in the private DB key registry and the matching server-only `INVENTORY_FILE_KEYS_JSON` in the corresponding branch preview. Verify ID, activation and expiry without exposing values. No service-role client in ordinary requests. Use local `.env.*.local` material only after `git check-ignore` confirms exclusion. | Matching isolated child key and branch-scoped Vercel Preview Secret configured; next-deployment activation and hosted runtime proof pending |
+| Linux runtime       | Verify the deployed Node validation route loads its worker, Sharp native dependencies and PDF parser. A Windows build trace is not Linux execution proof. Confirm function bundle size and the configured 60-second invocation budget.                                                                                                                    | Pending                                                                                                                                     |
+| Resource bounds     | Exercise maximum-size/complexity supported image/PDF inputs and concurrent validation. Worker old-space limits do not cover ArrayBuffers or native image allocations; record process-memory and deadline behavior without claiming a total-memory sandbox.                                                                                                | Pending                                                                                                                                     |
+| Access and cleanup  | Use separate temporary staff/viewer/maintainer fixtures; preserve the standing preview fixture. Verify authenticated private downloads, deactivation/removal behavior and browser-cache limitations. Delete bytes through supported Storage APIs and confirm bounded cleanup retries.                                                                     | Pending                                                                                                                                     |
+| Independent PR19    | Owner merged PR19 into main `281a0f2`; integration merge `096ff10` includes it. Scheduled preview recovery is removed; delayed/reset previews require event-driven or manual reconciliation.                                                                                                                                                              | Merged and integrated; commit evidence verified by lead                                                                                     |
 
 Platform references: [Vercel function limits](https://vercel.com/docs/functions/limitations),
 [Supabase standard uploads](https://supabase.com/docs/guides/storage/uploads/standard-uploads),
