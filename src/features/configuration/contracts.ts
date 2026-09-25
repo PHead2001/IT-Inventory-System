@@ -52,6 +52,10 @@ export type ConfigurationResult = {
   asset_count?: string;
   historical_quantity_count?: string;
   historical_asset_count?: string;
+  authored_revision_count?: string;
+  retained_value_count?: string;
+  quantity_needs_metadata_count?: string;
+  asset_needs_metadata_count?: string;
   tombstoned?: boolean;
 };
 export type ConfigurationState =
@@ -69,6 +73,11 @@ export type RemovalReview = {
   asset_count: string;
   historical_quantity_count: string;
   historical_asset_count: string;
+  authored_revision_count: string;
+  retained_value_count: string;
+  quantity_needs_metadata_count: string;
+  asset_needs_metadata_count: string;
+  will_tombstone: boolean;
   expires_at: string;
 };
 const resultSchema = z.object({
@@ -81,6 +90,10 @@ const resultSchema = z.object({
   asset_count: total.optional(),
   historical_quantity_count: total.optional(),
   historical_asset_count: total.optional(),
+  authored_revision_count: total.optional(),
+  retained_value_count: total.optional(),
+  quantity_needs_metadata_count: total.optional(),
+  asset_needs_metadata_count: total.optional(),
   tombstoned: z.boolean().optional(),
 });
 export const removalReviewSchema = z.object({
@@ -95,6 +108,11 @@ export const removalReviewSchema = z.object({
   asset_count: total,
   historical_quantity_count: total,
   historical_asset_count: total,
+  authored_revision_count: total,
+  retained_value_count: total,
+  quantity_needs_metadata_count: total,
+  asset_needs_metadata_count: total,
+  will_tombstone: z.boolean(),
   expires_at: z.iso.datetime({ offset: true }),
 });
 

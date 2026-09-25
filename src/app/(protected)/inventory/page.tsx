@@ -76,6 +76,12 @@ export default async function InventoryPage({
           >
             Download matching low-stock CSV
           </a>
+          <a
+            className="min-h-11 py-3 text-cyan-300 underline"
+            href={'/api/exports/inventory?customFields=true&' + exportParams}
+          >
+            Download inventory CSV with custom fields
+          </a>
         </div>
         {filters.lowStock && (
           <p className="mb-4 text-sm text-slate-400">
