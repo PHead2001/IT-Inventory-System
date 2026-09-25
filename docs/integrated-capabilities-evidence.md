@@ -59,14 +59,34 @@ are worker evidence verified by the lead, not a second reviewer runtime executio
 - Focused custody-read integration passed after the dashboard migration applied.
   The first custody browser run failed with missing Next build manifests while
   another worker also built the shared `.next` output. Exclusive build/runtime
-  ownership is established for the rerun; those failures do not establish any
-  application journey as passing.
+  ownership was established for the rerun. Subsequent real browser tests found
+  site-held label lookup failures, ambiguous opening-RPC identifiers and narrow
+  label-search overflow. Forward migrations `20260925160200`, `20260925160300`
+  and `20260925162250` plus the responsive label fix now pass focused low-stock,
+  custody and custody-read integration, generated-type checking and all three
+  custody browser journeys. The lead inspected the desktop site and mobile
+  label/assigned-asset captures in ignored `test-results/custody-review/`.
+  Full integrated and hosted certification remain pending.
+- Codex review of pushed checkpoint `39c48f1` independently reported the site-held
+  label lookup problem. Four threads remain open. CI at that checkpoint passed
+  475 pgTAP assertions and the foundation/inventory integration tests, then failed
+  the old no-repeated-total export assertion; the app job failed formatting of
+  the concurrently edited custody browser test. The forward export fix preserves
+  the old assertion and puts explicitly named item-wide totals only on the first
+  filtered holding row. Focused local proof above covers that repair.
 - Real local Storage acceptance remains incomplete: a near-20 MiB upload after
   the upload/cancel/cleanup sequence reproducibly times out at Kong. Isolated
   large uploads succeeded, and raw versus multipart bodies and graceful helper
-  shutdown did not remove the failure. Reservation-size differences and preceding
-  operations still require controlled comparison. No root cause or
-  complete Storage gate is claimed.
+  shutdown did not remove the failure. A controlled classifier then proved both
+  false-size and honest-size near-20 MiB baseline uploads succeed, while a genuine
+  unreserved upload denial precedes the next large-upload timeout. Connection/
+  provider-body handling remains under investigation; no complete Storage gate
+  is claimed.
+- A separate high-risk source review confirmed that Storage's preflight RLS test
+  rolls back before streaming and its final metadata upsert uses elevated access.
+  RLS locks alone do not establish completion-time immutability. A bucket-scoped
+  completion guard and deterministic post-preflight race tests are in progress;
+  the Files boundary is not accepted until real local and hosted proof pass.
 - Read-only provider inspection confirmed PR20's nondefault Supabase child
   `bojqpqdsmjyrxlgfgqux` under `dndqydmuqoduwaoujfki`, with the integration branch
   name and PR20 association. Its latest observed migration is

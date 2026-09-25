@@ -62,11 +62,21 @@ async function submitCustody(form: Locator, title: string) {
   await expect(form.getByRole('status')).toContainText('Custody saved');
 }
 async function noHorizontalOverflow(page: Page) {
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
+  const layout = await page.evaluate(() => ({
+    viewport: innerWidth,
+    document: document.documentElement.scrollWidth,
+    offenders: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .filter((node) => node.getBoundingClientRect().right > innerWidth + 1)
+      .slice(0, 10)
+      .map((node) => ({
+        tag: node.tagName,
+        className: node.className,
+        right: Math.round(node.getBoundingClientRect().right),
+      })),
+  }));
+  expect(layout.document, JSON.stringify(layout)).toBeLessThanOrEqual(
+    layout.viewport,
+  );
 }
 async function siteId(code: string) {
   const client = createClient(
@@ -94,7 +104,7 @@ async function siteId(code: string) {
 
 test('office storage and property custody keep an asset UUID and avoid fictional room links', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
@@ -166,6 +176,10 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await expect(
     page.getByRole('heading', { name: 'Custody history' }),
   ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('mobile-assigned-asset.png'),
+    fullPage: true,
+  });
   await expect(
     page.getByRole('link', { name: 'Print asset label' }),
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
@@ -235,10 +249,19 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await expect(returnedQr).toBeVisible();
   expect(await returnedQr.getAttribute('src')).toBe(originalQrBytes);
   await noHorizontalOverflow(page);
+  await page
+    .getByRole('region', { name: 'Label search results' })
+    .getByRole('link', { name })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath('mobile-label-search.png'),
+  });
   await page.getByRole('button', { name: 'Sign out' }).click();
   await signIn(page, 'viewer');
   await page.goto('/sites/' + siteCode);
-  await expect(page.getByRole('heading', { name: siteName, exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: siteName, exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole('link', { name: 'Record existing serialized asset' }),
   ).toHaveCount(0);
@@ -253,7 +276,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
 
 test('site movements distinguish available, assigned and recorded; dated activity leaves holdings current', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(120_000);
   await signIn(page);
   const aCode = code('E2E-A');
@@ -372,6 +395,9 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(
     page.getByText('Transferred in / out (quantity units)').locator('..'),
   ).toContainText('1 / 0');
+  await page.screenshot({
+    path: testInfo.outputPath('desktop-site-holdings.png'),
+  });
   await page.getByLabel('From (UTC)').fill('2000-01-01T00:00');
   await page.getByLabel('Until (UTC, exclusive)').fill('2000-01-02T00:00');
   await page.getByRole('button', { name: 'Filter activity' }).click();
@@ -415,7 +441,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
 
 test('opening holdings and write-off retain history without inventing a closet issue', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
@@ -451,6 +477,10 @@ test('opening holdings and write-off retain history without inventing a closet i
   await expect(
     page.getByText('Archive is blocked while site holdings remain.'),
   ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('mobile-opening-holding.png'),
+    fullPage: true,
+  });
   const writeOff = custodyForm(page, 'Write off at site');
   await writeOff
     .getByLabel('Source site')

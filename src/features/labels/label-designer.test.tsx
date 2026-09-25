@@ -173,6 +173,41 @@ it('keeps a pending Add from being silently cancelled by print settings or queue
   expect(within(queue).getAllByRole('spinbutton')[0]).toHaveValue(3);
 });
 
+it('keeps long search result names, identifiers, and site context inside the flexible text column', async () => {
+  const longName = 'A'.repeat(200);
+  const longContext = `Site ${'North'.repeat(50)}: 1 + 4 more; see item details`;
+  mocks.searchLabelRecords.mockResolvedValue({
+    rows: [
+      {
+        kind: 'asset',
+        key: asset.key,
+        name: longName,
+        categoryName: 'Computers',
+        status: 'active',
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+        holdingContext: longContext,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} initial={[]} />);
+  const link = await screen.findByRole('link', { name: longName });
+  const textColumn = link.parentElement;
+  expect(textColumn).toHaveClass('min-w-0', 'flex-1', 'basis-56');
+  expect(textColumn).toHaveClass('[overflow-wrap:anywhere]');
+  expect(link).toHaveClass('[overflow-wrap:anywhere]');
+  expect(screen.getByText(/see item details/)).toHaveClass(
+    '[overflow-wrap:anywhere]',
+  );
+  expect(textColumn?.parentElement).toHaveClass('max-w-full', 'min-w-0');
+  expect(screen.getByRole('button', { name: 'Add to queue' })).toBeEnabled();
+});
+
 it('prints every mixed-queue copy only after a fresh exact-ID read', async () => {
   vi.stubGlobal(
     'print',

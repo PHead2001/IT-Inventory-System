@@ -278,12 +278,28 @@ async function main() {
     'export joins each physical and site holding only once',
   );
   assert.ok(
-    snapshot.rows.every(
-      (row) =>
-        row.available_quantity === '8' &&
-        row.assigned_quantity === '2' &&
-        row.recorded_quantity === '10',
-    ),
+    snapshot.rows.every((row) => !Object.hasOwn(row, 'recorded_total')),
+    'ordinary inventory export retains the historical absence of recorded_total',
+  );
+  assert.deepEqual(
+    snapshot.rows
+      .filter((row) => row.recorded_quantity !== null)
+      .map((row) => [
+        row.available_quantity,
+        row.assigned_quantity,
+        row.recorded_quantity,
+      ]),
+    [['8', '2', '10']],
+    'named definition totals appear once across four holdings',
+  );
+  assert.ok(
+    snapshot.rows
+      .filter((row) => row.recorded_quantity === null)
+      .every(
+        (row) =>
+          row.available_quantity === null && row.assigned_quantity === null,
+      ),
+    'later holding rows do not repeat aggregate stock totals',
   );
   assert.ok(
     snapshot.rows.every((row) => {
@@ -298,6 +314,31 @@ async function main() {
       );
     }),
     'custom-field export retains field UUID and validated revision on every holding row',
+  );
+  const selectedSiteExport = (await rpc(
+    viewer.client,
+    'inventory_export_snapshot_v3',
+    {
+      p_query: prefix + ' cables',
+      p_type: 'quantity',
+      p_status: 'active',
+      p_category_id: null,
+      p_location_code: null,
+      p_site_id: site.entity_id,
+      p_low_stock: false,
+      p_export_type: 'inventory',
+      p_include_custom: false,
+    },
+  )) as { rows: Record<string, unknown>[]; total: string };
+  assert.equal(selectedSiteExport.total, '1');
+  assert.deepEqual(
+    [
+      selectedSiteExport.rows[0].available_quantity,
+      selectedSiteExport.rows[0].assigned_quantity,
+      selectedSiteExport.rows[0].recorded_quantity,
+    ],
+    ['8', '2', '10'],
+    'site filter includes item-wide totals once for its selected definition',
   );
   const lowStock = (await rpc(viewer.client, 'low_stock_dashboard', {
     p_page: 1,
@@ -452,7 +493,7 @@ async function main() {
     source_site_id: otherSite.entity_id,
     destination_location_id: office,
   });
-  await change(staff.client, 'asset_site_change', {
+  const assignedTwice = await change(staff.client, 'asset_site_change', {
     action: 'assign',
     asset_id: asset.entity_id,
     expected_version: returnedAsset.version,
@@ -471,6 +512,31 @@ async function main() {
   assert.equal(assetSearch.rows[0].entity_id, asset.entity_id);
   assert.equal(assetSearch.rows[0].location_id, null);
   assert.equal(assetSearch.rows[0].custody_kind, 'site');
+  const assetLabelSearch = (await rpc(viewer.client, 'inventory_label_search', {
+    p_query: prefix + ' laptop',
+    p_type: 'asset',
+    p_status: 'active',
+  })) as {
+    rows: { entity_id: string; holding_context: string }[];
+    total: number;
+  };
+  assert.equal(assetLabelSearch.total, 1);
+  assert.equal(assetLabelSearch.rows[0].entity_id, asset.entity_id);
+  assert.ok(
+    assetLabelSearch.rows[0].holding_context.includes(
+      prefix + ' second property',
+    ),
+  );
+  const currentAssetLabel = (await rpc(
+    viewer.client,
+    'inventory_label_resolve',
+    {
+      p_selection: [{ kind: 'asset', key: asset.entity_id }],
+    },
+  )) as unknown as { key: string; context: string; state: string }[];
+  assert.equal(currentAssetLabel.length, 1);
+  assert.equal(currentAssetLabel[0].key, asset.entity_id);
+  assert.match(currentAssetLabel[0].context, /site/i);
   const activity = (await rpc(viewer.client, 'site_activity_summary', {
     p_site_id: otherSite.entity_id,
   })) as {
@@ -507,6 +573,47 @@ async function main() {
     'date filters affect events, not current holdings',
   );
   assert.equal(historical.quantity.opening_units, '0');
+  const retiredAsset = await change(staff.client, 'asset_site_change', {
+    action: 'retire',
+    asset_id: asset.entity_id,
+    expected_version: assignedTwice.version,
+    source_site_id: otherSite.entity_id,
+    reason: 'Fictional end-of-life evidence',
+  });
+  assert.equal(retiredAsset.changed, true);
+  const retiredLabel = (await rpc(viewer.client, 'inventory_label_resolve', {
+    p_selection: [{ kind: 'asset', key: asset.entity_id }],
+  })) as unknown as { key: string; state: string }[];
+  assert.equal(
+    retiredLabel.length,
+    1,
+    'retired unlocated asset remains printable by immutable UUID',
+  );
+  assert.equal(retiredLabel[0].key, asset.entity_id);
+  assert.equal(retiredLabel[0].state, 'retired');
+
+  const retiredStorageAsset = await change(staff.client, 'asset_create_v2', {
+    name: prefix + ' retired storage laptop',
+    category_id: categoryId,
+    location_id: office,
+    expected_published_revision_id: published.published_revision_id,
+    custom_patch: { set: {}, unset: [] },
+  });
+  await change(staff.client, 'asset_retire', {
+    asset_id: retiredStorageAsset.entity_id,
+    expected_version: 1,
+    reason: 'Fictional retired storage context',
+  });
+  const retiredStorageLabel = (await rpc(
+    viewer.client,
+    'inventory_label_resolve',
+    {
+      p_selection: [{ kind: 'asset', key: retiredStorageAsset.entity_id }],
+    },
+  )) as unknown as { context: string; state: string }[];
+  assert.equal(retiredStorageLabel[0].state, 'retired');
+  assert.match(retiredStorageLabel[0].context, /Last recorded storage:/);
+  assert.match(retiredStorageLabel[0].context, /General Storage \/ Unsorted/);
 
   const empty = await change(staff.client, 'quantity_create_v2', {
     name: prefix + ' unlocated empty definition',
@@ -547,6 +654,114 @@ async function main() {
   )) as { rows: Record<string, unknown>[]; total: string };
   assert.equal(emptyExport.total, '1');
   assert.equal(emptyExport.rows[0].entity_id, empty.entity_id);
+
+  const openedDefinition = await change(staff.client, 'quantity_site_open', {
+    name: prefix + ' recorded at site',
+    description: null,
+    category_id: categoryId,
+    manufacturer: null,
+    model: null,
+    reorder_threshold: null,
+    site_id: otherSite.entity_id,
+    quantity: 2,
+    expected_published_revision_id: published.published_revision_id,
+    custom_patch: { set: {}, unset: [] },
+    reason: null,
+    reference: null,
+  });
+  assert.equal(openedDefinition.version, '1');
+  const openedTotals = await viewer.client
+    .from('inventory_quantity_totals')
+    .select('available_quantity,assigned_quantity,recorded_quantity')
+    .eq('item_id', openedDefinition.entity_id)
+    .single();
+  assert.equal(openedTotals.error, null);
+  assert.deepEqual(openedTotals.data, {
+    available_quantity: '0',
+    assigned_quantity: '2',
+    recorded_quantity: '2',
+  });
+  const siteOnlyLabel = (await rpc(viewer.client, 'inventory_label_resolve', {
+    p_selection: [{ kind: 'quantity', key: openedDefinition.entity_id }],
+  })) as unknown as { key: string; context: string }[];
+  assert.equal(siteOnlyLabel.length, 1);
+  assert.equal(siteOnlyLabel[0].key, openedDefinition.entity_id);
+  assert.match(siteOnlyLabel[0].context, /site/i);
+  let holdingVersion = '1';
+  for (let index = 0; index < 4; index++) {
+    const extraSite = await change(staff.client, 'site_create', {
+      code: `A-READ-${index}-${uid().slice(0, 8).toUpperCase()}`,
+      name:
+        index === 0
+          ? 'Long fictional property ' + 'x'.repeat(175)
+          : `${prefix} extra property ${index}`,
+    });
+    const added = await change(staff.client, 'quantity_site_change', {
+      action: 'opening',
+      item_id: openedDefinition.entity_id,
+      expected_version: holdingVersion,
+      destination_site_id: extraSite.entity_id,
+      quantity: 1,
+    });
+    holdingVersion = added.version as string;
+  }
+  const manyHoldingsLabel = (await rpc(
+    viewer.client,
+    'inventory_label_resolve',
+    {
+      p_selection: [{ kind: 'quantity', key: openedDefinition.entity_id }],
+    },
+  )) as unknown as { key: string; context: string }[];
+  assert.equal(manyHoldingsLabel.length, 1);
+  assert.match(manyHoldingsLabel[0].context, /\+ 2 more; see item details/);
+  assert.match(manyHoldingsLabel[0].context, /Long fictional property/);
+  assert.match(manyHoldingsLabel[0].context, /…/);
+  assert.ok(
+    !manyHoldingsLabel[0].context.includes('extra property 3'),
+    'only three deterministic paths are expanded',
+  );
+  const manyHoldingsSearch = (await rpc(
+    viewer.client,
+    'inventory_label_search',
+    {
+      p_query: prefix + ' recorded at site',
+      p_type: 'quantity',
+    },
+  )) as { rows: { entity_id: string; holding_context: string }[] };
+  assert.equal(
+    manyHoldingsSearch.rows[0].entity_id,
+    openedDefinition.entity_id,
+  );
+  assert.match(
+    manyHoldingsSearch.rows[0].holding_context,
+    /\+ 2 more; see item details/,
+  );
+  const openedAsset = await change(staff.client, 'asset_site_open', {
+    name: prefix + ' recorded serialized equipment',
+    description: null,
+    category_id: categoryId,
+    manufacturer: null,
+    model: null,
+    asset_tag: null,
+    serial_number: null,
+    site_id: otherSite.entity_id,
+    expected_published_revision_id: published.published_revision_id,
+    custom_patch: { set: {}, unset: [] },
+    reason: null,
+    reference: null,
+  });
+  assert.equal(openedAsset.version, '1');
+  const openingAssetRow = await viewer.client
+    .from('serialized_assets')
+    .select('location_id,site_id,status')
+    .eq('id', openedAsset.entity_id)
+    .single();
+  assert.equal(openingAssetRow.error, null);
+  assert.deepEqual(openingAssetRow.data, {
+    location_id: null,
+    site_id: otherSite.entity_id,
+    status: 'active',
+  });
 
   const denied = await outsider.client.rpc('inventory_search_v3', {
     p_query: prefix,

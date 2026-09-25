@@ -108,6 +108,14 @@ not change during assignment or rename. Show-in-room is offered only for codes
 actually bound in the closet JSON; office and site views use conventional
 navigation with a clear unmodeled explanation.
 
+Ordinary inventory CSV retains its legacy columns and omits
+`recorded_total`. The named `available_quantity`, `assigned_quantity`, and
+`recorded_quantity` totals describe the whole quantity definition, so they appear
+only on its first deterministic exported holding row; later holding rows leave
+those cells empty. A site or location filter still includes the totals once per
+selected definition. Low-stock export remains one row per definition and keeps
+its existing `recorded_total` column.
+
 `location_configuration_events` and `site_configuration_events` record
 before/after configuration changes without pretending they were inventory
 movements. Historical IDs and event snapshots remain readable after renames or

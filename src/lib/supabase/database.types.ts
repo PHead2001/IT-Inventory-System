@@ -2008,6 +2008,10 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_label_context: {
+        Args: { p_entity_id: string; p_kind: string }
+        Returns: string
+      }
       inventory_label_resolve: { Args: { p_selection: Json }; Returns: Json }
       inventory_label_search: {
         Args: {

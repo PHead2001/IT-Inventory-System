@@ -122,6 +122,63 @@ describe('inventory CSV', () => {
       '"site","00000000-0000-4000-8000-000000000001","PROPERTY-A","\'=Unsafe",7,3,10',
     );
   });
+  it('keeps each physical holding while leaving repeated item-wide total cells blank', () => {
+    const base = {
+      entity_id: id,
+      kind: 'quantity',
+      name: 'Adapters',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      location_name: 'Storage',
+      breadcrumb: 'Office / Storage',
+      custody_kind: 'storage',
+    };
+    const csv = exportCsv(
+      'inventory',
+      {
+        rows: [
+          {
+            ...base,
+            quantity: 2,
+            location_code: 'ITO-A',
+            available_quantity: '7',
+            assigned_quantity: '3',
+            recorded_quantity: '10',
+          },
+          {
+            ...base,
+            quantity: 5,
+            location_code: 'ITO-B',
+            available_quantity: null,
+            assigned_quantity: null,
+            recorded_quantity: null,
+          },
+        ],
+        total: 2,
+        exported_at: at,
+      },
+      'Preview',
+    ).csv;
+    const [header, first, second] = csv.slice(1).split('\r\n');
+    const columns = header.split(',');
+    const firstCells = first.split(',');
+    const secondCells = second.split(',');
+    expect(firstCells[columns.indexOf('"Quantity at Location"')]).toBe('2');
+    expect(secondCells[columns.indexOf('"Quantity at Location"')]).toBe('5');
+    for (const [name, value] of [
+      ['"Available in Storage (Item-wide)"', '7'],
+      ['"Assigned to Sites (Item-wide)"', '3'],
+      ['"Total Recorded (Item-wide)"', '10'],
+    ]) {
+      const index = columns.indexOf(name);
+      expect(firstCells[index]).toBe(value);
+      expect(secondCells[index]).toBe('');
+    }
+  });
   it('rejects malformed or oversized snapshots instead of publishing partial data', () => {
     expect(() =>
       exportCsv(
