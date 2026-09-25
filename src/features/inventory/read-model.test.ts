@@ -93,22 +93,59 @@ describe('inventory read contracts', () => {
       ]),
     ).toThrow('location could not be resolved');
   });
+  it('keeps a site holding separate from storage availability and room location', () => {
+    const site = mapSearch(
+      searchRow.parse({
+        kind: 'quantity',
+        entity_id: other,
+        name: 'Cable',
+        category_name: 'Cables',
+        status: 'active',
+        location_id: null,
+        site_id: id,
+        site_code: 'PROPERTY-A',
+        site_name: 'Example Property',
+        custody_kind: 'site',
+        quantity: 3,
+        available_quantity: '7',
+        assigned_quantity: '3',
+        recorded_quantity: '10',
+        asset_tag: null,
+        serial_number: null,
+        recorded_total: 7,
+        reorder_threshold: 7,
+        stock_state: 'needs_restocking',
+      }),
+      [location],
+    );
+    expect(site).toMatchObject({
+      location: null,
+      site: { code: 'PROPERTY-A' },
+      quantity: 3,
+      availableQuantity: '7',
+      assignedQuantity: '3',
+      ownedQuantity: '10',
+    });
+  });
   it('maps the authoritative item-wide stock projection independently of form metadata', () => {
     expect(
       mapQuantityStockSummary({
-        recorded_total: 2,
-        reorder_threshold: 3,
+        available_quantity: '2',
+        assigned_quantity: '3',
+        recorded_quantity: '5',
         stock_state: 'needs_restocking',
       }),
     ).toEqual({
-      recordedTotal: 2,
-      reorderThreshold: 3,
+      availableQuantity: '2',
+      assignedQuantity: '3',
+      ownedQuantity: '5',
       stockState: 'needs_restocking',
     });
     expect(() =>
       mapQuantityStockSummary({
-        recorded_total: 2,
-        reorder_threshold: 3,
+        available_quantity: '2',
+        assigned_quantity: '3',
+        recorded_quantity: '5',
         stock_state: 'guessed',
       }),
     ).toThrow();

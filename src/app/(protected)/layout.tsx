@@ -3,6 +3,7 @@ import {
   Boxes,
   Map,
   MapPin,
+  Building2,
   History,
   LayoutDashboard,
   ScanLine,
@@ -96,6 +97,13 @@ export default async function ApplicationLayout({
           >
             <MapPin size={18} />
             Locations
+          </Link>
+          <Link
+            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
+            href="/sites"
+          >
+            <Building2 size={18} />
+            Properties / sites
           </Link>
           <Link
             className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"

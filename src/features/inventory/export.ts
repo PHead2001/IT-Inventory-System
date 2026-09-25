@@ -23,6 +23,14 @@ const inventoryRow = z.object({
   location_name: text,
   location_code: text,
   breadcrumb: text,
+  location_id: identity.nullable().optional(),
+  custody_kind: z.string().nullable().optional(),
+  site_id: identity.nullable().optional(),
+  site_code: text.optional(),
+  site_name: text.optional(),
+  available_quantity: safeDecimal.nullable().optional(),
+  assigned_quantity: safeDecimal.nullable().optional(),
+  recorded_quantity: safeDecimal.nullable().optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const lowStockRow = z.object({
@@ -31,6 +39,8 @@ const lowStockRow = z.object({
   reorder_threshold: z.number().int().nonnegative(),
   stock_state: z.enum(['needs_restocking', 'out_of_stock']),
   holding_context: z.string(),
+  available_quantity: safeDecimal.optional(),
+  assigned_quantity: safeDecimal.optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 const snapshot = <T extends z.ZodType>(row: T) =>
@@ -124,6 +134,14 @@ export function exportCsv(
       'Location Name',
       'Location Code',
       'Location Breadcrumb',
+      'Location ID',
+      'Custody',
+      'Site ID',
+      'Site Code',
+      'Site Name',
+      'Available in Storage (Item-wide)',
+      'Assigned to Sites (Item-wide)',
+      'Total Recorded (Item-wide)',
       'Exported At (UTC)',
       'Environment',
     ];
@@ -145,6 +163,14 @@ export function exportCsv(
           csvText(row.location_name),
           csvText(row.location_code),
           csvText(row.breadcrumb),
+          csvText(row.location_id),
+          csvText(row.custody_kind),
+          csvText(row.site_id),
+          csvText(row.site_code),
+          csvText(row.site_name),
+          csvNumber(row.available_quantity),
+          csvNumber(row.assigned_quantity),
+          csvNumber(row.recorded_quantity),
           csvText(exportedAt),
           csvText(environment),
         ];
@@ -169,7 +195,9 @@ export function exportCsv(
     'Manufacturer',
     'Model',
     'Status',
-    'Recorded Total',
+    'Total Recorded',
+    'Available in Storage',
+    'Assigned to Sites',
     'Reorder Threshold',
     'Stock State',
     'All Current Holdings and Locations',
@@ -189,6 +217,8 @@ export function exportCsv(
         csvText(row.model),
         csvText(row.status),
         csvNumber(row.recorded_total),
+        csvNumber(row.available_quantity),
+        csvNumber(row.assigned_quantity),
         csvNumber(row.reorder_threshold),
         csvText(
           row.stock_state === 'out_of_stock'

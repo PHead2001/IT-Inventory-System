@@ -80,7 +80,7 @@ describe('authenticated inventory downloads', () => {
   it('lets a current viewer download all filtered rows in one scoped RPC call', async () => {
     const response = await GET(
       request(
-        '?q=100%25_%5C&type=quantity&status=all&lowStock=true&page=8&export=low_stock',
+        '?q=100%25_%5C&type=quantity&status=all&lowStock=true&site=00000000-0000-4000-8000-000000000002&page=8&export=low_stock',
       ),
     );
     expect(response.status).toBe(200);
@@ -88,7 +88,7 @@ describe('authenticated inventory downloads', () => {
     expect(response.headers.get('Content-Disposition')).toBe(
       'attachment; filename="preview-low-stock-20260924T151837Z.csv"',
     );
-    expect(await response.text()).toContain('"Recorded Total"');
+    expect(await response.text()).toContain('"Total Recorded"');
     expect(mocks.snapshot).toHaveBeenCalledOnce();
     expect(mocks.snapshot).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -100,6 +100,7 @@ describe('authenticated inventory downloads', () => {
           p_status: 'all',
           p_category_id: null,
           p_location_code: null,
+          p_site_id: '00000000-0000-4000-8000-000000000002',
           p_low_stock: true,
           p_export_type: 'low_stock',
           p_include_custom: false,

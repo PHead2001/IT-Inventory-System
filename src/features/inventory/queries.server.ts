@@ -39,6 +39,9 @@ const dashboardSchema = z.object({
       name: z.string(),
       category_name: z.string(),
       recorded_total: z.number().int().nonnegative(),
+      available_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+      assigned_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+      recorded_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
       reorder_threshold: z.number().int().nonnegative(),
       stock_state: z.enum(['needs_restocking', 'out_of_stock']),
     }),
@@ -105,12 +108,13 @@ export async function getInventory(
   const { supabase } = await requireMember();
   const filter = readFilters(input);
   const [{ data, error }, locations] = await Promise.all([
-    supabase.rpc('inventory_search_v2', {
+    supabase.rpc('inventory_search_v3', {
       p_query: filter.query,
       p_type: filter.type,
       p_status: filter.status,
       p_category_id: filter.category,
       p_location_code: filter.location,
+      p_site_id: filter.site,
       p_page: filter.page,
       p_page_size: pageSize,
       p_low_stock: filter.lowStock,
@@ -162,6 +166,9 @@ export async function getLowStockDashboard(page = 1) {
       recordedTotal: row.recorded_total,
       reorderThreshold: row.reorder_threshold,
       stockState: row.stock_state,
+      availableQuantity: row.available_quantity,
+      assignedQuantity: row.assigned_quantity,
+      ownedQuantity: row.recorded_quantity,
     })),
     total: result.total,
     page: safePage,
@@ -242,10 +249,11 @@ export async function getQuantityDetail(
       .eq('item_id', id)
       .order('location_id'),
     supabase
-      .from('inventory_search_rows')
-      .select('recorded_total,reorder_threshold,stock_state')
-      .eq('entity_id', id)
-      .eq('kind', 'quantity')
+      .from('inventory_quantity_totals')
+      .select(
+        'available_quantity,assigned_quantity,recorded_quantity,stock_state',
+      )
+      .eq('item_id', id)
       .limit(1)
       .maybeSingle(),
     getLocations(),
@@ -260,13 +268,16 @@ export async function getQuantityDetail(
       archived: row.archived,
       reorderThreshold: row.reorder_threshold,
     },
-    stockSummary: mapQuantityStockSummary(
-      requireData(
-        stockSummary,
-        stockSummaryError,
-        'Stock state could not be loaded.',
+    stockSummary: {
+      ...mapQuantityStockSummary(
+        requireData(
+          stockSummary,
+          stockSummaryError,
+          'Stock state could not be loaded.',
+        ),
       ),
-    ),
+      reorderThreshold: row.reorder_threshold,
+    },
     balances: requireData(
       balances,
       balanceError,
@@ -308,13 +319,22 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
     history,
     duplicateSerialMatches,
     customDisplay,
+    siteResult,
   ] = await Promise.all([
     getLocations(),
     getCategories(),
     getHistory({ type: 'asset', entityId: id }),
     duplicateSerials(row.serial_number ?? '', id),
     describeValues(supabase, row.custom_values, row.category_id),
+    row.site_id
+      ? supabase
+          .from('sites')
+          .select('id,code,name')
+          .eq('id', row.site_id)
+          .single()
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  if (siteResult.error) throw new Error('Asset site could not be loaded.');
   return {
     asset: {
       ...metadata(row, categories),
@@ -323,7 +343,8 @@ export async function getAssetDetail(id: string): Promise<AssetDetail | null> {
       assetTag: row.asset_tag,
       serialNumber: row.serial_number,
     },
-    location: locationById(locations, row.location_id),
+    location: row.location_id ? locationById(locations, row.location_id) : null,
+    site: siteResult.data,
     history: history.rows,
     duplicateSerialMatches,
   };

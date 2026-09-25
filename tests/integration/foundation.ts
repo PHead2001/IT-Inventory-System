@@ -102,7 +102,11 @@ async function main() {
       );
     await a.query('commit');
     const error = await competing;
-    assert.equal(error?.code, 'P1016', 'higher-isolation hierarchy writer must abort');
+    assert.equal(
+      error?.code,
+      'P1016',
+      'higher-isolation hierarchy writer must abort',
+    );
     await b.query('rollback');
   } finally {
     await a.end();

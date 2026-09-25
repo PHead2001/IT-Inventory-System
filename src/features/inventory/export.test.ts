@@ -49,7 +49,9 @@ describe('inventory CSV', () => {
       },
       'Production',
     ).csv;
-    expect(low).toContain('"Recorded Total","Reorder Threshold"');
+    expect(low).toContain(
+      '"Total Recorded","Available in Storage","Assigned to Sites","Reorder Threshold"',
+    );
     expect(low).toContain('"\'=Danger"');
     expect(low).toContain('"1A [ITC-S1A]: 1; 1B [ITC-S1B]: 2"');
     const inventory = exportCsv(
@@ -82,6 +84,43 @@ describe('inventory CSV', () => {
     expect(inventory).toContain('"Preview"');
     expect(low).toContain('"Production"');
     expect(low).toContain('"All Current Holdings and Locations"');
+  });
+  it('exports site custody and item-wide decimal-string totals without formula execution', () => {
+    const csv = exportCsv(
+      'inventory',
+      {
+        rows: [
+          {
+            entity_id: id,
+            kind: 'quantity',
+            name: 'Adapters',
+            category_name: 'Parts',
+            manufacturer: null,
+            model: null,
+            status: 'active',
+            asset_tag: null,
+            serial_number: null,
+            quantity: 3,
+            location_name: null,
+            location_code: null,
+            breadcrumb: null,
+            custody_kind: 'site',
+            site_id: id,
+            site_code: 'PROPERTY-A',
+            site_name: '=Unsafe',
+            available_quantity: '7',
+            assigned_quantity: '3',
+            recorded_quantity: '10',
+          },
+        ],
+        total: 1,
+        exported_at: at,
+      },
+      'Preview',
+    ).csv;
+    expect(csv).toContain(
+      '"site","00000000-0000-4000-8000-000000000001","PROPERTY-A","\'=Unsafe",7,3,10',
+    );
   });
   it('rejects malformed or oversized snapshots instead of publishing partial data', () => {
     expect(() =>

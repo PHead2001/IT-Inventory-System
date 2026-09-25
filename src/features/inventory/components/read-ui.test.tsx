@@ -62,7 +62,9 @@ it('labels item-wide low stock while retaining the location holding quantity', (
   );
   expect(screen.getByText('2 units')).toBeVisible();
   expect(
-    screen.getByText(/Needs restocking · Item-wide total 3 \/ threshold 4/),
+    screen.getByText(
+      /Needs restocking · Available in storage 3 \/ threshold 4/,
+    ),
   ).toBeVisible();
 });
 it('shows record corrections as human readable history distinct from movement', () => {

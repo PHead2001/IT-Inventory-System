@@ -11,6 +11,12 @@ import { MetadataForm } from '@/features/metadata/metadata-form';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
 import {
+  getSites,
+  getEntityAssignments,
+} from '@/features/custody/queries.server';
+import { CustodyChangeForm } from '@/features/custody/custody-change-form';
+import { FilesPanel } from '@/features/files/files-panel';
+import {
   HistoryList,
   LocationLink,
   panel,
@@ -24,10 +30,12 @@ export default async function AssetPage({
   const { id } = await params;
   const detail = await getAssetDetail(id);
   if (!detail) notFound();
-  const { asset, location, history, duplicateSerialMatches } = detail;
-  const [categories, locations] = await Promise.all([
+  const { asset, location, site, history, duplicateSerialMatches } = detail;
+  const [categories, locations, sites, assignments] = await Promise.all([
     getCategories(),
     getLocations(),
+    getSites(),
+    getEntityAssignments('asset', id),
   ]);
   const forms = await getPublishedForms(
     categories.map((category) => category.id),
@@ -101,22 +109,47 @@ export default async function AssetPage({
       <section className={panel + ' mb-6'}>
         <h2 className="mb-2 font-semibold">
           {asset.status === 'retired'
-            ? 'Last known location'
-            : 'Current location'}
+            ? 'Last recorded storage / custody'
+            : 'Current custody'}
         </h2>
-        <LocationLink location={location} />
+        {site ? (
+          <Link
+            className="text-cyan-300 underline"
+            href={`/sites/${encodeURIComponent(site.code)}`}
+          >
+            Assigned to {site.name} ({site.code})
+          </Link>
+        ) : location ? (
+          <LocationLink location={location} />
+        ) : (
+          <span>No current storage or site assignment</span>
+        )}
+        {site && (
+          <p className="mt-2 text-sm text-slate-400">
+            This asset is at a site and is not currently in a storage drawer.
+            The site has no 3D room model.
+          </p>
+        )}
       </section>
+      <FilesPanel
+        parentType="asset"
+        parentId={asset.id}
+        active={asset.status === 'active'}
+        staff={member.role === 'staff'}
+      />
       {member.role === 'staff' && (
         <section aria-label="Asset actions" className="mb-8 space-y-3">
           <h2 className="text-xl font-semibold">Manage serialized asset</h2>
           {(asset.status === 'retired'
             ? (['asset_update', 'asset_restore'] as const)
-            : ([
-                'asset_update',
-                'asset_move',
-                'asset_correct_location',
-                'asset_retire',
-              ] as const)
+            : site
+              ? (['asset_update'] as const)
+              : ([
+                  'asset_update',
+                  'asset_move',
+                  'asset_correct_location',
+                  'asset_retire',
+                ] as const)
           ).map((operation) =>
             operation === 'asset_update' ? (
               <section key={operation} className={panel}>
@@ -136,12 +169,60 @@ export default async function AssetPage({
                 key={operation}
                 operation={operation}
                 asset={asset}
-                currentLocation={location}
+                currentLocation={location ?? undefined}
                 categories={categories}
                 locations={locations}
               />
             ),
           )}
+          {asset.status === 'active' &&
+            (site
+              ? ([
+                  'return',
+                  'transfer',
+                  'correct',
+                  'write_off',
+                  'retire',
+                ] as const)
+              : (['assign'] as const)
+            ).map((action) => (
+              <CustodyChangeForm
+                key={action}
+                kind="asset"
+                action={action}
+                entityId={asset.id}
+                version={String(asset.version)}
+                locations={locations}
+                sites={sites}
+                currentLocation={location}
+                currentSite={
+                  site
+                    ? sites.find((candidate) => candidate.id === site.id)
+                    : null
+                }
+              />
+            ))}
+        </section>
+      )}
+      {assignments.length > 0 && (
+        <section className="mb-6 space-y-3" aria-label="Custody history">
+          <h2 className="text-xl font-semibold">Custody history</h2>
+          {assignments.map((event) => (
+            <p className={panel} key={event.id}>
+              <span className="font-medium capitalize">
+                {event.kind.replaceAll('_', ' ')}
+              </span>{' '}
+              · {event.from_label || 'Opening'} →{' '}
+              {event.to_label || 'No destination'} · {event.actor_name} ·{' '}
+              {new Date(event.created_at).toLocaleString('en-US', {
+                timeZone: 'UTC',
+              })}{' '}
+              UTC
+              {event.reason && (
+                <span className="mt-1 block">Reason: {event.reason}</span>
+              )}
+            </p>
+          ))}
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>

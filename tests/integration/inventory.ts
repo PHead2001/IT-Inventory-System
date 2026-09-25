@@ -682,7 +682,10 @@ async function main() {
     `insert into public.locations(code,name,parent_id,kind,can_hold_inventory)
      select $1,'Fictional eligibility location',id,'storage_area',true
      from public.locations where code='ITO' returning id`,
-    ['TEST-ELIG-' + randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()],
+    [
+      'TEST-ELIG-' +
+        randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase(),
+    ],
   );
   const eligibilityLocationId = eligibility.rows[0].id as string;
   try {
@@ -692,7 +695,12 @@ async function main() {
     await fail(
       staff.client,
       'quantity_receive',
-      { ...base(), location_id: eligibilityLocationId, quantity: 1, reason: 'Inactive' },
+      {
+        ...base(),
+        location_id: eligibilityLocationId,
+        quantity: 1,
+        reason: 'Inactive',
+      },
       'P1004',
     );
     await owner.query(
@@ -895,7 +903,9 @@ async function main() {
     'alter table public.locations disable trigger locations_affected_holdings',
   );
   try {
-    await owner.query('update public.locations set active=false where id=$1', [b]);
+    await owner.query('update public.locations set active=false where id=$1', [
+      b,
+    ]);
   } finally {
     await owner.query(
       'alter table public.locations enable trigger locations_affected_holdings',

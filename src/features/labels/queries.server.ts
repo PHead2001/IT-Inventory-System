@@ -8,7 +8,9 @@ export async function getAssetLabel(id: string): Promise<LabelRecord | null> {
     kind: 'asset',
     key: detail.asset.id,
     name: detail.asset.name,
-    context: detail.location.breadcrumb,
+    context: detail.site
+      ? `${detail.site.name} [${detail.site.code}] · assigned site`
+      : (detail.location?.breadcrumb ?? 'No current storage or site'),
     path: '/inventory/assets/' + detail.asset.id,
     barcode: detail.asset.assetTag,
     state: detail.asset.status,

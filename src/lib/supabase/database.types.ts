@@ -647,6 +647,282 @@ export type Database = {
           },
         ]
       }
+      inventory_file_collections: {
+        Row: {
+          asset_id: string | null
+          created_at: string
+          id: string
+          quantity_id: string | null
+          revision: number
+        }
+        Insert: {
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          quantity_id?: string | null
+          revision?: number
+        }
+        Update: {
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          quantity_id?: string | null
+          revision?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_file_collections_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: true
+            referencedRelation: "serialized_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_file_collections_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: true
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "inventory_file_collections_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: true
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_file_events: {
+        Row: {
+          action: string
+          actor_id: string
+          actor_name: string
+          asset_id: string | null
+          before_title: string | null
+          collection_id: string
+          collection_revision: number
+          created_at: string
+          file_bytes: number
+          file_id: string
+          file_type: string
+          id: string
+          quantity_id: string | null
+          replaces_file_id: string | null
+          title: string
+        }
+        Insert: {
+          action: string
+          actor_id: string
+          actor_name: string
+          asset_id?: string | null
+          before_title?: string | null
+          collection_id: string
+          collection_revision: number
+          created_at?: string
+          file_bytes: number
+          file_id: string
+          file_type: string
+          id?: string
+          quantity_id?: string | null
+          replaces_file_id?: string | null
+          title: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string
+          actor_name?: string
+          asset_id?: string | null
+          before_title?: string | null
+          collection_id?: string
+          collection_revision?: number
+          created_at?: string
+          file_bytes?: number
+          file_id?: string
+          file_type?: string
+          id?: string
+          quantity_id?: string | null
+          replaces_file_id?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_file_events_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "serialized_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_file_collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_files"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_file_events_replaces_file_id_fkey"
+            columns: ["replaces_file_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_files: {
+        Row: {
+          asset_id: string | null
+          attestation: string | null
+          created_at: string
+          declared_bytes: number
+          declared_type: string
+          display_title: string
+          id: string
+          original_name: string
+          purpose: string
+          quantity_id: string | null
+          ready_at: string | null
+          removed_at: string | null
+          replaces_file_id: string | null
+          reserve_expires_at: string
+          reviewed_collection_revision: number
+          reviewed_replaced_file_version: number | null
+          sha256: string | null
+          source_path: string
+          state: string
+          uploader_id: string
+          validated_bytes: number | null
+          validated_type: string | null
+          validation_generation: number
+          validation_key_id: string | null
+          validation_lease_until: string | null
+          validation_request_id: string | null
+          version: number
+        }
+        Insert: {
+          asset_id?: string | null
+          attestation?: string | null
+          created_at?: string
+          declared_bytes: number
+          declared_type: string
+          display_title: string
+          id?: string
+          original_name: string
+          purpose: string
+          quantity_id?: string | null
+          ready_at?: string | null
+          removed_at?: string | null
+          replaces_file_id?: string | null
+          reserve_expires_at: string
+          reviewed_collection_revision: number
+          reviewed_replaced_file_version?: number | null
+          sha256?: string | null
+          source_path: string
+          state?: string
+          uploader_id: string
+          validated_bytes?: number | null
+          validated_type?: string | null
+          validation_generation?: number
+          validation_key_id?: string | null
+          validation_lease_until?: string | null
+          validation_request_id?: string | null
+          version?: number
+        }
+        Update: {
+          asset_id?: string | null
+          attestation?: string | null
+          created_at?: string
+          declared_bytes?: number
+          declared_type?: string
+          display_title?: string
+          id?: string
+          original_name?: string
+          purpose?: string
+          quantity_id?: string | null
+          ready_at?: string | null
+          removed_at?: string | null
+          replaces_file_id?: string | null
+          reserve_expires_at?: string
+          reviewed_collection_revision?: number
+          reviewed_replaced_file_version?: number | null
+          sha256?: string | null
+          source_path?: string
+          state?: string
+          uploader_id?: string
+          validated_bytes?: number | null
+          validated_type?: string | null
+          validation_generation?: number
+          validation_key_id?: string | null
+          validation_lease_until?: string | null
+          validation_request_id?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_files_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "serialized_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_files_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_quantity_totals"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "inventory_files_quantity_id_fkey"
+            columns: ["quantity_id"]
+            isOneToOne: false
+            referencedRelation: "quantity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_files_replaces_file_id_fkey"
+            columns: ["replaces_file_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_files"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_files_uploader_id_fkey"
+            columns: ["uploader_id"]
+            isOneToOne: false
+            referencedRelation: "app_members"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       label_defaults: {
         Row: {
           format: string
@@ -1423,9 +1699,12 @@ export type Database = {
         Row: {
           ancestor_codes: string[] | null
           asset_tag: string | null
+          assigned_quantity: string | null
+          available_quantity: string | null
           breadcrumb: string | null
           category_id: string | null
           category_name: string | null
+          custody_kind: string | null
           description: string | null
           entity_id: string | null
           kind: string | null
@@ -1436,9 +1715,13 @@ export type Database = {
           model: string | null
           name: string | null
           quantity: number | null
+          recorded_quantity: string | null
           recorded_total: number | null
           reorder_threshold: number | null
           serial_number: string | null
+          site_code: string | null
+          site_id: string | null
+          site_name: string | null
           status: string | null
           stock_state: string | null
         }
@@ -1546,6 +1829,175 @@ export type Database = {
             }
             Returns: Json
           }
+      inventory_export_snapshot_v3: {
+        Args: {
+          p_category_id: string
+          p_export_type: string
+          p_include_custom: boolean
+          p_location_code: string
+          p_low_stock: boolean
+          p_query: string
+          p_site_id: string
+          p_status: string
+          p_type: string
+        }
+        Returns: Json
+      }
+      inventory_file_active_key: { Args: never; Returns: string }
+      inventory_file_begin: {
+        Args: {
+          p_expires: number
+          p_file_id: string
+          p_key_id: string
+          p_mac: string
+          p_nonce: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      inventory_file_cancel: { Args: { p_file_id: string }; Returns: undefined }
+      inventory_file_cards: {
+        Args: { p_parent_id: string; p_parent_type: string }
+        Returns: Json
+      }
+      inventory_file_cleanup_claim: {
+        Args: {
+          p_expires: number
+          p_key_id: string
+          p_limit: number
+          p_mac: string
+          p_nonce: string
+        }
+        Returns: Json
+      }
+      inventory_file_cleanup_confirm: {
+        Args: {
+          p_expires: number
+          p_key_id: string
+          p_mac: string
+          p_nonce: string
+          p_object_id: string
+        }
+        Returns: undefined
+      }
+      inventory_file_finalize: {
+        Args: {
+          p_expected_revision: number
+          p_file_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      inventory_file_history: {
+        Args: { p_page?: number; p_parent_id: string; p_parent_type: string }
+        Returns: Json
+      }
+      inventory_file_list_thumbnails: {
+        Args: { p_asset_ids: string[]; p_quantity_ids: string[] }
+        Returns: Json
+      }
+      inventory_file_prepare_variant: {
+        Args: {
+          p_bytes: number
+          p_file_id: string
+          p_generation: number
+          p_mac: string
+          p_path: string
+          p_sha256: string
+          p_variant: string
+        }
+        Returns: undefined
+      }
+      inventory_file_read: {
+        Args: { p_file_id: string; p_variant: string }
+        Returns: string
+      }
+      inventory_file_register: {
+        Args: {
+          p_bytes: number
+          p_file_id: string
+          p_generation: number
+          p_mac: string
+          p_object_id: string
+          p_path: string
+          p_sha256: string
+          p_variant: string
+        }
+        Returns: Json
+      }
+      inventory_file_reject: {
+        Args: {
+          p_expires: number
+          p_file_id: string
+          p_generation: number
+          p_key_id: string
+          p_mac: string
+          p_nonce: string
+        }
+        Returns: undefined
+      }
+      inventory_file_remove: {
+        Args: {
+          p_expected_file_version: number
+          p_expected_revision: number
+          p_file_id: string
+          p_request_id: string
+        }
+        Returns: Json
+      }
+      inventory_file_rename: {
+        Args: {
+          p_expected_file_version: number
+          p_expected_revision: number
+          p_file_id: string
+          p_request_id: string
+          p_title: string
+        }
+        Returns: Json
+      }
+      inventory_file_reserve: {
+        Args: {
+          p_bytes: number
+          p_expected_file_version?: number
+          p_expected_revision: number
+          p_name: string
+          p_parent_id: string
+          p_parent_type: string
+          p_replaces?: string
+          p_type: string
+        }
+        Returns: Json
+      }
+      inventory_file_review: {
+        Args: {
+          p_expected_file_version?: number
+          p_expected_revision: number
+          p_file_id: string
+        }
+        Returns: undefined
+      }
+      inventory_file_source_details: {
+        Args: { p_file_id: string }
+        Returns: Json
+      }
+      inventory_file_uploaded: {
+        Args: { p_file_id: string }
+        Returns: undefined
+      }
+      inventory_file_validated: {
+        Args: {
+          p_bytes: number
+          p_file_id: string
+          p_generation: number
+          p_key_id: string
+          p_mac: string
+          p_sha256: string
+          p_source_id: string
+          p_source_version: string
+          p_type: string
+        }
+        Returns: undefined
+      }
       inventory_history: {
         Args: {
           p_entity_id?: string
@@ -1589,6 +2041,20 @@ export type Database = {
           p_page?: number
           p_page_size?: number
           p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
+      inventory_search_v3: {
+        Args: {
+          p_category_id?: string
+          p_location_code?: string
+          p_low_stock?: boolean
+          p_page?: number
+          p_page_size?: number
+          p_query?: string
+          p_site_id?: string
           p_status?: string
           p_type?: string
         }
@@ -1706,6 +2172,10 @@ export type Database = {
       }
       site_create: {
         Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      site_holding_groups: {
+        Args: { p_page?: number; p_page_size?: number; p_site_id: string }
         Returns: Json
       }
       site_update: {

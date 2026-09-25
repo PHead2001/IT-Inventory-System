@@ -53,11 +53,22 @@ export function pickerLocations(
 ) {
   const excluded = new Set(options.excludeIds ?? []);
   const sources = new Set(options.sourceIds ?? []);
+  const byId = new Map(locations.map((location) => [location.id, location]));
+  const activePath = (location: LocationRef) => {
+    let current: LocationRef | undefined = location;
+    const seen = new Set<string>();
+    while (current) {
+      if (!current.active || seen.has(current.id)) return false;
+      seen.add(current.id);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    return true;
+  };
   const query = (options.query ?? '').trim().toLocaleLowerCase();
   return orderedLocations(locations).filter((location) => {
     if (
       mode === 'destination' &&
-      (!location.active ||
+      (!activePath(location) ||
         !location.can_hold_inventory ||
         excluded.has(location.id))
     )

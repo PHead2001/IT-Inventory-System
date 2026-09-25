@@ -54,10 +54,15 @@ export type InventoryResult = {
   categoryName: string;
   status: string;
   location: LocationRef | null;
+  site?: { id: string; code: string; name: string } | null;
+  custodyKind?: 'storage' | 'site' | 'unlocated' | 'retired';
   quantity: number | null;
   assetTag: string | null;
   serialNumber: string | null;
   recordedTotal: number | null;
+  availableQuantity?: string | null;
+  assignedQuantity?: string | null;
+  ownedQuantity?: string | null;
   reorderThreshold: number | null;
   stockState: StockState | null;
   customSummary?: string;
@@ -102,7 +107,9 @@ export type DuplicateSerial = {
 export type QuantityDetail = {
   item: QuantityItem;
   stockSummary: {
-    recordedTotal: number;
+    availableQuantity: string;
+    assignedQuantity: string;
+    ownedQuantity: string;
     reorderThreshold: number | null;
     stockState: StockState;
   };
@@ -111,7 +118,8 @@ export type QuantityDetail = {
 };
 export type AssetDetail = {
   asset: AssetItem;
-  location: LocationRef;
+  location: LocationRef | null;
+  site: { id: string; code: string; name: string } | null;
   history: HistoryEvent[];
   duplicateSerialMatches: DuplicateSerial[];
 };

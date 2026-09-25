@@ -1,5 +1,7 @@
 import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
+import { InventoryListThumbnail } from '@/features/files/list-thumbnail';
+import type { FileListSummary } from '@/features/files/list.server';
 import type {
   HistoryEvent,
   InventoryResult,
@@ -22,17 +24,43 @@ export function LocationLink({ location }: { location: LocationRef }) {
     </span>
   );
 }
-export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
+export function InventoryRows({
+  rows,
+  fileSummaries = [],
+}: {
+  rows: InventoryResult[];
+  fileSummaries?: FileListSummary[];
+}) {
   if (!rows.length)
     return <p className={panel}>No inventory matches these filters.</p>;
   return (
     <ul className="space-y-3">
       {rows.map((row) => (
         <li
-          key={row.kind + row.id + (row.location?.id ?? '')}
+          key={
+            row.kind + row.id + (row.location?.id ?? '') + (row.site?.id ?? '')
+          }
           className={panel}
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
+            {fileSummaries.find(
+              (summary) => summary.kind === row.kind && summary.id === row.id,
+            )?.thumbnail_path && (
+              <InventoryListThumbnail
+                path={
+                  fileSummaries.find(
+                    (summary) =>
+                      summary.kind === row.kind && summary.id === row.id,
+                  )!.thumbnail_path!
+                }
+                name={
+                  fileSummaries.find(
+                    (summary) =>
+                      summary.kind === row.kind && summary.id === row.id,
+                  )?.photo_name ?? row.name
+                }
+              />
+            )}
             <div className="min-w-0">
               <Link
                 className="break-words text-lg font-semibold text-cyan-200 underline"
@@ -60,7 +88,8 @@ export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
                     {row.stockState === 'out_of_stock'
                       ? 'Out of stock'
                       : 'Needs restocking'}{' '}
-                    · Item-wide total {row.recordedTotal} / threshold{' '}
+                    · Available in storage{' '}
+                    {row.availableQuantity ?? row.recordedTotal} / threshold{' '}
                     {row.reorderThreshold}
                   </p>
                 )}
@@ -79,11 +108,27 @@ export function InventoryRows({ rows }: { rows: InventoryResult[] }) {
               {row.customSummary}
             </p>
           )}
+          {row.kind === 'quantity' && row.availableQuantity !== undefined && (
+            <p className="mt-2 text-sm text-slate-400">
+              Available {row.availableQuantity} · Assigned{' '}
+              {row.assignedQuantity} · Total recorded {row.ownedQuantity}
+            </p>
+          )}
           <p className="mt-3 text-sm">
-            {row.location ? (
-              <LocationLink location={row.location} />
+            {row.site ? (
+              <Link
+                className="text-cyan-300 underline"
+                href={`/sites/${encodeURIComponent(row.site.code)}`}
+              >
+                Assigned to {row.site.name} ({row.site.code}) · no room model
+              </Link>
+            ) : row.location ? (
+              <>
+                {row.status === 'retired' ? 'Last recorded storage: ' : ''}
+                <LocationLink location={row.location} />
+              </>
             ) : (
-              'No positive stock — unlocated definition'
+              'No positive stock or active site holding — unlocated definition'
             )}
           </p>
         </li>

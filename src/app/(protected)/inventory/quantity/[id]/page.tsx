@@ -13,6 +13,13 @@ import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
 import { ArchiveQuantityPanel } from '@/features/inventory/components/archive-quantity-form';
 import {
+  getSites,
+  getEntitySiteHoldings,
+  getEntityAssignments,
+} from '@/features/custody/queries.server';
+import { CustodyChangeForm } from '@/features/custody/custody-change-form';
+import { FilesPanel } from '@/features/files/files-panel';
+import {
   HistoryList,
   LocationLink,
   panel,
@@ -27,10 +34,14 @@ export default async function QuantityPage({
   const detail = await getQuantityDetail(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
-  const [categories, locations] = await Promise.all([
-    getCategories(),
-    getLocations(),
-  ]);
+  const [categories, locations, sites, siteHoldings, assignments] =
+    await Promise.all([
+      getCategories(),
+      getLocations(),
+      getSites(),
+      getEntitySiteHoldings(id),
+      getEntityAssignments('quantity', id),
+    ]);
   const forms = await getPublishedForms(
     categories.map((category) => category.id),
   );
@@ -66,12 +77,13 @@ export default async function QuantityPage({
             {stockSummary.stockState === 'out_of_stock'
               ? 'Out of stock'
               : 'Needs restocking'}{' '}
-            (item-wide total {stockSummary.recordedTotal})
+            (available in storage {stockSummary.availableQuantity})
           </span>
         )}
         {stockSummary.stockState === 'in_stock' && (
           <span className="ml-2 text-emerald-200">
-            · Above threshold (item-wide total {stockSummary.recordedTotal})
+            · Above threshold (available in storage{' '}
+            {stockSummary.availableQuantity})
           </span>
         )}
       </p>
@@ -89,10 +101,21 @@ export default async function QuantityPage({
         values={item.customDisplay}
         needsMetadata={item.needsMetadata}
       />
+      <FilesPanel
+        parentType="quantity"
+        parentId={item.id}
+        active={!item.archived}
+        staff={member.role === 'staff'}
+      />
       <section className="my-6">
         <h2 className="mb-3 text-xl font-semibold">
-          Current stock — {stockSummary.recordedTotal} units total
+          Current stock — {stockSummary.availableQuantity} available in storage
         </h2>
+        <p className="mb-3 text-sm text-slate-400">
+          {stockSummary.assignedQuantity} assigned to sites ·{' '}
+          {stockSummary.ownedQuantity} total recorded across storage and sites.
+          Inactive storage remains included in availability until moved.
+        </p>
         {balances.some((b) => b.quantity > 0) ? (
           <ul className="space-y-3">
             {balances
@@ -101,11 +124,42 @@ export default async function QuantityPage({
                 <li className={panel} key={b.location.id}>
                   <LocationLink location={b.location} />
                   <p className="mt-2">{b.quantity} units</p>
+                  {!b.location.active && (
+                    <p className="mt-1 text-sm text-amber-200">
+                      Inactive location: existing stock remains recorded and can
+                      be evacuated.
+                    </p>
+                  )}
                 </li>
               ))}
           </ul>
         ) : (
           <p className={panel}>No positive stock at any location.</p>
+        )}
+      </section>
+      <section className="my-6 space-y-3" aria-label="Assigned site holdings">
+        <h2 className="text-xl font-semibold">
+          Assigned to properties / sites
+        </h2>
+        {siteHoldings.length ? (
+          <ul className="space-y-3">
+            {siteHoldings.map((holding) => (
+              <li className={panel} key={holding.site_id}>
+                <Link
+                  className="text-cyan-300 underline"
+                  href={`/sites/${encodeURIComponent(holding.site_code)}`}
+                >
+                  {holding.site_name} ({holding.site_code})
+                </Link>
+                <p>
+                  {holding.quantity} units
+                  {!holding.site_active ? ' · Archived site' : ''}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={panel}>No outstanding site holdings.</p>
         )}
       </section>
       {member.role === 'staff' && (
@@ -144,9 +198,83 @@ export default async function QuantityPage({
               />
             ),
           )}
-          {archiveReview && !archiveReview.archived && (
-            <ArchiveQuantityPanel review={archiveReview} />
+          {siteHoldings.length > 0 && (
+            <p className={panel + ' text-amber-200'}>
+              Archive is blocked while site holdings remain. Return, transfer,
+              or write off every outstanding assignment first; no site
+              obligation is erased by archive-and-clear.
+            </p>
           )}
+          {archiveReview &&
+            !archiveReview.archived &&
+            siteHoldings.length === 0 && (
+              <ArchiveQuantityPanel review={archiveReview} />
+            )}
+          {!item.archived && (
+            <section className="space-y-3" aria-label="Site custody actions">
+              <h3 className="text-xl font-semibold">
+                Site custody and opening holdings
+              </h3>
+              {(
+                [
+                  'issue',
+                  'return',
+                  'transfer',
+                  'opening',
+                  'correct',
+                  'write_off',
+                ] as const
+              ).map((action) => {
+                if (
+                  action === 'issue' &&
+                  !balances.some((row) => row.quantity > 0)
+                )
+                  return null;
+                if (
+                  ['return', 'transfer', 'correct', 'write_off'].includes(
+                    action,
+                  ) &&
+                  !siteHoldings.length
+                )
+                  return null;
+                return (
+                  <CustodyChangeForm
+                    key={action}
+                    kind="quantity"
+                    action={action}
+                    entityId={item.id}
+                    version={String(item.version)}
+                    locations={locations}
+                    sites={sites}
+                    storageBalances={balances}
+                    siteHoldings={siteHoldings}
+                  />
+                );
+              })}
+            </section>
+          )}
+        </section>
+      )}
+      {assignments.length > 0 && (
+        <section className="my-6 space-y-3" aria-label="Custody history">
+          <h2 className="text-xl font-semibold">Custody history</h2>
+          {assignments.map((event) => (
+            <p className={panel} key={event.id}>
+              <span className="font-medium capitalize">
+                {event.kind.replaceAll('_', ' ')}
+              </span>{' '}
+              · {event.from_label || 'Opening'} →{' '}
+              {event.to_label || 'No destination'} · {event.quantity ?? 0} units
+              · {event.actor_name} ·{' '}
+              {new Date(event.created_at).toLocaleString('en-US', {
+                timeZone: 'UTC',
+              })}{' '}
+              UTC
+              {event.reason && (
+                <span className="mt-1 block">Reason: {event.reason}</span>
+              )}
+            </p>
+          ))}
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>

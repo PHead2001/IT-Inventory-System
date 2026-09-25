@@ -12,6 +12,8 @@ import {
 import { SearchForm } from '@/features/inventory/components/search-form';
 import { Button } from '@/components/ui/button';
 import { readFilters } from '@/features/inventory/read-model';
+import { getSites } from '@/features/custody/queries.server';
+import { getFileListSummaries } from '@/features/files/list.server';
 export default async function InventoryPage({
   searchParams,
 }: {
@@ -22,11 +24,13 @@ export default async function InventoryPage({
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
-  const [result, categories, locations] = await Promise.all([
+  const [result, categories, locations, sites] = await Promise.all([
     getInventory(params),
     getCategories(),
     getLocations(),
+    getSites(),
   ]);
+  const fileSummaries = await getFileListSummaries(result.rows);
   const filters = readFilters(params);
   const exportParams = new URLSearchParams();
   if (filters.query) exportParams.set('q', filters.query);
@@ -34,16 +38,17 @@ export default async function InventoryPage({
   if (filters.status !== 'active') exportParams.set('status', filters.status);
   if (filters.category) exportParams.set('category', filters.category);
   if (filters.location) exportParams.set('location', filters.location);
+  if (filters.site) exportParams.set('site', filters.site);
   if (filters.lowStock) exportParams.set('lowStock', 'true');
   return (
     <>
       <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
-        IT Closet · Inventory
+        Logical storage and site custody · Inventory
       </p>
       <h1 className="mt-3 text-3xl font-semibold">Inventory workspace</h1>
       <p className="mt-3 text-slate-400">
-        Search stock and individually tracked assets across logical storage
-        locations.
+        Search available storage, assigned site holdings, and individually
+        tracked assets.
       </p>
       {member.role === 'staff' && (
         <div className="my-5 flex flex-wrap gap-3">
@@ -62,6 +67,7 @@ export default async function InventoryPage({
           params={params}
           categories={categories}
           locations={locations}
+          sites={sites}
         />
         <div className="mb-5 flex flex-wrap gap-4 text-sm">
           <a
@@ -85,11 +91,12 @@ export default async function InventoryPage({
         </div>
         {filters.lowStock && (
           <p className="mb-4 text-sm text-slate-400">
-            Low-stock state uses each item’s total across all recorded
-            locations, even when a location filter narrows the rows shown here.
+            Low-stock state uses available storage across all locations,
+            including inactive ones. A site filter narrows rows, not the
+            item-wide threshold calculation.
           </p>
         )}
-        <InventoryRows rows={result.rows} />
+        <InventoryRows rows={result.rows} fileSummaries={fileSummaries} />
         <Pagination result={result} base="/inventory" params={params} />
       </div>
     </>

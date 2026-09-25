@@ -50,7 +50,8 @@ export const assetRow = metadataRow.extend({
   status: z.enum(['active', 'retired']),
   asset_tag: nullableText,
   serial_number: nullableText,
-  location_id: id,
+  location_id: id.nullable(),
+  site_id: id.nullable().optional(),
 });
 export const searchRow = z.object({
   kind: z.enum(['quantity', 'asset']),
@@ -59,6 +60,25 @@ export const searchRow = z.object({
   category_name: z.string(),
   status: z.string(),
   location_id: id.nullable(),
+  site_id: id.nullable().optional(),
+  site_code: z.string().nullable().optional(),
+  site_name: z.string().nullable().optional(),
+  custody_kind: z.enum(['storage', 'site', 'unlocated', 'retired']).optional(),
+  available_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
+  assigned_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
+  recorded_quantity: z
+    .string()
+    .regex(/^(0|[1-9]\d*)$/)
+    .nullable()
+    .optional(),
   quantity: z.number().int().nonnegative().nullable(),
   asset_tag: nullableText,
   serial_number: nullableText,
@@ -103,8 +123,9 @@ export const searchPage = z.object({
   total: z.number().int().nonnegative(),
 });
 export const quantityStockSummaryRow = z.object({
-  recorded_total: z.number().int().nonnegative(),
-  reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
+  available_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+  assigned_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
+  recorded_quantity: z.string().regex(/^(0|[1-9]\d*)$/),
   stock_state: z.enum([
     'disabled',
     'in_stock',
@@ -116,8 +137,9 @@ export const quantityStockSummaryRow = z.object({
 export function mapQuantityStockSummary(input: unknown) {
   const row = quantityStockSummaryRow.parse(input);
   return {
-    recordedTotal: row.recorded_total,
-    reorderThreshold: row.reorder_threshold,
+    availableQuantity: row.available_quantity,
+    assignedQuantity: row.assigned_quantity,
+    ownedQuantity: row.recorded_quantity,
     stockState: row.stock_state,
   };
 }
@@ -145,10 +167,18 @@ export function mapSearch(
     categoryName: row.category_name,
     status: row.status,
     location: row.location_id ? locationById(locations, row.location_id) : null,
+    site:
+      row.site_id && row.site_code && row.site_name
+        ? { id: row.site_id, code: row.site_code, name: row.site_name }
+        : null,
+    custodyKind: row.custody_kind,
     quantity: row.quantity,
     assetTag: row.asset_tag,
     serialNumber: row.serial_number,
     recordedTotal: row.recorded_total,
+    availableQuantity: row.available_quantity,
+    assignedQuantity: row.assigned_quantity,
+    ownedQuantity: row.recorded_quantity,
     reorderThreshold: row.reorder_threshold,
     stockState: row.stock_state,
   };
@@ -231,6 +261,7 @@ export function readFilters(input: Record<string, string | undefined>) {
     query: (input.q ?? '').trim().slice(0, 200),
     category: id.safeParse(input.category).success ? input.category : undefined,
     location: input.location?.slice(0, 100) || undefined,
+    site: id.safeParse(input.site).success ? input.site : undefined,
     entityId: id.safeParse(input.entityId).success ? input.entityId : undefined,
     lowStock: input.lowStock === 'true',
   };

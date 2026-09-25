@@ -33,6 +33,47 @@ invalidates review without rebasing. The legacy-history correction and its moved
 removed-field integration assertions were also reviewed. Runtime results above
 are worker evidence verified by the lead, not a second reviewer runtime execution.
 
+## Integration checkpoint (not final certification)
+
+- Custody/location foundation `9fc517e` passed 475 pgTAP assertions and the
+  existing integration suites, including independent-connection custody races.
+  An upgrade from the prior schema preserved stock and assets at inactive storage
+  and allowed evacuation to the office. Later shared-read, file and UI changes
+  are outside that checkpoint's proof.
+- Independent custody and file source reviews produced fixes before acceptance.
+  The shared-read review subsequently found a two-snapshot low-stock dashboard;
+  the pending dashboard migration now returns status and all custody totals in
+  one statement. Focused independent source re-review is clean; runtime proof
+  remains pending.
+- Codex reviewed `681432c` and `4504e74`. Its three findings concern obsolete
+  recovery after undo, stale recovery after an oversized write, and datetime
+  offset comparison. Fixes are in `4504e74` and local `8aad7ef`, with focused
+  regressions. All three remote threads remain open pending pushed fix evidence,
+  green exact-HEAD checks and fresh review. This is not a clean final review.
+- At `4504e74`, the remote database/browser job passed; the app job stopped at
+  evidence-document formatting. Formatting is corrected in `8aad7ef`; later
+  integrated `npm run validate:app` passed typecheck, zero-warning lint,
+  formatting, 510 Vitest tests, 27 preview-access tests, export-memory checks,
+  discovery of 63 browser tests and the production build. This is local source
+  checkpoint evidence, not final exact-SHA remote certification.
+- Focused custody-read integration passed after the dashboard migration applied.
+  The first custody browser run failed with missing Next build manifests while
+  another worker also built the shared `.next` output. Exclusive build/runtime
+  ownership is established for the rerun; those failures do not establish any
+  application journey as passing.
+- Real local Storage acceptance remains incomplete: a near-20 MiB upload after
+  the upload/cancel/cleanup sequence reproducibly times out at Kong. Isolated
+  large uploads succeeded, and raw versus multipart bodies and graceful helper
+  shutdown did not remove the failure. Reservation-size differences and preceding
+  operations still require controlled comparison. No root cause or
+  complete Storage gate is claimed.
+- Read-only provider inspection confirmed PR20's nondefault Supabase child
+  `bojqpqdsmjyrxlgfgqux` under `dndqydmuqoduwaoujfki`, with the integration branch
+  name and PR20 association. Its latest observed migration is
+  `20260925003000`. The Vercel preview `dpl_6HWPo347roSGEmWurLASMfSpiPjx` is READY
+  at `4504e74`; it does not yet contain the pending custody/files work. Reverify
+  the eventual candidate and child identity before hosted writes.
+
 ## Capability coverage
 
 | Goal                                  | Proof required on the integrated candidate                                                                                                                                                                                                                                                                                                                                            | Prerequisites and important boundaries                                                                                                                                                                                                                                                                                     | State                                                                                                                               |

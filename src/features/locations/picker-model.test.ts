@@ -65,6 +65,27 @@ const inactive: LocationRef = {
 const locations = [drawer10, right, inactive, root, drawer7, left];
 
 describe('location picker model', () => {
+  it('rejects a destination under an inactive ancestor while retaining it as an evacuation source', () => {
+    const office = {
+      ...root,
+      id: 'office',
+      code: 'ITO',
+      name: 'IT Office',
+      active: false,
+    };
+    const area = {
+      ...drawer7,
+      id: 'area',
+      code: 'ITO-GENERAL',
+      parentId: office.id,
+      name: 'General Storage / Unsorted',
+      active: true,
+    };
+    expect(pickerLocations([office, area], 'destination')).toEqual([]);
+    expect(
+      pickerLocations([office, area], 'source', { sourceIds: [area.id] }),
+    ).toEqual([area]);
+  });
   it('orders siblings by sort_order then numeric label within their hierarchy', () => {
     expect(orderedLocations(locations).map((location) => location.id)).toEqual([
       'root',
