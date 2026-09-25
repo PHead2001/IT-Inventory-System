@@ -1651,6 +1651,16 @@ export type Database = {
         Row: {
           actor_name: string | null
           after_metadata: Json | null
+          assignment_event_id: string | null
+          assignment_from_label: string | null
+          assignment_from_location_id: string | null
+          assignment_from_site_id: string | null
+          assignment_kind: string | null
+          assignment_quantity: number | null
+          assignment_reference: string | null
+          assignment_to_label: string | null
+          assignment_to_location_id: string | null
+          assignment_to_site_id: string | null
           before_metadata: Json | null
           created_at: string | null
           custom_changed: boolean | null

@@ -82,6 +82,22 @@ export type HistoryEvent = {
   at: string;
   actorName: string;
   reason: string | null;
+  assignment: {
+    eventId: string;
+    kind: string;
+    from: {
+      locationId: string | null;
+      siteId: string | null;
+      label: string | null;
+    };
+    to: {
+      locationId: string | null;
+      siteId: string | null;
+      label: string | null;
+    };
+    quantity: number | null;
+    reference: string | null;
+  } | null;
   lines: {
     location: LocationRef;
     delta: number;

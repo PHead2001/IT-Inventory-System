@@ -134,6 +134,9 @@ export function exportCsv(
       'Location Name',
       'Location Code',
       'Location Breadcrumb',
+      'Exported At (UTC)',
+      'Environment',
+      ...(includeCustom ? ['Custom Fields JSON'] : []),
       'Location ID',
       'Custody',
       'Site ID',
@@ -142,10 +145,7 @@ export function exportCsv(
       'Available in Storage (Item-wide)',
       'Assigned to Sites (Item-wide)',
       'Total Recorded (Item-wide)',
-      'Exported At (UTC)',
-      'Environment',
     ];
-    if (includeCustom) headers.push('Custom Fields JSON');
     function* lines() {
       yield headers.map(csvText).join(',');
       for (const row of rows) {
@@ -163,6 +163,12 @@ export function exportCsv(
           csvText(row.location_name),
           csvText(row.location_code),
           csvText(row.breadcrumb),
+          csvText(exportedAt),
+          csvText(environment),
+        ];
+        if (includeCustom)
+          cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+        cells.push(
           csvText(row.location_id),
           csvText(row.custody_kind),
           csvText(row.site_id),
@@ -171,11 +177,7 @@ export function exportCsv(
           csvNumber(row.available_quantity),
           csvNumber(row.assigned_quantity),
           csvNumber(row.recorded_quantity),
-          csvText(exportedAt),
-          csvText(environment),
-        ];
-        if (includeCustom)
-          cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+        );
         yield cells.join(',');
       }
     }
@@ -201,10 +203,10 @@ export function exportCsv(
     'All Current Holdings and Locations',
     'Exported At (UTC)',
     'Environment',
+    ...(includeCustom ? ['Custom Fields JSON'] : []),
     'Available in Storage',
     'Assigned to Sites',
   ];
-  if (includeCustom) headers.push('Custom Fields JSON');
   function* lines() {
     yield headers.map(csvText).join(',');
     for (const row of rows) {
@@ -226,11 +228,13 @@ export function exportCsv(
         csvText(row.holding_context),
         csvText(exportedAt),
         csvText(environment),
-        csvNumber(row.available_quantity),
-        csvNumber(row.assigned_quantity),
       ];
       if (includeCustom)
         cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));
+      cells.push(
+        csvNumber(row.available_quantity),
+        csvNumber(row.assigned_quantity),
+      );
       yield cells.join(',');
     }
   }

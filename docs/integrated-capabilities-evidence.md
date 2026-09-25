@@ -265,6 +265,46 @@ formatting, 533 Vitest tests, 27 preview-access checks, export-memory checks,
 27 file-inspection cases and the production build. Full database/browser and
 exact-candidate hosted certification remain pending.
 
+## Follow-up checkpoint: `ad3d5ef`
+
+Foundation CI run `36175201849` passed on exact
+`ad3d5ef1f34a51b749bcdd1264999e9e6e5a5196`. Vercel deployment
+`dpl_5gEKmPcyrWbsQ7djwNu1ofjsrNrG` is a READY feature-branch preview, and the
+isolated Supabase child applied `20260925180955`. Eight earlier review findings
+received fix/test/CI evidence replies and were resolved. Fresh Codex review found
+three further issues: reserved-upload confirmation recovery, ordinary CSV column
+positions, and older paginated custody history context. Those remain open pending
+the next fix checkpoint.
+
+The clean local database gate passed 481 pgTAP checks and 78 actual Files
+completion checks, but the near-20 MiB upload still returned Storage HTTP 504.
+Generated database types match. A bounded diagnostic reproduced the stall on
+direct Storage without Kong: after a denied upload, an authorized request used
+the same TCP tuple with `reusedSocket=true` and timed out after ten seconds.
+A prior fresh-socket control passed with matching bytes. Linux CI passed the
+repository gates; local certification remains red. No timeout waiver, provider
+patch, or authentication-policy relaxation was applied.
+
+Signed-in hosted inspection confirmed the compiled application uses the isolated
+child, not its production parent. Hosted photo validation returned HTTP 200 in
+2.354 seconds, but no following file-card response arrived within the five-second
+UI check. A later read showed the ready photo. The UI's dependency on cleanup
+before refreshing confirmed publication is being removed; the artifact does not
+establish the cleanup endpoint's precise latency. Both fictional test attempts
+were scoped-cleaned without errors; retained event history remains in the preview.
+Full hosted document/photo and final integrated acceptance are still pending.
+
+The next local fix batch passed the application gate (540 Vitest tests, build,
+lint/typecheck/formatting and unchanged export/inspection budgets), clean migration
+replay, 481 pgTAP checks, generated types, and a real 54-transfer custody-history
+integration covering three pages and authorization. The two normal production
+browser photo/PDF journeys passed. A 390-pixel browser check of a persisted site
+label longer than 180 characters measured document width 390 with no overflow;
+the lead inspected the narrow-screen capture. Independent review confirmed the
+history view's unique joins, caller-invoker RLS, snapshot labels and literal legacy
+CSV column positions. Full local Storage certification remains blocked as above;
+these focused results do not waive that gate.
+
 ## Required acceptance journeys
 
 Each journey needs local evidence and signed-in evidence on the verified isolated

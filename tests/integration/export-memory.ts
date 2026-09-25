@@ -151,7 +151,10 @@ const csvLimit = {
   ...csvSampler.result(0),
   elapsedMs: performance.now() - csvStarted,
 };
-assert.ok(csvLimit.sampledIncrementalBytes <= 64 * MiB);
+assert.ok(
+  csvLimit.sampledIncrementalBytes <= 64 * MiB,
+  `CSV quote expansion sampled ${csvLimit.sampledIncrementalBytes} bytes; limit ${64 * MiB}`,
+);
 assert.ok(csvLimit.elapsedMs < 10000);
 const overflowRaw = new Uint8Array(maxSnapshotBytes + 1);
 const overResponse = streamedResponse(overflowRaw);

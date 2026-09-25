@@ -107,6 +107,16 @@ export const historyRow = z.object({
   after_metadata: z.record(z.string(), z.unknown()).nullable(),
   custom_present: z.boolean(),
   custom_changed: z.boolean(),
+  assignment_event_id: id.nullable(),
+  assignment_kind: z.string().nullable(),
+  assignment_from_location_id: id.nullable(),
+  assignment_to_location_id: id.nullable(),
+  assignment_from_site_id: id.nullable(),
+  assignment_to_site_id: id.nullable(),
+  assignment_from_label: nullableText,
+  assignment_to_label: nullableText,
+  assignment_quantity: z.number().int().positive().nullable(),
+  assignment_reference: nullableText,
   from_location_id: id.nullable(),
   to_location_id: id.nullable(),
   lines: z.array(
@@ -223,6 +233,24 @@ export function mapHistory(
     at: row.created_at,
     actorName: row.actor_name,
     reason: row.reason,
+    assignment: row.assignment_event_id
+      ? {
+          eventId: row.assignment_event_id,
+          kind: row.assignment_kind ?? 'unknown',
+          from: {
+            locationId: row.assignment_from_location_id,
+            siteId: row.assignment_from_site_id,
+            label: row.assignment_from_label,
+          },
+          to: {
+            locationId: row.assignment_to_location_id,
+            siteId: row.assignment_to_site_id,
+            label: row.assignment_to_label,
+          },
+          quantity: row.assignment_quantity,
+          reference: row.assignment_reference,
+        }
+      : null,
     customMetadataPresent: row.custom_present,
     customMetadataChanged: row.custom_changed,
     lines: row.lines.map((l) => ({

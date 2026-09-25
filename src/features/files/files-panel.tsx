@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 const bucket = 'inventory-files';
@@ -62,6 +62,7 @@ export function FilesPanel({
   const [historyMore, setHistoryMore] = useState(false);
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [file, setFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [replace, setReplace] = useState('');
   const replaceUnavailable = Boolean(
     replace &&
@@ -74,23 +75,27 @@ export function FilesPanel({
     null,
   );
   const [rpc] = useState(() => client.rpc.bind(client) as unknown as Rpc);
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<CardsEnvelope | null> => {
     const { data, error } = await rpc('inventory_file_cards', {
       p_parent_type: parentType,
       p_parent_id: parentId,
     });
     if (error) {
       setMessage('Files could not be loaded.');
-      return;
+      return null;
     }
     const envelope = data as CardsEnvelope;
     setCards(Array.isArray(envelope?.files) ? envelope.files : []);
     setCollectionRevision(envelope?.revision ?? '1');
+    return envelope;
   }, [rpc, parentType, parentId]);
   async function cleanupTerminalFiles() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch('/api/inventory-files/cleanup', {
         method: 'POST',
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error('Cleanup request failed.');
       const result: { deleted?: number } = await response.json();
@@ -104,6 +109,8 @@ export function FilesPanel({
     } catch {
       setCleanupPending(true);
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
   }
   useEffect(() => {
@@ -214,11 +221,21 @@ export function FilesPanel({
     }
     if (replacedId)
       setReplace((current) => (current === replacedId ? '' : current));
-    const deleted = await cleanupTerminalFiles();
-    await load();
+    const refreshed = await load();
     setHistoryPage(1);
     setHistoryRefresh((value) => value + 1);
-    setMessage(`File published. ${cleanupStatus(deleted)}`);
+    setCleanupPending(true);
+    setMessage(
+      refreshed
+        ? 'File published. Checking byte cleanup…'
+        : 'File published, but files could not be refreshed. Reload this record; byte cleanup is unverified.',
+    );
+    const deleted = await cleanupTerminalFiles();
+    setMessage(
+      refreshed
+        ? `File published. ${cleanupStatus(deleted)}`
+        : `File published, but files could not be refreshed. Reload this record. ${cleanupStatus(deleted)}`,
+    );
   }
 
   async function upload() {
@@ -275,12 +292,15 @@ export function FilesPanel({
           upsert: false,
         });
       if (uploaded.error) throw new Error('The file could not be uploaded.');
+      // The immutable reservation now owns these bytes even if the next RPC
+      // response is lost. The file picker must not offer a second upload.
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = '';
       const marked = await rpc('inventory_file_uploaded', {
         p_file_id: reservation.id,
       });
       if (marked.error)
         throw new Error('The uploaded file could not be confirmed.');
-      setFile(null);
       await validate(
         reservation.id,
         replacement?.version ?? null,
@@ -304,19 +324,54 @@ export function FilesPanel({
     setMessage('');
     try {
       if (action === 'validate') {
-        const replacementVersion = card.replaces_file_id
+        if (card.state === 'reserved') {
+          // Storage already received the original immutable object. A lost or
+          // transient uploaded-confirmation response is recovered against
+          // that reservation; never upload bytes to its path a second time.
+          let confirmed = false;
+          try {
+            const marked = await rpc('inventory_file_uploaded', {
+              p_file_id: card.id,
+            });
+            confirmed = !marked.error;
+          } catch {
+            // The response is ambiguous; only a fresh server state can prove
+            // that confirmation committed.
+          }
+          const refreshed = await load();
+          const current = refreshed?.files.find(
+            (entry) => entry.id === card.id,
+          );
+          if (current?.state === 'uploaded' || current?.state === 'validated') {
+            setMessage(
+              'Uploaded bytes confirmed. Review this pending file before publishing.',
+            );
+            return;
+          }
+          throw new Error(
+            confirmed
+              ? 'Upload confirmation was sent but files could not be refreshed. Refresh this record before reviewing; do not upload the same file again.'
+              : 'Uploaded bytes could not be confirmed. Retry confirmation or cancel this pending file; do not upload to its path again.',
+          );
+        }
+        const originalReplacementVersion = card.reviewed_replaced_file_version;
+        const readyReplacement = card.replaces_file_id
           ? cards.find(
               (ready) =>
                 ready.id === card.replaces_file_id && ready.state === 'ready',
-            )?.version
+            )
           : null;
-        if (card.replaces_file_id && !replacementVersion)
+        if (
+          card.replaces_file_id &&
+          (!readyReplacement ||
+            readyReplacement.version !== originalReplacementVersion)
+        )
           throw new Error(
-            'The replacement target is no longer ready. Cancel this pending file and start a new upload.',
+            'The reviewed replacement target changed or is no longer ready. Cancel this pending file and start a new upload after reviewing the current file.',
           );
         await validate(
           card.id,
-          replacementVersion ?? null,
+          originalReplacementVersion,
           undefined,
           card.replaces_file_id,
         );
@@ -326,6 +381,8 @@ export function FilesPanel({
         });
         if (error) throw new Error('The pending file could not be cancelled.');
         await load();
+        setCleanupPending(true);
+        setMessage('File cancelled. Checking byte cleanup…');
         const deleted = await cleanupTerminalFiles();
         setMessage(`File cancelled. ${cleanupStatus(deleted)}`);
       }
@@ -354,10 +411,12 @@ export function FilesPanel({
           : 'Removal could not be confirmed.',
       );
     else {
-      const deleted = await cleanupTerminalFiles();
       await load();
       setHistoryPage(1);
       setHistoryRefresh((value) => value + 1);
+      setCleanupPending(true);
+      setMessage('File removed. Checking byte cleanup…');
+      const deleted = await cleanupTerminalFiles();
       setMessage(`File removed. ${cleanupStatus(deleted)}`);
     }
     setBusy(false);
@@ -497,7 +556,9 @@ export function FilesPanel({
                       className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                       onClick={() => void pendingAction(card, 'validate')}
                     >
-                      Review and publish
+                      {card.state === 'reserved'
+                        ? 'Confirm uploaded bytes'
+                        : 'Review and publish'}
                     </button>
                     <button
                       type="button"
@@ -524,6 +585,7 @@ export function FilesPanel({
           </label>
           <input
             id="inventory-file"
+            ref={fileInput}
             type="file"
             className="block w-full min-h-11 text-sm"
             accept={

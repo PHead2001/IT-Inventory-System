@@ -131,6 +131,7 @@ it('shows record corrections as human readable history distinct from movement', 
           at: '2026-09-05T12:00:00Z',
           actorName: 'IT Staff',
           reason: 'Found in drawer',
+          assignment: null,
           lines: [],
           fromLocation: location,
           toLocation: {
@@ -172,6 +173,7 @@ it('does not present legacy category metadata events as asset movement', () => {
           at: '2026-09-05T12:00:00Z',
           actorName: 'IT Staff',
           reason: 'Category removed: Old category',
+          assignment: null,
           lines: [],
           fromLocation: location,
           toLocation: location,
@@ -194,4 +196,50 @@ it('does not present legacy category metadata events as asset movement', () => {
   expect(screen.getByText('Old category → New category')).toBeVisible();
   expect(screen.queryByText('From:')).not.toBeInTheDocument();
   expect(screen.queryByText('To:')).not.toBeInTheDocument();
+});
+
+it('renders historical custody labels and quantity on the full item history page', () => {
+  render(
+    <HistoryList
+      events={[
+        {
+          id: 'old-site-issue',
+          kind: 'quantity',
+          entityId: 'item',
+          entityName: 'Cable',
+          eventType: 'site_issued',
+          at: '2026-09-05T12:00:00Z',
+          actorName: 'IT Staff',
+          reason: null,
+          assignment: {
+            eventId: 'assignment',
+            kind: 'issued',
+            from: {
+              locationId: 'storage',
+              siteId: null,
+              label: 'Old closet label',
+            },
+            to: { locationId: null, siteId: 'site', label: 'Old site label' },
+            quantity: 3,
+            reference: 'Ticket 001',
+          },
+          lines: [],
+          fromLocation: null,
+          toLocation: null,
+          metadataChanges: [],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole('heading', { name: 'Issued to site' })).toBeVisible();
+  expect(
+    screen.getByText('Custody: Old closet label → Old site label'),
+  ).toBeVisible();
+  expect(screen.getByText('Custody quantity: 3 units')).toBeVisible();
+  expect(screen.getByText('Reference: Ticket 001')).toBeVisible();
+  expect(
+    screen.getByText('Custody: Old closet label → Old site label'),
+  ).toHaveClass('[overflow-wrap:anywhere]');
 });

@@ -207,6 +207,14 @@ const eventNames: Record<string, string> = {
   restored: 'Restored',
   location_corrected: 'Recorded location corrected',
   retired: 'Asset retired',
+  site_opened: 'Site opening recorded',
+  site_issued: 'Issued to site',
+  site_assigned: 'Assigned to site',
+  site_returned: 'Returned from site',
+  site_transferred: 'Transferred between sites',
+  site_corrected: 'Site custody corrected',
+  site_written_off: 'Written off at site',
+  site_retired: 'Retired at site',
 };
 export function HistoryList({ events }: { events: HistoryEvent[] }) {
   if (!events.length)
@@ -214,7 +222,10 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
   return (
     <ol className="space-y-3">
       {events.map((event) => (
-        <li key={event.kind + event.id} className={panel}>
+        <li
+          key={event.kind + event.id}
+          className={`${panel} min-w-0 [overflow-wrap:anywhere]`}
+        >
           <div className="flex flex-wrap justify-between gap-2">
             <h3 className="font-semibold">
               {eventNames[event.eventType] ?? event.eventType}
@@ -224,7 +235,7 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
               UTC
             </time>
           </div>
-          <p className="mt-2 text-sm">
+          <p className="mt-2 min-w-0 text-sm [overflow-wrap:anywhere]">
             <Link
               className="text-cyan-300 underline"
               href={
@@ -243,6 +254,23 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
               Reason: {event.reason}
             </p>
           )}
+          {event.assignment && (
+            <div className="mt-3 space-y-1 text-sm">
+              <p className="min-w-0 [overflow-wrap:anywhere]">
+                Custody: {event.assignment.from.label ?? 'No recorded source'}
+                {' → '}
+                {event.assignment.to.label ?? 'No recorded destination'}
+              </p>
+              {event.assignment.quantity !== null && (
+                <p>Custody quantity: {event.assignment.quantity} units</p>
+              )}
+              {event.assignment.reference && (
+                <p className="whitespace-pre-wrap break-words">
+                  Reference: {event.assignment.reference}
+                </p>
+              )}
+            </div>
+          )}
           {event.kind === 'quantity' &&
             event.eventType === 'archived' &&
             event.lines.length > 0 && (
@@ -254,16 +282,20 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
                 units across {event.lines.length} locations.
               </p>
             )}
-          {event.eventType !== 'metadata_updated' && event.fromLocation && (
-            <p className="mt-2 text-sm">
-              From: <LocationLink location={event.fromLocation} />
-            </p>
-          )}
-          {event.eventType !== 'metadata_updated' && event.toLocation && (
-            <p className="mt-2 text-sm">
-              To: <LocationLink location={event.toLocation} />
-            </p>
-          )}
+          {!event.assignment &&
+            event.eventType !== 'metadata_updated' &&
+            event.fromLocation && (
+              <p className="mt-2 text-sm">
+                From: <LocationLink location={event.fromLocation} />
+              </p>
+            )}
+          {!event.assignment &&
+            event.eventType !== 'metadata_updated' &&
+            event.toLocation && (
+              <p className="mt-2 text-sm">
+                To: <LocationLink location={event.toLocation} />
+              </p>
+            )}
           {event.lines.map((line) => (
             <p className="mt-2 text-sm" key={line.location.id}>
               <LocationLink location={line.location} />: {line.before} →{' '}

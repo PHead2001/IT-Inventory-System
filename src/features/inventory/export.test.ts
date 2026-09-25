@@ -3,6 +3,38 @@ import { csvText, exportCsv, ExportTooLargeError } from './export';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const at = '2026-09-24T15:18:37+00:00';
+const legacyInventoryHeaders = [
+  'Record ID',
+  'Type',
+  'Name',
+  'Category',
+  'Manufacturer',
+  'Model',
+  'Asset Tag',
+  'Serial Number',
+  'Status',
+  'Quantity at Location',
+  'Location Name',
+  'Location Code',
+  'Location Breadcrumb',
+  'Exported At (UTC)',
+  'Environment',
+];
+const legacyLowStockHeaders = [
+  'Record ID',
+  'Type',
+  'Name',
+  'Category',
+  'Manufacturer',
+  'Model',
+  'Status',
+  'Recorded Total',
+  'Reorder Threshold',
+  'Stock State',
+  'All Current Holdings and Locations',
+  'Exported At (UTC)',
+  'Environment',
+];
 describe('inventory CSV', () => {
   it('quotes comma, quotes and newlines while neutralizing formula prefixes', () => {
     expect(csvText('a,"b"\nc')).toBe('"a,""b""\nc"');
@@ -24,7 +56,9 @@ describe('inventory CSV', () => {
     );
     expect(result.exportedAt).toBe(at);
     expect(result.csv).toMatch(/^\uFEFF"Record ID","Type"/);
-    expect(result.csv).toContain('"Exported At (UTC)","Environment"\r\n');
+    expect(
+      result.csv.slice(1).split('\r\n')[0].split(',').slice(0, 15),
+    ).toEqual(legacyInventoryHeaders.map(csvText));
   });
   it('exports one low-stock row per definition and no global total in holding rows', () => {
     const low = exportCsv(
@@ -237,10 +271,79 @@ describe('inventory CSV', () => {
       true,
     ).csv;
     expect(plain).not.toContain('Custom Fields JSON');
-    expect(withCustom).toContain('"Environment","Custom Fields JSON"');
+    const plainLines = plain.slice(1).split('\r\n');
+    const customLines = withCustom.slice(1).split('\r\n');
+    expect(plainLines[0].split(',').slice(0, 15)).toEqual(
+      legacyInventoryHeaders.map(csvText),
+    );
+    expect(customLines[0].split(',').slice(0, 16)).toEqual(
+      [...legacyInventoryHeaders, 'Custom Fields JSON'].map(csvText),
+    );
+    expect(customLines[0]).toContain('"Custom Fields JSON"');
+    expect(customLines[0].split(',')[16]).toBe('"Location ID"');
+    const legacyRowPrefix = [
+      csvText(id),
+      csvText('Serialized asset'),
+      csvText('Laptop'),
+      csvText('Computers'),
+      csvText(null),
+      csvText(null),
+      csvText(null),
+      csvText(null),
+      csvText('active'),
+      '',
+      csvText('1A'),
+      csvText('ITC-S1A'),
+      csvText('Closet / 1A'),
+      csvText(at),
+      csvText('Preview'),
+    ];
+    expect(plainLines[1].split(',').slice(0, 15)).toEqual(legacyRowPrefix);
+    expect(customLines[1].split(',').slice(0, 15)).toEqual(legacyRowPrefix);
+    expect(plainLines[1].split(',')[15]).toBe(csvText(null));
     expect(withCustom).toContain(id);
     expect(withCustom).toContain(csvText(JSON.stringify(custom)));
     expect(withCustom).toContain('=Child');
+    const lowStockRow = {
+      entity_id: id,
+      name: 'Adapters',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      recorded_total: '3',
+      reorder_threshold: 4,
+      stock_state: 'needs_restocking',
+      holding_context: '1A: 3',
+      available_quantity: '3',
+      assigned_quantity: '0',
+      custom_fields: custom,
+    };
+    const lowPlain = exportCsv(
+      'low_stock',
+      { rows: [lowStockRow], total: '1', exported_at: at },
+      'Preview',
+    ).csv;
+    const lowCustom = exportCsv(
+      'low_stock',
+      { rows: [lowStockRow], total: '1', exported_at: at },
+      'Preview',
+      true,
+    ).csv;
+    const lowPlainLines = lowPlain.slice(1).split('\r\n');
+    const lowCustomLines = lowCustom.slice(1).split('\r\n');
+    expect(lowPlainLines[0].split(',').slice(0, 13)).toEqual(
+      legacyLowStockHeaders.map(csvText),
+    );
+    expect(lowCustomLines[0].split(',').slice(0, 14)).toEqual(
+      [...legacyLowStockHeaders, 'Custom Fields JSON'].map(csvText),
+    );
+    expect(lowCustomLines[0].split(',')[14]).toBe('"Available in Storage"');
+    expect(lowPlainLines[1].split(',').slice(0, 13)).toEqual(
+      lowCustomLines[1].split(',').slice(0, 13),
+    );
+    expect(lowPlainLines[1].split(',')[11]).toBe(csvText(at));
+    expect(lowPlainLines[1].split(',')[12]).toBe(csvText('Preview'));
   });
   it('measures UTF-8 CSV bytes including BOM and neutralized formula text before completing a file', () => {
     const row = {

@@ -763,6 +763,102 @@ async function main() {
     status: 'active',
   });
 
+  // The ordinary item-history RPC, not the 25/50-row custody supplements,
+  // must carry the original persisted endpoints through every older page.
+  let historyVersion = opening.version as string;
+  for (let index = 0; index < 54; index++) {
+    const moved = await change(staff.client, 'quantity_site_change', {
+      action: 'transfer',
+      item_id: itemId,
+      expected_version: historyVersion,
+      source_site_id: index % 2 === 0 ? site.entity_id : otherSite.entity_id,
+      destination_site_id:
+        index % 2 === 0 ? otherSite.entity_id : site.entity_id,
+      quantity: 1,
+      reference: `Historical page ${index}`,
+    });
+    historyVersion = moved.version as string;
+  }
+  type HistoryRow = {
+    id: string;
+    event_type: string;
+    assignment_event_id: string | null;
+    assignment_from_label: string | null;
+    assignment_to_label: string | null;
+    assignment_from_location_id: string | null;
+    assignment_to_location_id: string | null;
+    assignment_from_site_id: string | null;
+    assignment_to_site_id: string | null;
+    assignment_quantity: number | null;
+    assignment_reference: string | null;
+  };
+  const historyPages = [] as HistoryRow[];
+  for (let page = 1; page <= 3; page++) {
+    const result = (await rpc(viewer.client, 'inventory_history', {
+      p_type: 'quantity',
+      p_entity_id: itemId,
+      p_page: page,
+      p_page_size: 25,
+    })) as { rows: HistoryRow[]; total: number };
+    assert.ok(result.total > 50);
+    historyPages.push(...result.rows);
+  }
+  assert.equal(
+    new Set(historyPages.map((row) => row.id)).size,
+    historyPages.length,
+    'a unique linked assignment cannot duplicate an inventory history event',
+  );
+  const oldestIssue = historyPages.find((row) => row.id === first.event_id);
+  assert.ok(oldestIssue && historyPages.indexOf(oldestIssue) >= 50);
+  assert.ok(oldestIssue.assignment_event_id);
+  assert.equal(oldestIssue.assignment_from_location_id, office);
+  assert.equal(oldestIssue.assignment_to_site_id, site.entity_id);
+  assert.equal(oldestIssue.assignment_quantity, 3);
+  assert.match(oldestIssue.assignment_from_label ?? '', /General Storage/i);
+  assert.match(oldestIssue.assignment_to_label ?? '', /property/i);
+  const latestTransfer = historyPages.find(
+    (row) => row.assignment_reference === 'Historical page 53',
+  );
+  assert.ok(latestTransfer?.assignment_from_site_id);
+  assert.ok(latestTransfer?.assignment_to_site_id);
+  assert.equal(latestTransfer?.assignment_quantity, 1);
+  const officeHistory = (await rpc(viewer.client, 'inventory_history', {
+    p_type: 'quantity',
+    p_entity_id: itemId,
+    p_location_code: 'ITO',
+    p_page_size: 100,
+  })) as { rows: HistoryRow[] };
+  assert.ok(officeHistory.rows.some((row) => row.id === oldestIssue.id));
+  assert.ok(
+    officeHistory.rows.every(
+      (row) => row.assignment_reference !== 'Historical page 53',
+    ),
+    'site-to-site movement never masquerades as a storage location match',
+  );
+  const assetHistory = (await rpc(viewer.client, 'inventory_history', {
+    p_type: 'asset',
+    p_entity_id: asset.entity_id,
+  })) as { rows: HistoryRow[] };
+  const assignedAsset = assetHistory.rows.find(
+    (row) => row.event_type === 'site_assigned',
+  );
+  assert.ok(assignedAsset?.assignment_event_id);
+  assert.equal(assignedAsset.assignment_quantity, null);
+  assert.equal(assignedAsset.assignment_from_location_id, office);
+
+  const anonymous = createClient(api, process.env.LOCAL_ANON_KEY!, options);
+  for (const client of [outsider.client, anonymous]) {
+    const hidden = await client.rpc('inventory_history', {
+      p_type: 'quantity',
+      p_entity_id: itemId,
+    });
+    assert.ok(
+      hidden.error ||
+        (hidden.data as { rows: unknown[] } | null)?.rows.length === 0,
+      'unauthorized callers cannot read linked custody history',
+    );
+  }
+
   const denied = await outsider.client.rpc('inventory_search_v3', {
     p_query: prefix,
   });
@@ -780,6 +876,15 @@ async function main() {
   assert.ok(
     revoked.error || (revoked.data as { rows: unknown[] }).rows.length === 0,
     'deactivated member cannot read current holdings',
+  );
+  const hiddenHistory = await viewer.client.rpc('inventory_history', {
+    p_type: 'quantity',
+    p_entity_id: itemId,
+  });
+  assert.ok(
+    hiddenHistory.error ||
+      (hiddenHistory.data as { rows: unknown[] } | null)?.rows.length === 0,
+    'inactive members cannot read the linked history view',
   );
   await Promise.all([
     staff.client.auth.signOut({ scope: 'local' }),
