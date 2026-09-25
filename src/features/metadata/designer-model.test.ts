@@ -107,4 +107,28 @@ describe('form designer model', () => {
       ]),
     );
   });
+  it('compares datetime bounds by instant across offsets while keeping calendar dates ordered', () => {
+    const draft = definition();
+    draft.fields[0].type = 'datetime';
+    draft.fields[0].options = [];
+    draft.fields[0].rules = {
+      min: '2026-09-25T10:00:00+02:00',
+      max: '2026-09-25T09:30:00Z',
+    };
+    expect(designerIssues(draft)).not.toContain(
+      'Location type has inverted date bounds.',
+    );
+    draft.fields[0].rules = {
+      min: '2026-09-25T10:00:00Z',
+      max: '2026-09-25T11:00:00+02:00',
+    };
+    expect(designerIssues(draft)).toContain(
+      'Location type has inverted date bounds.',
+    );
+    draft.fields[0].type = 'date';
+    draft.fields[0].rules = { min: '2026-09-26', max: '2026-09-25' };
+    expect(designerIssues(draft)).toContain(
+      'Location type has inverted date bounds.',
+    );
+  });
 });

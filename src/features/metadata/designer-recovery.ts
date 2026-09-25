@@ -58,10 +58,16 @@ export function readDesignerRecovery(
 export function writeDesignerRecovery(item: DesignerRecovery): boolean {
   try {
     const raw = JSON.stringify(item);
-    if (new TextEncoder().encode(raw).length > MAX_BYTES) return false;
+    if (new TextEncoder().encode(raw).length > MAX_BYTES) {
+      clearDesignerRecovery(item.memberId, item.categoryId);
+      return false;
+    }
     sessionStorage.setItem(key(item.memberId, item.categoryId), raw);
     return true;
   } catch {
+    // An older snapshot would be misleading after a newer write fails.
+    // Removal is best effort when the browser also blocks storage access.
+    clearDesignerRecovery(item.memberId, item.categoryId);
     return false;
   }
 }

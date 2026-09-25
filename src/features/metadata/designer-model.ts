@@ -3,6 +3,7 @@ import {
   type FieldType,
   type MetadataDefinition,
 } from './contracts';
+import { z } from 'zod';
 
 export type Field = MetadataDefinition['fields'][number];
 export type Section = MetadataDefinition['layout'][number];
@@ -241,13 +242,27 @@ export function designerIssues(def: MetadataDefinition): string[] {
       )
         issues.push(`${field.label || 'A field'} has invalid precision.`);
     }
-    if (
-      ['date', 'datetime'].includes(field.type) &&
-      field.rules.min !== undefined &&
-      field.rules.max !== undefined &&
-      String(field.rules.min) > String(field.rules.max)
-    )
-      issues.push(`${field.label || 'A field'} has inverted date bounds.`);
+    if (['date', 'datetime'].includes(field.type)) {
+      const min = field.rules.min;
+      const max = field.rules.max;
+      const valid = (value: unknown) =>
+        field.type === 'date'
+          ? z.iso.date().safeParse(value).success
+          : z.iso.datetime({ offset: true }).safeParse(value).success;
+      if (
+        (min !== undefined && !valid(min)) ||
+        (max !== undefined && !valid(max))
+      )
+        issues.push(`${field.label || 'A field'} has invalid date bounds.`);
+      else if (
+        min !== undefined &&
+        max !== undefined &&
+        (field.type === 'date'
+          ? String(min) > String(max)
+          : Date.parse(String(min)) > Date.parse(String(max)))
+      )
+        issues.push(`${field.label || 'A field'} has inverted date bounds.`);
+    }
     if (
       field.type === 'multi_select' &&
       field.rules.maxSelections !== undefined &&

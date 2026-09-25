@@ -38,6 +38,7 @@ describe('designer session recovery', () => {
     expect(sessionStorage.getItem('unrelated')).toBe('keep');
   });
   it('reports unavailable storage without throwing', () => {
+    expect(writeDesignerRecovery(entry)).toBe(true);
     const write = vi
       .spyOn(Storage.prototype, 'setItem')
       .mockImplementation(() => {
@@ -45,6 +46,14 @@ describe('designer session recovery', () => {
       });
     expect(writeDesignerRecovery(entry)).toBe(false);
     write.mockRestore();
+    expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
+  });
+  it('invalidates an older recovery snapshot when a newer edit exceeds the storage bound', () => {
+    expect(writeDesignerRecovery(entry)).toBe(true);
+    expect(
+      writeDesignerRecovery({ ...entry, savedDefinition: 'x'.repeat(300_001) }),
+    ).toBe(false);
+    expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
   });
   it('retains the original draft identity when a replacement draft has the same version', () => {
     writeDesignerRecovery(entry);
