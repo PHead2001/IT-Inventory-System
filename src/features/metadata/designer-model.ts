@@ -149,6 +149,26 @@ export function canReparent(
   return true;
 }
 
+const numericBoundPattern = /^-?(0|[1-9]\d*)(\.\d{1,6})?$/;
+function numericBoundValid(
+  value: unknown,
+  precision: number,
+  integer: boolean,
+) {
+  const raw = String(value);
+  if (!numericBoundPattern.test(raw)) return false;
+  if ((raw.match(/\d/g) ?? []).length > 24) return false;
+  if ((raw.split('.')[1]?.length ?? 0) > precision) return false;
+  return !integer || Number.isSafeInteger(Number(raw));
+}
+function scaledNumericBound(value: unknown): bigint {
+  const raw = String(value);
+  const negative = raw.startsWith('-');
+  const [whole, fraction = ''] = (negative ? raw.slice(1) : raw).split('.');
+  const scaled = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
+  return negative ? -scaled : scaled;
+}
+
 export function designerIssues(def: MetadataDefinition): string[] {
   const issues: string[] = [];
   if (def.fields.length > 100) issues.push('At most 100 fields are supported.');
@@ -219,18 +239,28 @@ export function designerIssues(def: MetadataDefinition): string[] {
         issues.push(`${field.label || 'A field'} has invalid text bounds.`);
     }
     if (['integer', 'decimal', 'currency'].includes(field.type)) {
-      const numberPattern = /^-?(0|[1-9]\d*)(\.\d{1,6})?$/;
+      const configuredPrecision = field.rules.precision;
+      const precision =
+        typeof configuredPrecision === 'number' &&
+        Number.isInteger(configuredPrecision) &&
+        configuredPrecision >= 0 &&
+        configuredPrecision <= 6
+          ? configuredPrecision
+          : 6;
+      const min = field.rules.min;
+      const max = field.rules.max;
+      const minValid =
+        min === undefined ||
+        numericBoundValid(min, precision, field.type === 'integer');
+      const maxValid =
+        max === undefined ||
+        numericBoundValid(max, precision, field.type === 'integer');
       if (
-        ['min', 'max'].some(
-          (key) =>
-            field.rules[key] !== undefined &&
-            (!numberPattern.test(String(field.rules[key])) ||
-              (field.type === 'integer' &&
-                !Number.isSafeInteger(Number(field.rules[key])))),
-        ) ||
-        (field.rules.min !== undefined &&
-          field.rules.max !== undefined &&
-          Number(field.rules.min) > Number(field.rules.max))
+        !minValid ||
+        !maxValid ||
+        (min !== undefined &&
+          max !== undefined &&
+          scaledNumericBound(min) > scaledNumericBound(max))
       )
         issues.push(`${field.label || 'A field'} has invalid numeric bounds.`);
       if (

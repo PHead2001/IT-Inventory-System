@@ -131,4 +131,53 @@ describe('form designer model', () => {
       'Location type has inverted date bounds.',
     );
   });
+  it('enforces configured fractional precision and the database 24-digit bound cap', () => {
+    const draft = definition();
+    const field = draft.fields[0];
+    field.type = 'decimal';
+    field.options = [];
+    field.rules = { precision: 2, min: '1.234' };
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid numeric bounds.',
+    );
+    field.rules = {
+      precision: 2,
+      min: '1.23',
+      max: '9999999999999999999999.99',
+    };
+    expect(designerIssues(draft)).not.toContain(
+      'Location type has invalid numeric bounds.',
+    );
+    field.rules.max = '99999999999999999999999.99';
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid numeric bounds.',
+    );
+    field.rules = { min: '0.123456' };
+    expect(designerIssues(draft)).not.toContain(
+      'Location type has invalid numeric bounds.',
+    );
+    field.rules.min = '0.1234567';
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid numeric bounds.',
+    );
+    field.type = 'currency';
+    field.rules = { currencyCode: 'USD', precision: 0, min: '1.1' };
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid numeric bounds.',
+    );
+  });
+  it('orders large numeric bounds exactly instead of rounding them through Number', () => {
+    const draft = definition();
+    const field = draft.fields[0];
+    field.type = 'decimal';
+    field.options = [];
+    field.rules = {
+      precision: 0,
+      min: '999999999999999999999999',
+      max: '999999999999999999999998',
+    };
+    expect(designerIssues(draft)).toContain(
+      'Location type has invalid numeric bounds.',
+    );
+  });
 });
