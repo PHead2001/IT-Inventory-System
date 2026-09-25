@@ -29,6 +29,10 @@ the product timeout, file-size limit, authorization policy, or required journey
 was waived. The retained local evidence is
 `test-results/final-e2e-1b3997a.log` and its Playwright failure trace. Passing
 Linux CI and the isolated-preview journey do not make this local gate green.
+On September 25, 2026, the owner explicitly accepted this documented local
+exception: green exact-SHA Linux CI and signed-in isolated-preview proof
+substitute **only** for the local Supabase Storage denial/reused-connection
+failure. The local gate remains red; no other failed gate is waived.
 
 ## Signed-in isolated-preview journeys
 
@@ -73,9 +77,10 @@ tombstones remain; cleanup is not a history rewrite or hosted reset.
 The browser smoke used a simulated camera stream. A physical camera, physical
 phone, printer, barcode scanner and real-world device placement were not
 tested. Worker IPC and hosted PDF/image handling do not by themselves prove a
-total native-process memory ceiling. The local Storage transport failure above
-remains an explicit acceptance blocker despite the green Linux CI and hosted
-preview. No provider patch or timeout waiver was applied.
+total native-process memory ceiling. Under the dated owner acceptance above,
+the local Storage transport failure is no longer an acceptance blocker after
+the final exact-SHA CI and review pass. It remains a recorded failing local
+test. No provider patch or timeout waiver was applied.
 
 Production remains untouched and unverified. Before a production release, the
 owner must complete the normal PR merge and protected-main delivery, provision
