@@ -116,7 +116,9 @@ test('archiving stocked quantity clears every location in one reviewed operation
   await version(page, 3);
   await page.reload();
   await expect(
-    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+    page.getByRole('heading', {
+      name: 'Current stock — 0 available in storage',
+    }),
   ).toBeVisible();
   await expect(page.getByText(/Quantity inventory · Archived/)).toBeVisible();
   await page.getByRole('link', { name: 'View all item history' }).click();
@@ -134,7 +136,9 @@ test('archiving stocked quantity clears every location in one reviewed operation
   await confirm(restore, 'Restore quantity definition');
   await version(page, 4);
   await expect(
-    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+    page.getByRole('heading', {
+      name: 'Current stock — 0 available in storage',
+    }),
   ).toBeVisible();
 });
 
@@ -198,7 +202,9 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 2);
   await page.reload();
   await expect(
-    page.getByRole('heading', { name: 'Current stock — 15 units total' }),
+    page.getByRole('heading', {
+      name: 'Current stock — 15 available in storage',
+    }),
   ).toBeVisible();
   form = await openForm(page, 'Move stock');
   await choose(form, 'Source location', 'ITC-S1A');
@@ -216,7 +222,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await page.reload();
   const stock = page.locator('section').filter({
     has: page.getByRole('heading', {
-      name: 'Current stock — 15 units total',
+      name: 'Current stock — 15 available in storage',
     }),
   });
   await expect(stock.getByText('8 units', { exact: true })).toBeVisible();
@@ -301,7 +307,9 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 10);
   await page.reload();
   await expect(
-    page.getByRole('heading', { name: 'Current stock — 0 units total' }),
+    page.getByRole('heading', {
+      name: 'Current stock — 0 available in storage',
+    }),
   ).toBeVisible();
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
@@ -398,7 +406,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await version(page, 5);
   await page.reload();
   await expect(
-    page.getByRole('heading', { name: 'Last known location' }),
+    page.getByRole('heading', { name: 'Last recorded storage / custody' }),
   ).toBeVisible();
   await expect(
     page.locator('summary').filter({ hasText: /^Move asset$/ }),
@@ -411,8 +419,12 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await confirm(form, 'Restore asset');
   await version(page, 6);
   await page.reload();
+  const currentCustody = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Current custody', exact: true }),
+  });
+  await expect(currentCustody).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Current location' }),
+    currentCustody.locator('a[href="/locations/ITC-RACK"]'),
   ).toBeVisible();
   await expect(
     page

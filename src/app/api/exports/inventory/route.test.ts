@@ -88,7 +88,9 @@ describe('authenticated inventory downloads', () => {
     expect(response.headers.get('Content-Disposition')).toBe(
       'attachment; filename="preview-low-stock-20260924T151837Z.csv"',
     );
-    expect(await response.text()).toContain('"Total Recorded"');
+    expect(await response.text()).toContain(
+      '"Recorded Total","Reorder Threshold","Stock State"',
+    );
     expect(mocks.snapshot).toHaveBeenCalledOnce();
     expect(mocks.snapshot).toHaveBeenCalledWith(
       expect.objectContaining({

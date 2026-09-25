@@ -195,14 +195,14 @@ export function exportCsv(
     'Manufacturer',
     'Model',
     'Status',
-    'Total Recorded',
-    'Available in Storage',
-    'Assigned to Sites',
+    'Recorded Total',
     'Reorder Threshold',
     'Stock State',
     'All Current Holdings and Locations',
     'Exported At (UTC)',
     'Environment',
+    'Available in Storage',
+    'Assigned to Sites',
   ];
   if (includeCustom) headers.push('Custom Fields JSON');
   function* lines() {
@@ -217,8 +217,6 @@ export function exportCsv(
         csvText(row.model),
         csvText(row.status),
         csvNumber(row.recorded_total),
-        csvNumber(row.available_quantity),
-        csvNumber(row.assigned_quantity),
         csvNumber(row.reorder_threshold),
         csvText(
           row.stock_state === 'out_of_stock'
@@ -228,6 +226,8 @@ export function exportCsv(
         csvText(row.holding_context),
         csvText(exportedAt),
         csvText(environment),
+        csvNumber(row.available_quantity),
+        csvNumber(row.assigned_quantity),
       ];
       if (includeCustom)
         cells.push(csvText(JSON.stringify(row.custom_fields ?? {})));

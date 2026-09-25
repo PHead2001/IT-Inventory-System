@@ -50,7 +50,7 @@ describe('inventory CSV', () => {
       'Production',
     ).csv;
     expect(low).toContain(
-      '"Total Recorded","Available in Storage","Assigned to Sites","Reorder Threshold"',
+      '"Recorded Total","Reorder Threshold","Stock State","All Current Holdings and Locations","Exported At (UTC)","Environment","Available in Storage","Assigned to Sites"',
     );
     expect(low).toContain('"\'=Danger"');
     expect(low).toContain('"1A [ITC-S1A]: 1; 1B [ITC-S1B]: 2"');

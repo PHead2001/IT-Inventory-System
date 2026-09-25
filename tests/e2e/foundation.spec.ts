@@ -134,11 +134,25 @@ test('phone navigation remains usable and has no horizontal overflow', async ({
   await expect(
     page.getByRole('heading', { name: 'Inventory workspace' }),
   ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
+  const width = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+    offenders: [...document.querySelectorAll('body *')]
+      .filter(
+        (element) =>
+          element.getBoundingClientRect().right > window.innerWidth + 1,
+      )
+      .slice(0, 8)
+      .map((element) => ({
+        tag: element.tagName,
+        className:
+          typeof element.className === 'string' ? element.className : '',
+        right: Math.round(element.getBoundingClientRect().right),
+      })),
+  }));
+  expect(width.document, JSON.stringify(width.offenders)).toBeLessThanOrEqual(
+    width.viewport,
+  );
   await page.getByRole('link', { name: 'Room', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Room navigation' }),

@@ -350,12 +350,36 @@ test('explicit Stop and route navigation release a camera stream without a decod
   await page.goto('/scan');
   await page.getByRole('button', { name: 'Start camera' }).click();
   await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
+  await expect
+    .poll(() => events.filter((event) => event === 'requested').length)
+    .toBe(1);
+  await expect
+    .poll(() =>
+      page
+        .getByLabel('Camera preview')
+        .evaluate(
+          (video: HTMLVideoElement) => video.srcObject instanceof MediaStream,
+        ),
+    )
+    .toBe(true);
   await page.getByRole('button', { name: 'Stop camera' }).click();
   await expect
     .poll(() => events.filter((event) => event === 'stopped').length)
     .toBeGreaterThanOrEqual(1);
   await page.getByRole('button', { name: 'Start camera' }).click();
   await expect(page.getByRole('button', { name: 'Stop camera' })).toBeVisible();
+  await expect
+    .poll(() => events.filter((event) => event === 'requested').length)
+    .toBe(2);
+  await expect
+    .poll(() =>
+      page
+        .getByLabel('Camera preview')
+        .evaluate(
+          (video: HTMLVideoElement) => video.srcObject instanceof MediaStream,
+        ),
+    )
+    .toBe(true);
   await page.getByRole('link', { name: 'Inventory', exact: true }).click();
   await expect
     .poll(() => events.filter((event) => event === 'stopped').length)
@@ -489,7 +513,7 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
       .locator('section')
       .filter({
         has: page.getByRole('heading', {
-          name: 'Current location',
+          name: 'Current custody',
           exact: true,
         }),
       })
@@ -573,7 +597,9 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await search.getByRole('textbox').fill(quantityName);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: quantityName })).toBeVisible();
-  await expect(page.getByText('Holdings: ITC-S1A: 3')).toBeVisible();
+  await expect(
+    page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Add to queue' }).click();
   await search.getByRole('textbox').fill(assetName);
   await search.getByRole('button', { name: 'Search' }).click();

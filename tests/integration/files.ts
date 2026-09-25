@@ -31,6 +31,8 @@ const db = new Client({
 type Actor = { id: string; email: string; client: SupabaseClient };
 const actors: Actor[] = [];
 let keyToRetire: string | undefined;
+let keySecretForCleanup: string | undefined;
+let mainFailed = false;
 const sha = (data: Uint8Array) =>
   createHash('sha256').update(data).digest('hex');
 const mac = (key: string, data: string) =>
@@ -303,6 +305,108 @@ async function reserve(
     p_expected_file_version: replacedVersion,
   })) as { id: string; path: string };
 }
+
+async function cleanupFailedFixture(
+  staff: Actor,
+  keyId: string,
+  secret: string,
+) {
+  const pending = await db.query<{
+    id: string;
+    state: string;
+    validation_generation: number;
+  }>(
+    `select id,state,validation_generation from public.inventory_files
+     where uploader_id=$1 and state in ('reserved','uploaded','validating','validated')`,
+    [staff.id],
+  );
+  for (const file of pending.rows) {
+    if (file.state === 'validating') {
+      const rejected = await rpc(staff.client, 'inventory_file_reject', {
+        p_file_id: file.id,
+        p_generation: file.validation_generation,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'reject', [
+          file.id,
+          String(file.validation_generation),
+          keyId,
+        ]),
+      });
+      assert.equal(rejected.error, null, 'fictional validation rejection');
+      // Local failure teardown only: terminal rejection fences a late worker
+      // completion. Advancing this one fixture's grace clock lets the normal
+      // signed cleanup RPC reclaim its source; it is not grace-timing proof.
+      await db.query(
+        `update public.inventory_files
+           set validation_lease_until=clock_timestamp()-interval '31 seconds'
+         where id=$1 and uploader_id=$2 and state='rejected'`,
+        [file.id, staff.id],
+      );
+    } else {
+      const cancelled = await rpc(staff.client, 'inventory_file_cancel', {
+        p_file_id: file.id,
+      });
+      assert.equal(cancelled.error, null, 'fictional pending cancellation');
+    }
+  }
+  const foreign = await db.query<{ count: string }>(
+    `select count(*) from private.file_objects o
+       join public.inventory_files f on f.id=o.file_id
+      where o.cleanup_state='eligible' and f.uploader_id<>$1`,
+    [staff.id],
+  );
+  assert.equal(
+    foreign.rows[0].count,
+    '0',
+    'failure cleanup refuses to claim another fixture owner',
+  );
+  for (let batch = 0; batch < 10; batch++) {
+    const claims = (await okay(staff.client, 'inventory_file_cleanup_claim', {
+      p_limit: 20,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_claim', ['20', keyId]),
+    })) as { object_id: string; path: string }[];
+    if (!claims.length) break;
+    const ownership = await db.query<{ count: string }>(
+      `select count(*) from private.file_objects o
+         join public.inventory_files f on f.id=o.file_id
+        where o.id=any($1::uuid[]) and f.uploader_id=$2`,
+      [claims.map((claim) => claim.object_id), staff.id],
+    );
+    assert.equal(
+      Number(ownership.rows[0].count),
+      claims.length,
+      'failure cleanup claim remains within this test actor',
+    );
+    for (const claim of claims) {
+      const present = await db.query<{ present: boolean }>(
+        "select exists(select 1 from storage.objects where bucket_id='inventory-files' and name=$1) present",
+        [claim.path],
+      );
+      if (present.rows[0].present) {
+        const removed = await staff.client.storage
+          .from('inventory-files')
+          .remove([claim.path]);
+        assert.equal(removed.error, null, 'fictional Storage cleanup');
+      }
+      await okay(staff.client, 'inventory_file_cleanup_confirm', {
+        p_object_id: claim.object_id,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'cleanup_confirm', [
+          claim.object_id,
+          keyId,
+        ]),
+      });
+    }
+  }
+  const remaining = await db.query<{ count: string }>(
+    `select count(*) from private.file_objects o
+       join public.inventory_files f on f.id=o.file_id
+      where f.uploader_id=$1 and o.cleanup_state in ('eligible','claimed')`,
+    [staff.id],
+  );
+  assert.equal(remaining.rows[0].count, '0', 'fictional cleanup is complete');
+}
 async function bytesAt(client: SupabaseClient, path: string) {
   const result = await client.storage.from('inventory-files').download(path);
   assert.equal(result.error, null, `download: ${result.error?.message}`);
@@ -515,6 +619,7 @@ async function main() {
     [keyId, secret],
   );
   keyToRetire = keyId;
+  keySecretForCleanup = secret;
   const staff = await actor('staff');
   const viewer = await actor('viewer');
   const {
@@ -1772,6 +1877,74 @@ async function main() {
   await okay(staff.client, 'inventory_file_cancel', {
     p_file_id: retiredAttachment.id,
   });
+  // The quota-race reservations above deliberately leave their full source
+  // allowance charged after cancellation. Drain only this test's fictional
+  // parents through the signed cleanup lifecycle before the E2E fixtures run.
+  const quotaFiles = [
+    ...races.filter((entry) => entry.data?.id).map((entry) => entry.data.id),
+    retiredAttachment.id,
+  ];
+  const quotaObjects = await db.query<{ id: string }>(
+    `select id from private.file_objects
+      where file_id=any($1::uuid[]) and cleanup_state='eligible'`,
+    [quotaFiles],
+  );
+  eq(
+    quotaObjects.rows.length,
+    4,
+    'four cancelled fixture objects need cleanup',
+  );
+  const remainingQuotaObjects = new Set(quotaObjects.rows.map((row) => row.id));
+  for (let batch = 0; remainingQuotaObjects.size > 0 && batch < 4; batch++) {
+    const claims = (await okay(staff.client, 'inventory_file_cleanup_claim', {
+      p_limit: 20,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_claim', ['20', keyId]),
+    })) as { object_id: string; path: string }[];
+    assert.ok(claims.length > 0, 'fixture cleanup must make progress');
+    const owned = await db.query<{ id: string }>(
+      `select o.id from private.file_objects o
+        join public.inventory_files f on f.id=o.file_id
+       where o.id=any($1::uuid[])
+         and (f.asset_id=$2 or f.quantity_id=$3)`,
+      [claims.map((claim) => claim.object_id), parent, quantityId],
+    );
+    eq(
+      owned.rows.length,
+      claims.length,
+      "cleanup claim contains only this test's fictional parents",
+    );
+    for (const claim of claims) {
+      const present = await db.query<{ present: boolean }>(
+        "select exists(select 1 from storage.objects where bucket_id='inventory-files' and name=$1) present",
+        [claim.path],
+      );
+      if (present.rows[0].present) {
+        const deletion = await staff.client.storage
+          .from('inventory-files')
+          .remove([claim.path]);
+        assert.equal(
+          deletion.error,
+          null,
+          'fictional cleanup Storage deletion',
+        );
+      }
+      await okay(staff.client, 'inventory_file_cleanup_confirm', {
+        p_object_id: claim.object_id,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'cleanup_confirm', [
+          claim.object_id,
+          keyId,
+        ]),
+      });
+      remainingQuotaObjects.delete(claim.object_id);
+    }
+  }
+  eq(
+    remainingQuotaObjects.size,
+    0,
+    'cancelled quota fixtures are absent and no longer charged',
+  );
   eq(
     (
       await db.query(
@@ -1800,11 +1973,26 @@ async function main() {
 
 main()
   .catch((error) => {
+    mainFailed = true;
     console.error(error);
     process.exitCode = 1;
   })
   .finally(async () => {
     try {
+      if (mainFailed && keyToRetire && keySecretForCleanup && actors[0]) {
+        try {
+          await cleanupFailedFixture(
+            actors[0],
+            keyToRetire,
+            keySecretForCleanup,
+          );
+        } catch (error) {
+          console.error(
+            'Fictional Files fixture cleanup also failed:',
+            (error as { code?: string }).code ?? 'unknown',
+          );
+        }
+      }
       if (keyToRetire) {
         await db.query(
           'update private.file_keys set accepts_new=false,verify_until=clock_timestamp(),secret=$2 where key_id=$1',

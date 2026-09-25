@@ -208,6 +208,63 @@ remain active for testing
 and require final deactivation. Credentials and temporary access URLs remain in
 ignored local files only. No production action was performed.
 
+## Follow-up checkpoint: `3a763ef`
+
+Foundation CI run `36169645625` passed the app job, generated-type verification,
+477 pgTAP assertions, all database integration suites, 57 completion-guard checks
+and 262 private-file assertions. Its browser phase failed: 54 passed, eight failed
+and one camera-stop case passed only on retry. Failures include stale custody and
+label copy expectations, a CSV header compatibility regression, phone overflow
+and an absent photo-validation response. These remain tracked failures; the full
+CI gate is not green.
+
+Codex review `5320871613` completed on exact
+`3a763ef13bc26f5ec026c95bd942502102282544` and found stale replacement selection
+after publication. A local fix clears only the successfully consumed replacement
+target and rejects a disappeared target before reservation; 17 component tests
+passed. Exact-fix-SHA review is pending. Eight review threads remain open; no
+clean final review is claimed.
+
+Hosted photo publication succeeded on the matching isolated preview, returning
+HTTP 200 in approximately 3.8 seconds; staff and viewer ready reads succeeded.
+A minimal overwrite probe then returned Storage HTTP 500 / DatabaseError.
+Private read-only verification confirmed source, display and thumbnail UUIDs
+and object versions still match their registered identities; the source remained
+83 bytes, and the published display hash was unchanged. Provider logs recorded
+`sealed_file_storage_path`: the completion guard's custom SQLSTATE was not mapped
+to an authorization response by Storage. A forward error-contract correction is
+pending; the 500 is not counted as a successful denial test. Probe fixtures were
+removed/archived using supported operations; complete hosted Files proof remains
+pending.
+
+A new real local Chromium regression reproduces the post-denial transport stall:
+an unregistered 2 MiB multipart upload is denied, then a valid near-20 MiB PDF's
+Storage request stalls before application validation. This assertion remains red.
+A separate deterministic local fixture has proved an expired-key rejection of
+the real server's derived upload and subsequent same-process photo publication;
+the test uses a textured source over 1 MiB and asserts both derived display
+payloads exceed 128 KiB. It passed, but retained Storage completion timestamps
+show a roughly 60.7-second gap between the denial and the first cleanup DELETE
+completion. Request-start timestamps were not retained, so this proves eventual
+recovery, not prompt cleanup. These are distinct recovery paths and one does not
+certify the other.
+
+The photo failure in CI was traced to the reservation response, not validation:
+`P1012 staging_quota`. Earlier integration fixtures retained 80 MiB of cancelled
+reservation allowance, leaving insufficient space for a 60 MiB photo reservation.
+Scoped fixture cleanup is being added through the existing authenticated cleanup
+and absence-confirmation operations; production quotas are unchanged.
+
+Phone overflow was reproduced with CI-like fixtures: at a 390-pixel viewport,
+the document measured 1266 pixels wide and the offending element was the long
+site-custody link. Wrapping that link passed all 12 focused Foundation browser
+tests. The original low-stock CSV column prefix/order is restored, with custody
+totals appended; all 11 CSV unit tests passed. The focused inventory/label browser
+suite passed 15/15. The subsequent application gate passed typecheck, lint,
+formatting, 533 Vitest tests, 27 preview-access checks, export-memory checks,
+27 file-inspection cases and the production build. Full database/browser and
+exact-candidate hosted certification remain pending.
+
 ## Required acceptance journeys
 
 Each journey needs local evidence and signed-in evidence on the verified isolated

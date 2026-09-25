@@ -423,6 +423,73 @@ async function main() {
         .from('inventory-files')
         .info(duplicate.path);
       assert.equal(info.error, null, 'ordinary Storage info stays available');
+      const assertSealedSource = async () => {
+        const current = await db.query<{
+          id: string;
+          version: string;
+          metadata: unknown;
+        }>(
+          "select id,version,metadata from storage.objects where bucket_id='inventory-files' and name=$1",
+          [duplicate.path],
+        );
+        assert.deepEqual(
+          current.rows[0],
+          before.rows[0],
+          'denied Storage operation preserves sealed source identity',
+        );
+        const bytes = await staff.client.storage
+          .from('inventory-files')
+          .download(duplicate.path);
+        assert.equal(bytes.error, null);
+        assert.deepEqual(
+          Buffer.from(await bytes.data!.arrayBuffer()),
+          bytesA,
+          'denied Storage operation preserves sealed PDF bytes',
+        );
+        assertions += 2;
+      };
+      const upsert = await staff.client.storage
+        .from('inventory-files')
+        .upload(
+          duplicate.path,
+          new Blob([bytesB], { type: 'application/pdf' }),
+          { contentType: 'application/pdf', upsert: true },
+        );
+      assert.ok(upsert.error, 'sealed ready PDF cannot be upserted');
+      assert.equal(upsert.error.statusCode, '403');
+      await assertSealedSource();
+      const copyTarget = `s/${randomUUID()}/${randomBytes(16).toString('hex')}`;
+      const copied = await staff.client.storage
+        .from('inventory-files')
+        .copy(duplicate.path, copyTarget);
+      assert.ok(
+        copied.error,
+        'sealed PDF cannot be copied to an unregistered path',
+      );
+      assert.ok(
+        ['401', '403', '404'].includes(copied.error.statusCode ?? ''),
+        'copy denial is a mapped authorization or absence response',
+      );
+      await assertSealedSource();
+      const moveTarget = `s/${randomUUID()}/${randomBytes(16).toString('hex')}`;
+      const moved = await staff.client.storage
+        .from('inventory-files')
+        .move(duplicate.path, moveTarget);
+      assert.ok(
+        moved.error,
+        'sealed PDF cannot be moved to an unregistered path',
+      );
+      assert.ok(
+        ['401', '403', '404'].includes(moved.error.statusCode ?? ''),
+        'move denial is a mapped authorization or absence response',
+      );
+      await assertSealedSource();
+      const targets = await db.query<{ count: string }>(
+        "select count(*) from storage.objects where bucket_id='inventory-files' and name=any($1::text[])",
+        [[copyTarget, moveTarget]],
+      );
+      assert.equal(targets.rows[0].count, '0');
+      assertions += 7;
       await db.query(
         "update storage.objects set last_accessed_at=clock_timestamp() where bucket_id='inventory-files' and name=$1",
         [duplicate.path],
@@ -432,14 +499,14 @@ async function main() {
           "update storage.objects set version=$2 where bucket_id='inventory-files' and name=$1",
           [duplicate.path, randomUUID()],
         ),
-        { code: 'P1008' },
+        { code: '42501' },
       );
       await assert.rejects(
         db.query(
           "update storage.objects set metadata=jsonb_set(metadata,'{size}','999'::jsonb) where bucket_id='inventory-files' and name=$1",
           [duplicate.path],
         ),
-        { code: 'P1008' },
+        { code: '42501' },
       );
       assertions += 10;
     } finally {
@@ -675,6 +742,36 @@ async function main() {
       [image.id],
     );
     await cleanup(staff, image, keyId, secret);
+
+    const expiredSource = await reserve(
+      staff,
+      parent,
+      'expired-source.pdf',
+      bytesA.length,
+    );
+    await db.query(
+      "update public.inventory_files set reserve_expires_at=clock_timestamp()-interval '1 second' where id=$1 and state='reserved'",
+      [expiredSource.id],
+    );
+    const expiredUpload = await staff.client.storage
+      .from('inventory-files')
+      .upload(
+        expiredSource.path,
+        new Blob([bytesA], { type: 'application/pdf' }),
+        { contentType: 'application/pdf' },
+      );
+    assert.ok(
+      expiredUpload.error,
+      'expired source reservation cannot complete',
+    );
+    assert.equal(expiredUpload.error.statusCode, '403');
+    const expiredObject = await db.query<{ count: string }>(
+      "select count(*) from storage.objects where bucket_id='inventory-files' and name=$1",
+      [expiredSource.path],
+    );
+    assert.equal(expiredObject.rows[0].count, '0');
+    assertions += 3;
+    await cleanup(staff, expiredSource, keyId, secret);
 
     await assert.rejects(
       db.query(

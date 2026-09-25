@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 import { PDFDocument } from 'pdf-lib';
+import { createClient } from '@supabase/supabase-js';
+import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
@@ -299,4 +301,177 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   );
   await files.getByRole('button', { name: 'Remove' }).click();
   await expect(files.getByText('No ready files yet.')).toBeVisible();
+});
+
+test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const api = process.env.LOCAL_API_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  expect(api).toMatch(/^http:\/\/(127\.0\.0\.1|localhost):54321$/);
+  expect(key).toBeTruthy();
+  const actor = createClient(api!, key!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const signedIn = await actor.auth.signInWithPassword({
+    email: fixture.emails.staff,
+    password: fixture.password,
+  });
+  expect(signedIn.error).toBeNull();
+  const token = signedIn.data.session!.access_token;
+
+  await login(page, 'staff');
+  await page.goto('/inventory/assets/new');
+  const form = page.getByRole('form', { name: 'Create asset inventory' });
+  await form
+    .getByLabel('Name', { exact: true })
+    .fill('Large PDF browser ' + randomUUID());
+  await chooseLocation(form, 'Current location', 'ITC-RACK');
+  await confirm(form);
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+
+  const deniedPath = `s/${randomUUID()}/${randomUUID().replaceAll('-', '')}`;
+  const denied = await page.evaluate(
+    async ({ apiUrl, anonKey, accessToken, path }) => {
+      const bytes = new Uint8Array(2 * 1048576);
+      bytes.set(new TextEncoder().encode('%PDF-'));
+      const body = new FormData();
+      body.append('cacheControl', '3600');
+      body.append(
+        '',
+        new File([bytes], 'denied.pdf', { type: 'application/pdf' }),
+      );
+      const response = await fetch(
+        `${apiUrl}/storage/v1/object/inventory-files/${path}`,
+        {
+          method: 'POST',
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${accessToken}`,
+            'x-upsert': 'false',
+          },
+          body,
+        },
+      );
+      const result = await response.json();
+      return {
+        http: response.status,
+        code: String(result.statusCode ?? result.code ?? ''),
+      };
+    },
+    { apiUrl: api!, anonKey: key!, accessToken: token, path: deniedPath },
+  );
+  expect(denied.http).toBeGreaterThanOrEqual(400);
+  expect(denied.code).toBe('403');
+
+  const pdf = await PDFDocument.create();
+  pdf.addPage([300, 300]);
+  const minimal = Buffer.from(await pdf.save());
+  const nearLimit = Buffer.alloc(20971519, 0x20);
+  minimal.copy(nearLimit);
+  expect((await PDFDocument.load(nearLimit)).getPageCount()).toBe(1);
+  const files = page.getByRole('region', { name: 'Inventory files' });
+  await files.getByLabel('Add photo or PDF').setInputFiles({
+    name: 'large-manual.pdf',
+    mimeType: 'application/pdf',
+    buffer: nearLimit,
+  });
+  let reservationId: string | null = null;
+  let published = false;
+  let primaryError: unknown = null;
+  const reserved = page.waitForResponse(
+    (response) =>
+      response.url().includes('/rpc/inventory_file_reserve') &&
+      response.request().method() === 'POST',
+  );
+  const validation = page.waitForResponse(
+    (response) => response.url().includes('/api/inventory-files/validate'),
+    { timeout: 60_000 },
+  );
+  // A denied reservation has no validation response. Keep that separate
+  // listener handled while preserving its rejection for the success path.
+  void validation.catch(() => undefined);
+  try {
+    await files.getByRole('button', { name: 'Upload and review' }).click();
+    const reserveResponse = await reserved;
+    const reserveBody = (await reserveResponse.json()) as {
+      id?: string;
+      code?: string;
+    };
+    expect(
+      reserveResponse.ok(),
+      JSON.stringify({ code: reserveBody.code }),
+    ).toBe(true);
+    reservationId = reserveBody.id ?? null;
+    expect(reservationId).toMatch(/^[0-9a-f-]{36}$/);
+    const result = await validation;
+    expect(result.ok(), JSON.stringify(await result.json())).toBe(true);
+    await expect(
+      files
+        .locator('ul')
+        .first()
+        .getByText('large-manual.pdf', { exact: true }),
+    ).toBeVisible();
+    const downloadPromise = page.waitForEvent('download');
+    await files.getByRole('button', { name: 'Download PDF' }).click();
+    const download = await downloadPromise;
+    expect(sha256(await readFile(await download.path()))).toBe(
+      sha256(nearLimit),
+    );
+    await files.getByRole('button', { name: 'Remove' }).click();
+    await expect(files.getByText('No ready files yet.')).toBeVisible();
+    published = true;
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    if (reservationId && !published) {
+      let cleanupError: unknown = null;
+      try {
+        // Closing the browser settles its in-flight request before the
+        // authenticated cancel. Late backend completion remains fenced by the
+        // Storage lifecycle guard.
+        await page.close();
+        const cancelled = await actor.rpc('inventory_file_cancel', {
+          p_file_id: reservationId,
+        });
+        if (cancelled.error)
+          throw new Error(`Fixture cancel failed: ${cancelled.error.code}`);
+        const dbUrl = new URL(process.env.LOCAL_DB_URL ?? '');
+        expect(['127.0.0.1', 'localhost']).toContain(dbUrl.hostname);
+        expect(dbUrl.port).toBe('54322');
+        const db = new Client({ connectionString: dbUrl.toString() });
+        await db.connect();
+        try {
+          let deleted = false;
+          for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+            const cleanup = await page
+              .context()
+              .request.post('/api/inventory-files/cleanup', {
+                timeout: 10_000,
+              });
+            expect(cleanup.ok()).toBe(true);
+            const source = await db.query<{ state: string }>(
+              `select cleanup_state state from private.file_objects
+               where file_id=$1 and variant='source'`,
+              [reservationId],
+            );
+            deleted = source.rows[0]?.state === 'deleted';
+          }
+          expect(deleted).toBe(true);
+        } finally {
+          await db.end();
+        }
+      } catch (error) {
+        cleanupError = error;
+      }
+      if (cleanupError && !primaryError) throw cleanupError;
+      if (cleanupError)
+        console.error(
+          'Fictional reservation cleanup also failed:',
+          (cleanupError as { code?: string }).code ?? 'unknown',
+        );
+    }
+  }
 });

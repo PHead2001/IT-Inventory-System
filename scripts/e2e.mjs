@@ -25,6 +25,7 @@ try {
     APP_ORIGIN: 'http://127.0.0.1:3000',
     APP_ENV: 'local',
     LOCAL_API_URL: status.API_URL,
+    LOCAL_DB_URL: status.DB_URL,
     LOCAL_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY,
     VERCEL_ENV: testTelemetry ? 'preview' : 'development',
     SPEED_INSIGHTS_ENABLED: testTelemetry ? 'true' : 'false',

@@ -63,6 +63,10 @@ export function FilesPanel({
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [replace, setReplace] = useState('');
+  const replaceUnavailable = Boolean(
+    replace &&
+    !cards.some((card) => card.id === replace && card.state === 'ready'),
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [cleanupPending, setCleanupPending] = useState(false);
@@ -180,6 +184,7 @@ export function FilesPanel({
     fileId: string,
     expectedFileVersion: string | null,
     requestId = crypto.randomUUID(),
+    replacedId: string | null = null,
   ) {
     const response = await fetch('/api/inventory-files/validate', {
       method: 'POST',
@@ -207,6 +212,8 @@ export function FilesPanel({
       }
       throw new Error(body.message ?? 'Validation could not be confirmed.');
     }
+    if (replacedId)
+      setReplace((current) => (current === replacedId ? '' : current));
     const deleted = await cleanupTerminalFiles();
     await load();
     setHistoryPage(1);
@@ -237,6 +244,13 @@ export function FilesPanel({
         .replace(/[\x00-\x1f\x7f/\\]/g, '_')
         .slice(0, 200);
       if (!safeName) throw new Error('Choose a file with a name.');
+      const replacement = replace
+        ? cards.find((card) => card.id === replace && card.state === 'ready')
+        : null;
+      if (replace && !replacement)
+        throw new Error(
+          'The selected replacement is unavailable. Choose another ready file or add without replacing.',
+        );
       const { data, error } = await rpc('inventory_file_reserve', {
         p_parent_type: parentType,
         p_parent_id: parentId,
@@ -244,9 +258,8 @@ export function FilesPanel({
         p_name: safeName,
         p_type: file.type,
         p_bytes: file.size,
-        p_replaces: replace || null,
-        p_expected_file_version:
-          cards.find((card) => card.id === replace)?.version ?? null,
+        p_replaces: replacement?.id ?? null,
+        p_expected_file_version: replacement?.version ?? null,
       });
       if (error)
         throw new Error(
@@ -270,7 +283,9 @@ export function FilesPanel({
       setFile(null);
       await validate(
         reservation.id,
-        cards.find((card) => card.id === replace)?.version ?? null,
+        replacement?.version ?? null,
+        undefined,
+        replacement?.id ?? null,
       );
     } catch (error) {
       setMessage(
@@ -299,7 +314,12 @@ export function FilesPanel({
           throw new Error(
             'The replacement target is no longer ready. Cancel this pending file and start a new upload.',
           );
-        await validate(card.id, replacementVersion ?? null);
+        await validate(
+          card.id,
+          replacementVersion ?? null,
+          undefined,
+          card.replaces_file_id,
+        );
       } else {
         const { error } = await rpc('inventory_file_cancel', {
           p_file_id: card.id,
@@ -513,7 +533,8 @@ export function FilesPanel({
             }
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
-          {cards.some((card) => card.state === 'ready') && (
+          {(cards.some((card) => card.state === 'ready') ||
+            replaceUnavailable) && (
             <label className="block text-sm">
               Replace a ready file
               <select
@@ -522,6 +543,11 @@ export function FilesPanel({
                 onChange={(event) => setReplace(event.target.value)}
               >
                 <option value="">Add without replacing</option>
+                {replaceUnavailable && (
+                  <option value={replace} disabled>
+                    Previously selected replacement unavailable — choose again
+                  </option>
+                )}
                 {cards
                   .filter((card) => card.state === 'ready')
                   .map((card) => (
@@ -530,11 +556,20 @@ export function FilesPanel({
                     </option>
                   ))}
               </select>
+              {replaceUnavailable && (
+                <span
+                  role="alert"
+                  className="mt-1 block text-sm text-amber-200"
+                >
+                  The selected replacement is unavailable. Choose another ready
+                  file or add without replacing.
+                </span>
+              )}
             </label>
           )}
           <button
             type="button"
-            disabled={!file || busy}
+            disabled={!file || busy || replaceUnavailable}
             className="min-h-11 rounded bg-cyan-700 px-4 py-2 disabled:opacity-50"
             onClick={() => void upload()}
           >

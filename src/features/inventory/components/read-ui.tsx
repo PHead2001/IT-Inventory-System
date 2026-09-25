@@ -132,7 +132,7 @@ export function InventoryRows({
             <p className="mt-3 text-sm">
               {row.site ? (
                 <Link
-                  className="text-cyan-300 underline"
+                  className="text-cyan-300 underline [overflow-wrap:anywhere]"
                   href={`/sites/${encodeURIComponent(row.site.code)}`}
                 >
                   Assigned to {row.site.name} ({row.site.code}) · no room model
