@@ -12,6 +12,8 @@ Local development and CI pin Node 24.19.0 in .nvmrc. package.json allows Node 24
 
 Development/CI use disposable local Supabase. Previews use the already-configured Supabase nonproduction/preview branching integration with fictional data. Production uses its own project and real inventory.
 
+The optional trusted-branch [preview staff fixture workflow](preview-staff-access.md) provisions a marked staff account only in verified GitHub-managed PR child branches after the matching Supabase deployment succeeds. It requires separate owner-managed `preview-access` environment secrets and does not run from PR code.
+
 Record the preview branch and applied repository migration revision when certifying a schema-changing preview. Do not reuse a production database or create replacement hosted projects.
 
 | Variable                                                  | Boundary                                                |
