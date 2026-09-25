@@ -23,10 +23,17 @@ Record the preview branch and applied repository migration revision when certify
 | APP_ORIGIN                                                | Optional server-only origin override                    |
 | APP_ENV                                                   | Server-only environment label                           |
 | SPEED_INSIGHTS_ENABLED                                    | Optional server-only explicit telemetry opt-in (`true`) |
+| INVENTORY_FILE_KEYS_JSON                                  | Server-only map of file HMAC key IDs to secrets         |
 | Supabase access token/project reference/database password | GitHub `production-database` environment only           |
 | Service-role credential                                   | Owner administration/local fixtures only                |
 
 Commit placeholders only. Public values are build inputs; do not reuse an artifact built for another backend. Never run migrations inside Next build.
+
+### Private inventory file configuration
+
+The [private inventory files contract](inventory-files.md) uses the private `inventory-files` Supabase Storage bucket and a per-environment HMAC key in both `private.file_keys` and server-only `INVENTORY_FILE_KEYS_JSON`. The migration creates the bucket and policies but no signing secret. Keep the JSON variable out of `NEXT_PUBLIC_`, browser code, build logs and repository files. The ID and secret must match the database row; a missing pair leaves only the file workflow unavailable. The deployed app needs no service-role credential for ordinary file operations.
+
+Provision only an explicitly authorized, **verified isolated nonproduction preview branch** with a distinct preview-only key. Confirm its project reference, branch, applied migration revision and fictional data before writing the key or exercising authenticated uploads, downloads, validation, cleanup and denial. Do not copy a local or production key, and do not use the production project as a preview. Record actual Storage and app behavior; a local passing test or successful build is not hosted proof. Production key installation and activation remain part of the owner's production release prerequisites and are not performed by preview validation.
 
 ### Private Speed Insights
 
