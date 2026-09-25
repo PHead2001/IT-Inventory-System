@@ -146,13 +146,13 @@ async function waitForBarrierWait(barrierPid: number, holderPid: number) {
   }
   throw new Error('Intermediate SQL lock did not enter the observed queue');
 }
-async function waitForBlocked(holderPid: number) {
+async function waitForBlocked(holderPid: number, waiterPid: number) {
   const deadline = performance.now() + 3000;
   while (performance.now() < deadline) {
     const result = await db.query<{ blocked: boolean }>(
-      `select exists(select 1 from pg_stat_activity a where a.pid<>$1
+      `select exists(select 1 from pg_stat_activity a where a.pid=$2
        and a.wait_event_type='Lock' and $1::integer=any(pg_blocking_pids(a.pid))) blocked`,
-      [holderPid],
+      [holderPid, waiterPid],
     );
     if (result.rows[0].blocked) {
       assertions++;
@@ -557,6 +557,8 @@ async function main() {
         )
         .digest('hex'),
     });
+    const provider = await holder(path);
+    let providerReleased = false;
     const keyHolder = new Client({
       connectionString: dbUrl,
       application_name: 'files-completion-key-holder',
@@ -565,20 +567,26 @@ async function main() {
     let keyTransaction = false;
     let expiringUpload: Promise<unknown> | undefined;
     try {
+      expiringUpload = staff.client.storage
+        .from('inventory-files')
+        .upload(path, png, { contentType: 'image/png' });
+      const [providerPid] = await waitForProviderWait(provider.pid, 1);
       await keyHolder.query('begin');
       keyTransaction = true;
       const keyPid = (
         await keyHolder.query<{ pid: number }>(
-          `update private.file_keys set verify_until=clock_timestamp()+interval '2 seconds'
-           where key_id=$1 returning pg_backend_pid() pid`,
+          'select pg_backend_pid() pid from private.file_keys where key_id=$1 for update',
           [keyId],
         )
       ).rows[0].pid;
-      expiringUpload = staff.client.storage
-        .from('inventory-files')
-        .upload(path, png, { contentType: 'image/png' });
-      await waitForBlocked(keyPid);
-      const expiryDeadline = performance.now() + 3000;
+      await provider.release();
+      providerReleased = true;
+      await waitForBlocked(keyPid, providerPid);
+      await keyHolder.query(
+        "update private.file_keys set verify_until=clock_timestamp()+interval '400 milliseconds' where key_id=$1",
+        [keyId],
+      );
+      const expiryDeadline = performance.now() + 1200;
       while (performance.now() < expiryDeadline) {
         const expired = await keyHolder.query<{ expired: boolean }>(
           'select clock_timestamp()>=verify_until expired from private.file_keys where key_id=$1',
@@ -599,16 +607,23 @@ async function main() {
         result.error,
         'completion waiting across natural key expiry fails',
       );
+      assert.equal(
+        (result.error as { statusCode?: string }).statusCode,
+        '403',
+        'late expiry is authorization failure, not a lock timeout',
+      );
       const absent = await db.query<{ count: string }>(
         "select count(*) from storage.objects where bucket_id='inventory-files' and name=$1",
         [path],
       );
       assert.equal(absent.rows[0].count, '0');
-      assertions += 3;
+      assertions += 4;
     } finally {
+      if (!providerReleased) await provider.release();
       if (keyTransaction) await keyHolder.query('rollback');
       if (expiringUpload) await expiringUpload.catch(() => undefined);
       await keyHolder.end();
+      await provider.connection.end();
       // Restore only this disposable local fixture key so its subsequent
       // rejection and cleanup can use the normal signed RPCs.
       await db.query(

@@ -3,13 +3,16 @@ import { resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
+import { inspectFile } from '../../src/features/files/inspect.server';
+import { InvalidFileContentError } from '../../src/features/files/inspection-error';
 
 const workerPath = resolve('src/features/files/inspect-worker.cjs');
 const maxBytes = 20 * 1024 * 1024;
 let checks = 0;
 
 type Inspection =
-  { ok: true; variants: Uint8Array[] } | { ok: false; message: string };
+  | { ok: true; variants: Uint8Array[] }
+  | { ok: false; code: string; message: string };
 
 async function inspect(bytes: Uint8Array, type: string): Promise<Inspection> {
   const worker = new Worker(workerPath, {
@@ -53,6 +56,7 @@ async function accepted(bytes: Uint8Array, type: string) {
 async function denied(bytes: Uint8Array, type: string, pattern: RegExp) {
   const result = await inspect(bytes, type);
   assert.equal(result.ok, false, `${type} unexpectedly passed`);
+  assert.equal(result.code, 'INVALID_FILE_CONTENT');
   assert.match(result.message, pattern);
   checks++;
 }
@@ -192,8 +196,28 @@ async function pdfFixtures() {
   await denied(await encrypted.save(), 'application/pdf', /encrypt/i);
 }
 
+async function typedWrapperFailures() {
+  const corruptPng = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    Buffer.from('<html>broken image bytes</html>'),
+  ]);
+  await assert.rejects(
+    inspectFile(corruptPng, 'image/png'),
+    (error: unknown) => error instanceof InvalidFileContentError,
+    'a valid PNG signature with corrupt decoder bytes is terminal content',
+  );
+  checks++;
+  await assert.rejects(
+    inspectFile(Buffer.from('%PDF-not-a-document'), 'application/pdf'),
+    (error: unknown) => error instanceof InvalidFileContentError,
+    'a valid PDF signature with corrupt decoder bytes is terminal content',
+  );
+  checks++;
+}
+
 await imageFixtures();
 await pdfFixtures();
+await typedWrapperFailures();
 console.log(
   `Real file-inspection worker accepted/rejected ${checks} cases and terminated after each.`,
 );

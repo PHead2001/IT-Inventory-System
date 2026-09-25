@@ -30,6 +30,7 @@ const db = new Client({
 });
 type Actor = { id: string; email: string; client: SupabaseClient };
 const actors: Actor[] = [];
+let keyToRetire: string | undefined;
 const sha = (data: Uint8Array) =>
   createHash('sha256').update(data).digest('hex');
 const mac = (key: string, data: string) =>
@@ -513,6 +514,7 @@ async function main() {
     "insert into private.file_keys(key_id,secret,accepts_new,verify_until) values($1,$2,true,now()+interval '2 hours')",
     [keyId, secret],
   );
+  keyToRetire = keyId;
   const staff = await actor('staff');
   const viewer = await actor('viewer');
   const {
@@ -1316,15 +1318,25 @@ async function main() {
     'select id from public.locations where active and can_hold_inventory and id<>$1 limit 1',
     [loc.id],
   );
+  const assetVersionBeforeMove = (
+    await db.query('select version from public.serialized_assets where id=$1', [
+      parent,
+    ])
+  ).rows[0].version;
   await okay(staff.client, 'asset_move', {
     p_request_id: randomUUID(),
     p_payload: {
       asset_id: parent,
-      expected_version: 3,
+      expected_version: assetVersionBeforeMove,
       location_id: otherLocation.id,
       reason: 'Review race',
     },
   });
+  const assetVersionAfterMove = (
+    await db.query('select version from public.serialized_assets where id=$1', [
+      parent,
+    ])
+  ).rows[0].version;
   const pdfVersion = (
     await db.query(
       'select version::text from public.inventory_files where id=$1',
@@ -1378,7 +1390,7 @@ async function main() {
         [parent],
       )
     ).rows[0].version,
-    4,
+    assetVersionAfterMove,
     'file rename leaves inventory version unchanged after movement',
   );
   eq(
@@ -1792,8 +1804,17 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await Promise.allSettled(
-      actors.map((person) => person.client.auth.signOut({ scope: 'local' })),
-    );
-    await db.end();
+    try {
+      if (keyToRetire) {
+        await db.query(
+          'update private.file_keys set accepts_new=false,verify_until=clock_timestamp(),secret=$2 where key_id=$1',
+          [keyToRetire, randomBytes(48).toString('hex')],
+        );
+      }
+    } finally {
+      await Promise.allSettled(
+        actors.map((person) => person.client.auth.signOut({ scope: 'local' })),
+      );
+      await db.end();
+    }
   });

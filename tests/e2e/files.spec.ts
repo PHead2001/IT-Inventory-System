@@ -91,7 +91,6 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     })
     .first();
   await listRow.scrollIntoViewIfNeeded();
-  await expect(listRow.getByText('Recognition photo')).toBeVisible();
   await expect(listRow.locator('img[alt="first.png"]')).toBeVisible();
   await page.goto(detailUrl);
   await files.getByRole('button', { name: 'View photo' }).click();
@@ -147,9 +146,6 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     cards.getByRole('listitem').getByText('first.png', { exact: true }),
   ).toBeVisible();
   await expect(files.getByRole('button', { name: 'View photo' })).toBeVisible();
-  await expect(
-    files.getByRole('button', { name: 'Upload and review' }),
-  ).toBeEnabled();
   await files
     .getByLabel('Replace a ready file')
     .selectOption({ label: 'first.png' });
@@ -158,6 +154,9 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     mimeType: 'image/png',
     buffer: png(40),
   });
+  await expect(
+    files.getByRole('button', { name: 'Upload and review' }),
+  ).toBeEnabled();
   const secondValidation = page.waitForResponse(
     (response) => response.url().includes('/api/inventory-files/validate'),
     { timeout: 20_000 },
@@ -250,7 +249,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   page.once('dialog', (dialog) => dialog.accept('Updated manual title'));
   await files.getByRole('button', { name: 'Rename' }).click();
   await expect(
-    files.getByText('Updated manual title', { exact: true }),
+    cards.getByText('Updated manual title', { exact: true }),
   ).toBeVisible();
   await expect(files.getByText('Original: manual.pdf')).toBeVisible();
   await expect(

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { HistoryList, InventoryRows } from './read-ui';
 const location = {
@@ -66,6 +66,57 @@ it('labels item-wide low stock while retaining the location holding quantity', (
       /Needs restocking · Available in storage 3 \/ threshold 4/,
     ),
   ).toBeVisible();
+});
+it('shows per-definition photo and PDF counts without inventing file counts for other rows', () => {
+  const base = {
+    categoryName: 'Equipment',
+    status: 'active' as const,
+    location,
+    quantity: null,
+    assetTag: null,
+    serialNumber: null,
+    recordedTotal: null,
+    reorderThreshold: null,
+    stockState: null,
+  };
+  render(
+    <InventoryRows
+      rows={[
+        { ...base, kind: 'asset', id: 'asset-a', name: 'Camera' },
+        { ...base, kind: 'asset', id: 'asset-b', name: 'Router' },
+        { ...base, kind: 'quantity', id: 'item-c', name: 'Adapters' },
+      ]}
+      fileSummaries={[
+        {
+          kind: 'asset',
+          id: 'asset-a',
+          thumbnail_path: null,
+          photo_name: null,
+          photo_count: 1,
+          document_count: 2,
+        },
+        {
+          kind: 'quantity',
+          id: 'item-c',
+          thumbnail_path: null,
+          photo_name: null,
+          photo_count: 3,
+          document_count: 0,
+        },
+      ]}
+    />,
+  );
+  const cameraFiles = screen.getByRole('group', { name: 'Files for Camera' });
+  expect(within(cameraFiles).getByText('1 photo')).toBeVisible();
+  expect(within(cameraFiles).getByText('2 PDFs')).toBeVisible();
+  const adapterFiles = screen.getByRole('group', {
+    name: 'Files for Adapters',
+  });
+  expect(within(adapterFiles).getByText('3 photos')).toBeVisible();
+  expect(within(adapterFiles).getByText('0 PDFs')).toBeVisible();
+  expect(
+    screen.queryByRole('group', { name: 'Files for Router' }),
+  ).not.toBeInTheDocument();
 });
 it('shows record corrections as human readable history distinct from movement', () => {
   render(

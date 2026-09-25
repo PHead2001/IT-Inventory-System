@@ -88,6 +88,7 @@ parentPort.on('message', async ({ bytes, type }) => {
   } catch (error) {
     parentPort.postMessage({
       ok: false,
+      code: 'INVALID_FILE_CONTENT',
       message: error instanceof Error ? error.message : 'Inspection failed.',
     });
   }

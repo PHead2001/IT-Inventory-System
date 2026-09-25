@@ -107,8 +107,13 @@ are worker evidence verified by the lead, not a second reviewer runtime executio
   review loop confirms resolution.
 - The file-completion contract first passed 31 focused checks twice locally.
   Its expanded 55-check run now covers ready PDF byte survival, duplicate object
-  bytes, terminal-path resurrection denial, derived cancellation, and key-lock
-  expiry. The canonical `test:db` run visibly completed 477 pgTAP assertions,
+  bytes, terminal-path resurrection denial, and derived cancellation. Its initial
+  key-expiry case stopped at preflight and did not prove completion-time expiry.
+  A corrected, later 57-check run observes the actual Storage completion backend
+  waiting on the key row after preflight, crosses natural expiry, and proves
+  denial without a metadata row. Independent source review accepted that barrier;
+  this does not prove absence of provider-internal orphan bytes. The canonical
+  `test:db` run visibly completed 477 pgTAP assertions,
   foundation/inventory/low-stock/configuration/metadata/custody/custody-read
   integration, and those 55 completion checks. The PTY disappeared before the
   following `files.ts` result, so the overall canonical database run is
@@ -138,6 +143,70 @@ are worker evidence verified by the lead, not a second reviewer runtime executio
 | C — Locations and IT Office           | Maintainer creation/rename/reparent/order/deactivate/reactivate; immutable codes; cycle/kind/capability/ancestor-active checks; audited versions; real deactivation/reparent races; inactive-source evacuation. Office appears in every picker/read/filter/label/export path.                                                                                                         | Preserve required 35 closet bindings as a subset, statement hierarchy guard and placement lock ordering. No stock erasure or fake movement history. Unmodeled destinations cannot resolve to closet geometry.                                                                                                              | Pending                                                                                                                             |
 | D — Sites and custody                 | Site maintenance and holdings/history filters; serialized issue/return/transfer; positive integer quantity issue/partial return/transfer; opening records; reasoned correction/write-off/site retirement; explicit restore; archival guards; unique linked inventory/assignment events, receipts and versions.                                                                        | One current-state authority; enforce legacy-entry-point denials and same-entity event links. Real multi-connection races and history-insertion failure rollback. Separate gross issues, transfers, openings and unique assets.                                                                                             | Pending                                                                                                                             |
 | E — Shared accounting and integration | Shared available/assigned/owned calculations across dashboard, detail, search, filters and exports; inactive-storage balances retained; null/zero/inclusive thresholds; no join multiplication; stable QR links; metadata and file continuity through custody/category changes.                                                                                                       | Preserve export snapshot, row/byte caps, formula protection, private access and provenance. Site-aware row identities; no attachment bytes/tokens in CSV. Mobile, keyboard, non-WebGL and existing room controls remain usable.                                                                                            | Pending                                                                                                                             |
+
+## Latest checkpoint: `6cddf6d` and subsequent working-tree repairs
+
+Foundation CI run `36164847513` passed the application job at exact
+`6cddf6d2f48ffe108ca5e62e638f5a41bd9d39bb`. The database job passed 477 pgTAP
+assertions and the integration suites preceding Files. Its Linux Files run passed
+the near-20 MiB quota-upload sequence, then found a stale test fixture: it used a
+file-collection revision as an inventory version for `asset_move`. The pending
+repair reads the actual asset version and still asserts that attachment changes
+do not increment it. This CI run is failed, not final certification.
+
+The latest Codex review of that SHA raised two Files findings: decoder failures
+were classified by incomplete message prefixes, and rejected/cancelled uploads
+did not trigger bounded cleanup. Typed rejection and cleanup/UI repairs passed
+14 focused tests and 27 actual worker cases. Independent source review accepted
+the corrected boundary: claim batches report confirmed deletions but cannot prove
+that all remaining bytes are gone. Seven review threads remain open pending fix evidence
+and a fresh exact-SHA review.
+
+Local Chromium has exercised a complete quantity-photo journey: upload and
+normalized preview, viewer reads, mobile thumbnail, invalid replacement retaining
+the previous photo, successful replacement and removal without stock changes.
+The asset PDF journey reached publication, exact-byte attachment download,
+site assignment/return and rename; its list-count assertion exposed missing UI
+counts. That correction passed five component tests and typecheck; the complete
+browser rerun subsequently passed both file journeys, including replacement PDF
+byte hashes and removal. Lead screenshot inspection then found squeezed phone
+file metadata and an asset source picker incorrectly marked unavailable. Both
+received focused UI regressions. The subsequent application gate and both real
+Chromium file journeys passed; the lead inspected the corrected phone and
+desktop captures under `test-results/files-review/*-after-ui.png`. These are
+working-tree checkpoint results, not a complete local database or final CI gate.
+
+The local large-upload failure also reproduces with official Linux Node against
+the same local Supabase stack, so it is not established as a Windows Node defect.
+Four bounded comparisons passed near-20 MiB baselines through both direct Storage
+and Kong, then reproduced an authorized-upload stall after a real unregistered
+upload denial through both routes. A Storage receive queue retained body bytes
+while PostgreSQL showed no lock wait. This narrows the failure to the local
+Storage HTTP/body path rather than Kong alone; the causal defect is still under
+investigation. No upload assertion is waived.
+
+Hosted verification is pinned to the READY nonproduction deployment
+`dpl_DTQaqJaKRANdkw3c5gSqe4maB89U` at `6cddf6d`, using the verified PR20 child
+`bojqpqdsmjyrxlgfgqux`, migration `20260925164157`. Three marked fictional Auth
+actors have distinct maintainer/staff/viewer memberships. Two initial browser
+attempts stopped at Vercel protection before app login and created no inventory
+fixtures. A supported temporary deployment share link is available for the next
+attempt; no protection settings were disabled. After correcting test-runner
+synchronization and recording created identities before navigation assertions,
+the signed-in run passed the permission matrix and journeys 1, 3, 4, 5 and 6.
+Six Server Action saves returned HTTP 200, with no pending creates or browser
+warnings. Evidence is in `test-results/pr20-hosted-fixtures.json` and
+`test-results/pr20-hosted-captures/`; the lead inspected the published designer
+and phone office/assigned-asset label captures. This is tested-SHA core evidence,
+not final post-fix certification or hosted Files proof.
+
+Scoped cleanup of that run was verified by reads: three quantities archived,
+three assets retired, no positive storage/site holdings, and its category,
+office location and two sites inactive. Earlier interrupted harness attempts
+were also reconciled and cleaned, retaining required historical rows. Actors
+remain active for testing
+and require final deactivation. Credentials and temporary access URLs remain in
+ignored local files only. No production action was performed.
 
 ## Required acceptance journeys
 

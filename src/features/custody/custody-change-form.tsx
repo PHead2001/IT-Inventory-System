@@ -143,9 +143,15 @@ export function CustodyChangeForm({
           label="Storage source"
           locations={locations}
           mode="source"
-          sourceIds={storageBalances
-            .filter((row) => row.quantity > 0)
-            .map((row) => row.location.id)}
+          sourceIds={
+            quantity
+              ? storageBalances
+                  .filter((row) => row.quantity > 0)
+                  .map((row) => row.location.id)
+              : currentLocation
+                ? [currentLocation.id]
+                : []
+          }
           value={values.source_location_id}
           onValueChange={(value) => update('source_location_id', value)}
           required

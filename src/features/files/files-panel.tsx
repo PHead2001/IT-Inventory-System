@@ -30,6 +30,11 @@ type FileHistory = {
   collection_revision: string;
 };
 type CardsEnvelope = { revision: string; files: Card[] };
+function cleanupStatus(deleted: number | null) {
+  return deleted === null
+    ? 'Byte cleanup could not be confirmed; retry later.'
+    : `Deleted ${deleted} stored object${deleted === 1 ? '' : 's'}. Remaining cleanup is unverified; retry later.`;
+}
 type Rpc = (
   name: string,
   args: Record<string, unknown>,
@@ -60,6 +65,7 @@ export function FilesPanel({
   const [replace, setReplace] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [cleanupPending, setCleanupPending] = useState(false);
   const [preview, setPreview] = useState<{ name: string; url: string } | null>(
     null,
   );
@@ -77,6 +83,25 @@ export function FilesPanel({
     setCards(Array.isArray(envelope?.files) ? envelope.files : []);
     setCollectionRevision(envelope?.revision ?? '1');
   }, [rpc, parentType, parentId]);
+  async function cleanupTerminalFiles() {
+    try {
+      const response = await fetch('/api/inventory-files/cleanup', {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Cleanup request failed.');
+      const result: { deleted?: number } = await response.json();
+      setCleanupPending(true);
+      const deleted = result.deleted;
+      return typeof deleted === 'number' &&
+        Number.isSafeInteger(deleted) &&
+        deleted >= 0
+        ? deleted
+        : null;
+    } catch {
+      setCleanupPending(true);
+      return null;
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     void rpc('inventory_file_cards', {
@@ -166,13 +191,27 @@ export function FilesPanel({
         expectedFileVersion,
       }),
     });
-    const body: { message?: string } = await response.json();
-    if (!response.ok)
+    const body: {
+      message?: string;
+      terminalRejected?: boolean;
+      cleanupPending?: boolean;
+      cleanupDeleted?: number | null;
+    } = await response.json();
+    if (!response.ok) {
+      if (body.terminalRejected) {
+        setCleanupPending(true);
+        await load();
+        throw new Error(
+          `${body.message ?? 'Validation could not be confirmed.'} ${cleanupStatus(body.cleanupDeleted ?? null)}`,
+        );
+      }
       throw new Error(body.message ?? 'Validation could not be confirmed.');
-    await fetch('/api/inventory-files/cleanup', { method: 'POST' }).catch(
-      () => null,
-    );
-    window.location.reload();
+    }
+    const deleted = await cleanupTerminalFiles();
+    await load();
+    setHistoryPage(1);
+    setHistoryRefresh((value) => value + 1);
+    setMessage(`File published. ${cleanupStatus(deleted)}`);
   }
 
   async function upload() {
@@ -267,6 +306,8 @@ export function FilesPanel({
         });
         if (error) throw new Error('The pending file could not be cancelled.');
         await load();
+        const deleted = await cleanupTerminalFiles();
+        setMessage(`File cancelled. ${cleanupStatus(deleted)}`);
       }
     } catch (error) {
       setMessage(
@@ -293,10 +334,11 @@ export function FilesPanel({
           : 'Removal could not be confirmed.',
       );
     else {
-      await fetch('/api/inventory-files/cleanup', { method: 'POST' }).catch(
-        () => null,
-      );
-      window.location.reload();
+      const deleted = await cleanupTerminalFiles();
+      await load();
+      setHistoryPage(1);
+      setHistoryRefresh((value) => value + 1);
+      setMessage(`File removed. ${cleanupStatus(deleted)}`);
     }
     setBusy(false);
   }
@@ -347,83 +389,107 @@ export function FilesPanel({
           {message}
         </p>
       )}
+      {staff && (
+        <button
+          type="button"
+          disabled={busy}
+          className="mt-3 min-h-11 text-cyan-300 underline disabled:opacity-50"
+          onClick={() => {
+            void cleanupTerminalFiles().then((deleted) =>
+              setMessage(cleanupStatus(deleted)),
+            );
+          }}
+        >
+          {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
+        </button>
+      )}
       <ul className="mt-4 space-y-3">
         {cards
           .filter((card) => card.state === 'ready' || staff)
           .map((card) => (
             <li
               key={card.id}
-              className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-700 p-3"
+              className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-700 p-3 sm:flex-row sm:flex-wrap sm:items-center"
             >
-              <FileThumb card={card} read={read} />
-              <div className="min-w-0 flex-1">
-                <p className="break-all font-medium">{card.name}</p>
-                <p className="break-all text-xs text-slate-400">
-                  Original: {card.filename}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {card.state} · {(card.bytes / 1048576).toFixed(1)} MiB ·{' '}
-                  {card.type} · {card.uploader} ·{' '}
-                  {new Date(card.ready_at ?? card.created_at).toLocaleString()}
-                </p>
+              <div className="flex min-w-0 items-start gap-3 sm:min-w-64 sm:flex-1">
+                <span className="w-16 shrink-0">
+                  <FileThumb card={card} read={read} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-medium [overflow-wrap:anywhere]">
+                    {card.name}
+                  </p>
+                  <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
+                    Original: {card.filename}
+                  </p>
+                  <p className="text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
+                    {card.state} · {(card.bytes / 1048576).toFixed(1)} MiB ·{' '}
+                    {card.type} · {card.uploader} ·{' '}
+                    {new Date(
+                      card.ready_at ?? card.created_at,
+                    ).toLocaleString()}
+                  </p>
+                </div>
               </div>
-              {card.state === 'ready' && (
-                <button
-                  type="button"
-                  className="min-h-11 text-cyan-300 underline"
-                  onClick={() =>
-                    void read(
-                      card,
-                      card.type === 'application/pdf' ? 'source' : 'display',
-                      card.type === 'application/pdf',
-                    )
-                  }
-                >
-                  {card.type === 'application/pdf'
-                    ? 'Download PDF'
-                    : 'View photo'}
-                </button>
-              )}
-              {staff && card.state === 'ready' && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                  onClick={() => void rename(card)}
-                >
-                  Rename
-                </button>
-              )}
-              {staff && card.state === 'ready' && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="min-h-11 text-amber-200 underline disabled:opacity-50"
-                  onClick={() => void remove(card)}
-                >
-                  Remove
-                </button>
-              )}
-              {staff && card.state !== 'ready' && (
-                <>
+              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:ml-auto sm:w-auto">
+                {card.state === 'ready' && (
+                  <button
+                    type="button"
+                    className="min-h-11 text-cyan-300 underline"
+                    onClick={() =>
+                      void read(
+                        card,
+                        card.type === 'application/pdf' ? 'source' : 'display',
+                        card.type === 'application/pdf',
+                      )
+                    }
+                  >
+                    {card.type === 'application/pdf'
+                      ? 'Download PDF'
+                      : 'View photo'}
+                  </button>
+                )}
+                {staff && card.state === 'ready' && (
                   <button
                     type="button"
                     disabled={busy}
                     className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                    onClick={() => void pendingAction(card, 'validate')}
+                    onClick={() => void rename(card)}
                   >
-                    Review and publish
+                    Rename
                   </button>
+                )}
+                {staff && card.state === 'ready' && (
                   <button
                     type="button"
                     disabled={busy}
                     className="min-h-11 text-amber-200 underline disabled:opacity-50"
-                    onClick={() => void pendingAction(card, 'cancel')}
+                    onClick={() => void remove(card)}
                   >
-                    Cancel
+                    Remove
                   </button>
-                </>
-              )}
+                )}
+                {staff && card.state !== 'ready' && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="min-h-11 text-cyan-300 underline disabled:opacity-50"
+                      onClick={() => void pendingAction(card, 'validate')}
+                    >
+                      Review and publish
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="min-h-11 text-amber-200 underline disabled:opacity-50"
+                      onClick={() => void pendingAction(card, 'cancel')}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </div>
             </li>
           ))}
       </ul>

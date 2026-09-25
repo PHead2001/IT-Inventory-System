@@ -1,5 +1,6 @@
 import 'server-only';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { InvalidFileContentError } from './inspection-error';
 
 type RpcResult = { data: unknown; error: { code?: string } | null };
 export type FileClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -48,12 +49,7 @@ export function fileError(error: unknown): string {
     return 'Files changed. Review the current collection and replacement file versions, then submit a new request.';
   if (code === 'P1009') return 'This request ID was used for another change.';
   if (code === 'P1012') return 'The file or request could not be validated.';
-  if (
-    error instanceof Error &&
-    /^(HEIC|Invalid PDF|Encrypted|Unsupported|The file content|Normalized|Inspection exceeded|File exceeds)/.test(
-      error.message,
-    )
-  )
-    return error.message;
+  if (error instanceof InvalidFileContentError)
+    return 'The uploaded content is invalid or exceeds supported limits. Choose another file or cancel this upload.';
   return 'The file operation could not be confirmed. Refresh the record before retrying.';
 }

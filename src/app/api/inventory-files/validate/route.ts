@@ -3,6 +3,8 @@ import { revalidatePath } from 'next/cache';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { inspectFile } from '@/features/files/inspect.server';
+import { InvalidFileContentError } from '@/features/files/inspection-error';
+import { cleanupTerminalFiles } from '@/features/files/cleanup.server';
 import { fileError, fileRpc, staffClient } from '@/features/files/rpc.server';
 import { fileKeys, mac, proof } from '@/features/files/keys.server';
 
@@ -231,27 +233,51 @@ export async function POST(request: Request) {
     revalidatePath('/history');
     return NextResponse.json({ result });
   } catch (error) {
-    // A bad decode is terminal. A stale parent remains validated for explicit
-    // review and a new request; cleanup never silently advances the version.
+    // Only a trusted worker's typed content rejection is terminal. Storage,
+    // download, RPC and stale-version failures retain their retryable state.
     if (
       generation !== null &&
       validationKey !== null &&
       keys[validationKey] &&
-      error instanceof Error &&
-      /^(HEIC|Invalid PDF|Encrypted|Unsupported|The file content|Normalized|Inspection exceeded|File exceeds)/.test(
-        error.message,
-      )
+      error instanceof InvalidFileContentError
     ) {
-      await fileRpc(client, 'inventory_file_reject', {
-        p_file_id: input.data.fileId,
-        p_generation: generation,
-        p_key_id: validationKey,
-        ...proof(keys[validationKey], userId, 'reject', [
-          input.data.fileId,
-          String(generation),
-          validationKey,
-        ]),
-      }).catch(() => null);
+      try {
+        await fileRpc(client, 'inventory_file_reject', {
+          p_file_id: input.data.fileId,
+          p_generation: generation,
+          p_key_id: validationKey,
+          ...proof(keys[validationKey], userId, 'reject', [
+            input.data.fileId,
+            String(generation),
+            validationKey,
+          ]),
+        });
+      } catch {
+        return NextResponse.json(
+          {
+            message:
+              'The invalid file could not be rejected. Refresh and retry the pending file.',
+          },
+          { status: 409 },
+        );
+      }
+      let cleanupDeleted: number | null = null;
+      try {
+        cleanupDeleted = (await cleanupTerminalFiles(actor)).deleted;
+      } catch {
+        // The file remains rejected. A later bounded cleanup request retries.
+      }
+      return NextResponse.json(
+        {
+          message: fileError(error),
+          terminalRejected: true,
+          // The new terminal source may still be behind validation grace.
+          // Claims alone cannot certify that every byte has been removed.
+          cleanupPending: true,
+          cleanupDeleted,
+        },
+        { status: 409 },
+      );
     }
     return NextResponse.json({ message: fileError(error) }, { status: 409 });
   }
