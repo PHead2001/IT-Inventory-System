@@ -95,10 +95,26 @@ test('runtime verification requires the exact local Storage image, not only a pi
       'supabase_storage_it-inventory',
     ]);
     assertLocalStorageImage(LOCAL_STORAGE_IMAGE);
+    for (const image of [
+      'ghcr.io/supabase/storage-api:v1.77.9',
+      'supabase/storage-api:v1.77.9',
+      'docker.io/supabase/storage-api:v1.77.9',
+    ])
+      assertLocalStorageImage(image);
+    for (const image of [
+      'public.ecr.aws/supabase/storage-api:v1.77.0',
+      'ghcr.io/other/storage-api:v1.77.9',
+      'other.example/supabase/storage-api:v1.77.9',
+      'supabase/storage-api:latest',
+      'supabase/storage-api@sha256:abcdef',
+    ])
+      assert.throws(
+        () => assertLocalStorageImage(image),
+        /not using the pinned image/,
+      );
     assert.throws(
-      () =>
-        assertLocalStorageImage('public.ecr.aws/supabase/storage-api:v1.77.0'),
-      /not using the pinned image/,
+      () => assertLocalStorageImage('secret\nvalue'),
+      /found \(unrecognized image reference\)/,
     );
     assert.throws(
       () =>

@@ -6,6 +6,14 @@ import { resolve } from 'node:path';
 // before an upload body is sent. This override affects only the local stack.
 export const LOCAL_STORAGE_VERSION = 'v1.77.9';
 export const LOCAL_STORAGE_IMAGE = `public.ecr.aws/supabase/storage-api:${LOCAL_STORAGE_VERSION}`;
+// The pinned CLI falls back between these official registries when a mirror is
+// unavailable. The tag and repository stay identical across all four names.
+export const LOCAL_STORAGE_IMAGES = new Set([
+  LOCAL_STORAGE_IMAGE,
+  `ghcr.io/supabase/storage-api:${LOCAL_STORAGE_VERSION}`,
+  `supabase/storage-api:${LOCAL_STORAGE_VERSION}`,
+  `docker.io/supabase/storage-api:${LOCAL_STORAGE_VERSION}`,
+]);
 const STORAGE_CONTAINER = 'supabase_storage_it-inventory';
 
 export function localStorageVersionPath(cwd = process.cwd()) {
@@ -35,10 +43,16 @@ export function assertLocalStorageVersion(cwd = process.cwd()) {
 }
 
 export function assertLocalStorageImage(configuredImage) {
-  if (configuredImage !== LOCAL_STORAGE_IMAGE)
+  if (!LOCAL_STORAGE_IMAGES.has(configuredImage)) {
+    const observed =
+      typeof configuredImage === 'string' &&
+      /^[A-Za-z0-9/:._-]{1,160}$/.test(configuredImage)
+        ? configuredImage
+        : '(unrecognized image reference)';
     throw new Error(
-      'Local Storage container is not using the pinned image. Run npm run db:stop, then npm run db:start.',
+      `Local Storage container is not using the pinned image (found ${observed}). Run npm run db:stop, then npm run db:start.`,
     );
+  }
 }
 
 export function verifyLocalStorageRuntime({

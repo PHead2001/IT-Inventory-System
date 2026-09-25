@@ -32,8 +32,8 @@ Linux CI and the isolated-preview journey do not make this local gate green.
 On September 25, 2026, the owner briefly accepted a narrow exception for this
 local Supabase Storage denial/reused-connection failure, then explicitly
 withdrew it later the same day. Green Linux CI and signed-in isolated-preview
-proof do not substitute for the failing local gate. The local gate remains red
-and is again an acceptance blocker until fixed and verified green.
+proof do not substitute for a failing local gate. A real runtime repair and
+complete green local validation were required; that proof is recorded below.
 
 ### Local runtime repair checkpoint
 
@@ -52,6 +52,24 @@ and `test-results/files-browser-1779.log`. This focused repair proof does not
 replace the complete local gate, exact-SHA CI and fresh review for the successor.
 The successor also validates designer defaults and supported currency codes
 before publication review, including exact microsecond datetime comparisons.
+
+### Complete local repair validation
+
+At `148b21a0cb3ea0499d0f372bd00f1691d69d3c9b`, fresh `npm ci` followed by the
+complete canonical `npm run validate` passed: 544 Vitest tests, four local
+Storage pin tests, application checks/build, clean migration replay, 481 pgTAP
+assertions, every database integration (including 78 completion checks and 276
+real Storage/RPC checks), generated types and **65 of 65 Playwright tests**.
+The retained log is `test-results/final-validate-148b21a.log`. No test, timeout
+or assertion was weakened. The former local failure is fixed, not excepted.
+
+The first clean CI runner pulled the same fixed image through Supabase CLI's
+official GHCR fallback after ECR rate limiting. The original ECR-only image
+check rejected that valid mirror. A focused correction accepts only the exact
+`v1.77.9` repository/tag through official ECR, GHCR or Docker Hub references;
+tests reject other hosts, repositories, tags and unrecognized references.
+Its pure tests and actual local runtime verification pass. This correction
+changes local tooling only; exact successor CI/review evidence is tracked on PR20.
 
 ## Signed-in isolated-preview journeys
 
@@ -96,10 +114,10 @@ tombstones remain; cleanup is not a history rewrite or hosted reset.
 The browser smoke used a simulated camera stream. A physical camera, physical
 phone, printer, barcode scanner and real-world device placement were not
 tested. Worker IPC and hosted PDF/image handling do not by themselves prove a
-total native-process memory ceiling. The local Storage transport failure
-remains an explicit acceptance blocker despite green Linux CI and hosted
-preview evidence. No provider patch or timeout waiver was applied to the
-recorded test run.
+total native-process memory ceiling. The local Storage transport failure was
+resolved by the released provider version and the complete local gate above.
+No custom vendor patch or timeout waiver was applied. Matching final CI and
+fresh review remain required separately from the local proof.
 
 Production remains untouched and unverified. Before a production release, the
 owner must complete the normal PR merge and protected-main delivery, provision
