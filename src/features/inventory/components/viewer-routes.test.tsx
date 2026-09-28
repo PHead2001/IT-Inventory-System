@@ -1,9 +1,17 @@
 import { render, screen, cleanup } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import QuantityPage from '@/app/(protected)/inventory/quantity/[id]/page';
 import AssetPage from '@/app/(protected)/inventory/assets/[id]/page';
+import NewQuantityPage from '@/app/(protected)/inventory/quantity/new/page';
+import NewAssetPage from '@/app/(protected)/inventory/assets/new/page';
+import SiteOpeningPage from '@/app/(protected)/sites/[code]/open/[kind]/page';
 vi.mock('server-only', () => ({}));
 const fixture = vi.hoisted(() => ({
+  role: 'viewer',
+  forms: vi.fn(async (ids: string[]) => {
+    void ids;
+    return {};
+  }),
   metadata: {
     id: 'item',
     name: 'Cable',
@@ -25,13 +33,19 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/auth/session.server', () => ({
-  requireMember: async () => ({ member: { role: 'viewer' } }),
+  requireMember: async () => ({ member: { role: fixture.role } }),
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
-  getPublishedForms: async () => ({}),
+  getPublishedForms: fixture.forms,
 }));
 vi.mock('@/features/custody/queries.server', () => ({
   getSites: async () => [],
+  getSite: async () => ({
+    id: 'site',
+    code: 'SITE',
+    name: 'Test site',
+    active: true,
+  }),
   getEntitySiteHoldings: async () => [],
   getEntityAssignments: async () => [],
 }));
@@ -40,7 +54,12 @@ vi.mock('@/features/files/files-panel', () => ({
 }));
 vi.mock('../queries.server', () => ({
   getQuantityDetail: async () => ({
-    item: { ...fixture.metadata, archived: false, reorderThreshold: null },
+    item: {
+      ...fixture.metadata,
+      archived: false,
+      itemCode: null,
+      reorderThreshold: null,
+    },
     stockSummary: {
       availableQuantity: '2',
       assignedQuantity: '0',
@@ -63,7 +82,11 @@ vi.mock('../queries.server', () => ({
     history: [],
     duplicateSerialMatches: [],
   }),
-  getCategories: async () => [],
+  getQuantityArchiveReview: async () => null,
+  getCategories: async () => [
+    { id: 'category', name: 'Cables', active: true },
+    { id: 'other', name: 'Other', active: true },
+  ],
   getLocations: async () => [fixture.location],
 }));
 vi.mock('../actions', () => ({
@@ -76,6 +99,10 @@ vi.mock('next/navigation', () => ({
     throw new Error('not found');
   },
 }));
+beforeEach(() => {
+  fixture.role = 'viewer';
+  fixture.forms.mockClear();
+});
 it('viewers can read both detail types and history links without mutation panels', async () => {
   render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
   expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
@@ -99,4 +126,18 @@ it('viewers can read both detail types and history links without mutation panels
   ).toBeVisible();
   expect(screen.queryByText('Manage serialized asset')).not.toBeInTheDocument();
   expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  expect(fixture.forms).not.toHaveBeenCalled();
+});
+it('staff pages fetch only the initially selected category form', async () => {
+  fixture.role = 'staff';
+  await NewQuantityPage();
+  await NewAssetPage();
+  await QuantityPage({ params: Promise.resolve({ id: 'item' }) });
+  await AssetPage({ params: Promise.resolve({ id: 'item' }) });
+  await SiteOpeningPage({
+    params: Promise.resolve({ code: 'SITE', kind: 'quantity' }),
+  });
+  expect(fixture.forms).toHaveBeenCalledTimes(5);
+  for (const [ids] of fixture.forms.mock.calls)
+    expect(ids).toEqual(['category']);
 });

@@ -24,10 +24,8 @@ function custodyForm(page: Page, title: string) {
 async function createSite(page: Page, siteCode: string, name: string) {
   await page.goto('/settings/sites');
   const form = custodyForm(page, 'Add property / site');
-  await form
-    .getByLabel('Permanent code (uppercase letters, digits, hyphens)')
-    .fill(siteCode);
   await form.getByLabel('Name', { exact: true }).fill(name);
+  await form.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await form.getByRole('button', { name: 'Save site' }).click();
   await expect(form.getByRole('status')).toContainText('Site saved');
   await page.goto('/sites/' + siteCode);
@@ -319,7 +317,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(overReturn.getByRole('status')).toContainText(
     'valid whole-unit quantity',
   );
-  await page.goto('/sites/' + aCode);
+  await page.goto('/settings/sites/' + aCode);
   const archiveSite = custodyForm(page, `Manage Fictional site ${aCode}`);
   await archiveSite.getByLabel('Active site').uncheck();
   await archiveSite

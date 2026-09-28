@@ -40,6 +40,7 @@ export type StockState =
   'disabled' | 'in_stock' | 'needs_restocking' | 'out_of_stock' | 'archived';
 export type QuantityItem = Metadata & {
   archived: boolean;
+  itemCode: string | null;
   reorderThreshold: number | null;
 };
 export type AssetItem = Metadata & {
@@ -58,6 +59,7 @@ export type InventoryResult = {
   custodyKind?: 'storage' | 'site' | 'unlocated' | 'retired';
   quantity: number | null;
   assetTag: string | null;
+  itemCode?: string | null;
   serialNumber: string | null;
   recordedTotal: number | null;
   availableQuantity?: string | null;

@@ -42,6 +42,10 @@ describe('label destinations', () => {
       kind: 'bare',
       identifier: 'ITC',
     });
+    expect(parseScan('😀'.repeat(100), origin)).toEqual({
+      kind: 'bare',
+      identifier: '😀'.repeat(100),
+    });
   });
   it.each([
     'https://evil.test/locations/ITC',

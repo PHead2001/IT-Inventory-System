@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 vi.mock('qrcode', () => ({
   default: { toDataURL: async () => 'data:image/png;base64,iVBORw0KGgo=' },
 }));
-import { LabelSheet, barcodePayload, printExcerpt } from './label-sheet';
+import { LabelSheet, barcodePayload } from './label-sheet';
 
 it('keeps quantity identity as the canonical QR URL even when Code 128 is selected', async () => {
   const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
@@ -43,7 +43,7 @@ it('keeps quantity identity as the canonical QR URL even when Code 128 is select
   );
 });
 
-it('shortens display text visibly while preserving the full stable identifier', () => {
+it('uses the full name and short physical context without slicing by character count', () => {
   const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
   const name = 'Very long asset name '.repeat(12);
   render(
@@ -53,7 +53,7 @@ it('shortens display text visibly while preserving the full stable identifier', 
           kind: 'asset',
           key: id,
           name,
-          context: 'IT Closet / Shelf 1A',
+          context: 'IT Closet / Left Storage / Shelf 1A',
           path: '/inventory/assets/' + id,
           state: 'active',
         },
@@ -65,8 +65,9 @@ it('shortens display text visibly while preserving the full stable identifier', 
       format="qr"
     />,
   );
-  expect(screen.getByText(id)).toBeInTheDocument();
-  expect(screen.getByText(printExcerpt(name, 30))).toHaveTextContent('…');
+  expect(screen.getByText(name.trim())).toBeInTheDocument();
+  expect(screen.getByText('Left Storage / Shelf 1A')).toBeInTheDocument();
+  expect(screen.queryByText(id)).not.toBeInTheDocument();
   expect(
     document.querySelector('.label-card')?.getAttribute('style'),
   ).toContain('width: 70mm');
@@ -107,4 +108,107 @@ it('scales Code 128 bars and quiet zones at physical module width', async () => 
     ),
   ).toBeCloseTo(viewBox[2] * 0.3);
   expect(viewBox[2]).toBeGreaterThan(20); // internal quiet zones flank actual bars
+});
+
+it('shows the quantity Item code as human identity while retaining stable QR navigation', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  render(
+    <LabelSheet
+      records={[
+        {
+          kind: 'quantity',
+          key: id,
+          name: 'Chargers',
+          humanId: 'SKU-0042',
+          context: 'IT Closet / Right Storage / Shelf 3A',
+          path: '/inventory/quantity/' + id,
+          state: 'active',
+        },
+      ]}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="70x35"
+      page="A4"
+      format="qr"
+    />,
+  );
+  expect(screen.getByText('SKU-0042')).toBeInTheDocument();
+  expect(screen.getByText('Right Storage / Shelf 3A')).toBeInTheDocument();
+  expect(screen.queryByText(id)).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(document.querySelector('.label-card')).toHaveAttribute(
+      'data-code-ready',
+      'true',
+    ),
+  );
+});
+
+it('reports measured text overflow and denies code readiness for a physically unfit label', async () => {
+  const originalScroll = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'scrollHeight',
+  );
+  const originalClient = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'clientHeight',
+  );
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    configurable: true,
+    get() {
+      return this.hasAttribute('data-fit-text') ? 100 : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return this.hasAttribute('data-fit-text') ? 10 : 0;
+    },
+  });
+  try {
+    render(
+      <LabelSheet
+        records={[
+          {
+            kind: 'location',
+            key: 'ITC',
+            name: 'Overlong name',
+            context: 'Closet / Shelf',
+            path: '/locations/ITC',
+            state: 'active',
+          },
+        ]}
+        origin="https://inventory.example.test"
+        preview={false}
+        size="70x35"
+        page="letter"
+        format="qr"
+      />,
+    );
+    await waitFor(() =>
+      expect(document.querySelector('.label-card')).toHaveAttribute(
+        'data-text-overflow',
+        'true',
+      ),
+    );
+    expect(document.querySelector('.label-card')).toHaveAttribute(
+      'data-code-ready',
+      'false',
+    );
+    expect(
+      screen.getByText('Text does not fit this label. Choose a larger size.'),
+    ).toBeInTheDocument();
+  } finally {
+    if (originalScroll)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'scrollHeight',
+        originalScroll,
+      );
+    if (originalClient)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'clientHeight',
+        originalClient,
+      );
+  }
 });

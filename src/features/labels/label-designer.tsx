@@ -43,7 +43,9 @@ function entryFor(record: LiveLabel): QueueEntry {
     lifecycleAcknowledged: record.state === 'active',
   };
 }
-function signature(record: LiveLabel): string {
+function signature(
+  record: LabelRecord & { tag?: string | null; categoryName?: string | null },
+): string {
   return JSON.stringify([
     record.kind,
     record.key,
@@ -51,6 +53,7 @@ function signature(record: LiveLabel): string {
     record.context,
     record.state,
     record.tag,
+    record.humanId,
     record.categoryName,
   ]);
 }
@@ -94,6 +97,11 @@ export function LabelDesigner({
   } | null>(null);
   const [printRows, setPrintRows] = useState<LabelRecord[] | null>(null);
   const [prepared, setPrepared] = useState<LiveLabel[] | null>(null);
+  const [validatedKey, setValidatedKey] = useState('');
+  const [refreshPending, setRefreshPending] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [readySheetKey, setReadySheetKey] = useState('');
+  const [retry, setRetry] = useState(0);
   const [pendingChanges, setPendingChanges] = useState<LiveLabel[]>([]);
   const [fallbackPending, setFallbackPending] = useState(false);
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
@@ -102,6 +110,7 @@ export function LabelDesigner({
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const queueEpoch = useRef(0);
+  const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
@@ -141,21 +150,6 @@ export function LabelDesigner({
         setFilters(stored.filters);
         setDraft(stored.filters);
         setJob(stored.job);
-        if (merged.length) {
-          const epoch = queueEpoch.current;
-          void getQueueRecords(merged.map(({ kind, key }) => ({ kind, key })))
-            .then((rows) => {
-              if (!current || epoch !== queueEpoch.current) return;
-              setLive(rows);
-              setMessage('Queued labels refreshed from current inventory.');
-            })
-            .catch(() => {
-              if (current && epoch === queueEpoch.current)
-                setMessage(
-                  'Queued labels could not be refreshed. Printing is unavailable until retry succeeds.',
-                );
-            });
-        }
       }
       setHydrated(true);
     });
@@ -187,9 +181,8 @@ export function LabelDesigner({
   const invalidate = () => {
     queueEpoch.current++;
     clearPrintAuthorization.current?.();
-    setPrepared(null);
-    setPrintRows(null);
-    setPendingChanges([]);
+    setRefreshPending(true);
+    setRefreshFailed(false);
     setFallbackPending(false);
     setFormatAcknowledged(false);
   };
@@ -231,7 +224,7 @@ export function LabelDesigner({
       setBusy(false);
     }
   };
-  const prepareFrom = (rows: LiveLabel[]) => {
+  const prepareFrom = (rows: LiveLabel[], generationKey: string) => {
     const rowMap = new Map(rows.map((row) => [queueIdentity(row), row]));
     setLive(rows);
     const missing = entries
@@ -239,7 +232,9 @@ export function LabelDesigner({
       .map(queueIdentity);
     setUnavailable(missing);
     if (missing.length) {
-      invalidate();
+      setPendingChanges([]);
+      setRefreshPending(false);
+      setValidatedKey('');
       setMessage(
         'Some queued records are unavailable. Remove them before printing.',
       );
@@ -254,8 +249,9 @@ export function LabelDesigner({
         : [];
     });
     if (changed.length) {
-      invalidate();
       setPendingChanges(changed);
+      setRefreshPending(false);
+      setValidatedKey('');
       setMessage(
         'A tag or lifecycle state needs review. Acknowledge before printing.',
       );
@@ -264,29 +260,51 @@ export function LabelDesigner({
     setPendingChanges([]);
     setPrepared(rows);
     setPrintRows(expandLabels(entries, rows));
+    setValidatedKey(generationKey);
+    setRefreshPending(false);
+    setRefreshFailed(false);
     setFallbackPending(false);
     setMessage(
-      'Full print preview refreshed from current inventory. Review every page before printing.',
+      'Print preview refreshed from current inventory. Review every page before printing.',
     );
   };
-  const prepare = async () => {
-    if (!entries.length) return;
-    const epoch = ++queueEpoch.current;
-    setBusy(true);
-    try {
-      const rows = await getQueueRecords(
-        entries.map(({ kind, key }) => ({ kind, key })),
-      );
-      if (epoch !== queueEpoch.current) return;
-      prepareFrom(rows);
-    } catch {
-      if (epoch !== queueEpoch.current) return;
-      invalidate();
-      setMessage('Label refresh failed. Printing is blocked; retry.');
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    if (!hydrated) return;
+    const generation = ++queueEpoch.current;
+    clearPrintAuthorization.current?.();
+    if (!entries.length) {
+      queueMicrotask(() => {
+        if (generation !== queueEpoch.current) return;
+        setPrintRows(null);
+        setPrepared(null);
+        setValidatedKey('');
+        setRefreshPending(false);
+        setUnavailable([]);
+        setPendingChanges([]);
+      });
+      return;
     }
-  };
+    queueMicrotask(() => {
+      if (generation === queueEpoch.current) setRefreshPending(true);
+    });
+    const timer = window.setTimeout(() => {
+      void getQueueRecords(entries.map(({ kind, key }) => ({ kind, key })))
+        .then((rows) => {
+          if (generation === queueEpoch.current)
+            prepareFrom(rows, selectionKey);
+        })
+        .catch(() => {
+          if (generation !== queueEpoch.current) return;
+          setRefreshPending(false);
+          setRefreshFailed(true);
+          setValidatedKey('');
+          setMessage('Label refresh failed. Printing is blocked; retry.');
+        });
+    }, 150);
+    return () => window.clearTimeout(timer);
+    // Copies and sheet settings only change the local layout, not the validated selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, hydrated, retry]);
   const acknowledge = () => {
     invalidate();
     const current = new Map(
@@ -306,10 +324,20 @@ export function LabelDesigner({
       }),
     );
     setPendingChanges([]);
-    setMessage('Changes acknowledged. Prepare a fresh print preview.');
+    setRetry((value) => value + 1);
+    setMessage('Changes acknowledged. Refreshing print preview.');
   };
   const print = async () => {
-    if (!prepared || !printRows) return;
+    if (
+      !prepared ||
+      !printRows ||
+      refreshPending ||
+      refreshFailed ||
+      validatedKey !== selectionKey ||
+      unavailable.length ||
+      pendingChanges.length
+    )
+      return;
     const epoch = ++queueEpoch.current;
     setBusy(true);
     try {
@@ -328,7 +356,7 @@ export function LabelDesigner({
         );
       });
       if (fresh.length !== entries.length || meaningfulChange) {
-        prepareFrom(fresh);
+        prepareFrom(fresh, selectionKey);
         return;
       }
       const descriptiveChange = fresh.some(
@@ -344,6 +372,14 @@ export function LabelDesigner({
           setMessage('Label information refreshed from current inventory.');
         });
       }
+      await document.fonts?.ready;
+      const images = Array.from(
+        document.querySelectorAll<HTMLImageElement>(
+          '.label-print-root .label-card img',
+        ),
+      );
+      await Promise.all(images.map((image) => image.decode?.()));
+      if (epoch !== queueEpoch.current) return;
       if (
         job.format === 'code128' &&
         !formatAcknowledged &&
@@ -360,9 +396,9 @@ export function LabelDesigner({
       const ready = document.querySelectorAll(
         '.label-print-root .label-card[data-code-ready="true"]',
       ).length;
-      if (ready !== printRows.length) {
+      if (ready !== totalCopies(entries)) {
         setMessage(
-          'Wait for every code to appear, or choose a larger label for an oversized identifier.',
+          'Wait for every code and label text to fit, or choose a larger label.',
         );
         return;
       }
@@ -371,30 +407,36 @@ export function LabelDesigner({
         setMessage('Print preview is unavailable. Prepare it again.');
         return;
       }
-      // Ctrl/Cmd+P skips the final inventory check. Some browsers return from
-      // print() before capture; keep the sheet available until afterprint,
-      // with a bounded fallback for browsers that never dispatch it.
+      // The final check grants exactly one print lifecycle. A second
+      // beforeprint (including Ctrl/Cmd+P) cannot reuse that grant.
       clearPrintAuthorization.current?.();
+      let armed = true;
+      const beforePrint = () => {
+        if (armed) {
+          armed = false;
+          sheet.dataset.printAuthorized = 'true';
+        } else delete sheet.dataset.printAuthorized;
+      };
       const clear = () => {
+        armed = false;
+        window.removeEventListener('beforeprint', beforePrint);
         window.removeEventListener('afterprint', clear);
-        window.clearTimeout(timeout);
         delete sheet.dataset.printAuthorized;
         if (clearPrintAuthorization.current === clear)
           clearPrintAuthorization.current = null;
       };
       clearPrintAuthorization.current = clear;
+      window.addEventListener('beforeprint', beforePrint);
       window.addEventListener('afterprint', clear, { once: true });
-      const timeout = window.setTimeout(clear, 30_000);
-      sheet.dataset.printAuthorized = 'true';
       try {
         window.print();
-      } catch (error) {
+      } finally {
         clear();
-        throw error;
       }
     } catch {
       if (epoch !== queueEpoch.current) return;
-      invalidate();
+      setValidatedKey('');
+      setRefreshFailed(true);
       setMessage('Final label check failed. Printing is blocked; retry.');
     } finally {
       setBusy(false);
@@ -409,7 +451,7 @@ export function LabelDesigner({
       return;
     }
     setEntries(next);
-    invalidate();
+    clearPrintAuthorization.current?.();
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -421,6 +463,61 @@ export function LabelDesigner({
       (entry.kind === 'asset' &&
         !barcodeCompatibleTag(byId.get(queueIdentity(entry))?.tag ?? '')),
   ).length;
+  const displayRows =
+    !refreshPending && validatedKey === selectionKey && prepared
+      ? expandLabels(entries, prepared)
+      : printRows;
+  const sheetKey = JSON.stringify([
+    selectionKey,
+    totalCopies(entries),
+    job,
+    displayRows?.map(signature),
+  ]);
+  useEffect(() => {
+    let current = true;
+    const sheet = document.querySelector<HTMLElement>('.label-print-root');
+    if (!sheet || !displayRows?.length) return;
+    const check = () => {
+      if (!current) return;
+      const cards = Array.from(
+        sheet.querySelectorAll<HTMLElement>('.label-card'),
+      );
+      const ready =
+        cards.length === displayRows.length &&
+        cards.every((card) => card.dataset.codeReady === 'true');
+      const imagesReady = Array.from(
+        sheet.querySelectorAll<HTMLImageElement>('img'),
+      ).every((image) => image.complete && image.naturalWidth > 0);
+      const fallback =
+        job.format === 'code128' &&
+        cards.some((card) => card.dataset.codeFallback === 'true');
+      setFallbackPending(fallback && !formatAcknowledged);
+      if (
+        ready &&
+        imagesReady &&
+        (!document.fonts || document.fonts.status === 'loaded')
+      )
+        setReadySheetKey(sheetKey);
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(sheet, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-code-ready', 'data-code-fallback'],
+    });
+    sheet.addEventListener('load', check, true);
+    sheet.addEventListener('error', check, true);
+    check();
+    void document.fonts?.ready.then(check);
+    return () => {
+      current = false;
+      observer.disconnect();
+      sheet.removeEventListener('load', check, true);
+      sheet.removeEventListener('error', check, true);
+    };
+    // Sheet identity captures rows and layout; readiness follows the rendered DOM.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetKey, formatAcknowledged]);
 
   return (
     <>
@@ -540,12 +637,14 @@ export function LabelDesigner({
                 {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
                 {record.holdingContext}
               </p>
-              {(record.assetTag ||
+              {(record.itemCode ||
+                record.assetTag ||
                 record.serialNumber ||
                 record.manufacturer ||
                 record.model) && (
                 <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                   {[
+                    record.itemCode && `Item code: ${record.itemCode}`,
                     record.assetTag,
                     record.serialNumber,
                     record.manufacturer,
@@ -671,7 +770,7 @@ export function LabelDesigner({
                   ...job,
                   size: event.target.value as JobSettings['size'],
                 });
-                invalidate();
+                clearPrintAuthorization.current?.();
               }}
               className="ml-2 rounded bg-slate-800 p-2"
             >
@@ -689,7 +788,7 @@ export function LabelDesigner({
                   ...job,
                   page: event.target.value as JobSettings['page'],
                 });
-                invalidate();
+                clearPrintAuthorization.current?.();
               }}
               className="ml-2 rounded bg-slate-800 p-2"
             >
@@ -707,7 +806,9 @@ export function LabelDesigner({
                   ...job,
                   format: event.target.value as JobSettings['format'],
                 });
-                invalidate();
+                clearPrintAuthorization.current?.();
+                setFormatAcknowledged(false);
+                setFallbackPending(false);
               }}
               className="ml-2 rounded bg-slate-800 p-2"
             >
@@ -783,22 +884,36 @@ export function LabelDesigner({
             {message}
           </p>
         )}
+        {refreshPending && (
+          <p role="status">
+            Refreshing labels; previous sheet shown until current records are
+            ready.
+          </p>
+        )}
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            disabled={!entries.length || busy}
-            onClick={() => void prepare()}
-            className="rounded border border-cyan-500 px-4 py-2 text-cyan-200"
-          >
-            Prepare full print preview
-          </button>
+          {refreshFailed && (
+            <button
+              type="button"
+              onClick={() => setRetry((value) => value + 1)}
+              className="rounded border border-cyan-500 px-4 py-2 text-cyan-200"
+            >
+              Retry label refresh
+            </button>
+          )}
           <button
             type="button"
             disabled={
               !prepared ||
               busy ||
+              refreshPending ||
+              refreshFailed ||
+              validatedKey !== selectionKey ||
+              readySheetKey !== sheetKey ||
               unavailable.length > 0 ||
-              pendingChanges.length > 0
+              pendingChanges.length > 0 ||
+              (job.format === 'code128' &&
+                fallbackPending &&
+                !formatAcknowledged)
             }
             onClick={() => void print()}
             className="rounded bg-cyan-400 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50"
@@ -806,9 +921,9 @@ export function LabelDesigner({
             Print selected labels / Save as PDF
           </button>
         </div>
-        {printRows && (
+        {displayRows && (
           <LabelSheet
-            records={printRows}
+            records={displayRows}
             origin={origin}
             preview={preview}
             size={job.size}

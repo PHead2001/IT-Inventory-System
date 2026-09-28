@@ -157,6 +157,7 @@ export const custodySchemas = {
     ...published,
     quantity: positive,
     reorder_threshold: count.nullable(),
+    item_code: z.string().nullable().optional(),
   }),
   asset_site_open: z.strictObject({
     ...published,

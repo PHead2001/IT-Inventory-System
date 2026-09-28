@@ -52,6 +52,28 @@ const archiveVersion = versionWire.refine(
   (v) => v.length <= 10 && Number(v) <= 2147483647,
 );
 const reorderThreshold = count.nullable().optional();
+export function normalizeItemCode(value: string): string | null {
+  const trimmed = value.replace(
+    /^[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+|[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$/gu,
+    '',
+  );
+  return trimmed || null;
+}
+export function itemCodeValid(value: string | null): boolean {
+  return (
+    value === null || ([...value].length <= 100 && !/[\p{Cc}]/u.test(value))
+  );
+}
+const itemCode = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((value) =>
+    typeof value === 'string' ? normalizeItemCode(value) : value,
+  )
+  .refine((value) => value === undefined || itemCodeValid(value), {
+    message: 'Use at most 100 characters without control characters.',
+  });
 const optionalText = (max: number) =>
   z
     .string()
@@ -92,6 +114,7 @@ export const payloadSchemas = {
       initial_location_id: uuid.nullish().transform((v) => v ?? null),
       initial_quantity: count.default(0),
       reorder_threshold: reorderThreshold,
+      item_code: itemCode,
     })
     .refine((v) => v.initial_quantity === 0 || !!v.initial_location_id, {
       path: ['initial_location_id'],
@@ -104,6 +127,7 @@ export const payloadSchemas = {
       initial_location_id: uuid.nullish().transform((v) => v ?? null),
       initial_quantity: count.default(0),
       reorder_threshold: reorderThreshold,
+      item_code: itemCode,
     })
     .refine((v) => v.initial_quantity === 0 || !!v.initial_location_id, {
       path: ['initial_location_id'],
@@ -138,6 +162,7 @@ export const payloadSchemas = {
     ...quantity,
     ...metadata,
     reorder_threshold: reorderThreshold,
+    item_code: itemCode,
   }),
   quantity_update_v2: z.strictObject({
     ...quantity,
@@ -145,6 +170,7 @@ export const payloadSchemas = {
     ...published,
     acknowledge_legacy_values: z.boolean().optional(),
     reorder_threshold: reorderThreshold,
+    item_code: itemCode,
   }),
   quantity_archive: z.strictObject({ ...quantity, reason }),
   quantity_archive_and_clear: z.strictObject({

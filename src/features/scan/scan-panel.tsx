@@ -9,7 +9,11 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { IScannerControls } from '@zxing/browser';
-import { resolveScan, type ScanResolution } from './resolve.server';
+import {
+  resolveItemCode,
+  resolveScan,
+  type ScanResolution,
+} from './resolve.server';
 
 export function ScanPanel() {
   const router = useRouter();
@@ -20,6 +24,7 @@ export function ScanPanel() {
   const consumed = useRef(false);
   const [camera, setCamera] = useState<'idle' | 'starting' | 'running'>('idle');
   const [input, setInput] = useState('');
+  const [mode, setMode] = useState<'identifier' | 'item_code'>('identifier');
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<ScanResolution | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +54,10 @@ export function ScanPanel() {
   }, [stop]);
 
   const open = useCallback(
-    async (text: string) => {
+    async (
+      text: string,
+      lookupMode: 'identifier' | 'item_code' = 'identifier',
+    ) => {
       if (consumed.current) return;
       consumed.current = true;
       stop();
@@ -57,7 +65,10 @@ export function ScanPanel() {
       setBusy(true);
       setMessage('');
       try {
-        const resolution = await resolveScan(text);
+        const resolution =
+          lookupMode === 'item_code'
+            ? await resolveItemCode(text)
+            : await resolveScan(text);
         if (!mounted.current || token !== generation.current) return;
         setResult(resolution);
         if (
@@ -66,9 +77,17 @@ export function ScanPanel() {
         ) {
           router.push(resolution.matches[0].path);
         } else if (resolution.status === 'invalid')
-          setMessage('This is not a supported inventory label or identifier.');
+          setMessage(
+            lookupMode === 'item_code'
+              ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
+              : 'This is not a supported inventory label or identifier.',
+          );
         else if (resolution.status === 'unknown')
-          setMessage('No matching location or asset was found.');
+          setMessage(
+            lookupMode === 'item_code'
+              ? 'No quantity item has that exact Item code (SKU).'
+              : 'No matching location, asset, or quantity item was found.',
+          );
         else if (resolution.status === 'ambiguous')
           setMessage(
             'This identifier matches more than one record. Choose the intended record.',
@@ -140,7 +159,7 @@ export function ScanPanel() {
     event.preventDefault();
     if (!busy) {
       consumed.current = false;
-      void open(input);
+      void open(input, mode);
     }
   };
   return (
@@ -182,8 +201,43 @@ export function ScanPanel() {
         onSubmit={submit}
         className="space-y-3 rounded-xl border border-slate-700 p-4"
       >
+        <fieldset className="space-y-2">
+          <legend className="font-semibold">Look up as</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="scan-mode"
+              checked={mode === 'identifier'}
+              onChange={() => {
+                stop();
+                consumed.current = false;
+                setResult(null);
+                setMessage('');
+                setMode('identifier');
+              }}
+            />
+            Label or identifier
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="scan-mode"
+              checked={mode === 'item_code'}
+              onChange={() => {
+                stop();
+                consumed.current = false;
+                setResult(null);
+                setMessage('');
+                setMode('item_code');
+              }}
+            />
+            Quantity Item code (SKU)
+          </label>
+        </fieldset>
         <label htmlFor="scan-text" className="block font-semibold">
-          Paste a label URL, barcode text, or exact identifier
+          {mode === 'item_code'
+            ? 'Enter the exact Item code (SKU)'
+            : 'Paste a label URL, barcode text, or exact identifier'}
         </label>
         <input
           id="scan-text"
@@ -193,8 +247,9 @@ export function ScanPanel() {
           className="w-full rounded border border-slate-500 bg-slate-950 p-3"
         />
         <p className="text-sm text-slate-400">
-          Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are
-          checked for exact matches.
+          {mode === 'item_code'
+            ? 'Use this mode for quantity codes beginning with / or containing a colon. Text that looks like a URL is matched only against stored Item codes.'
+            : 'Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are checked for exact matches across locations, assets, and quantity items.'}
         </p>
         <button
           disabled={busy}

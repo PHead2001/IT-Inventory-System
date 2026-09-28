@@ -89,7 +89,7 @@ export default async function ApplicationLayout({
             href="/room"
           >
             <Map size={18} />
-            Room
+            Spaces &amp; maps
           </Link>
           <Link
             className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"

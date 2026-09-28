@@ -59,10 +59,9 @@ it('preserves unlocated definitions without fabricating a room link', () => {
   expect(screen.getByRole('link', { name: 'Cable' })).toBeVisible();
 });
 
-it('does not direct unmodeled office or site custody into closet geometry', () => {
+it('routes unmodeled office inventory into its own Spaces view', () => {
   render(<ShowInRoom code="ITO-GENERAL" />);
-  expect(screen.getByText('No room model for this location')).toBeVisible();
   expect(
-    screen.queryByRole('link', { name: /in room/i }),
-  ).not.toBeInTheDocument();
+    screen.getByRole('link', { name: 'Show ITO-GENERAL in Spaces' }),
+  ).toHaveAttribute('href', '/room?location=ITO-GENERAL');
 });

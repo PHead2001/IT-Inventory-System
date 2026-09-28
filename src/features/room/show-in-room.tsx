@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { roomHref } from './navigation';
 import { buildRoomBindings } from './bindings';
 import { loadItCloset } from './load';
+import { spaces } from './spaces';
 
 const room = loadItCloset();
 const modeledCodes = new Set([
@@ -10,7 +11,12 @@ const modeledCodes = new Set([
 ]);
 
 export function ShowInRoom({ code }: { code: string }) {
-  if (!modeledCodes.has(code))
+  const inventoryOnly = spaces.find(
+    (space) =>
+      space.kind === 'inventory' &&
+      (code === space.rootCode || code.startsWith(space.rootCode + '-')),
+  );
+  if (!modeledCodes.has(code) && !inventoryOnly)
     return (
       <span className="text-xs text-slate-400">
         No room model for this location
@@ -20,9 +26,9 @@ export function ShowInRoom({ code }: { code: string }) {
     <Link
       className="inline-flex min-h-11 items-center py-2 text-sm text-cyan-300 underline"
       href={roomHref(code)}
-      aria-label={'Show ' + code + ' in room'}
+      aria-label={'Show ' + code + (inventoryOnly ? ' in Spaces' : ' in room')}
     >
-      Show in room
+      {inventoryOnly ? 'Open in Spaces' : 'Show in room'}
     </Link>
   );
 }

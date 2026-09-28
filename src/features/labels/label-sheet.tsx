@@ -30,6 +30,7 @@ export type LabelRecord = {
   context: string;
   path: string;
   barcode?: string | null;
+  humanId?: string | null;
   state: string;
 };
 export type LabelSize = '70x35' | '90x50';
@@ -40,13 +41,6 @@ export function barcodePayload(record: LabelRecord): string | null {
   return record.barcode && barcodeCompatibleTag(record.barcode)
     ? 'AST:' + record.barcode
     : null;
-}
-
-export function printExcerpt(value: string, limit: number): string {
-  const characters = Array.from(value);
-  return characters.length > limit
-    ? characters.slice(0, limit - 1).join('') + '…'
-    : value;
 }
 
 export function LabelSheet({
@@ -78,6 +72,7 @@ export function LabelSheet({
       .label-print-root .label-card { border: 0.2mm solid #222; }
       .label-print-root .label-card, .label-print-root .label-card * { color: black !important; background: white !important; }
       .label-print-root .label-card { break-inside: avoid; page-break-inside: avoid; }
+      .label-print-root .label-card * { animation: none !important; transition: none !important; }
     }`}</style>
       <div
         className="label-print-root mt-6 flex flex-wrap content-start gap-[3mm] rounded-xl bg-white p-[3mm] text-black"
@@ -85,7 +80,15 @@ export function LabelSheet({
       >
         {records.map((record, index) => (
           <LabelCard
-            key={record.kind + record.key + ':' + index}
+            key={[
+              record.kind,
+              record.key,
+              index,
+              size,
+              record.name,
+              record.context,
+              record.humanId,
+            ].join(':')}
             record={record}
             origin={origin}
             preview={preview}
@@ -117,7 +120,10 @@ function LabelCard({
   const [qr, setQr] = useState<string | null>(null);
   const [qrFailed, setQrFailed] = useState(false);
   const [barcodeWidthMm, setBarcodeWidthMm] = useState<number | null>(null);
+  const [textOverflow, setTextOverflow] = useState(false);
+  const [compact, setCompact] = useState(false);
   const svg = useRef<SVGSVGElement>(null);
+  const textBox = useRef<HTMLDivElement>(null);
   const payload = barcodePayload(record);
   const url = origin + record.path;
   useEffect(() => {
@@ -171,13 +177,56 @@ function LabelCard({
   }, [payload, format, width]);
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
   const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);
-  const identifierFits = record.key.length <= (width >= 90 ? 64 : 40);
+  const identifier =
+    record.humanId ||
+    (record.kind === 'asset' ? record.barcode : null) ||
+    (record.kind === 'location' ? record.key : null);
+  const displayIdentifier =
+    identifier ||
+    (record.kind === 'quantity' ? 'Quantity item' : 'Untagged asset');
+  const shortContext = record.context
+    .split(/\s*\/\s*/)
+    .filter(Boolean)
+    .slice(-2)
+    .join(' / ');
+  useEffect(() => {
+    const box = textBox.current;
+    if (!box) return;
+    const measure = () => {
+      const over =
+        box.scrollHeight > box.clientHeight + 1 ||
+        Array.from(box.querySelectorAll<HTMLElement>('[data-fit-text]')).some(
+          (line) =>
+            line.scrollHeight > line.clientHeight + 1 ||
+            line.scrollWidth > line.clientWidth + 1,
+        );
+      if (over && !compact) setCompact(true);
+      else setTextOverflow(over);
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(box);
+    void document.fonts?.ready.then(measure);
+    return () => observer?.disconnect();
+  }, [
+    record.name,
+    identifier,
+    shortContext,
+    width,
+    height,
+    useBarcode,
+    compact,
+  ]);
   return (
     <article
       className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
-      data-code-ready={Boolean(identifierFits && (qr || useBarcode))}
+      data-code-ready={Boolean(!textOverflow && (qr || useBarcode))}
       data-code-fallback={format === 'code128' && !useBarcode}
+      data-text-overflow={textOverflow}
     >
       {preview && (
         <strong className="mb-[1mm] text-[8pt] uppercase tracking-wide">
@@ -201,15 +250,29 @@ function LabelCard({
             {qrFailed ? 'Code unavailable. Do not print.' : 'Generating code…'}
           </span>
         )}
-        <div className="min-w-0 flex-1">
-          <strong className="line-clamp-2 block break-words text-[10pt] leading-tight">
-            {printExcerpt(record.name, width >= 90 ? 42 : 30)}
+        <div
+          ref={textBox}
+          className="max-h-full min-w-0 flex-1 overflow-hidden"
+        >
+          <strong
+            data-fit-text
+            className={`line-clamp-3 block break-words leading-tight ${compact ? 'text-[8pt]' : 'text-[9pt]'}`}
+          >
+            {record.name}
           </strong>
-          <span className="mt-1 block break-all font-mono text-[8pt]">
-            {record.key}
+          <span
+            data-fit-text
+            className={`mt-[0.5mm] line-clamp-2 block break-words font-mono leading-tight ${compact ? 'text-[7pt]' : 'text-[8pt]'}`}
+            title={identifier || undefined}
+          >
+            {displayIdentifier}
           </span>
-          <span className="mt-1 block truncate text-[7pt] leading-tight">
-            {printExcerpt(record.context, width >= 90 ? 32 : 20)}
+          <span
+            data-fit-text
+            className="mt-[0.5mm] line-clamp-2 block break-words text-[7pt] leading-tight"
+            title={record.context}
+          >
+            {shortContext}
           </span>
           {record.state !== 'active' && (
             <span className="block font-bold uppercase text-[8pt]">
@@ -218,9 +281,9 @@ function LabelCard({
           )}
         </div>
       </div>
-      {!identifierFits && (
-        <strong className="text-[8pt]">
-          Identifier exceeds this label size. Do not print.
+      {textOverflow && (
+        <strong className="text-[7pt]">
+          Text does not fit this label. Choose a larger size.
         </strong>
       )}
       {format === 'code128' && (

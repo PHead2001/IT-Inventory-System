@@ -31,15 +31,15 @@ export default async function AssetPage({
   const detail = await getAssetDetail(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
-  const [categories, locations, sites, assignments] = await Promise.all([
+  const [categories, locations, sites, assignments, forms] = await Promise.all([
     getCategories(),
     getLocations(),
     getSites(),
     getEntityAssignments('asset', id),
+    member.role === 'staff'
+      ? getPublishedForms([asset.categoryId])
+      : Promise.resolve({}),
   ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">

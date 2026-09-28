@@ -48,6 +48,7 @@ const item: QuantityItem = {
   model: null,
   version: 2,
   archived: false,
+  itemCode: null,
   reorderThreshold: null,
 };
 const defaults = {

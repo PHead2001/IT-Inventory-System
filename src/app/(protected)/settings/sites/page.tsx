@@ -26,7 +26,7 @@ export default async function ManageSitesPage() {
           <li key={site.id}>
             <Link
               className="text-cyan-300 underline"
-              href={`/sites/${encodeURIComponent(site.code)}`}
+              href={`/settings/sites/${encodeURIComponent(site.code)}`}
             >
               {site.name} ({site.code})
             </Link>{' '}

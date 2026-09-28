@@ -1,5 +1,6 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { fetchCategoryForm } from './form-fetch.actions';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,10 @@ import type {
   QuantityItem,
 } from '@/features/inventory/contracts-ui';
 import { field as fieldClass } from '@/features/inventory/components/read-ui';
+import {
+  normalizeItemCode,
+  itemCodeValid,
+} from '@/features/inventory/contracts';
 import type {
   MetadataDefinition,
   MetadataForm,
@@ -43,6 +48,7 @@ const labels: Record<string, string> = {
   manufacturer: 'Manufacturer',
   model: 'Model',
   reorder_threshold: 'Reorder threshold (optional)',
+  item_code: 'Item code (SKU)',
   asset_tag: 'Asset tag',
   serial_number: 'Serial number',
 };
@@ -62,6 +68,8 @@ const initialCore = (
     entity && 'reorderThreshold' in entity && entity.reorderThreshold !== null
       ? String(entity.reorderThreshold)
       : '',
+  item_code:
+    entity && 'itemCode' in entity ? String(entity.itemCode ?? '') : '',
   asset_tag: entity && 'assetTag' in entity ? (entity.assetTag ?? '') : '',
   serial_number:
     entity && 'serialNumber' in entity ? (entity.serialNumber ?? '') : '',
@@ -84,8 +92,26 @@ export function buildCustomPatch(
   const set: Record<string, unknown> = {};
   const unset: string[] = [];
   const touchedIds = new Set(touched);
-  for (const field of definition.fields.filter((value) =>
-    value.applies_to.includes(kind),
+  const visibleFields = new Set(
+    definition.layout
+      .filter(
+        (section) =>
+          section.visible !== false &&
+          (section.applies_to ?? ['quantity', 'asset']).includes(kind),
+      )
+      .flatMap((section) =>
+        section.controls
+          .filter(
+            (control) =>
+              control.visible !== false &&
+              (control.applies_to ?? ['quantity', 'asset']).includes(kind) &&
+              control.kind === 'field',
+          )
+          .map((control) => control.field_id),
+      ),
+  );
+  for (const field of definition.fields.filter(
+    (value) => value.applies_to.includes(kind) && visibleFields.has(value.id),
   )) {
     if (!creating && !touchedIds.has(field.id)) continue;
     const hasValue = Object.hasOwn(current, field.id);
@@ -208,6 +234,16 @@ export function MetadataForm({
   const [touched, setTouched] = useState<string[]>([]);
   const [thresholdTouched, setThresholdTouched] = useState(false);
   const [reviewedForms, setReviewedForms] = useState(() => forms);
+  const [loadedForms, setLoadedForms] = useState<Record<string, MetadataForm>>(
+    {},
+  );
+  const [formLoadError, setFormLoadError] = useState('');
+  const [formLoading, setFormLoading] = useState(false);
+  const [loadRetry, setLoadRetry] = useState(0);
+  const loadGeneration = useRef(0);
+  const conflictGeneration = useRef(0);
+  const [schemaConflictPending, setSchemaConflictPending] = useState(false);
+  const [schemaRefreshError, setSchemaRefreshError] = useState('');
   const [priorForms, setPriorForms] = useState<Record<string, MetadataForm>>(
     {},
   );
@@ -222,9 +258,87 @@ export function MetadataForm({
     null,
   );
   const [duplicates, setDuplicates] = useState<string[]>([]);
-  const currentForm = forms[core.category_id];
+  const routeForm = forms[core.category_id];
+  const fetchedForm = loadedForms[core.category_id];
+  const currentForm =
+    routeForm && fetchedForm
+      ? BigInt(routeForm.published_number) >
+        BigInt(fetchedForm.published_number)
+        ? routeForm
+        : fetchedForm
+      : (routeForm ?? fetchedForm);
   const form = reviewedForms[core.category_id] ?? currentForm;
+  const refreshConflict = async (categoryId: string) => {
+    const generation = ++conflictGeneration.current;
+    setSchemaConflictPending(true);
+    setSchemaRefreshError('');
+    try {
+      const result = await fetchCategoryForm(categoryId);
+      if (generation !== conflictGeneration.current) return;
+      if (!result.ok || !result.form) {
+        setSchemaRefreshError(
+          result.ok
+            ? 'The current form is unavailable. Retry.'
+            : result.message,
+        );
+        return;
+      }
+      setLoadedForms((prior) => ({ ...prior, [categoryId]: result.form! }));
+    } catch {
+      if (generation === conflictGeneration.current)
+        setSchemaRefreshError('The current form could not be loaded. Retry.');
+    } finally {
+      if (generation === conflictGeneration.current)
+        setSchemaConflictPending(false);
+    }
+  };
+  useEffect(() => {
+    const categoryId = core.category_id;
+    if (!categoryId || forms[categoryId] || loadedForms[categoryId] || preview)
+      return;
+    const generation = ++loadGeneration.current;
+    queueMicrotask(() => {
+      if (generation === loadGeneration.current) {
+        setFormLoading(true);
+        setFormLoadError('');
+      }
+    });
+    void fetchCategoryForm(categoryId)
+      .then((result) => {
+        if (generation !== loadGeneration.current) return;
+        setFormLoading(false);
+        if (!result.ok) {
+          setFormLoadError(result.message);
+          return;
+        }
+        if (!result.form) {
+          setFormLoadError('This category has no published form.');
+          return;
+        }
+        setLoadedForms((prior) => ({ ...prior, [categoryId]: result.form! }));
+        setReviewedForms((prior) =>
+          prior[categoryId] ? prior : { ...prior, [categoryId]: result.form! },
+        );
+      })
+      .catch(() => {
+        if (generation === loadGeneration.current) {
+          setFormLoading(false);
+          setFormLoadError('The form could not be loaded. Retry.');
+        }
+      });
+    return () => {
+      loadGeneration.current += 1;
+    };
+  }, [core.category_id, forms, loadedForms, preview, loadRetry]);
+  useEffect(
+    () => () => {
+      conflictGeneration.current += 1;
+    },
+    [core.category_id],
+  );
   const definition = form?.published_definition;
+  const invalidItemCode =
+    kind === 'quantity' && !itemCodeValid(normalizeItemCode(core.item_code));
   const schemaStale =
     !!currentForm &&
     !!form &&
@@ -460,7 +574,7 @@ export function MetadataForm({
   const builtin = (name: string) => {
     if (
       (kind === 'quantity' && ['asset_tag', 'serial_number'].includes(name)) ||
-      (kind === 'asset' && name === 'reorder_threshold')
+      (kind === 'asset' && ['reorder_threshold', 'item_code'].includes(name))
     )
       return null;
     if (name === 'category_id')
@@ -508,10 +622,9 @@ export function MetadataForm({
           type={name === 'reorder_threshold' ? 'number' : 'text'}
           min={name === 'reorder_threshold' ? 0 : undefined}
           max={name === 'reorder_threshold' ? 2147483647 : undefined}
-          maxLength={
-            name === 'name' || name === 'manufacturer' || name === 'model'
-              ? 200
-              : 200
+          maxLength={name === 'item_code' ? undefined : 200}
+          aria-invalid={
+            name === 'item_code' && invalidItemCode ? true : undefined
           }
           required={name === 'name'}
           value={core[name as keyof typeof core] ?? ''}
@@ -519,6 +632,11 @@ export function MetadataForm({
             updateCore(name as keyof typeof core, event.target.value)
           }
         />
+        {name === 'item_code' && invalidItemCode && (
+          <p role="alert" className="text-sm text-amber-200">
+            Use at most 100 characters without control characters.
+          </p>
+        )}
         {name === 'reorder_threshold' && (
           <p className="text-xs text-slate-400">
             Blank disables monitoring; zero alerts only at zero stock.
@@ -528,7 +646,7 @@ export function MetadataForm({
     );
   };
   const payload = () => {
-    if (!definition || !form) return null;
+    if (!definition || !form || invalidItemCode) return null;
     const result: Record<string, unknown> = {
       name: core.name,
       description: core.description || null,
@@ -545,6 +663,7 @@ export function MetadataForm({
       ),
     };
     if (kind === 'quantity') {
+      result.item_code = normalizeItemCode(core.item_code);
       if (creating || thresholdTouched)
         result.reorder_threshold =
           core.reorder_threshold === '' ? null : Number(core.reorder_threshold);
@@ -576,7 +695,7 @@ export function MetadataForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!form || schemaStale || itemStale || pending) return;
+    if (!form || schemaStale || itemStale || invalidItemCode || pending) return;
     if (!review) {
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
@@ -638,6 +757,8 @@ export function MetadataForm({
         result.code === 'stale_schema' ||
         result.code === 'stale_version'
       ) {
+        if (result.code === 'P1024' || result.code === 'stale_schema')
+          void refreshConflict(core.category_id);
         router.refresh();
       }
     });
@@ -693,6 +814,24 @@ export function MetadataForm({
           </Button>
         </div>
       )}
+      {schemaConflictPending && (
+        <p role="status">
+          Loading the newly published category form. Your values remain
+          available for review.
+        </p>
+      )}
+      {schemaRefreshError && (
+        <div role="alert">
+          {schemaRefreshError}{' '}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void refreshConflict(core.category_id)}
+          >
+            Retry current form
+          </Button>
+        </div>
+      )}
       {itemStale && (
         <div
           className="rounded border border-amber-600 p-3 text-amber-100"
@@ -734,53 +873,87 @@ export function MetadataForm({
           values remain visible.
         </p>
       )}
-      {!form && (
+      {formLoading && <p role="status">Loading category form…</p>}
+      {formLoadError && !form && (
+        <div role="alert">
+          {formLoadError}{' '}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setLoadRetry((value) => value + 1)}
+          >
+            Retry form load
+          </Button>
+        </div>
+      )}
+      {!form && !formLoading && !formLoadError && (
         <p role="alert">The selected category has no published form.</p>
       )}
       <fieldset
-        disabled={pending || schemaStale || itemStale}
+        disabled={
+          pending ||
+          schemaStale ||
+          schemaConflictPending ||
+          !!schemaRefreshError ||
+          itemStale
+        }
         className="min-w-0 w-full max-w-full space-y-5"
       >
-        {definition?.layout.map((section) => (
-          <section key={section.id} className="min-w-0 space-y-3">
-            <h3 className="break-words text-lg font-semibold">
-              {section.label}
-            </h3>
-            <div className="flex flex-wrap gap-3">
-              {section.controls.map((control) => {
-                const content =
-                  control.kind === 'field' ? (
-                    customControl(control.field_id ?? '')
-                  ) : control.kind === 'builtin' ? (
-                    builtin(control.builtin ?? '')
-                  ) : (
-                    <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
-                      {control.help}
-                    </p>
-                  );
-                if (!content) return null;
-                const booleanShort =
-                  control.kind === 'field' &&
-                  applicable.some(
-                    (value) =>
-                      value.id === control.field_id && value.type === 'boolean',
-                  ) &&
-                  (control.width === 'Auto' ||
-                    control.width === 3 ||
-                    control.width === 4);
-                return (
-                  <div
-                    key={control.id}
-                    style={controlLayoutStyle(control.width, booleanShort)}
-                    className="min-w-0 break-words"
-                  >
-                    {content}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+        {definition?.layout
+          .filter(
+            (section) =>
+              section.visible !== false &&
+              (section.applies_to ?? ['quantity', 'asset']).includes(kind),
+          )
+          .map((section) => (
+            <section key={section.id} className="min-w-0 space-y-3">
+              <h3 className="break-words text-lg font-semibold">
+                {section.label}
+              </h3>
+              <div className="flex flex-wrap gap-3">
+                {section.controls
+                  .filter(
+                    (control) =>
+                      control.visible !== false &&
+                      (control.applies_to ?? ['quantity', 'asset']).includes(
+                        kind,
+                      ),
+                  )
+                  .map((control) => {
+                    const content =
+                      control.kind === 'field' ? (
+                        customControl(control.field_id ?? '')
+                      ) : control.kind === 'builtin' ? (
+                        builtin(control.builtin ?? '')
+                      ) : (
+                        <p className="break-words whitespace-pre-wrap text-sm text-slate-400">
+                          {control.help}
+                        </p>
+                      );
+                    if (!content) return null;
+                    const booleanShort =
+                      control.kind === 'field' &&
+                      applicable.some(
+                        (value) =>
+                          value.id === control.field_id &&
+                          value.type === 'boolean',
+                      ) &&
+                      (control.width === 'Auto' ||
+                        control.width === 3 ||
+                        control.width === 4);
+                    return (
+                      <div
+                        key={control.id}
+                        style={controlLayoutStyle(control.width, booleanShort)}
+                        className="min-w-0 break-words"
+                      >
+                        {content}
+                      </div>
+                    );
+                  })}
+              </div>
+            </section>
+          ))}
         {creating && !preview && !openingSite && kind === 'quantity' && (
           <div className="space-y-3">
             <label htmlFor="metadata-initial-quantity">Initial quantity</label>
@@ -924,6 +1097,9 @@ export function MetadataForm({
               pending ||
               !form ||
               schemaStale ||
+              schemaConflictPending ||
+              !!schemaRefreshError ||
+              invalidItemCode ||
               itemStale ||
               (review && legacyMigration && !ackLegacy)
             }

@@ -54,6 +54,7 @@ describe('inventory read contracts', () => {
       location_id: null,
       quantity: null,
       asset_tag: null,
+      item_code: '0001-A/B',
       serial_number: null,
       recorded_total: 0,
       reorder_threshold: null,
@@ -63,6 +64,7 @@ describe('inventory read contracts', () => {
       id: other,
       quantity: null,
       location: null,
+      itemCode: '0001-A/B',
     });
     const located = mapSearch(
       searchRow.parse({ ...base, location_id: id, quantity: 7 }),

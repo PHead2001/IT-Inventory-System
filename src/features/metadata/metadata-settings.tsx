@@ -1,7 +1,18 @@
 'use client';
-import { useEffect, useRef, useState, useTransition } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { motion } from 'motion/react';
+import { DragDropProvider, DragOverlay, useDroppable } from '@dnd-kit/react';
+import { isSortable, useSortable } from '@dnd-kit/react/sortable';
+import { move as sortableMove } from '@dnd-kit/helpers';
 import {
   fieldTypes,
   metadataDefinition,
@@ -9,10 +20,8 @@ import {
   type MetadataDefinition,
   type MetadataForm,
 } from './contracts';
-import type { z } from 'zod';
-import type { reviewSchema } from './contracts';
 import {
-  reviewMetadataPublish,
+  saveMetadataForm,
   submitMetadataDraft,
   verifyMetadataDesignerIdentity,
 } from './actions';
@@ -30,6 +39,8 @@ import {
   designerIssues,
   initialDefinition,
   moveControl,
+  removeSection,
+  sectionHasProtectedControls,
   newId,
   selectTypes,
   widths,
@@ -37,7 +48,6 @@ import {
   type Field,
 } from './designer-model';
 
-type Review = z.infer<typeof reviewSchema>;
 type Category = { id: string; name: string; active: boolean };
 const input =
   'min-h-10 w-full min-w-0 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm';
@@ -332,6 +342,94 @@ function FieldPanel({
   );
 }
 
+type HandleRef = (element: Element | null) => void;
+function SortableSection({
+  id,
+  index,
+  selected,
+  children,
+}: {
+  id: string;
+  index: number;
+  selected: boolean;
+  children: (handleRef: HandleRef) => ReactNode;
+}) {
+  const { ref, handleRef, isDragging } = useSortable({
+    id: `section:${id}`,
+    index,
+    group: 'sections',
+    type: 'section',
+    accept: 'section',
+  });
+  return (
+    <div
+      ref={ref}
+      data-section-id={id}
+      className={`min-w-0 space-y-3 rounded border p-3 ${selected ? 'border-cyan-400' : 'border-slate-700'} ${isDragging ? 'opacity-40' : ''}`}
+    >
+      {children(handleRef)}
+    </div>
+  );
+}
+function SortableControl({
+  id,
+  index,
+  sectionId,
+  style,
+  selected,
+  children,
+  onClick,
+}: {
+  id: string;
+  index: number;
+  sectionId: string;
+  style: React.CSSProperties;
+  selected: boolean;
+  children: (handleRef: HandleRef) => ReactNode;
+  onClick: () => void;
+}) {
+  const { ref, handleRef, isDragging } = useSortable({
+    id: `control:${id}`,
+    index,
+    group: sectionId,
+    type: 'control',
+    accept: 'control',
+  });
+  return (
+    <div
+      ref={ref}
+      data-control-id={id}
+      style={style}
+      onClick={onClick}
+      className={`min-w-0 space-y-2 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-slate-600'} ${isDragging ? 'opacity-40' : ''}`}
+    >
+      {children(handleRef)}
+    </div>
+  );
+}
+function SectionDropArea({
+  id,
+  children,
+}: {
+  id: string;
+  children: ReactNode;
+}) {
+  const { ref, isDropTarget } = useDroppable({
+    id: `empty:${id}`,
+    type: 'control',
+    accept: 'control',
+    data: { sectionId: id },
+  });
+  return (
+    <div
+      ref={ref}
+      className={`flex min-h-20 flex-wrap gap-3 rounded border border-dashed p-2 ${isDropTarget ? 'border-cyan-400 bg-cyan-400/10' : 'border-slate-700'}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function MetadataSettings({
   categories,
   forms,
@@ -342,10 +440,6 @@ export function MetadataSettings({
   memberId: string;
 }) {
   const router = useRouter();
-  const routerRef = useRef(router);
-  useEffect(() => {
-    routerRef.current = router;
-  }, [router]);
   const active = categories.filter((category) => category.active);
   const [categoryId, setCategoryId] = useState(active[0]?.id ?? '');
   const selected = forms[categoryId];
@@ -367,7 +461,13 @@ export function MetadataSettings({
   const [publishedBaseline, setPublishedBaseline] = useState(
     selected?.published_revision_id ?? '',
   );
-  const [review, setReview] = useState<Review | null>(null);
+  const [saveReview, setSaveReview] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [savePayload, setSavePayload] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [message, setMessage] = useState('');
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -380,9 +480,11 @@ export function MetadataSettings({
   );
   const [storageWarning, setStorageWarning] = useState('');
   const [identityStatus, setIdentityStatus] = useState<
-    'verified' | 'checking' | 'blocked'
+    'verified' | 'checking' | 'blocked' | 'retry'
   >('verified');
   const identityCheck = useRef(0);
+  const identityInFlight = useRef(false);
+  const terminalDenied = useRef(false);
   const busy = useRef(false);
   const categorySession = useRef(0);
   const editEpoch = useRef(0);
@@ -394,14 +496,54 @@ export function MetadataSettings({
     'quantity',
   );
   const [phone, setPhone] = useState(false);
-  const [previewVersion, setPreviewVersion] = useState(0);
-  const drag = useRef<string | null>(null);
-  const resize = useRef<{
+  const [mobilePanel, setMobilePanel] = useState<
+    'library' | 'canvas' | 'inspector'
+  >('canvas');
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
+    null,
+  );
+  const [selectedControlId, setSelectedControlId] = useState<string | null>(
+    null,
+  );
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(
+    selected?.published_definition.fields[0]?.id ?? null,
+  );
+  const dndBaseline = useRef<MetadataDefinition | null>(null);
+  const gesture = useRef<{
+    kind: 'resize';
     id: string;
+    baseline: MetadataDefinition;
+    changed: boolean;
     x: number;
-    span: number;
-    container: number;
+    span?: number;
+    container?: number;
   } | null>(null);
+  const definitionRef = useRef(definition);
+  const denyIdentity = useCallback(() => {
+    if (terminalDenied.current) return;
+    terminalDenied.current = true;
+    identityCheck.current += 1;
+    gesture.current = null;
+    dndBaseline.current = null;
+    definitionRef.current = null;
+    editEpoch.current += 1;
+    setDefinition(null);
+    setSaved('');
+    setRecovery(null);
+    setHistory([]);
+    setSaveReview(null);
+    setSavePayload(null);
+    setAdvancedJson('');
+    setSelectedFieldId(null);
+    setSelectedControlId(null);
+    setSelectedSectionId(null);
+    clearDesignerRecovery(memberId, categoryId);
+    setIdentityStatus('blocked');
+  }, [memberId, categoryId]);
+  useEffect(() => {
+    definitionRef.current = definition;
+  }, [definition]);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const refreshRequested = useRef(false);
   const dirty = definition !== null && JSON.stringify(definition) !== saved;
   const recoveryScope = `${memberId}:${categoryId}`;
@@ -413,16 +555,29 @@ export function MetadataSettings({
   useEffect(() => {
     let mounted = true;
     const verify = async () => {
+      if (identityInFlight.current || terminalDenied.current) return;
+      identityInFlight.current = true;
       const check = ++identityCheck.current;
-      setIdentityStatus('checking');
       try {
         const result = await verifyMetadataDesignerIdentity(memberId);
-        if (!mounted || check !== identityCheck.current) return;
-        setIdentityStatus(result.ok ? 'verified' : 'blocked');
-        if (!result.ok) routerRef.current.refresh();
+        if (
+          !mounted ||
+          terminalDenied.current ||
+          check !== identityCheck.current
+        )
+          return;
+        if (result.ok) setIdentityStatus('verified');
+        else if (result.code === 'P1001') denyIdentity();
+        else setIdentityStatus('retry');
       } catch {
-        if (mounted && check === identityCheck.current)
-          setIdentityStatus('blocked');
+        if (
+          mounted &&
+          !terminalDenied.current &&
+          check === identityCheck.current
+        )
+          setIdentityStatus('retry');
+      } finally {
+        identityInFlight.current = false;
       }
     };
     const onVisible = () => {
@@ -436,12 +591,12 @@ export function MetadataSettings({
       window.removeEventListener('focus', verify);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [memberId]);
+  }, [denyIdentity, memberId]);
   useEffect(() => {
     let active = true;
     const result = readDesignerRecovery(memberId, categoryId);
     queueMicrotask(() => {
-      if (!active) return;
+      if (!active || terminalDenied.current) return;
       setRecovery(result.item);
       setRecoveryLoadedScope(recoveryScope);
       setStorageWarning(
@@ -457,7 +612,7 @@ export function MetadataSettings({
   useEffect(() => {
     // Wait for the entry read before clearing anything: an older unsaved draft
     // must remain available for explicit recovery on a fresh mount.
-    if (recoveryLoadedScope !== recoveryScope) return;
+    if (recoveryLoadedScope !== recoveryScope || terminalDenied.current) return;
     if (!dirty || !definition) {
       if (!recovery) clearDesignerRecovery(memberId, categoryId);
       return;
@@ -525,7 +680,8 @@ export function MetadataSettings({
     if (definition)
       setHistory((prior) => [...prior.slice(-19), copy(definition)]);
     setDefinition(next);
-    setReview(null);
+    setSaveReview(null);
+    setSavePayload(null);
     setMessage('');
   };
   const reset = (
@@ -542,15 +698,16 @@ export function MetadataSettings({
     setDraftVersion(version);
     setDraftId(nextDraftId);
     setPublishedBaseline(publishedId);
-    setReview(null);
     setReceipt(null);
+    setSaveReview(null);
+    setSavePayload(null);
     setHistory([]);
     setAdvancedJson('');
     setAdvancedError('');
     setMessage('');
   };
   useEffect(() => {
-    if (!refreshRequested.current) return;
+    if (!refreshRequested.current || terminalDenied.current) return;
     refreshRequested.current = false;
     reset(
       source(selected),
@@ -598,19 +755,21 @@ export function MetadataSettings({
           payload,
         });
         if (
+          terminalDenied.current ||
           categorySession.current !== submittedSession ||
           categoryId !== submittedCategory
         )
           return;
         if (!response.ok) {
-          if (response.code === 'P1001') setIdentityStatus('blocked');
+          if (response.code === 'P1001') denyIdentity();
+          else if (response.code === 'identity_unverified')
+            setIdentityStatus('retry');
           setMessage(
             response.message +
               (response.code === 'P1002'
                 ? ' Refresh from server after reviewing your unsaved edits.'
                 : ''),
           );
-          if (['P1002', 'P1017'].includes(response.code)) setReview(null);
           return;
         }
         setReceipt(null);
@@ -637,12 +796,88 @@ export function MetadataSettings({
           setDraftVersion('0');
           setDraftId(null);
           setPublishedBaseline(String(response.data.published_revision_id));
-          setReview(null);
           setSaved(JSON.stringify(definition));
           setMessage(
             'Published form revision ' + String(response.data.version) + '.',
           );
         }
+        router.refresh();
+      } finally {
+        busy.current = false;
+        setOperationPending(false);
+      }
+    });
+  };
+  const saveChanges = (confirmed = false) => {
+    if (
+      busy.current ||
+      !definition ||
+      issues.length ||
+      identityStatus !== 'verified'
+    )
+      return;
+    const payload =
+      confirmed && savePayload
+        ? { ...savePayload, review_token: saveReview?.token }
+        : {
+            expected_actor_id: memberId,
+            category_id: categoryId,
+            expected_draft_id: draftId,
+            expected_draft_version: draftVersion,
+            expected_published_revision_id: publishedBaseline,
+            definition,
+          };
+    const key = JSON.stringify(['metadata_form_save', payload]);
+    const requestId = receipt?.key === key ? receipt.id : newId();
+    setReceipt({ key, id: requestId });
+    busy.current = true;
+    setOperationPending(true);
+    setMessage('Saving…');
+    const submittedSession = categorySession.current;
+    const submittedEpoch = editEpoch.current;
+    startTransition(async () => {
+      try {
+        const result = await saveMetadataForm({
+          requestId,
+          expectedActorId: memberId,
+          payload,
+        });
+        if (
+          terminalDenied.current ||
+          submittedSession !== categorySession.current ||
+          submittedEpoch !== editEpoch.current
+        )
+          return;
+        if (!result.ok) {
+          if (result.code === 'P1001') denyIdentity();
+          else if (result.code === 'identity_unverified')
+            setIdentityStatus('retry');
+          setMessage(result.message);
+          if (['P1002', 'P1017'].includes(result.code)) {
+            setSaveReview(null);
+            setSavePayload(null);
+          }
+          return;
+        }
+        if (result.data.status === 'confirmation_required') {
+          setSaveReview(result.data);
+          setSavePayload(payload);
+          setMessage('Review the effect on existing inventory before saving.');
+          return;
+        }
+        setReceipt(null);
+        setSaveReview(null);
+        setSavePayload(null);
+        clearDesignerRecovery(memberId, categoryId);
+        setRecovery(null);
+        setDraftId(null);
+        setDraftVersion('0');
+        setPublishedBaseline(String(result.data.published_revision_id));
+        setSaved(JSON.stringify(definition));
+        setHistory([]);
+        setMessage(
+          `Saved active form revision ${String(result.data.version)}.`,
+        );
         router.refresh();
       } finally {
         busy.current = false;
@@ -674,7 +909,9 @@ export function MetadataSettings({
   const addField = (type: FieldType, name = '') => {
     if (!definition || definition.fields.length >= 100) return;
     const field = newField(type, name);
-    const first = definition.layout[0];
+    const first =
+      definition.layout.find((section) => section.id === selectedSectionId) ??
+      definition.layout[0];
     edit({
       fields: [...definition.fields, field],
       layout: first
@@ -709,6 +946,9 @@ export function MetadataSettings({
             },
           ],
     });
+    setSelectedFieldId(field.id);
+    setSelectedSectionId(first?.id ?? null);
+    setMobilePanel('inspector');
   };
   const removeField = (id: string) => {
     if (
@@ -741,6 +981,113 @@ export function MetadataSettings({
   const move = (id: string, sectionId: string, index: number) => {
     if (definition) edit(moveControl(definition, id, sectionId, index));
   };
+  const beginResize = (
+    id: string,
+    event: React.PointerEvent<HTMLElement>,
+    span: number,
+    container: number,
+  ) => {
+    if (terminalDenied.current || !definitionRef.current || gesture.current)
+      return;
+    event.preventDefault();
+    gesture.current = {
+      kind: 'resize',
+      id,
+      baseline: copy(definitionRef.current),
+      changed: false,
+      x: event.clientX,
+      span,
+      container,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const updateResize = (event: { clientX: number }) => {
+    const current = gesture.current;
+    const now = definitionRef.current;
+    if (terminalDenied.current || !current || !now) return;
+    const desired =
+      (current.span ?? 4) +
+      ((event.clientX - current.x) / Math.max(1, current.container ?? 1)) * 12;
+    const snapped = ([3, 4, 6, 8, 9, 12] as const).reduce((best, candidate) =>
+      Math.abs(candidate - desired) < Math.abs(best - desired)
+        ? candidate
+        : best,
+    );
+    const next = {
+      ...now,
+      layout: now.layout.map((section) => ({
+        ...section,
+        controls: section.controls.map((control) =>
+          control.id === current.id ? { ...control, width: snapped } : control,
+        ),
+      })),
+    };
+    if (JSON.stringify(next) !== JSON.stringify(now)) {
+      current.changed = true;
+      definitionRef.current = next;
+      setDefinition(next);
+    }
+  };
+  const endResize = (cancel = false) => {
+    const current = gesture.current;
+    if (terminalDenied.current || !current) return;
+    gesture.current = null;
+    if (cancel) {
+      definitionRef.current = current.baseline;
+      setDefinition(current.baseline);
+      return;
+    }
+    if (
+      current.changed &&
+      JSON.stringify(definitionRef.current) !== JSON.stringify(current.baseline)
+    ) {
+      setHistory((prior) => [...prior.slice(-19), current.baseline]);
+      editEpoch.current += 1;
+      setSaveReview(null);
+      setSavePayload(null);
+      setMessage('');
+    }
+  };
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && gesture.current) endResize(true);
+    };
+    const move = (event: PointerEvent) => updateResize(event);
+    const end = () => endResize();
+    const cancel = () => endResize(true);
+    window.addEventListener('keydown', escape);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', cancel);
+    return () => {
+      window.removeEventListener('keydown', escape);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', cancel);
+    };
+  });
+  const finishDnd = (canceled: boolean) => {
+    const baseline = dndBaseline.current;
+    dndBaseline.current = null;
+    if (terminalDenied.current || !baseline) return;
+    if (canceled) {
+      definitionRef.current = baseline;
+      setDefinition(baseline);
+      return;
+    }
+    if (JSON.stringify(definitionRef.current) !== JSON.stringify(baseline)) {
+      setHistory((prior) => [...prior.slice(-19), baseline]);
+      editEpoch.current += 1;
+      setSaveReview(null);
+      setSavePayload(null);
+      setMessage('');
+    }
+  };
+  const selectedField = definition?.fields.find(
+    (field) => field.id === selectedFieldId,
+  );
+  const selectedFieldIndex =
+    selectedField && definition ? definition.fields.indexOf(selectedField) : -1;
   return (
     <section
       className="min-w-0 space-y-5 rounded-lg border border-slate-700 p-3 sm:p-4"
@@ -751,23 +1098,21 @@ export function MetadataSettings({
           Forms and fields
         </h2>
         <p className="text-sm text-slate-400">
-          Build a category form, save a draft, review affected inventory, then
-          publish.
+          Arrange fields and sections, preview the result, then save the active
+          form.
         </p>
       </div>
-      {identityStatus !== 'verified' ? (
+      {identityStatus === 'blocked' ? (
         <div
           role="status"
           className="rounded border border-amber-700 p-3 text-sm"
         >
-          {identityStatus === 'checking'
-            ? 'Checking configuration access…'
-            : 'Configuration access changed. Refresh this page to continue.'}
+          Configuration access changed. Refresh this page to continue.
           {identityStatus === 'blocked' && (
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.refresh()}
+              onClick={() => window.location.reload()}
             >
               Refresh access
             </Button>
@@ -777,6 +1122,19 @@ export function MetadataSettings({
         <p>No active category is available.</p>
       ) : (
         <>
+          {identityStatus === 'retry' && (
+            <div role="alert" className="rounded border border-amber-700 p-3">
+              Identity verification was interrupted. Your edits remain here.
+              Saving is paused until access is verified.{' '}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.dispatchEvent(new Event('focus'))}
+              >
+                Retry access check
+              </Button>
+            </div>
+          )}
           <label className="block">
             Category
             <select
@@ -793,9 +1151,9 @@ export function MetadataSettings({
             </select>
           </label>
           <p className="text-sm text-slate-400">
-            Published revision {selected?.published_number ?? 'unknown'} · Draft
-            version {draftVersion === '0' ? 'none' : draftVersion}
-            {dirty ? ' · Unsaved edits' : ''}
+            Published revision {selected?.published_number ?? 'unknown'}
+            {draftVersion !== '0' ? ' · Legacy draft available' : ''}
+            {dirty ? ' · Unsaved changes' : ' · Saved'}
           </p>
           {recovery && (
             <div
@@ -825,13 +1183,15 @@ export function MetadataSettings({
                   variant="outline"
                   onClick={() => {
                     setDefinition(recovery.definition);
+                    setSelectedFieldId(
+                      recovery.definition.fields[0]?.id ?? null,
+                    );
                     editEpoch.current += 1;
                     setPreviewVersion((version) => version + 1);
                     setSaved(recovery.savedDefinition);
                     setDraftVersion(recovery.expectedDraftVersion);
                     setDraftId(recovery.expectedDraftId);
                     setPublishedBaseline(recovery.expectedPublishedRevisionId);
-                    setReview(null);
                     setReceipt(null);
                     setHistory([]);
                     setRecovery(null);
@@ -894,7 +1254,6 @@ export function MetadataSettings({
                     setDefinition(prior);
                     setPreviewVersion((version) => version + 1);
                     setHistory(history.slice(0, -1));
-                    setReview(null);
                   }
                 }}
               >
@@ -932,8 +1291,9 @@ export function MetadataSettings({
               </summary>
               <p className="my-2 text-slate-400">
                 The visual editor is the normal way to change forms. Load the
-                current document to inspect or copy it. Pasted JSON becomes a
-                draft edit only after you apply it; save that edit separately.
+                current document to inspect or copy it. Pasted JSON changes your
+                local editor only after you apply it. Use Save changes to
+                publish those edits.
               </p>
               <Button
                 type="button"
@@ -988,7 +1348,7 @@ export function MetadataSettings({
                   edit(result.data);
                   setAdvancedError('');
                   setMessage(
-                    'JSON applied to the local draft. Save it before publication review.',
+                    'JSON applied to the local editor. Save changes to publish it.',
                   );
                 }}
               >
@@ -998,511 +1358,859 @@ export function MetadataSettings({
           )}
           {definition && !recovery && (
             <>
-              <div className="space-y-3">
-                <h3 className="font-semibold">Fields</h3>
-                <div className="flex flex-wrap gap-2">
-                  <select
-                    aria-label="New field type"
-                    className={input + ' max-w-52'}
-                    value={fieldType}
-                    onChange={(event) =>
-                      setFieldType(event.target.value as FieldType)
-                    }
-                  >
-                    {fieldTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {label(type)}
-                      </option>
-                    ))}
-                  </select>
+              <nav
+                className="flex gap-2 md:hidden"
+                aria-label="Designer panels"
+              >
+                {(['library', 'canvas', 'inspector'] as const).map((panel) => (
                   <Button
+                    key={panel}
                     type="button"
-                    variant="outline"
-                    disabled={definition.fields.length >= 100}
-                    onClick={() => addField(fieldType)}
+                    variant={mobilePanel === panel ? 'default' : 'outline'}
+                    onClick={() => setMobilePanel(panel)}
                   >
-                    Add field
+                    {label(panel)}
                   </Button>
-                </div>
-                <div className="grid gap-3 xl:grid-cols-2">
-                  {definition.fields.map((field, index) => (
-                    <FieldPanel
-                      key={field.id}
-                      field={field}
-                      change={updateField}
-                      remove={() => removeField(field.id)}
-                      replace={(type) =>
-                        addField(
-                          type,
-                          (field.label || 'Untitled field') + ' replacement',
-                        )
-                      }
-                      lockedCurrency={
-                        field.type === 'currency' &&
-                        !!selected?.published_definition.fields.some(
-                          (published) => published.id === field.id,
-                        )
-                      }
-                      moveUp={() => {
-                        if (index < 1) return;
-                        const fields = [...definition.fields];
-                        [fields[index - 1], fields[index]] = [
-                          fields[index],
-                          fields[index - 1],
-                        ];
-                        edit({ ...definition, fields });
-                      }}
-                      moveDown={() => {
-                        if (index >= definition.fields.length - 1) return;
-                        const fields = [...definition.fields];
-                        [fields[index + 1], fields[index]] = [
-                          fields[index],
-                          fields[index + 1],
-                        ];
-                        edit({ ...definition, fields });
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-3">
-                <h3 className="font-semibold">Sections and layout</h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    edit({
-                      ...definition,
-                      layout: [
-                        ...definition.layout,
-                        { id: newId(), label: 'New section', controls: [] },
-                      ],
-                    })
+                ))}
+              </nav>
+              <DragDropProvider
+                onDragStart={() => {
+                  if (terminalDenied.current) return;
+                  if (definitionRef.current)
+                    dndBaseline.current = copy(definitionRef.current);
+                }}
+                onDragOver={(event) => {
+                  if (terminalDenied.current) return;
+                  const { operation } = event;
+                  const source = operation.source;
+                  if (
+                    isSortable(source) &&
+                    String(source.id).startsWith('section:') &&
+                    isSortable(operation.target) &&
+                    String(operation.target.id).startsWith('section:')
+                  ) {
+                    const now = definitionRef.current;
+                    if (!now) return;
+                    const ids = now.layout.map(
+                      (section) => `section:${section.id}`,
+                    );
+                    const order = sortableMove(ids, event);
+                    const byId = new Map(
+                      now.layout.map((section) => [
+                        `section:${section.id}`,
+                        section,
+                      ]),
+                    );
+                    const next = {
+                      ...now,
+                      layout: order.map((id) => byId.get(id)!).filter(Boolean),
+                    };
+                    if (JSON.stringify(next) !== JSON.stringify(now)) {
+                      definitionRef.current = next;
+                      setDefinition(next);
+                    }
+                    return;
                   }
-                >
-                  Add section
-                </Button>
-                {definition.layout.map((section, sectionIndex) => (
+                  if (
+                    !isSortable(source) ||
+                    !String(source.id).startsWith('control:')
+                  )
+                    return;
+                  const now = definitionRef.current;
+                  if (!now) return;
+                  const id = String(source.id).slice(8);
+                  const target = operation.target;
+                  const sectionId = String(target?.id).startsWith('empty:')
+                    ? String(target?.id).slice(6)
+                    : isSortable(target) &&
+                        String(target.id).startsWith('control:')
+                      ? String(target.group)
+                      : String(source.group);
+                  const section = now.layout.find(
+                    (item) => item.id === sectionId,
+                  );
+                  if (!section) return;
+                  const original = section.controls.findIndex(
+                    (item) => item.id === id,
+                  );
+                  const index = String(target?.id).startsWith('empty:')
+                    ? section.controls.length
+                    : isSortable(target)
+                      ? target.index
+                      : source.index;
+                  const next = moveControl(
+                    now,
+                    id,
+                    sectionId,
+                    original >= 0 && index > original ? index + 1 : index,
+                  );
+                  if (JSON.stringify(next) !== JSON.stringify(now)) {
+                    definitionRef.current = next;
+                    setDefinition(next);
+                  }
+                }}
+                onDragEnd={(event) => {
+                  finishDnd(event.canceled);
+                }}
+              >
+                <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(12rem,1fr)_minmax(0,2fr)_minmax(14rem,1fr)]">
                   <div
-                    key={section.id}
-                    data-section-id={section.id}
-                    className="min-w-0 space-y-3 rounded border border-slate-700 p-3"
+                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
                   >
+                    <h3 className="font-semibold">Field library</h3>
                     <div className="flex flex-wrap gap-2">
-                      <label className="min-w-40 flex-1 text-sm">
-                        Section heading
-                        <input
-                          className={input}
-                          value={section.label}
-                          onChange={(event) =>
-                            edit({
-                              ...definition,
-                              layout: definition.layout.map((item) =>
-                                item.id === section.id
-                                  ? { ...item, label: event.target.value }
-                                  : item,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={sectionIndex === 0}
-                        onClick={() => {
-                          const layout = [...definition.layout];
-                          [layout[sectionIndex - 1], layout[sectionIndex]] = [
-                            layout[sectionIndex],
-                            layout[sectionIndex - 1],
-                          ];
-                          edit({ ...definition, layout });
-                        }}
-                      >
-                        Section up
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={sectionIndex === definition.layout.length - 1}
-                        onClick={() => {
-                          const layout = [...definition.layout];
-                          [layout[sectionIndex + 1], layout[sectionIndex]] = [
-                            layout[sectionIndex],
-                            layout[sectionIndex + 1],
-                          ];
-                          edit({ ...definition, layout });
-                        }}
-                      >
-                        Section down
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={section.controls.length > 0}
-                        onClick={() =>
-                          edit({
-                            ...definition,
-                            layout: definition.layout.filter(
-                              (item) => item.id !== section.id,
-                            ),
-                          })
+                      <select
+                        aria-label="New field type"
+                        className={input + ' max-w-52'}
+                        value={fieldType}
+                        onChange={(event) =>
+                          setFieldType(event.target.value as FieldType)
                         }
                       >
-                        Remove section
+                        {fieldTypes.map((type) => (
+                          <option key={type} value={type}>
+                            {label(type)}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={definition.fields.length >= 100}
+                        onClick={() => addField(fieldType)}
+                      >
+                        Add field
                       </Button>
                     </div>
-                    <div className="flex flex-wrap gap-3">
-                      {section.controls.map((control, index) => {
-                        const field = definition.fields.find(
-                          (item) => item.id === control.field_id,
+                    <div className="grid gap-2">
+                      {definition.fields.map((field) => (
+                        <button
+                          type="button"
+                          key={field.id}
+                          className="min-h-11 rounded border border-slate-600 p-2 text-left"
+                          onClick={() => {
+                            setSelectedFieldId(field.id);
+                            setSelectedControlId(null);
+                            setMobilePanel('inspector');
+                          }}
+                        >
+                          {field.label || 'Untitled field'} ·{' '}
+                          {label(field.type)}{' '}
+                          <span className="block text-xs text-slate-400">
+                            {definition.layout.some((section) =>
+                              section.controls.some(
+                                (control) => control.field_id === field.id,
+                              ),
+                            )
+                              ? 'Placed'
+                              : 'Unplaced'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded border border-slate-700 p-2 text-sm">
+                    <h4 className="font-semibold">Hidden controls</h4>
+                    {definition.layout
+                      .flatMap((section) => section.controls)
+                      .filter((control) => control.visible === false)
+                      .map((control) => (
+                        <button
+                          className="block min-h-10 underline"
+                          type="button"
+                          key={control.id}
+                          onClick={() =>
+                            updateControl(control.id, { visible: true })
+                          }
+                        >
+                          Restore{' '}
+                          {control.kind === 'builtin'
+                            ? label(control.builtin ?? '')
+                            : control.kind === 'field'
+                              ? definition.fields.find(
+                                  (field) => field.id === control.field_id,
+                                )?.label
+                              : 'help text'}
+                        </button>
+                      ))}
+                  </div>
+                  <div
+                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
+                  >
+                    <h3 className="font-semibold">Form canvas</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const id = newId();
+                        edit({
+                          ...definition,
+                          layout: [
+                            ...definition.layout,
+                            { id, label: 'New section', controls: [] },
+                          ],
+                        });
+                        setSelectedSectionId(id);
+                        requestAnimationFrame(() =>
+                          document
+                            .querySelector<HTMLElement>(
+                              `[data-section-id="${id}"] input`,
+                            )
+                            ?.focus(),
                         );
-                        const name =
-                          control.kind === 'field'
-                            ? field?.label || 'Missing field'
-                            : control.kind === 'builtin'
-                              ? label(control.builtin ?? '')
-                              : 'Help text';
-                        return (
-                          <div
-                            key={control.id}
-                            data-control-id={control.id}
-                            style={controlLayoutStyle(
-                              control.width,
-                              field?.type === 'boolean',
-                            )}
-                            className="min-w-0 space-y-2 rounded border border-slate-600 p-2 text-sm"
-                          >
-                            <div className="flex items-center gap-2">
+                      }}
+                    >
+                      Add section
+                    </Button>
+                    {definition.layout.map((section, sectionIndex) => (
+                      <SortableSection
+                        key={section.id}
+                        id={section.id}
+                        index={sectionIndex}
+                        selected={selectedSectionId === section.id}
+                      >
+                        {(sectionHandleRef) => (
+                          <>
+                            <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                aria-label={`Drag ${name}`}
-                                title="Drag to reorder"
-                                className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
-                                onPointerDown={(event) => {
-                                  event.preventDefault();
-                                  drag.current = control.id;
-                                  event.currentTarget.setPointerCapture(
-                                    event.pointerId,
-                                  );
-                                }}
-                                onPointerUp={(event) => {
-                                  if (drag.current !== control.id) return;
-                                  drag.current = null;
-                                  const element = document
-                                    .elementFromPoint(
-                                      event.clientX,
-                                      event.clientY,
-                                    )
-                                    ?.closest(
-                                      '[data-control-id]',
-                                    ) as HTMLElement | null;
-                                  const sectionElement = document
-                                    .elementFromPoint(
-                                      event.clientX,
-                                      event.clientY,
-                                    )
-                                    ?.closest(
-                                      '[data-section-id]',
-                                    ) as HTMLElement | null;
-                                  const target = definition.layout.find(
-                                    (item) =>
-                                      item.controls.some(
-                                        (candidate) =>
-                                          candidate.id ===
-                                          element?.dataset.controlId,
-                                      ),
-                                  );
-                                  if (
-                                    target &&
-                                    element?.dataset.controlId !== control.id
-                                  ) {
-                                    const hit = target.controls.findIndex(
-                                      (candidate) =>
-                                        candidate.id ===
-                                        element?.dataset.controlId,
-                                    );
-                                    const sourceIndex =
-                                      target.controls.findIndex(
-                                        (candidate) =>
-                                          candidate.id === control.id,
-                                      );
-                                    move(
-                                      control.id,
-                                      target.id,
-                                      sourceIndex >= 0 && sourceIndex < hit
-                                        ? hit + 1
-                                        : hit,
-                                    );
-                                  } else if (
-                                    sectionElement?.dataset.sectionId &&
-                                    sectionElement.dataset.sectionId !==
-                                      section.id
-                                  )
-                                    move(
-                                      control.id,
-                                      sectionElement.dataset.sectionId,
-                                      definition.layout.find(
-                                        (item) =>
-                                          item.id ===
-                                          sectionElement.dataset.sectionId,
-                                      )?.controls.length ?? 0,
-                                    );
-                                }}
+                                aria-label={`Drag section ${section.label}`}
+                                ref={sectionHandleRef}
+                                className="min-h-11 min-w-11 cursor-grab touch-none rounded border"
                               >
                                 ⋮⋮
                               </button>
-                              <span className="min-w-0 flex-1 break-words">
-                                {name}
-                              </span>
-                            </div>
-                            {control.kind === 'help' && (
-                              <label className="block">
-                                Help text
-                                <textarea
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedSectionId(section.id);
+                                  setSelectedControlId(null);
+                                  setMobilePanel('inspector');
+                                }}
+                              >
+                                Inspect section
+                              </Button>
+                              <label className="min-w-40 flex-1 text-sm">
+                                Section heading
+                                <input
                                   className={input}
-                                  rows={2}
-                                  value={control.help ?? ''}
+                                  value={section.label}
                                   onChange={(event) =>
-                                    updateControl(control.id, {
-                                      help: event.target.value,
+                                    edit({
+                                      ...definition,
+                                      layout: definition.layout.map((item) =>
+                                        item.id === section.id
+                                          ? {
+                                              ...item,
+                                              label: event.target.value,
+                                            }
+                                          : item,
+                                      ),
                                     })
                                   }
                                 />
                               </label>
-                            )}
-                            <div className="grid grid-cols-2 gap-2">
                               <label className="text-xs">
-                                Section
-                                <select
-                                  className={input}
-                                  value={section.id}
+                                <input
+                                  type="checkbox"
+                                  checked={section.visible !== false}
+                                  disabled={sectionHasProtectedControls(
+                                    section,
+                                  )}
                                   onChange={(event) =>
-                                    move(
-                                      control.id,
-                                      event.target.value,
-                                      definition.layout.find(
-                                        (item) =>
-                                          item.id === event.target.value,
-                                      )?.controls.length ?? 0,
-                                    )
-                                  }
-                                >
-                                  {definition.layout.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.label || 'Untitled'}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="text-xs">
-                                Width
-                                <select
-                                  className={input}
-                                  value={control.width}
-                                  onChange={(event) =>
-                                    updateControl(control.id, {
-                                      width:
-                                        event.target.value === 'Auto'
-                                          ? 'Auto'
-                                          : (Number(
-                                              event.target.value,
-                                            ) as Control['width']),
+                                    edit({
+                                      ...definition,
+                                      layout: definition.layout.map((item) =>
+                                        item.id === section.id
+                                          ? {
+                                              ...item,
+                                              visible: event.target.checked,
+                                            }
+                                          : item,
+                                      ),
                                     })
                                   }
-                                >
-                                  {widths.map((width) => (
-                                    <option key={width} value={width}>
-                                      {width === 'Auto'
-                                        ? 'Auto'
-                                        : `${width}/12`}
-                                    </option>
-                                  ))}
-                                </select>
+                                />{' '}
+                                Show section
                               </label>
-                            </div>
-                            <button
-                              type="button"
-                              aria-label={`Resize ${name}`}
-                              title="Drag to snap width; width selector is also available"
-                              className="min-h-11 w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
-                              onPointerDown={(event) => {
-                                event.preventDefault();
-                                const container =
-                                  event.currentTarget
-                                    .closest('[data-section-id]')
-                                    ?.getBoundingClientRect().width ?? 1;
-                                resize.current = {
-                                  id: control.id,
-                                  x: event.clientX,
-                                  span:
-                                    control.width === 'Auto'
-                                      ? field?.type === 'boolean'
-                                        ? 3
-                                        : 4
-                                      : control.width,
-                                  container,
-                                };
-                                event.currentTarget.setPointerCapture(
-                                  event.pointerId,
-                                );
-                              }}
-                              onPointerUp={(event) => {
-                                const current = resize.current;
-                                resize.current = null;
-                                if (!current || current.id !== control.id)
-                                  return;
-                                const desired =
-                                  current.span +
-                                  ((event.clientX - current.x) /
-                                    current.container) *
-                                    12;
-                                const snapped = (
-                                  [3, 4, 6, 8, 9, 12] as const
-                                ).reduce((best, candidate) =>
-                                  Math.abs(candidate - desired) <
-                                  Math.abs(best - desired)
-                                    ? candidate
-                                    : best,
-                                );
-                                updateControl(control.id, { width: snapped });
-                              }}
-                            >
-                              ↔ Resize width
-                            </button>
-                            <div className="flex flex-wrap gap-2 text-xs">
-                              <button
-                                type="button"
-                                className="min-h-11 px-2 underline"
-                                disabled={index === 0}
-                                onClick={() =>
-                                  move(control.id, section.id, index - 1)
-                                }
-                              >
-                                Move up
-                              </button>
-                              <button
-                                type="button"
-                                className="min-h-11 px-2 underline"
-                                disabled={index === section.controls.length - 1}
-                                onClick={() =>
-                                  move(control.id, section.id, index + 2)
-                                }
-                              >
-                                Move down
-                              </button>
-                              <button
-                                type="button"
-                                className="min-h-11 px-2 text-rose-300 underline"
-                                disabled={
-                                  control.kind === 'builtin' &&
-                                  ['name', 'category_id'].includes(
-                                    control.builtin ?? '',
-                                  )
-                                }
-                                onClick={() =>
+                              <select
+                                aria-label={`Applies to ${section.label}`}
+                                className={input + ' max-w-36'}
+                                value={(
+                                  section.applies_to ?? ['quantity', 'asset']
+                                ).join(',')}
+                                disabled={sectionHasProtectedControls(section)}
+                                onChange={(event) =>
                                   edit({
                                     ...definition,
-                                    layout: definition.layout.map((item) => ({
-                                      ...item,
-                                      controls: item.controls.filter(
-                                        (candidate) =>
-                                          candidate.id !== control.id,
-                                      ),
-                                    })),
+                                    layout: definition.layout.map((item) =>
+                                      item.id === section.id
+                                        ? {
+                                            ...item,
+                                            applies_to:
+                                              event.target.value.split(',') as (
+                                                'quantity' | 'asset'
+                                              )[],
+                                          }
+                                        : item,
+                                    ),
                                   })
                                 }
                               >
-                                Remove control
-                              </button>
+                                <option value="quantity,asset">Both</option>
+                                <option value="quantity">Quantity</option>
+                                <option value="asset">Serialized</option>
+                              </select>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={sectionIndex === 0}
+                                onClick={() => {
+                                  const layout = [...definition.layout];
+                                  [
+                                    layout[sectionIndex - 1],
+                                    layout[sectionIndex],
+                                  ] = [
+                                    layout[sectionIndex],
+                                    layout[sectionIndex - 1],
+                                  ];
+                                  edit({ ...definition, layout });
+                                }}
+                              >
+                                Section up
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={
+                                  sectionIndex === definition.layout.length - 1
+                                }
+                                onClick={() => {
+                                  const layout = [...definition.layout];
+                                  [
+                                    layout[sectionIndex + 1],
+                                    layout[sectionIndex],
+                                  ] = [
+                                    layout[sectionIndex],
+                                    layout[sectionIndex + 1],
+                                  ];
+                                  edit({ ...definition, layout });
+                                }}
+                              >
+                                Section down
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={
+                                  sectionHasProtectedControls(section) ||
+                                  section.id ===
+                                    selected?.published_definition.layout[0]
+                                      ?.id ||
+                                  definition.layout.length === 1
+                                }
+                                onClick={() => {
+                                  const destinations = definition.layout.filter(
+                                    (item) => item.id !== section.id,
+                                  );
+                                  const destination = section.controls.length
+                                    ? window.prompt(
+                                        `Move ${section.controls.length} controls to which section? Enter a section name, or leave blank to remove custom field placements. Definitions and stored values remain.`,
+                                        destinations[0]?.label ?? '',
+                                      )
+                                    : '';
+                                  if (destination === null) return;
+                                  const target = destination.trim()
+                                    ? destinations.find(
+                                        (item) =>
+                                          item.label.toLowerCase() ===
+                                          destination.trim().toLowerCase(),
+                                      )
+                                    : null;
+                                  if (destination.trim() && !target) {
+                                    setMessage(
+                                      'Choose an existing section name.',
+                                    );
+                                    return;
+                                  }
+                                  const next = removeSection(
+                                    definition,
+                                    section.id,
+                                    target?.id ?? null,
+                                  );
+                                  if (next === definition) {
+                                    setMessage(
+                                      'This section contains protected or standard controls. Move or show those controls before removing it.',
+                                    );
+                                    return;
+                                  }
+                                  edit(next);
+                                  setSelectedSectionId(
+                                    target?.id ?? destinations[0]?.id ?? null,
+                                  );
+                                }}
+                              >
+                                Remove section
+                              </Button>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          addControl(section.id, {
-                            id: newId(),
-                            kind: 'help',
-                            help: '',
-                            width: 12,
-                          })
-                        }
-                      >
-                        Add help text
-                      </Button>
-                      <select
-                        aria-label={`Add existing field to ${section.label}`}
-                        className={input + ' max-w-56'}
-                        defaultValue=""
-                        onChange={(event) => {
-                          if (event.target.value)
-                            addControl(section.id, {
-                              id: newId(),
-                              kind: 'field',
-                              field_id: event.target.value,
-                              width: 'Auto',
-                            });
-                          event.target.value = '';
-                        }}
-                      >
-                        <option value="">Add field control…</option>
-                        {definition.fields
-                          .filter(
-                            (field) =>
-                              !definition.layout.some((item) =>
-                                item.controls.some(
-                                  (control) => control.field_id === field.id,
-                                ),
-                              ),
-                          )
-                          .map((field) => (
-                            <option key={field.id} value={field.id}>
-                              {field.label || 'Untitled field'}
-                            </option>
-                          ))}
-                      </select>
-                      <select
-                        aria-label={`Add standard control to ${section.label}`}
-                        className={input + ' max-w-56'}
-                        defaultValue=""
-                        onChange={(event) => {
-                          if (event.target.value)
-                            addControl(section.id, {
-                              id: newId(),
-                              kind: 'builtin',
-                              builtin: event.target.value,
-                              width: 'Auto',
-                            });
-                          event.target.value = '';
-                        }}
-                      >
-                        <option value="">Add standard control…</option>
-                        {builtins
-                          .filter(
-                            (name) =>
-                              !definition.layout.some((item) =>
-                                item.controls.some(
-                                  (control) =>
-                                    control.kind === 'builtin' &&
-                                    control.builtin === name,
-                                ),
-                              ),
-                          )
-                          .map((name) => (
-                            <option key={name} value={name}>
-                              {label(name)}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
+                            <SectionDropArea id={section.id}>
+                              {section.controls.map((control, index) => {
+                                const field = definition.fields.find(
+                                  (item) => item.id === control.field_id,
+                                );
+                                const name =
+                                  control.kind === 'field'
+                                    ? field?.label || 'Missing field'
+                                    : control.kind === 'builtin'
+                                      ? label(control.builtin ?? '')
+                                      : 'Help text';
+                                return (
+                                  <SortableControl
+                                    key={control.id}
+                                    id={control.id}
+                                    index={index}
+                                    sectionId={section.id}
+                                    selected={selectedControlId === control.id}
+                                    onClick={() => {
+                                      setSelectedControlId(control.id);
+                                      setSelectedSectionId(section.id);
+                                      setSelectedFieldId(
+                                        control.field_id ?? null,
+                                      );
+                                    }}
+                                    style={controlLayoutStyle(
+                                      control.width,
+                                      field?.type === 'boolean',
+                                    )}
+                                  >
+                                    {(controlHandleRef) => (
+                                      <>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            aria-label={`Drag ${name}`}
+                                            ref={controlHandleRef}
+                                            title="Drag to reorder"
+                                            className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
+                                          >
+                                            ⋮⋮
+                                          </button>
+                                          <span className="min-w-0 flex-1 break-words">
+                                            {name}
+                                          </span>
+                                        </div>
+                                        {control.kind === 'help' && (
+                                          <label className="block">
+                                            Help text
+                                            <textarea
+                                              className={input}
+                                              rows={2}
+                                              value={control.help ?? ''}
+                                              onChange={(event) =>
+                                                updateControl(control.id, {
+                                                  help: event.target.value,
+                                                })
+                                              }
+                                            />
+                                          </label>
+                                        )}
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <label className="text-xs">
+                                            <input
+                                              type="checkbox"
+                                              checked={
+                                                control.visible !== false
+                                              }
+                                              disabled={
+                                                control.kind === 'builtin' &&
+                                                [
+                                                  'name',
+                                                  'category_id',
+                                                  'asset_tag',
+                                                ].includes(
+                                                  control.builtin ?? '',
+                                                )
+                                              }
+                                              onChange={(event) =>
+                                                updateControl(control.id, {
+                                                  visible: event.target.checked,
+                                                })
+                                              }
+                                            />{' '}
+                                            Show control
+                                          </label>
+                                          <select
+                                            aria-label={`Applies to ${name}`}
+                                            className={input}
+                                            value={(
+                                              control.applies_to ?? [
+                                                'quantity',
+                                                'asset',
+                                              ]
+                                            ).join(',')}
+                                            disabled={
+                                              control.kind === 'builtin' &&
+                                              [
+                                                'name',
+                                                'category_id',
+                                                'asset_tag',
+                                              ].includes(control.builtin ?? '')
+                                            }
+                                            onChange={(event) =>
+                                              updateControl(control.id, {
+                                                applies_to:
+                                                  event.target.value.split(
+                                                    ',',
+                                                  ) as ('quantity' | 'asset')[],
+                                              })
+                                            }
+                                          >
+                                            <option value="quantity,asset">
+                                              Both
+                                            </option>
+                                            <option value="quantity">
+                                              Quantity
+                                            </option>
+                                            <option value="asset">
+                                              Serialized
+                                            </option>
+                                          </select>
+                                          <label className="text-xs">
+                                            Section
+                                            <select
+                                              className={input}
+                                              value={section.id}
+                                              onChange={(event) =>
+                                                move(
+                                                  control.id,
+                                                  event.target.value,
+                                                  definition.layout.find(
+                                                    (item) =>
+                                                      item.id ===
+                                                      event.target.value,
+                                                  )?.controls.length ?? 0,
+                                                )
+                                              }
+                                            >
+                                              {definition.layout.map((item) => (
+                                                <option
+                                                  key={item.id}
+                                                  value={item.id}
+                                                >
+                                                  {item.label || 'Untitled'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          <label className="text-xs">
+                                            Width
+                                            <select
+                                              className={input}
+                                              value={control.width}
+                                              onChange={(event) =>
+                                                updateControl(control.id, {
+                                                  width:
+                                                    event.target.value ===
+                                                    'Auto'
+                                                      ? 'Auto'
+                                                      : (Number(
+                                                          event.target.value,
+                                                        ) as Control['width']),
+                                                })
+                                              }
+                                            >
+                                              {widths.map((width) => (
+                                                <option
+                                                  key={width}
+                                                  value={width}
+                                                >
+                                                  {width === 'Auto'
+                                                    ? 'Auto'
+                                                    : `${width}/12`}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          aria-label={`Resize ${name}`}
+                                          title="Drag to snap width; width selector is also available"
+                                          className="min-h-11 w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
+                                          onPointerDown={(event) =>
+                                            beginResize(
+                                              control.id,
+                                              event,
+                                              control.width === 'Auto'
+                                                ? field?.type === 'boolean'
+                                                  ? 3
+                                                  : 4
+                                                : control.width,
+                                              event.currentTarget
+                                                .closest('[data-section-id]')
+                                                ?.getBoundingClientRect()
+                                                .width ?? 1,
+                                            )
+                                          }
+                                          onPointerMove={updateResize}
+                                          onPointerUp={() => endResize()}
+                                          onPointerCancel={() =>
+                                            endResize(true)
+                                          }
+                                        >
+                                          ↔ Resize width
+                                        </button>
+                                        <div className="flex flex-wrap gap-2 text-xs">
+                                          <button
+                                            type="button"
+                                            className="min-h-11 px-2 underline"
+                                            disabled={index === 0}
+                                            onClick={() =>
+                                              move(
+                                                control.id,
+                                                section.id,
+                                                index - 1,
+                                              )
+                                            }
+                                          >
+                                            Move up
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="min-h-11 px-2 underline"
+                                            disabled={
+                                              index ===
+                                              section.controls.length - 1
+                                            }
+                                            onClick={() =>
+                                              move(
+                                                control.id,
+                                                section.id,
+                                                index + 2,
+                                              )
+                                            }
+                                          >
+                                            Move down
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="min-h-11 px-2 text-rose-300 underline"
+                                            disabled={
+                                              control.kind === 'builtin'
+                                            }
+                                            onClick={() =>
+                                              edit({
+                                                ...definition,
+                                                layout: definition.layout.map(
+                                                  (item) => ({
+                                                    ...item,
+                                                    controls:
+                                                      item.controls.filter(
+                                                        (candidate) =>
+                                                          candidate.id !==
+                                                          control.id,
+                                                      ),
+                                                  }),
+                                                ),
+                                              })
+                                            }
+                                          >
+                                            Remove control
+                                          </button>
+                                        </div>
+                                      </>
+                                    )}
+                                  </SortableControl>
+                                );
+                              })}
+                            </SectionDropArea>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() =>
+                                  addControl(section.id, {
+                                    id: newId(),
+                                    kind: 'help',
+                                    help: '',
+                                    width: 12,
+                                  })
+                                }
+                              >
+                                Add help text
+                              </Button>
+                              <select
+                                aria-label={`Add existing field to ${section.label}`}
+                                className={input + ' max-w-56'}
+                                defaultValue=""
+                                onChange={(event) => {
+                                  if (event.target.value)
+                                    addControl(section.id, {
+                                      id: newId(),
+                                      kind: 'field',
+                                      field_id: event.target.value,
+                                      width: 'Auto',
+                                    });
+                                  event.target.value = '';
+                                }}
+                              >
+                                <option value="">Add field control…</option>
+                                {definition.fields
+                                  .filter(
+                                    (field) =>
+                                      !definition.layout.some((item) =>
+                                        item.controls.some(
+                                          (control) =>
+                                            control.field_id === field.id,
+                                        ),
+                                      ),
+                                  )
+                                  .map((field) => (
+                                    <option key={field.id} value={field.id}>
+                                      {field.label || 'Untitled field'}
+                                    </option>
+                                  ))}
+                              </select>
+                              <select
+                                aria-label={`Add standard control to ${section.label}`}
+                                className={input + ' max-w-56'}
+                                defaultValue=""
+                                onChange={(event) => {
+                                  if (event.target.value)
+                                    addControl(section.id, {
+                                      id: newId(),
+                                      kind: 'builtin',
+                                      builtin: event.target.value,
+                                      width: 'Auto',
+                                    });
+                                  event.target.value = '';
+                                }}
+                              >
+                                <option value="">Add standard control…</option>
+                                {builtins
+                                  .filter(
+                                    (name) =>
+                                      !definition.layout.some((item) =>
+                                        item.controls.some(
+                                          (control) =>
+                                            control.kind === 'builtin' &&
+                                            control.builtin === name,
+                                        ),
+                                      ),
+                                  )
+                                  .map((name) => (
+                                    <option key={name} value={name}>
+                                      {label(name)}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+                          </>
+                        )}
+                      </SortableSection>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <aside
+                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
+                    aria-label="Designer inspector"
+                  >
+                    <h3 className="font-semibold">Inspector</h3>
+                    {selectedField ? (
+                      <FieldPanel
+                        key={selectedField.id}
+                        field={selectedField}
+                        change={updateField}
+                        remove={() => removeField(selectedField.id)}
+                        replace={(type) =>
+                          addField(
+                            type,
+                            (selectedField.label || 'Untitled field') +
+                              ' replacement',
+                          )
+                        }
+                        lockedCurrency={
+                          selectedField.type === 'currency' &&
+                          !!selected?.published_definition.fields.some(
+                            (published) => published.id === selectedField.id,
+                          )
+                        }
+                        moveUp={() => {
+                          if (selectedFieldIndex < 1) return;
+                          const fields = [...definition.fields];
+                          [
+                            fields[selectedFieldIndex - 1],
+                            fields[selectedFieldIndex],
+                          ] = [
+                            fields[selectedFieldIndex],
+                            fields[selectedFieldIndex - 1],
+                          ];
+                          edit({ ...definition, fields });
+                        }}
+                        moveDown={() => {
+                          if (
+                            selectedFieldIndex >=
+                            definition.fields.length - 1
+                          )
+                            return;
+                          const fields = [...definition.fields];
+                          [
+                            fields[selectedFieldIndex + 1],
+                            fields[selectedFieldIndex],
+                          ] = [
+                            fields[selectedFieldIndex],
+                            fields[selectedFieldIndex + 1],
+                          ];
+                          edit({ ...definition, fields });
+                        }}
+                      />
+                    ) : selectedSectionId ? (
+                      <p className="text-sm text-slate-400">
+                        Section{' '}
+                        {
+                          definition.layout.find(
+                            (section) => section.id === selectedSectionId,
+                          )?.label
+                        }
+                        . Choose a control or field to inspect its settings.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-400">
+                        Select a section, control, or field to inspect it.
+                      </p>
+                    )}
+                  </aside>
+                </div>
+                <DragOverlay dropAnimation={null}>
+                  {(source) => (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.96 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="rounded-lg border border-cyan-400 bg-slate-900 px-4 py-3 text-sm font-semibold shadow-2xl"
+                    >
+                      {String(source.id).startsWith('section:')
+                        ? definition.layout.find(
+                            (item) => item.id === String(source.id).slice(8),
+                          )?.label
+                        : (() => {
+                            const control = definition.layout
+                              .flatMap((section) => section.controls)
+                              .find(
+                                (item) =>
+                                  item.id === String(source.id).slice(8),
+                              );
+                            return control?.kind === 'builtin'
+                              ? label(control.builtin ?? '')
+                              : control?.kind === 'field'
+                                ? definition.fields.find(
+                                    (field) => field.id === control.field_id,
+                                  )?.label
+                                : 'Help text';
+                          })()}
+                    </motion.div>
+                  )}
+                </DragOverlay>
+              </DragDropProvider>
               <div className="space-y-3">
                 <h3 className="font-semibold">Live preview</h3>
                 <div className="flex flex-wrap gap-2">
@@ -1565,7 +2273,7 @@ export function MetadataSettings({
               className="break-words rounded border border-amber-700 p-3 text-sm"
               role="alert"
             >
-              <p>Resolve before publishing:</p>
+              <p>Resolve before saving:</p>
               <ul className="list-disc pl-5">
                 {issues.map((issue) => (
                   <li key={issue}>{issue}</li>
@@ -1577,20 +2285,17 @@ export function MetadataSettings({
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
-                disabled={operationPending || pending || !definition}
-                onClick={() =>
-                  definition &&
-                  submit('metadata_draft_save', {
-                    expected_actor_id: memberId,
-                    category_id: categoryId,
-                    expected_draft_id: draftId,
-                    expected_draft_version: draftVersion,
-                    expected_published_revision_id: publishedBaseline,
-                    definition,
-                  })
+                disabled={
+                  operationPending ||
+                  pending ||
+                  !definition ||
+                  issues.length > 0 ||
+                  identityStatus !== 'verified' ||
+                  (!dirty && draftVersion === '0')
                 }
+                onClick={() => saveChanges()}
               >
-                Save draft
+                {operationPending ? 'Saving…' : 'Save changes'}
               </Button>
               {draftVersion !== '0' && (
                 <>
@@ -1615,120 +2320,67 @@ export function MetadataSettings({
                   >
                     Discard saved draft
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      operationPending ||
-                      pending ||
-                      dirty ||
-                      issues.length > 0 ||
-                      !draftId
-                    }
-                    onClick={() => {
-                      if (!draftId) return;
-                      if (busy.current) return;
-                      busy.current = true;
-                      setOperationPending(true);
-                      const reviewedSession = categorySession.current;
-                      const reviewedEpoch = editEpoch.current;
-                      const reviewedBaseline = {
-                        categoryId,
-                        draftId,
-                        draftVersion,
-                        publishedBaseline,
-                      };
-                      startTransition(async () => {
-                        try {
-                          const result = await reviewMetadataPublish({
-                            categoryId,
-                            expectedActorId: memberId,
-                            expectedDraftId: draftId,
-                            expectedDraftVersion: draftVersion,
-                            expectedPublishedRevisionId: publishedBaseline,
-                          });
-                          if (
-                            reviewedSession !== categorySession.current ||
-                            reviewedEpoch !== editEpoch.current
-                          )
-                            return;
-                          if (result.ok) {
-                            const checked = result.review;
-                            if (
-                              checked.category_id !==
-                                reviewedBaseline.categoryId ||
-                              checked.draft_id !== reviewedBaseline.draftId ||
-                              checked.draft_version !==
-                                reviewedBaseline.draftVersion ||
-                              checked.published_revision_id !==
-                                reviewedBaseline.publishedBaseline
-                            ) {
-                              setReview(null);
-                              setMessage(
-                                'The server draft changed during review. Your edits are preserved. Refresh from server, then review again.',
-                              );
-                            } else {
-                              setReview(checked);
-                              setMessage('');
-                            }
-                          } else {
-                            if (result.code === 'P1001')
-                              setIdentityStatus('blocked');
-                            setMessage(result.message);
-                            setReview(null);
-                          }
-                        } finally {
-                          busy.current = false;
-                          setOperationPending(false);
-                        }
-                      });
-                    }}
-                  >
-                    Review publish impact
-                  </Button>
                 </>
               )}
             </div>
           )}
-          {draftVersion !== '0' && dirty && (
-            <p className="text-xs text-slate-400">
-              Save edits before reviewing publication impact.
-            </p>
-          )}
-          {review && !recovery && (
+          {saveReview && !recovery && (
             <div
               role="region"
-              aria-label="Form publication impact"
+              aria-label="Form save impact"
               className="space-y-3 break-words rounded border border-amber-700 p-3 text-sm"
             >
               <p>
-                Revision {review.draft_version} will become current for{' '}
-                {review.affected_quantity} quantity definitions and{' '}
-                {review.affected_assets} assets. Existing values and historical
-                revisions remain retained. Records with missing fields or
-                tightened rules may need metadata review.
+                Records in affected form types:{' '}
+                {String(saveReview.affected_quantity)} quantity records and{' '}
+                {String(saveReview.affected_assets)} serialized assets.{' '}
+                {String(saveReview.newly_needs_quantity)} quantity records and{' '}
+                {String(saveReview.newly_needs_assets)} assets will newly need
+                metadata review. Existing values are retained.
               </p>
+              <ul className="list-disc pl-5">
+                {Array.isArray(saveReview.reasons) &&
+                  saveReview.reasons.map((reason, index) => {
+                    const entry = reason as {
+                      kind?: string;
+                      id?: string;
+                      affected_kinds?: string[];
+                    };
+                    return (
+                      <li key={index}>
+                        {label(entry.kind ?? 'Change')}{' '}
+                        {entry.id ? `(${entry.id})` : ''}:{' '}
+                        {(entry.affected_kinds ?? []).map(label).join(', ')}
+                      </li>
+                    );
+                  })}
+              </ul>
               <p className="text-xs text-slate-400">
                 Review expires at{' '}
-                {new Date(review.expires_at).toLocaleTimeString()}.
+                {new Date(String(saveReview.expires_at)).toLocaleTimeString()}.
               </p>
               <Button
                 type="button"
                 disabled={
-                  operationPending || pending || dirty || issues.length > 0
+                  operationPending ||
+                  pending ||
+                  issues.length > 0 ||
+                  identityStatus !== 'verified'
                 }
-                onClick={() =>
-                  submit('metadata_publish', {
-                    expected_actor_id: memberId,
-                    category_id: categoryId,
-                    expected_draft_id: draftId,
-                    expected_draft_version: draftVersion,
-                    expected_published_revision_id: publishedBaseline,
-                    review_token: review.token,
-                  })
-                }
+                onClick={() => saveChanges(true)}
               >
-                Publish reviewed revision
+                Confirm and save changes
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setSaveReview(null);
+                  setSavePayload(null);
+                  setMessage('Save canceled. Your edits remain here.');
+                }}
+              >
+                Cancel
               </Button>
             </div>
           )}

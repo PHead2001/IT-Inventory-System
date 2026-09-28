@@ -40,6 +40,7 @@ import {
   type VisibleHover,
 } from './visible-hover-runtime';
 import { placeHoverTooltip } from './visible-hover';
+import { validCameraView, type CameraView } from './camera-view';
 
 export type RoomSceneProps = {
   room: RoomDefinition;
@@ -53,6 +54,8 @@ export type RoomSceneProps = {
   onFailure(message: string): void;
   canFocusSelected: boolean;
   onRequestFocus(): void;
+  initialView?: CameraView | null;
+  onViewChange?: (view: CameraView) => void;
 };
 type ViewCommand = {
   kind:
@@ -560,6 +563,8 @@ function CameraRig({
   onFocusComplete,
   onReady,
   onFailure,
+  initialView,
+  onViewChange,
   command,
   orbitMode,
   manualGesture,
@@ -571,6 +576,8 @@ function CameraRig({
   | 'onFocusComplete'
   | 'onReady'
   | 'onFailure'
+  | 'initialView'
+  | 'onViewChange'
 > & {
   command: ViewCommand;
   orbitMode: OrbitMode;
@@ -597,6 +604,14 @@ function CameraRig({
   } | null>(null);
   const ready = useRef(false);
   const renderedOnce = useRef(false);
+  const viewCallback = useRef(onViewChange);
+  const modeValue = useRef(orbitMode);
+  useEffect(() => {
+    viewCallback.current = onViewChange;
+  }, [onViewChange]);
+  useEffect(() => {
+    modeValue.current = orbitMode;
+  }, [orbitMode]);
   const reduced = useRef(false);
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
@@ -657,6 +672,24 @@ function CameraRig({
       camera.projectionMatrix.elements,
     );
   }, [camera, gl]);
+  const emitView = useCallback(() => {
+    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    const view: CameraView = {
+      position: camera.position.toArray() as [number, number, number],
+      target: controls.current.target.toArray() as [number, number, number],
+      zoom: camera.zoom,
+      mode: modeValue.current,
+    };
+    if (!validCameraView(view)) return;
+    gl.domElement.dataset.cameraView = JSON.stringify(view);
+    viewCallback.current?.(view);
+  }, [camera, gl]);
+  useEffect(
+    () => () => {
+      if (!animation.current) emitView();
+    },
+    [emitView],
+  );
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const update = () => {
@@ -708,21 +741,41 @@ function CameraRig({
       camera.position.add(frame.target.clone().sub(controls.current.target));
       controls.current.target.copy(frame.target);
       camera.zoom = frame.zoom;
+      if (validCameraView(initialView)) {
+        camera.position.set(...initialView.position);
+        controls.current.target.set(...initialView.target);
+        camera.zoom = MathUtils.clamp(
+          initialView.zoom,
+          controls.current.minZoom,
+          controls.current.maxZoom,
+        );
+        lastFocusRequest.current = { ...focusRequest, room };
+      }
       camera.updateProjectionMatrix();
     }
     controls.current.update();
     writeTelemetry();
+    emitView();
     invalidate();
-  }, [camera, currentFrame, initialTarget, room, invalidate, writeTelemetry]);
+  }, [
+    camera,
+    currentFrame,
+    initialTarget,
+    room,
+    invalidate,
+    writeTelemetry,
+    initialView,
+    focusRequest,
+    emitView,
+  ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
     animation.current = null;
-    if (
-      !(camera instanceof OrthographicCamera) ||
-      !controls.current ||
-      orbitMode !== 'guided'
-    )
+    if (!(camera instanceof OrthographicCamera) || !controls.current) return;
+    if (orbitMode !== 'guided') {
+      emitView();
       return;
+    }
     const control = controls.current;
     const constrained = guidedOffset(
       camera.position,
@@ -743,9 +796,10 @@ function CameraRig({
       camera.position.copy(control.target).add(constrained);
       control.update();
       writeTelemetry();
+      emitView();
       invalidate();
-    }
-  }, [orbitMode, camera, gl, invalidate, room, writeTelemetry]);
+    } else emitView();
+  }, [orbitMode, camera, gl, invalidate, room, writeTelemetry, emitView]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (
@@ -793,6 +847,7 @@ function CameraRig({
       camera.updateProjectionMatrix();
       controls.current.update();
       writeTelemetry();
+      emitView();
       onFocusComplete(focusRequest.code);
     } else
       animation.current = {
@@ -817,6 +872,7 @@ function CameraRig({
     onFocusComplete,
     invalidate,
     writeTelemetry,
+    emitView,
   ]);
   useEffect(() => {
     if (
@@ -888,6 +944,7 @@ function CameraRig({
     camera.updateProjectionMatrix();
     control.update();
     writeTelemetry();
+    emitView();
     invalidate();
   }, [
     command,
@@ -897,6 +954,7 @@ function CameraRig({
     currentFrame,
     invalidate,
     writeTelemetry,
+    emitView,
   ]);
   useFrame(() => {
     if (!ready.current) {
@@ -925,6 +983,7 @@ function CameraRig({
     writeTelemetry();
     if (t === 1) {
       animation.current = null;
+      emitView();
       onFocusComplete(motion.code);
     } else invalidate();
   });
@@ -984,6 +1043,7 @@ function CameraRig({
       onEnd={() => {
         manualGesture.current.active = false;
         manualStart.current = null;
+        emitView();
       }}
     />
   );
@@ -1075,13 +1135,18 @@ export default function RoomScene(props: RoomSceneProps) {
     (): OrbitMode => 'guided',
   );
   const [ephemeralMode, setEphemeralMode] = useState<OrbitMode | null>(null);
-  const orbitMode = ephemeralMode ?? persistedMode;
+  const orbitMode =
+    ephemeralMode ??
+    (validCameraView(props.initialView)
+      ? props.initialView.mode
+      : persistedMode);
   const chooseMode = (mode: OrbitMode) => {
+    setEphemeralMode(mode);
     try {
       window.localStorage.setItem(ORBIT_MODE_KEY, mode);
       window.dispatchEvent(new Event('room-orbit-mode-change'));
     } catch {
-      setEphemeralMode(mode);
+      /* Local room mode remains usable without storage. */
     }
   };
   const requestCommand = useCallback((kind: ViewCommand['kind']) => {

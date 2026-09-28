@@ -1,6 +1,11 @@
 'use server';
+import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
+import {
+  itemCodeValid,
+  normalizeItemCode,
+} from '@/features/inventory/contracts';
 import { ASSET_UUID, QUANTITY_UUID, parseScan } from './targets';
 
 export type ScanMatch = {
@@ -12,6 +17,45 @@ export type ScanMatch = {
 export type ScanResolution =
   | { status: 'invalid' | 'unknown'; matches: [] }
   | { status: 'found' | 'ambiguous'; matches: ScanMatch[] };
+
+const itemCodeRow = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  archived: z.boolean(),
+  item_code: z.string().nullable(),
+});
+
+async function lookupItemCode(value: string): Promise<ScanResolution> {
+  const normalized = normalizeItemCode(value);
+  if (!normalized || !itemCodeValid(normalized))
+    return { status: 'invalid', matches: [] };
+  const { supabase } = await requireMember();
+  const { data, error } = await supabase.rpc('inventory_item_code_lookup', {
+    p_code: value,
+  });
+  if (error?.code === 'P1012') return { status: 'invalid', matches: [] };
+  if (error) throw new Error('Item code lookup failed.');
+  const item = itemCodeRow.nullable().parse(data);
+  if (!item) return { status: 'unknown', matches: [] };
+  return {
+    status: 'found',
+    matches: [
+      {
+        kind: 'quantity',
+        path: '/inventory/quantity/' + item.id,
+        label: quantityLabel(item),
+        state: item.archived ? 'archived' : 'active',
+      },
+    ],
+  };
+}
+
+/** Manual exact quantity lookup; URL-like text remains data in this explicit mode. */
+export async function resolveItemCode(value: string): Promise<ScanResolution> {
+  if (typeof value !== 'string' || [...value].length > 128)
+    return { status: 'invalid', matches: [] };
+  return lookupItemCode(value);
+}
 
 export async function resolveScan(value: string): Promise<ScanResolution> {
   let origin = '';
@@ -62,7 +106,7 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
     const id = target.kind === 'quantity' ? target.id : target.identifier;
     const { data, error } = await supabase
       .from('quantity_items')
-      .select('id,name,archived')
+      .select('id,name,archived,item_code')
       .eq('id', id)
       .maybeSingle();
     if (error) throw new Error('Quantity item lookup failed.');
@@ -70,7 +114,7 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       matches.push({
         kind: 'quantity',
         path: '/inventory/quantity/' + data.id,
-        label: data.name,
+        label: quantityLabel(data),
         state: data.archived ? 'archived' : 'active',
       });
   }
@@ -89,8 +133,23 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
     )
       matches.push(assetMatch(data));
   }
+  if (target.kind === 'bare') {
+    const itemResult = await lookupItemCode(target.identifier);
+    if (
+      itemResult.status === 'found' &&
+      !matches.some((match) => match.path === itemResult.matches[0].path)
+    )
+      matches.push(itemResult.matches[0]);
+  }
   if (matches.length === 0) return { status: 'unknown', matches: [] };
   return { status: matches.length > 1 ? 'ambiguous' : 'found', matches };
+}
+
+function quantityLabel(data: {
+  name: string;
+  item_code: string | null;
+}): string {
+  return `${data.name}${data.item_code ? ` (${data.item_code})` : ''}`;
 }
 
 function assetMatch(data: {

@@ -33,9 +33,10 @@ export default async function SiteOpeningPage({
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
+  const initialCategory = categories.find((category) => category.active);
+  const forms = initialCategory
+    ? await getPublishedForms([initialCategory.id])
+    : {};
   return (
     <>
       <Link

@@ -3,6 +3,7 @@ const db = vi.hoisted(() => ({
   location: vi.fn(),
   asset: vi.fn(),
   quantity: vi.fn(),
+  itemCode: vi.fn(),
   origin: vi.fn(),
 }));
 vi.mock('server-only', () => ({}));
@@ -12,6 +13,8 @@ vi.mock('@/features/labels/origin.server', () => ({
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
     supabase: {
+      rpc: (_name: string, args: { p_code: string }) =>
+        db.itemCode(args.p_code),
       from: (table: string) => ({
         select: () => ({
           eq: (_field: string, value: string) => ({
@@ -27,11 +30,12 @@ vi.mock('@/lib/auth/session.server', () => ({
     },
   }),
 }));
-import { resolveScan } from './resolve.server';
+import { resolveItemCode, resolveScan } from './resolve.server';
 beforeEach(() => {
   db.location.mockReset().mockResolvedValue({ data: null, error: null });
   db.asset.mockReset().mockResolvedValue({ data: null, error: null });
   db.quantity.mockReset().mockResolvedValue({ data: null, error: null });
+  db.itemCode.mockReset().mockResolvedValue({ data: null, error: null });
   db.origin.mockReset().mockReturnValue({
     origin: 'https://inventory.example.test',
     preview: false,
@@ -90,6 +94,92 @@ it('does not guess when a bare code exists in both namespaces', async () => {
   expect(await resolveScan('ITC')).toMatchObject({
     status: 'ambiguous',
     matches: [{ state: 'inactive' }, { state: 'retired' }],
+  });
+});
+it('treats bare item codes as exact identities and keeps namespace collisions ambiguous', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  db.itemCode.mockResolvedValue({
+    data: { id, name: 'Adapter', item_code: '0007-A/B', archived: true },
+    error: null,
+  });
+  expect(await resolveScan('0007-A/B')).toEqual({
+    status: 'found',
+    matches: [
+      {
+        kind: 'quantity',
+        path: '/inventory/quantity/' + id,
+        label: 'Adapter (0007-A/B)',
+        state: 'archived',
+      },
+    ],
+  });
+  db.location.mockResolvedValue({
+    data: { code: 'ITC', name: 'Room', active: true },
+    error: null,
+  });
+  db.asset.mockResolvedValue({
+    data: {
+      id: '6b84a7cf-197b-45b1-8016-87482d124cb4',
+      name: 'Laptop',
+      asset_tag: 'itc',
+      status: 'active',
+    },
+    error: null,
+  });
+  expect(await resolveScan('ITC')).toMatchObject({
+    status: 'ambiguous',
+    matches: [{ kind: 'location' }, { kind: 'asset' }, { kind: 'quantity' }],
+  });
+  db.itemCode.mockResolvedValue({
+    data: null,
+    error: { message: 'lookup denied' },
+  });
+  await expect(resolveScan('ITC')).rejects.toThrow('Item code lookup failed');
+});
+it('keeps reserved-looking and supplementary Item codes as data only in explicit mode', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  db.itemCode.mockImplementation(async (value: string) => ({
+    data: { id, name: 'Adapter', item_code: value, archived: false },
+    error: null,
+  }));
+  for (const value of [
+    '/SKU',
+    'ABC:001',
+    'AST:001',
+    '😀'.repeat(100),
+    'https://evil.test/sku',
+  ]) {
+    expect(await resolveItemCode(value)).toMatchObject({
+      status: 'found',
+      matches: [{ kind: 'quantity', path: '/inventory/quantity/' + id }],
+    });
+    expect(db.itemCode).toHaveBeenLastCalledWith(value);
+  }
+  expect((await resolveScan('/SKU')).status).toBe('invalid');
+  expect((await resolveScan('ABC:001')).status).toBe('invalid');
+  expect((await resolveScan('https://evil.test/sku')).status).toBe('invalid');
+  expect((await resolveItemCode('ABC\u0085D')).status).toBe('invalid');
+  expect((await resolveItemCode('😀'.repeat(101))).status).toBe('invalid');
+});
+it('keeps AST in asset-tag mode and accepts supplementary bare identifiers', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  db.asset.mockResolvedValue({
+    data: { id, name: 'Laptop', asset_tag: '001', status: 'active' },
+    error: null,
+  });
+  expect(await resolveScan('AST:001')).toMatchObject({
+    status: 'found',
+    matches: [{ kind: 'asset' }],
+  });
+  expect(db.itemCode).not.toHaveBeenCalled();
+  db.asset.mockResolvedValue({ data: null, error: null });
+  db.itemCode.mockResolvedValue({
+    data: { id, name: 'Cable', item_code: '😀'.repeat(100), archived: false },
+    error: null,
+  });
+  expect(await resolveScan('😀'.repeat(100))).toMatchObject({
+    status: 'found',
+    matches: [{ kind: 'quantity' }],
   });
 });
 it('fails closed on malformed input and read errors', async () => {

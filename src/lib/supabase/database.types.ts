@@ -466,6 +466,7 @@ export type Database = {
       }
       form_revision_controls: {
         Row: {
+          applies_to: string[]
           builtin: string | null
           control_id: string
           field_id: string | null
@@ -474,9 +475,11 @@ export type Database = {
           revision_id: string
           section_id: string
           sort_order: number
+          visible: boolean
           width: string
         }
         Insert: {
+          applies_to?: string[]
           builtin?: string | null
           control_id: string
           field_id?: string | null
@@ -485,9 +488,11 @@ export type Database = {
           revision_id: string
           section_id: string
           sort_order: number
+          visible?: boolean
           width: string
         }
         Update: {
+          applies_to?: string[]
           builtin?: string | null
           control_id?: string
           field_id?: string | null
@@ -496,6 +501,7 @@ export type Database = {
           revision_id?: string
           section_id?: string
           sort_order?: number
+          visible?: boolean
           width?: string
         }
         Relationships: [
@@ -620,22 +626,28 @@ export type Database = {
       }
       form_revision_sections: {
         Row: {
+          applies_to: string[]
           id: string
           label: string
           revision_id: string
           sort_order: number
+          visible: boolean
         }
         Insert: {
+          applies_to?: string[]
           id: string
           label: string
           revision_id: string
           sort_order: number
+          visible?: boolean
         }
         Update: {
+          applies_to?: string[]
           id?: string
           label?: string
           revision_id?: string
           sort_order?: number
+          visible?: boolean
         }
         Relationships: [
           {
@@ -1221,6 +1233,8 @@ export type Database = {
           custom_values: Json
           description: string | null
           id: string
+          item_code: string | null
+          item_code_key: string | null
           manufacturer: string | null
           model: string | null
           name: string
@@ -1237,6 +1251,8 @@ export type Database = {
           custom_values?: Json
           description?: string | null
           id?: string
+          item_code?: string | null
+          item_code_key?: string | null
           manufacturer?: string | null
           model?: string | null
           name: string
@@ -1253,6 +1269,8 @@ export type Database = {
           custom_values?: Json
           description?: string | null
           id?: string
+          item_code?: string | null
+          item_code_key?: string | null
           manufacturer?: string | null
           model?: string | null
           name?: string
@@ -1717,6 +1735,7 @@ export type Database = {
           custody_kind: string | null
           description: string | null
           entity_id: string | null
+          item_code: string | null
           kind: string | null
           location_code: string | null
           location_id: string | null
@@ -2018,6 +2037,7 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_item_code_lookup: { Args: { p_code: string }; Returns: Json }
       inventory_label_context: {
         Args: { p_entity_id: string; p_kind: string }
         Returns: string
@@ -2034,6 +2054,10 @@ export type Database = {
           p_type?: string
         }
         Returns: Json
+      }
+      inventory_normalize_item_code: {
+        Args: { p_value: string }
+        Returns: string
       }
       inventory_search: {
         Args: {
@@ -2126,6 +2150,11 @@ export type Database = {
         Returns: Json
       }
       metadata_form_get: { Args: { p_category_id: string }; Returns: Json }
+      metadata_form_get_v2: { Args: { p_category_id: string }; Returns: Json }
+      metadata_form_save: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       metadata_publish: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json

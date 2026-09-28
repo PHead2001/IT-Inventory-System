@@ -266,6 +266,7 @@ export async function getQuantityDetail(
       ...metadata(row, categories),
       customDisplay,
       archived: row.archived,
+      itemCode: row.item_code,
       reorderThreshold: row.reorder_threshold,
     },
     stockSummary: {

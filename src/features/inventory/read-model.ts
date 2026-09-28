@@ -44,6 +44,7 @@ export const metadataRow = z.object({
 });
 export const quantityRow = metadataRow.extend({
   archived: z.boolean(),
+  item_code: nullableText.default(null),
   reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
 });
 export const assetRow = metadataRow.extend({
@@ -81,6 +82,7 @@ export const searchRow = z.object({
     .optional(),
   quantity: z.number().int().nonnegative().nullable(),
   asset_tag: nullableText,
+  item_code: nullableText.default(null),
   serial_number: nullableText,
   recorded_total: z.number().int().nonnegative().nullable(),
   reorder_threshold: z.number().int().min(0).max(2147483647).nullable(),
@@ -184,6 +186,7 @@ export function mapSearch(
     custodyKind: row.custody_kind,
     quantity: row.quantity,
     assetTag: row.asset_tag,
+    itemCode: row.item_code,
     serialNumber: row.serial_number,
     recordedTotal: row.recorded_total,
     availableQuantity: row.available_quantity,
@@ -205,6 +208,7 @@ export function mapHistory(
     manufacturer: 'Manufacturer',
     model: 'Model',
     asset_tag: 'Asset tag',
+    item_code: 'Item code (SKU)',
     serial_number: 'Serial number',
     reorder_threshold: 'Reorder threshold',
   };

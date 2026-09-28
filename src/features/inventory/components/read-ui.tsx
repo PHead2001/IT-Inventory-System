@@ -75,6 +75,11 @@ export function InventoryRows({
                     : 'Serialized asset'}{' '}
                   · {row.status}
                 </p>
+                {row.kind === 'quantity' && row.itemCode && (
+                  <p className="mt-1 break-all text-sm text-slate-300">
+                    Item code (SKU): {row.itemCode}
+                  </p>
+                )}
                 {summary &&
                   (summary.photo_count > 0 || summary.document_count > 0) && (
                     <div

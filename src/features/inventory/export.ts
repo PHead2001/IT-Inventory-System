@@ -18,6 +18,7 @@ const inventoryRow = z.object({
   ...common,
   kind: z.enum(['quantity', 'asset']),
   asset_tag: text,
+  item_code: text.optional(),
   serial_number: text,
   quantity: z.number().int().nonnegative().nullable(),
   location_name: text,
@@ -39,6 +40,7 @@ const lowStockRow = z.object({
   reorder_threshold: z.number().int().nonnegative(),
   stock_state: z.enum(['needs_restocking', 'out_of_stock']),
   holding_context: z.string(),
+  item_code: text.optional(),
   available_quantity: safeDecimal.optional(),
   assigned_quantity: safeDecimal.optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
@@ -145,6 +147,7 @@ export function exportCsv(
       'Available in Storage (Item-wide)',
       'Assigned to Sites (Item-wide)',
       'Total Recorded (Item-wide)',
+      'Item Code (SKU)',
     ];
     function* lines() {
       yield headers.map(csvText).join(',');
@@ -177,6 +180,7 @@ export function exportCsv(
           csvNumber(row.available_quantity),
           csvNumber(row.assigned_quantity),
           csvNumber(row.recorded_quantity),
+          csvText(row.item_code),
         );
         yield cells.join(',');
       }
@@ -206,6 +210,7 @@ export function exportCsv(
     ...(includeCustom ? ['Custom Fields JSON'] : []),
     'Available in Storage',
     'Assigned to Sites',
+    'Item Code (SKU)',
   ];
   function* lines() {
     yield headers.map(csvText).join(',');
@@ -234,6 +239,7 @@ export function exportCsv(
       cells.push(
         csvNumber(row.available_quantity),
         csvNumber(row.assigned_quantity),
+        csvText(row.item_code),
       );
       yield cells.join(',');
     }

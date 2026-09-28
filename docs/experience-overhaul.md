@@ -78,6 +78,16 @@ must also cover legacy publication entry points, not only the new editor.
 
 ### Atomic Save changes
 
+Migration-first compatibility requires a versioned read: `metadata_form_get` retains
+the baseline strict JSON shape without overlays; `metadata_form_get_v2` supplies
+effective visibility and protected/Item code placements to the new application.
+Legacy reads fail explicitly with `client_upgrade_required` after a publication
+or returned draft uses unsupported capabilities; they never silently strip a form
+into a lossy editable projection. Legacy draft save/publication check this capability
+boundary under catalog/category/draft locks after authorization and completed-receipt
+replay, before fresh writes. Exact draft discard remains available. Compatibility
+tests use the actual baseline parser, not the more permissive new parser.
+
 Add a hardened `metadata_form_save(request_id, payload)` operation with the existing
 actor/receipt/catalog lock discipline, READ COMMITTED requirement and timeout bounds.
 Payload carries original actor/category, expected published revision, nullable
@@ -157,6 +167,17 @@ control characters; client checks give feedback but never replace database check
 Append Item code to existing CSV prefixes, project it through quantity reads/search/
 labels and distinguish ambiguous bare scans from unique matches. Stable UUID QR
 identities remain unchanged. Do not manufacture item codes for existing rows.
+
+Preserve the existing label grammar: explicit `LOC:` and `AST:` labels retain their
+meaning and foreign URLs remain invalid navigation targets. A separate manual
+Quantity Item code mode performs an authorized exact lookup, allowing legitimate
+codes such as `/SKU`, `ABC:001`, or `AST:001` without interpreting them as routes.
+Count Unicode characters rather than UTF-16 units. A pure public, authenticated-only
+normalization function supplies the same string rules to the private mutation helper
+and the invoker/RLS lookup; normalization does not read data or grant access to the
+private schema. Case comparison occurs in PostgreSQL, not a divergent JavaScript
+case conversion. Normal bare identifiers still return all matching kinds for
+explicit disambiguation.
 
 Site code suggestion is client feedback over the existing server constraint:
 name-first, uppercase ASCII words separated by single hyphens, bounded to the
@@ -248,15 +269,50 @@ focused-loading and verification work, rather than speculative auth changes.
 
 Settings routes and name-derived site-code behavior are implemented with focused
 component coverage, pending integrated browser acceptance. Root inspection caught
-that the first site-code edit still placed Code before Name; the ordering correction
-and a DOM-order regression are required before acceptance. The earlier local Storage
+that the first site-code edit still placed Code before Name; the corrected order now
+has a DOM-order regression. The earlier local Storage
 exception is not carried forward: the existing `v1.77.9` fix passed the original
 denial-then-large-upload browser regression and a same-agent connection recovery
 probe on September 28. An unrelated site-form locator failure from the full Files
 run is not represented as a green full-suite result.
 
-All rows begin pending. Completion requires evidence for every listed boundary;
-an implementation commit alone is insufficient.
+The functional working tree has passed a fresh local database gate (481 pgTAP
+assertions, all configured integration suites and generated-type comparison),
+including atomic form saving, versioned legacy form reads and Item code contracts.
+Independent source reviews accepted the publication/compatibility and designer
+identity boundaries after fixes. These are working-tree checkpoints, not final-SHA
+certification. The focused production-build Chromium sweep now passes all 17
+cases in `experience-overhaul.spec.ts` and `metadata-designer.spec.ts`, including
+on-screen pointer reflow/resize before release, gesture interruption on account
+switch, rendered QR/Code 128 decoding and PDF dimensions, phone layouts, persisted
+layout reload, unsaved recovery and legacy draft discard. Remaining legacy suites,
+the app-wide visual implementation and final performance comparison are outstanding.
+
+The initial PR checkpoint `78ec7dc9a46881c634c573f1401735002f1a2248` received a
+completed Codex review with no findings. Its Linux CI passed application and
+database checks but failed seven of 65 browser cases; changed Settings/site-form
+navigation and telemetry attribution require current-candidate proof. Later source
+changes require a fresh review and exact-SHA CI rather than reusing that result.
+
+Hosted acceptance is pending: the Supabase PR22 integration reported preview
+`bhqrwxclpggeurtbzfps` removed before configuration completed, and a subsequent
+read-only project lookup returned not found. No test writes were made there or to
+the production parent. A ready Vercel deployment alone does not establish a usable
+isolated backend; verify a healthy matching child before hosted fixture work.
+
+Completion requires evidence for every listed boundary; an implementation commit
+or a partial checkpoint alone is insufficient.
+
+Final performance comparison will use a new deterministic fictional dataset shared
+by separate production builds of the baseline commit and final candidate. The
+original pre-reset database was not snapshotted, so its 49-category timings remain
+historical observations, not directly matched final comparison samples. Pin the
+same detail target and populated/empty locations, record fixture counts, and keep
+browser/runtime/instrumentation identical. Run five warm samples per comparable
+scenario with normal visual effects enabled; report median and nearest-rank p95
+(the maximum at this sample count). Fresh-context single samples remain descriptive.
+Supabase HTTP fetch counts and summed parallel request durations must not be
+presented as SQL query counts or critical-path latency.
 
 | Requirement                                               | Required proof                                                                                                                                                                                                                                                                                                                   | State   |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |

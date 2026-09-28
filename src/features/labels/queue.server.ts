@@ -23,6 +23,7 @@ const candidate = z.object({
   category_name: z.string(),
   status: z.string(),
   asset_tag: z.string().nullable(),
+  item_code: z.string().nullable().default(null),
   serial_number: z.string().nullable(),
   manufacturer: z.string().nullable(),
   model: z.string().nullable(),
@@ -39,6 +40,7 @@ const liveRow = z.object({
   context: z.string(),
   state: z.string(),
   tag: z.string().nullable(),
+  item_code: z.string().nullable().default(null),
   category_name: z.string().nullable(),
 });
 const filterInput = z.object({
@@ -57,6 +59,7 @@ export type LabelCandidate = {
   categoryName: string;
   status: string;
   assetTag: string | null;
+  itemCode: string | null;
   serialNumber: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -103,6 +106,7 @@ export async function searchLabelRecords(input: LabelSearchFilters): Promise<{
       categoryName: row.category_name,
       status: row.status,
       assetTag: row.asset_tag,
+      itemCode: row.item_code,
       serialNumber: row.serial_number,
       manufacturer: row.manufacturer,
       model: row.model,
@@ -141,6 +145,7 @@ export async function getQueueRecords(
       context: row.context,
       state: row.state,
       tag: row.tag,
+      humanId: row.kind === 'quantity' ? row.item_code : null,
       categoryName: row.category_name,
       barcode: row.tag,
       path:

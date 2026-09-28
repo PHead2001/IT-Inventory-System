@@ -17,10 +17,8 @@ export default async function NewQuantityPage() {
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
-  if (!categories.some((category) => category.active))
+  const initialCategory = categories.find((category) => category.active);
+  if (!initialCategory)
     return (
       <p role="alert">
         An active category is required before staff can create inventory. Ask a
@@ -31,6 +29,7 @@ export default async function NewQuantityPage() {
         .
       </p>
     );
+  const forms = await getPublishedForms([initialCategory.id]);
   return (
     <>
       <h1 className="mb-5 text-3xl font-semibold">Create quantity inventory</h1>

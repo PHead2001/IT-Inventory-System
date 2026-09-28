@@ -34,21 +34,27 @@ export default async function QuantityPage({
   const detail = await getQuantityDetail(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
-  const [categories, locations, sites, siteHoldings, assignments] =
-    await Promise.all([
-      getCategories(),
-      getLocations(),
-      getSites(),
-      getEntitySiteHoldings(id),
-      getEntityAssignments('quantity', id),
-    ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
-  const archiveReview =
+  const [
+    categories,
+    locations,
+    sites,
+    siteHoldings,
+    assignments,
+    forms,
+    archiveReview,
+  ] = await Promise.all([
+    getCategories(),
+    getLocations(),
+    getSites(),
+    getEntitySiteHoldings(id),
+    getEntityAssignments('quantity', id),
+    member.role === 'staff'
+      ? getPublishedForms([item.categoryId])
+      : Promise.resolve({}),
     member.role === 'staff' && !item.archived
-      ? await getQuantityArchiveReview(id)
-      : null;
+      ? getQuantityArchiveReview(id)
+      : Promise.resolve(null),
+  ]);
   return (
     <>
       <Link href="/inventory" className="text-sm text-cyan-300 underline">
@@ -65,6 +71,11 @@ export default async function QuantityPage({
         {item.categoryName} · Quantity inventory ·{' '}
         {item.archived ? 'Archived' : 'Active'} · Version {item.version}
       </p>
+      {item.itemCode && (
+        <p className="mt-2 break-all text-sm text-slate-300">
+          Item code (SKU): {item.itemCode}
+        </p>
+      )}
       <p className="mt-3 text-sm">
         Reorder threshold:{' '}
         {stockSummary.reorderThreshold === null
