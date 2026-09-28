@@ -190,9 +190,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   const siteName = 'Fictional file site ' + siteCode;
   await page.goto('/settings/sites');
   const siteForm = custodyForm(page, 'Add property / site');
-  await siteForm
-    .getByLabel('Permanent code (uppercase letters, digits, hyphens)')
-    .fill(siteCode);
+  await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await siteForm.getByLabel('Name', { exact: true }).fill(siteName);
   await siteForm.getByRole('button', { name: 'Save site' }).click();
   await expect(siteForm.getByRole('status')).toContainText('Site saved');

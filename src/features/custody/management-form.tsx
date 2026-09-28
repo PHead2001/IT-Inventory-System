@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody } from './actions';
+import { suggestSiteCode } from './site-code';
 import type { ManagedLocation, Site } from './queries.server';
 import type { CustodyOperation, CustodyState } from './contracts';
 
@@ -45,6 +46,8 @@ export function SiteManagementForm({ site }: { site?: Site }) {
     active: site?.active ?? true,
   });
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const suggestedCode = site ? '' : suggestSiteCode(values.name);
+  const code = values.code || suggestedCode;
   const update = (key: keyof typeof values, value: string | boolean) => {
     setValues((old) => ({ ...old, [key]: value }));
     setState(null);
@@ -66,7 +69,7 @@ export function SiteManagementForm({ site }: { site?: Site }) {
                 active: values.active,
               }
             : {
-                code: values.code,
+                code,
                 name: values.name,
                 notes: values.notes || null,
               },
@@ -76,18 +79,6 @@ export function SiteManagementForm({ site }: { site?: Site }) {
       <h2 className="text-lg font-semibold">
         {site ? `Manage ${site.name}` : 'Add property / site'}
       </h2>
-      {!site && (
-        <label className="block space-y-2">
-          Permanent code (uppercase letters, digits, hyphens)
-          <Input
-            value={values.code}
-            maxLength={100}
-            required
-            pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
-            onChange={(e) => update('code', e.target.value.toUpperCase())}
-          />
-        </label>
-      )}
       <label className="block space-y-2">
         Name
         <Input
@@ -97,6 +88,25 @@ export function SiteManagementForm({ site }: { site?: Site }) {
           onChange={(e) => update('name', e.target.value)}
         />
       </label>
+      {!site && (
+        <div className="space-y-2">
+          <label className="block space-y-2">
+            Permanent code
+            <Input
+              value={code}
+              maxLength={100}
+              required
+              pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
+              aria-describedby="site-code-guidance"
+              onChange={(e) => update('code', e.target.value.toUpperCase())}
+            />
+          </label>
+          <p id="site-code-guidance" className="text-sm text-slate-400">
+            Suggested from the name when possible; edit to override or enter a
+            code manually if no suggestion appears.
+          </p>
+        </div>
+      )}
       <label className="block space-y-2">
         Notes
         <textarea
