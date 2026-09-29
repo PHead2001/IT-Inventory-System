@@ -8,6 +8,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 
 function Invoke-GitHub([string] $Uri, [string] $Method = 'GET', $Body = $null, [string] $Token = '') {
     $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2026-03-10'; 'User-Agent' = 'ITInventoryLocalRunner' }
@@ -377,9 +378,16 @@ function Invoke-RunnerSession($Config) {
         foreach ($service in @(Get-VMIntegrationService -VMName $name | Where-Object Name -Match 'Guest Service')) {
             Disable-VMIntegrationService -VMName $name -Name $service.Name
         }
-        $mac = (Get-VMNetworkAdapter -VMName $name).MacAddress.ToLowerInvariant() -replace '(..)(?!$)', '$1:'
+        $guestMac = Set-RunnerGuestMac -VmName $name
+        $mutex = Enter-RunnerLock
+        try {
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $name) { throw 'Session removed before guest MAC journaling.' }
+            $current | Add-Member -NotePropertyName guestMac -NotePropertyValue $guestMac.rawMac -Force
+            Write-RunnerJson $script:RunnerStatePath $current
+        } finally { Exit-RunnerLock $mutex }
         $seed = Join-Path $instance 'cidata.vhdx'
-        New-SeedDisk $seed $key $mac $Config
+        New-SeedDisk $seed $key $guestMac.seedMac $Config
         Add-VMHardDiskDrive -VMName $name -Path $seed
         $script:RunnerOperationStage = 'network-isolation'
         $mutex = Enter-RunnerLock
@@ -391,7 +399,9 @@ function Invoke-RunnerSession($Config) {
         } finally { Exit-RunnerLock $mutex }
         $expectedRules = Set-IsolatedAdapter $name
         Start-SessionGuardian $state
+        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         Start-GuardedVm $state
+        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         $script:RunnerOperationStage = 'guest-readiness'
         Wait-Guest $state $Config
         Assert-SessionAlive $state
@@ -413,6 +423,7 @@ function Invoke-RunnerSession($Config) {
         $token = Get-OwnerToken
         $parts = $Config.repo.Split('/')
         $script:RunnerOperationStage = 'jit-registration'
+        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         if ($Config.activation -eq 'pilot') {
             $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
             $evidence = Get-PilotEvidence $Config $attempt $token
@@ -504,6 +515,7 @@ function Get-QueuedRunnerJob($Config, [string] $Token) {
 function Invoke-Supervisor {
     Assert-Administrator
     Assert-SecureRoot
+    Assert-RunnerTransitionClear
     # One process owns recovery and pickup, including boot and manual starts.
     $supervisorMutex = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
     try {
@@ -516,6 +528,7 @@ function Invoke-Supervisor {
 
 function Invoke-SupervisorLoop {
     while (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
+        Assert-RunnerTransitionClear
         $config = Get-RunnerConfig
         if ($config.activation -notin @('pilot', 'active')) {
             Start-Sleep -Seconds 30
@@ -603,6 +616,63 @@ function Stop-Supervisor {
     finally { Exit-RunnerLock $mutex }
 }
 
+function Complete-PilotRetry($Plan) {
+    if ($Plan.tag -cne $script:RunnerTag -or $Plan.retryId -cnotmatch '^[0-9a-f]{32}$' -or $Plan.phase -cne 'pending') {
+        throw 'Retry journal identity/phase is invalid.'
+    }
+    $expectedDisabled = Get-RunnerEvidenceValue $Plan.sources.'config.json'
+    $expectedTarget = Get-RunnerEvidenceValue $Plan.sources.'config.json'
+    $expectedDisabled.activation = 'disabled'
+    $expectedTarget | Add-Member -NotePropertyName pilotExpectedSha -NotePropertyValue $Plan.nextSha -Force
+    $expectedTarget | Add-Member -NotePropertyName pilotWorkflowPath -NotePropertyValue '.github/workflows/local-runner-pilot.yml' -Force
+    $expectedTarget | Add-Member -NotePropertyName pilotLabel -NotePropertyValue (Get-PilotLabel $Plan.nextSha) -Force
+    $expectedTarget.activation = 'pilot'
+    $expectedArchive = Get-RunnerJsonEvidence ([ordered]@{ tag = $script:RunnerTag; retryId = $Plan.retryId; reason = $Plan.reason; nextSha = $Plan.nextSha; sources = $Plan.sources })
+    if ($Plan.disabledConfig.hash -cne (Get-RunnerJsonEvidence $expectedDisabled).hash -or
+        $Plan.targetConfig.hash -cne (Get-RunnerJsonEvidence $expectedTarget).hash -or $Plan.archive.hash -cne $expectedArchive.hash) {
+        throw 'Retry journal does not encode the exact authorized source/archive/target transition.'
+    }
+    $archivePath = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'pilot-history') ($Plan.retryId + '.json'))
+    $configPath = $script:RunnerConfigPath
+    foreach ($name in @('pilot-attempt.json', 'pilot-result.json', 'last-error.json')) {
+        $path = Assert-OwnedPath (Join-Path $script:RunnerRoot $name)
+        $source = $Plan.sources.$name
+        [void](Get-RunnerEvidenceValue $source)
+        $absent = -not (Test-Path -LiteralPath $path)
+        if (-not (Test-RunnerEvidence $path $source) -and -not ($name -ne 'last-error.json' -and $source.exists -and $absent)) {
+            throw 'Retry evidence changed unexpectedly; no receipt/config overwrite is permitted.'
+        }
+    }
+    $old = $Plan.sources.'config.json'; $disabled = $Plan.disabledConfig; $target = $Plan.targetConfig
+    if (-not (Test-RunnerEvidence $configPath $old) -and -not (Test-RunnerEvidence $configPath $disabled) -and
+        -not (Test-RunnerEvidence $configPath $target)) { throw 'Retry config differs from recorded old/intermediate/target state.' }
+    if (Test-Path -LiteralPath $archivePath) {
+        if (-not (Test-RunnerEvidence $archivePath $Plan.archive)) { throw 'Retry archive changed; refusing resume.' }
+    } else { Write-RunnerEvidence $archivePath $Plan.archive }
+    Invoke-RunnerTransitionCheckpoint 'retry-archive'
+    if (-not (Test-RunnerEvidence $configPath $target)) {
+        Write-RunnerEvidence $configPath $disabled
+        Invoke-RunnerTransitionCheckpoint 'retry-disabled'
+        foreach ($name in @('pilot-attempt.json', 'pilot-result.json')) {
+            $path = Assert-OwnedPath (Join-Path $script:RunnerRoot $name)
+            if (Test-Path -LiteralPath $path) {
+                if (-not (Test-RunnerEvidence $path $Plan.sources.$name)) { throw 'Retry receipt changed before removal.' }
+                Remove-Item -LiteralPath $path -ErrorAction Stop
+            }
+            Invoke-RunnerTransitionCheckpoint ('retry-remove-' + $name)
+        }
+        Write-RunnerEvidence $configPath $target
+        Invoke-RunnerTransitionCheckpoint 'retry-target'
+    } elseif ((Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json')) -or
+        (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-result.json'))) {
+        throw 'Target retry config has unexpected remaining receipts; refusing adoption.'
+    }
+    Invoke-RunnerTransitionCheckpoint 'retry-before-complete'
+    $Plan.phase = 'complete'
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'pilot-retry.json') $Plan
+    Invoke-RunnerTransitionCheckpoint 'retry-complete'
+}
+
 function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retry) {
     Assert-Administrator
     Assert-SecureRoot
@@ -617,9 +687,24 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
         try {
             $config = Get-RunnerConfig
             [void](Get-OwnerToken)
-            if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -eq 'Running' -or
-                (Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
-                throw 'Pilot activation/retry requires a stopped supervisor and no session or owned-prefix VM.'
+            Assert-RunnerControlIdle
+            $update = Read-RunnerJson (Join-Path $script:RunnerRoot 'update-journal.json')
+            if ($null -ne $update -and ($update.tag -cne $script:RunnerTag -or $update.phase -cne 'complete')) { throw 'Resume the pending installed update before pilot control.' }
+            $journalPath = Join-Path $script:RunnerRoot 'pilot-retry.json'
+            $plan = Read-RunnerJson $journalPath
+            if ($null -ne $plan) {
+                if ($plan.tag -cne $script:RunnerTag -or $plan.phase -cnotin @('pending', 'complete')) { throw 'Retry journal is invalid.' }
+                if ($plan.phase -ceq 'pending') {
+                    if (-not $Retry -or $plan.nextSha -cne $Sha -or $plan.reason -cne $Reason) { throw 'Pending retry requires identical recorded SHA/reason via RetryPilot.' }
+                    Complete-PilotRetry $plan
+                    Write-Host 'Recorded maintainer retry completed. Pickup remains stopped.'
+                    return
+                }
+                if ($Retry -and $plan.nextSha -ceq $Sha -and $plan.reason -ceq $Reason) {
+                    if (-not (Test-RunnerEvidence $script:RunnerConfigPath $plan.targetConfig)) { throw 'Completed retry replay does not match current target config.' }
+                    Write-Host 'Maintainer retry already completed; no evidence or pickup changed.'
+                    return
+                }
             }
             $attemptPath = Join-Path $script:RunnerRoot 'pilot-attempt.json'
             $resultPath = Join-Path $script:RunnerRoot 'pilot-result.json'
@@ -635,23 +720,38 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
                 }
                 $history = Assert-OwnedPath (Join-Path $script:RunnerRoot 'pilot-history')
                 [void][IO.Directory]::CreateDirectory($history)
-                $archivePath = Join-Path $history ($([guid]::NewGuid().ToString('N')) + '.json')
-                Write-RunnerJson $archivePath ([ordered]@{
-                    tag = $script:RunnerTag; archivedUtc = [DateTime]::UtcNow.ToString('o'); reason = $Reason
-                    nextSha = $Sha; previousConfig = $config; attempt = $attempt; result = $result
-                    failure = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
-                })
-                $archive = Read-RunnerJson $archivePath
-                if ($archive.tag -ne $script:RunnerTag -or $archive.attempt.jobId -ne $attempt.jobId -or $archive.nextSha -cne $Sha) {
-                    throw 'Pilot evidence archive readback failed; current receipt preserved.'
+                if ($null -ne $plan) {
+                    $priorPath = Join-Path $history ($plan.retryId + '.journal.json')
+                    $prior = Get-RunnerFileEvidence $journalPath
+                    if (Test-Path -LiteralPath $priorPath) {
+                        if (-not (Test-RunnerEvidence $priorPath $prior)) { throw 'Previous completed retry journal archive differs.' }
+                    } else { Write-RunnerEvidence $priorPath $prior }
                 }
-                # Crash before/after removal leaves pickup disabled; the archive is retained.
-                $config.activation = 'disabled'
-                Write-RunnerJson $script:RunnerConfigPath $config
-                Remove-Item -LiteralPath $attemptPath -ErrorAction Stop
-                if (Test-Path -LiteralPath $resultPath) { Remove-Item -LiteralPath $resultPath -ErrorAction Stop }
-                Write-Host "Previous pilot evidence retained in $archivePath"
-            } elseif ($config.activation -ne 'disabled' -or $null -ne $attempt -or $null -ne $result) {
+                $sources = [ordered]@{}
+                foreach ($name in @('config.json', 'pilot-attempt.json', 'pilot-result.json', 'last-error.json')) {
+                    $sources[$name] = Get-RunnerFileEvidence (Join-Path $script:RunnerRoot $name)
+                }
+                $disabledConfig = Get-RunnerEvidenceValue $sources.'config.json'
+                $disabledConfig.activation = 'disabled'
+                $targetConfig = Get-RunnerEvidenceValue $sources.'config.json'
+                $targetConfig | Add-Member -NotePropertyName pilotExpectedSha -NotePropertyValue $Sha -Force
+                $targetConfig | Add-Member -NotePropertyName pilotWorkflowPath -NotePropertyValue '.github/workflows/local-runner-pilot.yml' -Force
+                $targetConfig | Add-Member -NotePropertyName pilotLabel -NotePropertyValue $label -Force
+                $targetConfig.activation = 'pilot'
+                $retryId = [guid]::NewGuid().ToString('N')
+                $archive = Get-RunnerJsonEvidence ([ordered]@{ tag = $script:RunnerTag; retryId = $retryId; reason = $Reason; nextSha = $Sha; sources = $sources })
+                $plan = [pscustomobject]@{
+                    tag = $script:RunnerTag; retryId = $retryId; phase = 'pending'; nextSha = $Sha; reason = $Reason
+                    sources = [pscustomobject]$sources; disabledConfig = Get-RunnerJsonEvidence $disabledConfig
+                    targetConfig = Get-RunnerJsonEvidence $targetConfig; archive = $archive
+                }
+                Write-RunnerJson $journalPath $plan
+                Invoke-RunnerTransitionCheckpoint 'retry-pending'
+                Complete-PilotRetry $plan
+                Write-Host 'Maintainer retry evidence retained and new bound pilot configured. Pickup remains stopped.'
+                return
+            } elseif ($config.activation -ne 'disabled' -or $null -ne $attempt -or $null -ne $result -or $null -ne $plan -or
+                @(Get-ChildItem -LiteralPath (Join-Path $script:RunnerRoot 'pilot-history') -ErrorAction SilentlyContinue).Count -gt 0) {
                 throw 'Initial pilot requires disabled activation and no previous receipt; use a reviewed maintainer retry after investigation.'
             }
             $config | Add-Member -NotePropertyName pilotExpectedSha -NotePropertyValue $Sha -Force
@@ -667,6 +767,7 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
 function Enable-RunnerActive {
     Assert-Administrator
     Assert-SecureRoot
+    Assert-RunnerTransitionClear
     $mutex = Enter-RunnerLock
     try {
         $config = Get-RunnerConfig
@@ -734,6 +835,7 @@ switch ($Action) {
         Write-Host 'Machine-bound DPAPI credential stored under the SYSTEM/Administrators-only root.'
     }
     'Start' {
+        Assert-RunnerTransitionClear
         Assert-Administrator
         Assert-SecureRoot
         $config = Get-RunnerConfig
@@ -745,6 +847,7 @@ switch ($Action) {
         Write-Host 'Persistent SYSTEM supervisor started; it waits for a matching queued job.'
     }
     'Restart' {
+        Assert-RunnerTransitionClear
         Stop-Supervisor
         Remove-Item -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -Force
         Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
@@ -773,6 +876,13 @@ switch ($Action) {
         if ($null -ne $attempt) { Write-Host "Pilot consumed for job $($attempt.jobId). Failure or uncertainty requires maintainer investigation; it cannot take another pilot job." }
         $pilot = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
         if ($null -ne $pilot) { Write-Host "Pilot proof: status=$($pilot.status); conclusion=$($pilot.conclusion); verified=$($pilot.verified)." }
+        foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
+            $journal = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
+            if ($null -ne $journal) {
+                $phase = if ($journal.phase -cin @('pending', 'complete')) { $journal.phase } else { 'invalid' }
+                Write-Host "Lifecycle journal $name : $phase. Pending operations require explicit resume; pickup is blocked."
+            }
+        }
     }
     'Watchdog' { Invoke-Watchdog }
     'Guard' {

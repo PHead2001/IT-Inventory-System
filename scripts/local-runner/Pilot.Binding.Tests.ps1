@@ -11,6 +11,11 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-pilot-binding-' + [guid]
 $script:RunnerRoot = $testRoot
 $script:RunnerConfigPath = Join-Path $testRoot 'config.json'
 $script:RunnerStatePath = Join-Path $testRoot 'state.json'
+$script:pilotLockPrefix = 'Local\ITIR-pilot-test-' + [guid]::NewGuid().ToString('N')
+$script:realEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+    return & $script:realEnterLock ($script:pilotLockPrefix + '-' + $Name.Replace('\', '-'))
+}
 function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     $rejected = $false
     try { & $Work } catch { $rejected = $true }
@@ -104,21 +109,21 @@ try {
     Write-RunnerJson (Join-Path $testRoot 'pilot-result.json') ([ordered]@{ verified = $true })
     Assert-Rejected { Enable-RunnerPilot ('b' * 40) 'do not reset success' -Retry } 'successful proof reset'
     Remove-Item -LiteralPath (Join-Path $testRoot 'pilot-result.json')
-    $realWrite = (Get-Command Write-RunnerJson).ScriptBlock
-    function Write-RunnerJson {
-        param($Path, $Value)
+    $realWrite = (Get-Command Write-RunnerBytes).ScriptBlock
+    function Write-RunnerBytes {
+        param($Path, $Bytes)
         if ($Path -like '*\pilot-history\*') { throw 'Synthetic evidence archive write failure.' }
-        & $realWrite $Path $Value
+        & $realWrite $Path $Bytes
     }
     Assert-Rejected { Enable-RunnerPilot ('b' * 40) 'diagnosed ACL collision' -Retry } 'archive failure'
     if ([IO.File]::ReadAllText((Join-Path $testRoot 'pilot-attempt.json')) -cne $before -or (Get-RunnerConfig).activation -ne 'pilot') {
         throw 'Failed archival altered current receipt or activation.'
     }
-    Set-Item -Path Function:\Write-RunnerJson -Value $realWrite
+    Set-Item -Path Function:\Write-RunnerBytes -Value $realWrite
     Enable-RunnerPilot ('b' * 40) 'diagnosed ACL collision' -Retry
     $archives = @(Get-ChildItem -LiteralPath (Join-Path $testRoot 'pilot-history') -Filter '*.json')
     $archive = Read-RunnerJson $archives[0].FullName
-    if ($archives.Count -ne 1 -or $archive.attempt.jobId -ne 56 -or $archive.failure.stage -cne 'network-isolation' -or
+    if ($archives.Count -ne 1 -or (Get-RunnerEvidenceValue $archive.sources.'pilot-attempt.json').jobId -ne 56 -or (Get-RunnerEvidenceValue $archive.sources.'last-error.json').stage -cne 'network-isolation' -or
         (Test-Path -LiteralPath (Join-Path $testRoot 'pilot-attempt.json')) -or (Get-RunnerConfig).pilotExpectedSha -cne ('b' * 40)) {
         throw 'Maintainer retry lost old evidence or failed to bind the new SHA.'
     }

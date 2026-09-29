@@ -8,6 +8,7 @@ param(
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Setup.Download.ps1')
+. (Join-Path $PSScriptRoot 'Update.ps1')
 if ($EnableHyperV) {
     Assert-Administrator
     $result = Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
@@ -15,6 +16,7 @@ if ($EnableHyperV) {
     return
 }
 Assert-HostPrerequisites
+$setupBundle = Get-RunnerBundle $PSScriptRoot
 
 $mutex = Enter-RunnerLock
 try {
@@ -180,9 +182,11 @@ try {
     elseif ($gateway.PrefixLength -ne 29) { throw 'Reserved gateway has the wrong prefix length.' }
     if ($null -eq $existingNat) { New-NetNat -Name $script:RunnerNat -InternalIPInterfaceAddressPrefix '172.30.240.0/29' | Out-Null }
 
-    foreach ($file in @('Common.ps1', 'Runner.ps1', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')) {
+    foreach ($file in @($setupBundle.manifest.files.name) + @('Bundle.json')) {
         $destination = Assert-OwnedPath (Join-Path $binDir $file)
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $destination -Force
+        $expectedHash = if ($file -ceq 'Bundle.json') { $setupBundle.hash } else { @($setupBundle.manifest.files | Where-Object name -CEQ $file)[0].hash }
+        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -cne $expectedHash) { throw 'Installed initial bundle differs from source manifest.' }
     }
     $installed = Join-Path $binDir 'Runner.ps1'
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Watchdog"
@@ -199,6 +203,9 @@ try {
         label = 'it-inventory-ephemeral'; maxMinutes = 120; activation = 'disabled'
         baseVhdx = $vhdxPath; baseSha256 = $vhdxHash
         guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; prefixLength = 29
+    })
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'installed-bundle.json') ([ordered]@{
+        tag = $script:RunnerTag; version = $setupBundle.manifest.version; manifestHash = $setupBundle.hash
     })
     Remove-Item -LiteralPath $stagePath -Force
     Write-Host 'Runner files, isolated NAT and watchdog installed. Job pickup remains disabled.'

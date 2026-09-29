@@ -17,13 +17,25 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell DPAPI regression fail
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell image download regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Pilot.Binding.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell pilot binding regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Recovery.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression failed.' }
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($testRoot)
 $script:RunnerRoot = $testRoot
 $script:RunnerStatePath = Join-Path $testRoot 'state.json'
 $script:RunnerConfigPath = Join-Path $testRoot 'config.json'
+$script:contractLockPrefix = 'Local\ITIR-contract-' + [guid]::NewGuid().ToString('N')
+$script:realEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+    $mapped = if ($Name -eq 'Global\ITInventoryLocalRunner-v1') { $script:contractLockPrefix + '-state' }
+        elseif ($Name -eq 'Global\ITInventoryLocalRunner-Supervisor-v1') { $script:contractLockPrefix + '-supervisor' } else { $Name }
+    return & $script:realEnterLock $mapped
+}
 try {
     $insecureRootRejected = $false
     try { Assert-SecureRoot } catch { $insecureRootRejected = $true }
@@ -44,8 +56,9 @@ try {
 
     $mutex = Enter-RunnerLock
     try {
-        $job = Start-Job -ScriptBlock {
-            $probe = [Threading.Mutex]::new($false, 'Global\ITInventoryLocalRunner-v1')
+        $job = Start-Job -ArgumentList ($script:contractLockPrefix + '-state') -ScriptBlock {
+            param($name)
+            $probe = [Threading.Mutex]::new($false, $name)
             try { $probe.WaitOne(0) } finally { $probe.Dispose() }
         }
         [void](Wait-Job -Job $job -Timeout 10)
@@ -413,6 +426,36 @@ public class ArgvSink {
     }
     $script:fakeVm.Path = $expectedVmPath
 
+    # Execute the actual seed-construction segment against a zero dynamic MAC;
+    # all Hyper-V/disk commands are mocks and state is confined to this TEMP root.
+    $script:seedAdapter = [pscustomobject]@{ VMName = $validName; SwitchName = 'ITIR-Isolated'; MacAddress = '000000000000'; DynamicMacAddressEnabled = $true }
+    function Get-VMNetworkAdapter { param($VMName, [switch]$All) return $script:seedAdapter }
+    function Set-VMNetworkAdapter { param($VMNetworkAdapter, $StaticMacAddress) $script:seedAdapter.MacAddress = $StaticMacAddress; $script:seedAdapter.DynamicMacAddressEnabled = $false }
+    function Add-VMHardDiskDrive { param($VMName, $Path) }
+    $realSeedWriter = (Get-Command New-SeedDisk).ScriptBlock
+    function New-SeedDisk {
+        param($Path, $PublicKey, $MacAddress, $Config)
+        $script:capturedSeedMac = $MacAddress
+        if ((Get-RunnerState).guestMac -cne $script:seedAdapter.MacAddress) { throw 'Seed was built before static MAC journaling.' }
+    }
+    Write-RunnerJson $script:RunnerStatePath $creating
+    $name = $validName; $instance = $validInstance; $key = 'dummy public key'; $Config = [pscustomobject]@{}
+    $sessionDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $true)
+    $segmentStart = $sessionDefinition.Extent.Text.IndexOf('$guestMac = Set-RunnerGuestMac')
+    $segmentEnd = $sessionDefinition.Extent.Text.IndexOf('$script:RunnerOperationStage = ''network-isolation''')
+    & ([scriptblock]::Create($sessionDefinition.Extent.Text.Substring($segmentStart, $segmentEnd - $segmentStart)))
+    if ($script:capturedSeedMac -cnotmatch '^02(:[0-9a-f]{2}){5}$' -or
+        ($script:capturedSeedMac.Replace(':', '').ToUpperInvariant()) -cne (Get-RunnerState).guestMac) {
+        throw 'NoCloud seed did not use the assigned exact static MAC.'
+    }
+    $macChecks = @($sessionDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Assert-RunnerGuestMac' }, $true))
+    $bootCall = $sessionDefinition.Find({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Start-GuardedVm' }, $true)
+    if ($macChecks.Count -ne 3 -or $macChecks[0].Extent.StartOffset -ge $bootCall.Extent.StartOffset -or
+        $macChecks[1].Extent.StartOffset -le $bootCall.Extent.StartOffset -or
+        $macChecks[2].Extent.StartOffset -le $macChecks[1].Extent.StartOffset) { throw 'Static MAC is not checked around boot and before JIT.' }
+    Set-Item -Path Function:\New-SeedDisk -Value $realSeedWriter
+    Remove-Item -LiteralPath $script:RunnerStatePath -Force
+
     # Route/address drift is fatal even during work blocked in another process.
     $script:fakeAddresses = @(
         [pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = '192.0.2.1'; PrefixLength = 24; InterfaceIndex = 7 },
@@ -543,9 +586,12 @@ public class ArgvSink {
     Write-RunnerJson $script:RunnerStatePath $networkState
     $readyName = 'Local\ITIR-guard-test-' + [guid]::NewGuid().ToString('N')
     $ready = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $readyName)
-    $guardJob = Start-Job -ArgumentList $PSScriptRoot, $testRoot, $validName, $readyName -ScriptBlock {
-        param($source, $root, $name, $eventName)
+    $guardJob = Start-Job -ArgumentList $PSScriptRoot, $testRoot, $validName, $readyName, $script:contractLockPrefix -ScriptBlock {
+        param($source, $root, $name, $eventName, $lockPrefix)
         . (Join-Path $source 'Common.ps1')
+        $script:guardEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
+        $script:guardLockName = $lockPrefix + '-state'
+        function Enter-RunnerLock { return & $script:guardEnterLock $script:guardLockName }
         $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'Runner.ps1'), [ref]$null, [ref]$null)
         $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-GuardCheck' }, $true)
@@ -589,6 +635,7 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
     $menuAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'SetupMenu.ps1'), [ref]$null, [ref]$null)
     $menuSwitch = $menuAst.Find({ param($node) $node -is [Management.Automation.Language.SwitchStatementAst] }, $true)
     function Read-Host { return ('a' * 40) }
+    function Assert-RunnerBundleCurrent { param($SourceRoot) }
     foreach ($choice in @('5', '6')) {
         $clause = @($menuSwitch.Clauses | Where-Object { $_.Item1.Value -eq $choice })[0].Item2
         $control = [scriptblock]::Create($clause.Extent.Text.Substring(1, $clause.Extent.Text.Length - 2))

@@ -441,6 +441,88 @@ function Assert-SecureRoot {
 
 function Get-RunnerState { return Read-RunnerJson $script:RunnerStatePath }
 
+function Get-RunnerBytesHash([byte[]] $Bytes) {
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hash.ComputeHash($Bytes))).Replace('-', '') }
+    finally { $hash.Dispose() }
+}
+
+function Get-RunnerFileEvidence([string] $Path) {
+    $Path = Assert-OwnedPath $Path
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ exists = $false; hash = ''; content = '' } }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    return [pscustomobject]@{ exists = $true; hash = Get-RunnerBytesHash $bytes; content = [Convert]::ToBase64String($bytes) }
+}
+
+function Get-RunnerEvidenceValue($Evidence) {
+    if (-not $Evidence.exists) { return $null }
+    $bytes = [Convert]::FromBase64String($Evidence.content)
+    if ((Get-RunnerBytesHash $bytes) -cne $Evidence.hash) { throw 'Transition evidence content/hash mismatch.' }
+    return [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xfeff) | ConvertFrom-Json
+}
+
+function Test-RunnerEvidence([string] $Path, $Evidence) {
+    $actual = Get-RunnerFileEvidence $Path
+    return $actual.exists -eq $Evidence.exists -and $actual.hash -ceq $Evidence.hash
+}
+
+function Write-RunnerBytes([string] $Path, [byte[]] $Bytes) {
+    $Path = Assert-OwnedPath $Path
+    $temporary = Assert-OwnedPath ($Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $backup = Assert-OwnedPath ($Path + '.' + [guid]::NewGuid().ToString('N') + '.bak')
+    try {
+        [IO.File]::WriteAllBytes($temporary, $Bytes)
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $backup) }
+        else { [IO.File]::Move($temporary, $Path) }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
+    }
+}
+
+function Get-RunnerJsonEvidence($Value) {
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes((ConvertTo-Json -InputObject $Value -Depth 10 -Compress))
+    return [pscustomobject]@{ exists = $true; hash = Get-RunnerBytesHash $bytes; content = [Convert]::ToBase64String($bytes) }
+}
+
+function Write-RunnerEvidence([string] $Path, $Evidence) {
+    [void](Get-RunnerEvidenceValue $Evidence)
+    if (-not $Evidence.exists) { throw 'Cannot write absent transition evidence.' }
+    Write-RunnerBytes $Path ([Convert]::FromBase64String($Evidence.content))
+    if (-not (Test-RunnerEvidence $Path $Evidence)) { throw 'Transition evidence readback failed.' }
+}
+
+function Assert-RunnerTransitionClear {
+    foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
+        $record = Read-RunnerJson (Assert-OwnedPath (Join-Path $script:RunnerRoot $name))
+        if ($null -ne $record -and ($record.tag -cne $script:RunnerTag -or $record.phase -cne 'complete')) {
+            throw 'A pending or invalid lifecycle journal blocks pickup/activation; explicitly resume the recorded operation.'
+        }
+    }
+}
+
+function Assert-RunnerControlIdle {
+    if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -eq 'Running' -or
+        (Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        throw 'Lifecycle control requires a stopped supervisor and no session or owned-prefix VM.'
+    }
+}
+
+function Assert-RunnerProtectedPath([string] $Path) {
+    [void](Assert-OwnedPath $Path)
+    $acl = Get-Acl -LiteralPath $Path
+    $allowed = @('S-1-5-18', 'S-1-5-32-544')
+    if ($allowed -notcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Installed path owner is unexpected.' }
+    foreach ($rule in $acl.Access) {
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($rule.AccessControlType -eq 'Allow' -and $allowed -notcontains $sid) { throw 'Installed path grants unexpected access.' }
+    }
+}
+
+# Offline tests inject interruption here; production has no environment switch
+# or callback that can change transition behavior.
+function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
+
 function Assert-StateIdentity($State) {
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'
