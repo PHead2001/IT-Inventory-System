@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 import { confirmationSchema, passwordSchema } from './schemas';
 import { isActiveMember, mayMutateInventory } from './membership';
 const mocks = vi.hoisted(() => ({
@@ -55,7 +56,10 @@ beforeEach(() => {
     select: () => ({ eq: () => ({ maybeSingle: mocks.member }) }),
   });
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 describe('auth boundaries', () => {
   it.each([
     [
@@ -143,6 +147,54 @@ describe('auth boundaries', () => {
         }),
       ),
     ).rejects.toThrow('REDIRECT:/inventory');
+  });
+  it('emits only fixed login spans and preserves the authorized redirect when enabled', async () => {
+    vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await expect(
+      login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).rejects.toThrow('REDIRECT:/inventory');
+    const events = info.mock.calls.map(([line]) =>
+      JSON.parse(String(line).slice('AUTH_DIAGNOSTIC '.length)),
+    );
+    expect(events.map((event) => event.stage)).toEqual([
+      'login.client',
+      'login.credentials',
+      'login.getUser',
+      'login.membership',
+      'login.total',
+    ]);
+    expect(new Set(events.map((event) => event.correlation)).size).toBe(1);
+    expect(info.mock.calls.flat().join(' ')).not.toContain(
+      'staff@example.test',
+    );
+  });
+  it('does not let a diagnostic logging failure change denial or credential errors', async () => {
+    vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('observer failed');
+    });
+    mocks.member.mockResolvedValue({ data: null, error: null });
+    await expect(
+      login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).rejects.toThrow('REDIRECT:/access-denied');
+    mocks.signInWithPassword.mockResolvedValue({
+      error: { message: 'secret internal detail' },
+    });
+    expect(
+      await login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).toEqual({ error: 'Unable to sign in. Check your email and password.' });
   });
   it('returns to a validated label only after checking current membership', async () => {
     await expect(
