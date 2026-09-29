@@ -535,9 +535,21 @@ it('requires acknowledgement when Code 128 falls back to QR', async () => {
   fireEvent.change(screen.getByRole('combobox', { name: 'Code' }), {
     target: { value: 'code128' },
   });
+  const fallback = await screen.findByRole('alert');
+  expect(fallback).toHaveTextContent(
+    'queued record(s) will use stable QR links',
+  );
+  expect(fallback).toHaveTextContent('Long barcodes that do not fit');
+  expect(screen.queryByText(/Some labels will use QR because/)).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Acknowledge QR fallback' }),
+  ).toBeInTheDocument();
   fireEvent.click(
     await screen.findByRole('button', { name: 'Acknowledge QR fallback' }),
   );
+  expect(
+    screen.queryByRole('button', { name: 'Acknowledge QR fallback' }),
+  ).toBeNull();
   fireEvent.click(printButton());
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
 });

@@ -946,12 +946,34 @@ export function LabelDesigner({
           size / 100%. Code 128 asset tags require reprinting if the tag
           changes.
         </p>
-        {job.format === 'code128' && fallbackCount > 0 && (
-          <p className={styles.warning}>
-            {fallbackCount} queued record(s) will use stable QR links because
-            quantity items have no Code 128 identity or an asset tag is
-            absent/incompatible. Long barcodes that do not fit also use QR.
-          </p>
+        {job.format === 'code128' && (fallbackCount > 0 || fallbackPending) && (
+          <div
+            role={fallbackPending ? 'alert' : undefined}
+            className={styles.warning}
+          >
+            <p>
+              {fallbackCount > 0
+                ? `${fallbackCount} queued record(s) will use stable QR links because quantity items have no Code 128 identity or an asset tag is absent/incompatible. `
+                : 'Some labels will use stable QR links because Code 128 is unavailable. '}
+              Long barcodes that do not fit at a readable size also use QR.
+            </p>
+            {fallbackPending && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setFormatAcknowledged(true);
+                  setFallbackPending(false);
+                  setMessage(
+                    'QR fallback acknowledged. Print again to run the final inventory check.',
+                  );
+                }}
+                className={styles.secondaryButton}
+              >
+                Acknowledge QR fallback
+              </button>
+            )}
+          </div>
         )}
         {unavailable.length > 0 && (
           <p role="alert" className={styles.error}>
@@ -978,28 +1000,6 @@ export function LabelDesigner({
               className={styles.secondaryButton}
             >
               Acknowledge changes
-            </button>
-          </div>
-        )}
-        {fallbackPending && (
-          <div role="alert" className={styles.warning}>
-            <p>
-              Some labels will use QR because Code 128 is unavailable or will
-              not fit at readable size.
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setFormatAcknowledged(true);
-                setFallbackPending(false);
-                setMessage(
-                  'QR fallback acknowledged. Print again to run the final inventory check.',
-                );
-              }}
-              className={styles.secondaryButton}
-            >
-              Acknowledge QR fallback
             </button>
           </div>
         )}
