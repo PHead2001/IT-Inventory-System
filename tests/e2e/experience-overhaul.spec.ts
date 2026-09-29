@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { PNG } from 'pngjs';
 import {
@@ -11,6 +11,53 @@ import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 
 test.use({ deviceScaleFactor: 2 });
+
+type CameraSnapshot = {
+  position: [number, number, number];
+  target: [number, number, number];
+  zoom: number;
+  mode: 'guided' | 'free';
+};
+
+function parseCameraSnapshot(raw: string | null): CameraSnapshot | null {
+  if (!raw || raw === 'null') return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object') return null;
+    const view = value as Partial<CameraSnapshot>;
+    const vector = (value: unknown): value is [number, number, number] =>
+      Array.isArray(value) &&
+      value.length === 3 &&
+      value.every(
+        (number) => typeof number === 'number' && Number.isFinite(number),
+      );
+    if (
+      !vector(view.position) ||
+      !vector(view.target) ||
+      typeof view.zoom !== 'number' ||
+      !Number.isFinite(view.zoom) ||
+      view.zoom <= 0 ||
+      (view.mode !== 'guided' && view.mode !== 'free')
+    )
+      return null;
+    return view as CameraSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+async function readyCameraSnapshot(viewer: Locator): Promise<CameraSnapshot> {
+  let snapshot: CameraSnapshot | null = null;
+  await expect
+    .poll(async () => {
+      snapshot = parseCameraSnapshot(
+        await viewer.getAttribute('data-camera-view'),
+      );
+      return snapshot !== null;
+    })
+    .toBe(true);
+  return snapshot!;
+}
 
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -730,41 +777,31 @@ test('a user camera pan is restored after leaving and returning to the modeled s
   await page.goto('/room?space=it-closet');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer.locator('canvas')).toBeVisible();
-  await expect
-    .poll(() => viewer.getAttribute('data-camera-view'))
-    .not.toBe('null');
-  const original = await viewer.getAttribute('data-camera-view');
-  const initialTarget = JSON.stringify(JSON.parse(original!).target);
+  const original = await readyCameraSnapshot(viewer);
+  const initialTarget = JSON.stringify(original.target);
   await viewer.getByRole('button', { name: 'Free Orbit' }).click();
   await viewer.getByText('Pan and rotate').click();
   await viewer.getByRole('button', { name: 'Pan left' }).click();
+  const movement: { snapshot: CameraSnapshot | null } = { snapshot: null };
   await expect
     .poll(async () => {
-      const state = await viewer.getAttribute('data-camera-view');
-      return state && state !== 'null'
-        ? JSON.stringify(JSON.parse(state).target)
-        : null;
+      movement.snapshot = parseCameraSnapshot(
+        await viewer.getAttribute('data-camera-view'),
+      );
+      return (
+        movement.snapshot !== null &&
+        JSON.stringify(movement.snapshot.target) !== initialTarget
+      );
     })
-    .not.toBe(initialTarget);
-  const moved = JSON.parse(
-    (await viewer.getAttribute('data-camera-view'))!,
-  ) as {
-    position: number[];
-    target: number[];
-    zoom: number;
-    mode: string;
-  };
+    .toBe(true);
+  const moved = movement.snapshot;
+  if (!moved) throw new Error('Panned camera snapshot unavailable');
   expect(moved.mode).toBe('free');
   await page.getByLabel('Space', { exact: true }).selectOption('it-office');
   await expect(viewer).toHaveCount(0);
   await page.getByLabel('Space', { exact: true }).selectOption('it-closet');
   await expect(viewer.locator('canvas')).toBeVisible();
-  await expect
-    .poll(() => viewer.getAttribute('data-camera-view'))
-    .not.toBe('null');
-  const restored = JSON.parse(
-    (await viewer.getAttribute('data-camera-view'))!,
-  ) as typeof moved;
+  const restored = await readyCameraSnapshot(viewer);
   expect(restored.mode).toBe(moved.mode);
   expect(restored.zoom).toBeCloseTo(moved.zoom, 3);
   for (const key of ['position', 'target'] as const)
@@ -783,20 +820,12 @@ test('Back into a selected modeled space focuses from its saved camera baseline'
   const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
   await toolbar.locator('summary').click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
-  const displaced = JSON.parse(
-    (await viewer.getAttribute('data-camera-view'))!,
-  ) as {
-    target: number[];
-  };
+  const displaced = await readyCameraSnapshot(viewer);
   await page.getByLabel('Space', { exact: true }).selectOption('it-office');
   await expect(viewer).toHaveCount(0);
   await page.goBack();
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
-  const focused = JSON.parse(
-    (await viewer.getAttribute('data-camera-view'))!,
-  ) as {
-    target: number[];
-  };
+  const focused = await readyCameraSnapshot(viewer);
   expect(focused.target).not.toEqual(displaced.target);
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
 });
@@ -813,8 +842,8 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await expect(
     viewer.getByRole('button', { name: 'Center selected' }),
   ).toBeEnabled();
-  const view = async () => viewer.getAttribute('data-camera-view');
-  await expect.poll(view).not.toBe('null');
+  const view = async () => JSON.stringify(await readyCameraSnapshot(viewer));
+  await readyCameraSnapshot(viewer);
   await viewer.getByText('Pan and rotate').click();
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const panned = await view();
@@ -888,12 +917,9 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).not.toBe(osPan);
   await viewer.getByRole('button', { name: 'Free Orbit' }).click();
-  const beforeZoom = JSON.parse((await view())!).zoom as number;
+  const beforeZoom = (await readyCameraSnapshot(viewer)).zoom;
   await viewer.getByRole('button', { name: 'Zoom in' }).click();
-  const manualView = JSON.parse((await view())!) as {
-    zoom: number;
-    mode: string;
-  };
+  const manualView = await readyCameraSnapshot(viewer);
   expect(manualView.mode).toBe('free');
   expect(manualView.zoom).toBeGreaterThan(beforeZoom);
 });
