@@ -9,7 +9,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -304,4 +304,135 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   ).toBeVisible();
   await saveDesigner(designer);
   await retainedValue();
+
+  designer = await openDesigner(page, category);
+  const library = designer.getByTestId('designer-library');
+  await library.getByText(/Hidden & unplaced/).click();
+  await expect(
+    library.getByRole('heading', {
+      name: /Unplaced fields and standard controls \([1-9]/,
+    }),
+  ).toBeVisible();
+  await library.getByRole('button', { name: `Place ${fieldName}` }).click();
+  await expect(fieldControl(designer, fieldName)).toHaveCount(1);
+  await saveDesigner(designer);
+  await retainedValue();
+  designer = await openDesigner(page, category);
+  await expect(fieldControl(designer, fieldName)).toHaveCount(1);
+  await page.goto(`/inventory/quantity/${itemId}`);
+  const placedEdit = page.getByRole('form', { name: 'Edit quantity metadata' });
+  if (!(await placedEdit.isVisible()))
+    await page
+      .locator('summary')
+      .filter({ hasText: 'Edit quantity metadata' })
+      .click();
+  await expect(placedEdit.getByLabel(fieldName)).toHaveValue(value);
+});
+
+test('hidden sections and preview exclusions remain distinct through save and reload', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  let designer = await openDesigner(page, category);
+  await designer.getByLabel('New field type').selectOption('short_text');
+  await designer.getByRole('button', { name: 'Add field' }).click();
+  await designer.getByLabel('Label', { exact: true }).fill('Quantity note');
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const section = designer.locator('[data-section-id]').last();
+  await section.getByLabel('Section heading').fill('Quantity details');
+  const control = fieldControl(designer, 'Quantity note');
+  await openLayout(control);
+  await control.getByLabel('Applies to Quantity note').selectOption('quantity');
+  await control
+    .getByLabel('Section')
+    .selectOption({ label: 'Quantity details' });
+  await section.getByText('Section options').click();
+  await section
+    .getByLabel('Applies to Quantity details')
+    .selectOption('quantity');
+  await designer
+    .getByText(/Live preview · open quantity or asset form/)
+    .click();
+  await designer.getByRole('button', { name: 'Asset', exact: true }).click();
+  const library = designer.getByTestId('designer-library');
+  await library.getByText(/Hidden & unplaced/).click();
+  await expect(
+    library.getByRole('heading', {
+      name: /Excluded from Serialized preview \([1-9]/,
+    }),
+  ).toBeVisible();
+  await expect(
+    library.getByText(/Quantity note in Quantity details/),
+  ).toBeVisible();
+  await expect(library.getByText('Hidden sections (0)')).toBeVisible();
+  await section.getByRole('checkbox', { name: 'Show section' }).uncheck();
+  await expect(library.getByText('Hidden sections (1)')).toBeVisible();
+  await expect(library.getByText('Hidden controls (0)')).toBeVisible();
+  await expect(
+    library.getByText(/Quantity note in Quantity details/),
+  ).toHaveCount(0);
+  await saveDesigner(designer);
+
+  designer = await openDesigner(page, category);
+  const reloadedLibrary = designer.getByTestId('designer-library');
+  await reloadedLibrary.getByText(/Hidden & unplaced/).click();
+  await expect(reloadedLibrary.getByText('Hidden sections (1)')).toBeVisible();
+  await reloadedLibrary
+    .getByRole('button', { name: 'Restore section Quantity details' })
+    .click();
+  await expect(reloadedLibrary.getByText('Hidden sections (0)')).toBeVisible();
+  await saveDesigner(designer);
+  designer = await openDesigner(page, category);
+  await expect(
+    designer.locator('[data-section-id]').last().getByRole('checkbox', {
+      name: 'Show section',
+    }),
+  ).toBeChecked();
+});
+
+test('duplicate section names use distinct UUID destinations and removal can be undone', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  const designer = await openDesigner(page, category);
+  const initialSectionCount = await designer
+    .locator('[data-section-id]')
+    .count();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const sections = designer.locator('[data-section-id]');
+  const first = sections.nth(initialSectionCount);
+  const second = sections.nth(initialSectionCount + 1);
+  await first.getByLabel('Section heading').fill('Duplicate details');
+  await second.getByLabel('Section heading').fill('Duplicate details');
+  const firstId = await first.getAttribute('data-section-id');
+  const secondId = await second.getAttribute('data-section-id');
+  expect(firstId).toBeTruthy();
+  expect(secondId).toBeTruthy();
+  expect(firstId).not.toBe(secondId);
+  await first.getByText('Section options').click();
+  await first.getByRole('button', { name: 'Remove section' }).click();
+  let dialog = designer.getByRole('dialog', {
+    name: 'Remove Duplicate details?',
+  });
+  await expect(
+    dialog.getByRole('option', {
+      name: `Duplicate details · ${secondId!.slice(-8)}`,
+    }),
+  ).toHaveAttribute('value', secondId!);
+  await dialog.getByLabel('Destination').selectOption(secondId!);
+  await expect(dialog.getByLabel('Destination')).toHaveValue(secondId!);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 2);
+  await first.getByRole('button', { name: 'Remove section' }).click();
+  dialog = designer.getByRole('dialog', { name: 'Remove Duplicate details?' });
+  await dialog.getByLabel('Destination').selectOption(secondId!);
+  await dialog.getByRole('button', { name: 'Remove section' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 1);
+  await designer.getByRole('button', { name: 'Undo edit' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 2);
+  await expect(first).toHaveAttribute('data-section-id', firstId!);
+  await expect(second).toHaveAttribute('data-section-id', secondId!);
 });

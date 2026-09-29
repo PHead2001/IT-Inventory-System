@@ -77,7 +77,7 @@ for (const role of ['staff', 'viewer'] as const)
     async ({ page }) => {
       await signIn(page, fixtureEmails[role]);
       await expect(
-        page.getByRole('heading', { name: 'Inventory workspace' }),
+        page.getByRole('heading', { name: 'Inventory', exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole('form', { name: 'Search inventory' }),
@@ -107,7 +107,7 @@ test('existing session loses access immediately after membership deactivation', 
 }) => {
   await signIn(page, fixtureEmails.staff);
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   const client = admin();
   const listed = await client.auth.admin.listUsers();
@@ -134,7 +134,7 @@ test('phone navigation remains usable and has no horizontal overflow', async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page, fixtureEmails.viewer);
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   const width = await page.evaluate(() => ({
     viewport: window.innerWidth,
@@ -236,14 +236,14 @@ test('recovery email returns to the requesting deployment and changes the passwo
   await page.getByLabel('Confirm password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Set password' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.getByLabel('Email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 });
 

@@ -65,7 +65,7 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -657,7 +657,7 @@ test('account switch during a held designer gesture permanently masks the old pr
     await other.getByLabel('Password', { exact: true }).fill(fixture.password);
     await other.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(
-      other.getByRole('heading', { name: 'Inventory workspace' }),
+      other.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -851,7 +851,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
     await viewer.getAttribute('data-focus-count'),
   );
   await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await page.getByRole('button', { name: 'Reduce motion locally' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await expect
     .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
@@ -864,7 +864,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).toBe(settled);
 
-  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await page.getByRole('button', { name: 'Use system motion setting' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();

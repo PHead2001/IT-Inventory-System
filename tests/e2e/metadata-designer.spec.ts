@@ -10,7 +10,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -46,7 +46,7 @@ test('an account switch in another tab masks the old designer on focus', async (
     await other.getByLabel('Password', { exact: true }).fill(fixture.password);
     await other.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(
-      other.getByRole('heading', { name: 'Inventory workspace' }),
+      other.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));

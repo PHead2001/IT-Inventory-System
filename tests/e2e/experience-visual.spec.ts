@@ -7,7 +7,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -132,7 +132,9 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   await page.screenshot({
     path: testInfo.outputPath('overview-phone-390-viewport.png'),
   });
-  const motionToggle = page.getByRole('button', { name: 'Reduce motion' });
+  const motionToggle = page.getByRole('button', {
+    name: 'Reduce motion locally',
+  });
   await expect(motionToggle).toBeVisible();
   const motionBounds = await motionToggle.boundingBox();
   const headingBounds = await page
@@ -207,18 +209,18 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('asset-detail-edit-open-phone-390.png'),
     fullPage: true,
   });
-  const motion = page.getByRole('button', { name: 'Reduce motion' });
+  const motion = page.getByRole('button', { name: 'Reduce motion locally' });
   await expect(
     page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
   ).resolves.toBe(true);
   await motion.click();
   await expect(
-    page.getByRole('button', { name: 'Reduce motion' }),
+    page.getByRole('button', { name: 'Use system motion setting' }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await page.getByRole('button', { name: 'Use system motion setting' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
@@ -300,7 +302,9 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         saved ? 'reduced' : 'full',
       );
       await expect(
-        probe.getByRole('button', { name: 'Reduce motion' }),
+        probe.getByRole('button', {
+          name: saved ? 'Use system motion setting' : 'Reduce motion locally',
+        }),
       ).toHaveAttribute('aria-pressed', String(saved));
     } finally {
       release();
@@ -327,7 +331,9 @@ test('desktop navigation and motion control stay separate and operable after lon
     const settings = page
       .getByRole('navigation', { name: 'Main navigation' })
       .getByRole('link', { name: 'Settings' });
-    const toggle = page.getByRole('button', { name: 'Reduce motion' });
+    const toggle = page.getByRole('button', {
+      name: 'Reduce motion locally',
+    });
     const settingsBox = await settings.boundingBox();
     const toggleBox = await toggle.boundingBox();
     expect(settingsBox).toBeTruthy();
@@ -774,7 +780,7 @@ test('configuration and inventory creation surfaces render at desktop and phone 
       const panels = page.getByRole('navigation', { name: 'Designer panels' });
       await panels.getByRole('button', { name: 'Library' }).click();
       await expect(
-        page.getByRole('heading', { name: 'Hidden controls' }),
+        page.getByRole('heading', { name: 'Field library' }),
       ).toBeVisible();
       await noHorizontalOverflow(page);
       await page.screenshot({
