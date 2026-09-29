@@ -6,6 +6,14 @@ these changes; existing inventory, custody, private-file, history and release
 invariants remain in force. This document records decisions and coverage, not a
 claim that unfinished work is implemented.
 
+Historical status (2026-09-29): this document preserves the PR 22/23 overhaul
+contract and its then-current evidence and open-work notes. Those PRs subsequently
+landed on main at `b08906a634a338171f3926f8aa3689a1f590409d`, including the
+previous drag and camera corrections. The separate, still-in-progress completion
+milestone and its current acceptance evidence are tracked in
+[Experience completion](experience-completion.md); the historical pending items
+below are not a claim about that newer branch or its final readiness.
+
 ## Delivery and visual direction
 
 Use `feat/inventory-experience-overhaul`, with one PR targeting main. Functional,
