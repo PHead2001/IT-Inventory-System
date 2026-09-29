@@ -3,6 +3,8 @@ import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import JsBarcode from 'jsbarcode';
+import { motion } from 'motion/react';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { barcodeCompatibleTag } from '@/features/scan/targets';
 
 const qrCache = new Map<string, Promise<string>>();
@@ -101,6 +103,8 @@ export function LabelSheet({
   generation: string;
 }) {
   const [width, height] = size.split('x').map(Number);
+  const reducedMotion = useEffectiveReducedMotion();
+  const copyOrdinals = new Map<string, number>();
   return (
     <>
       <style>{`@page { size: ${page}; margin: 8mm; background: #fff; }
@@ -115,6 +119,7 @@ export function LabelSheet({
       .label-print-root .label-card { border: 0.2mm solid #222; }
       .label-print-root .label-card, .label-print-root .label-card * { color: black !important; background: white !important; }
       .label-print-root .label-card { break-inside: avoid; page-break-inside: avoid; }
+      .label-print-root .label-preview-item { transform: none !important; opacity: 1 !important; break-inside: avoid; page-break-inside: avoid; }
       .label-print-root .label-card * { animation: none !important; transition: none !important; }
     }`}</style>
       <div
@@ -122,30 +127,31 @@ export function LabelSheet({
         aria-label="Print preview"
         data-sheet-generation={generation}
       >
-        {records.map((record, index) => (
-          <LabelCard
-            key={[
-              record.kind,
-              record.key,
-              index,
-              size,
-              record.name,
-              record.categoryName,
-              record.manufacturer,
-              record.model,
-              record.serialNumber,
-              record.locationHierarchy,
-              record.humanId,
-            ].join(':')}
-            record={record}
-            origin={origin}
-            preview={preview}
-            width={width}
-            height={height}
-            format={format}
-            generation={generation}
-          />
-        ))}
+        {records.map((record) => {
+          const identity = JSON.stringify([record.kind, record.key]);
+          const ordinal = copyOrdinals.get(identity) ?? 0;
+          copyOrdinals.set(identity, ordinal + 1);
+          return (
+            <motion.div
+              key={JSON.stringify([identity, ordinal])}
+              className="label-preview-item"
+              layout={!reducedMotion}
+              initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reducedMotion ? 0 : 0.2 }}
+            >
+              <LabelCard
+                record={record}
+                origin={origin}
+                preview={preview}
+                width={width}
+                height={height}
+                format={format}
+                generation={generation}
+              />
+            </motion.div>
+          );
+        })}
       </div>
     </>
   );

@@ -60,7 +60,7 @@ describe('workspace navigation', () => {
     const stack = navigation.parentElement;
     expect(stack).toHaveClass('experience-nav-stack');
     expect(stack).toContainElement(
-      screen.getByRole('button', { name: 'Reduce motion' }),
+      screen.getByRole('button', { name: 'Reduce motion locally' }),
     );
     expect(stack).toContainElement(
       screen.getByRole('button', { name: 'Menu' }),
@@ -73,11 +73,13 @@ describe('workspace navigation', () => {
     const menu = screen.getByRole('button', { name: 'Menu' });
     expect(menu).toHaveAttribute('aria-expanded', 'false');
     expect(
-      screen.getAllByRole('button', { name: 'Reduce motion' }),
+      screen.getAllByRole('button', { name: 'Reduce motion locally' }),
     ).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: 'Reduce motion' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Reduce motion locally' }),
+    );
     expect(
-      screen.getByRole('button', { name: 'Reduce motion' }),
+      screen.getByRole('button', { name: 'Use system motion setting' }),
     ).toHaveAttribute('aria-pressed', 'true');
     await user.click(menu);
     expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute(

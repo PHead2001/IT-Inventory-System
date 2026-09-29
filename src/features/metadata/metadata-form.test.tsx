@@ -139,6 +139,62 @@ describe('published metadata form', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Item code (SKU)')).toBeInTheDocument();
   });
+  it('shows optional asset identifiers only on serialized forms and quantity identifiers only on quantity forms', () => {
+    const current = form();
+    current.published_definition.layout[0].controls.push(
+      {
+        id: '00000000-0000-4000-8000-000000000031',
+        kind: 'builtin',
+        builtin: 'asset_tag',
+        width: 12,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000032',
+        kind: 'builtin',
+        builtin: 'serial_number',
+        width: 12,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000033',
+        kind: 'builtin',
+        builtin: 'item_code',
+        width: 12,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000034',
+        kind: 'builtin',
+        builtin: 'reorder_threshold',
+        width: 12,
+      },
+    );
+    const { unmount } = render(
+      <MetadataFormPreview
+        kind="asset"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(screen.getByLabelText('Asset tag')).toHaveValue('');
+    expect(screen.getByLabelText('Serial number')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Item code (SKU)')).toBeNull();
+    expect(screen.queryByLabelText('Reorder threshold (optional)')).toBeNull();
+    unmount();
+    render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(screen.getByLabelText('Item code (SKU)')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Reorder threshold (optional)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Asset tag')).toBeNull();
+    expect(screen.queryByLabelText('Serial number')).toBeNull();
+  });
   it('previews live controls in order without submitting inventory', () => {
     const { container } = render(
       <MetadataFormPreview
@@ -295,6 +351,22 @@ describe('published metadata form', () => {
         false,
       ),
     ).toEqual({ set: { [sectionId]: 0 }, unset: [] });
+    const hiddenSection = {
+      ...definition,
+      layout: definition.layout.map((section) => ({
+        ...section,
+        visible: false,
+      })),
+    };
+    expect(
+      buildCustomPatch(
+        hiddenSection,
+        'quantity',
+        { [fieldId]: false },
+        [fieldId],
+        false,
+      ),
+    ).toEqual({ set: {}, unset: [] });
   });
   it('records an opening site assignment with the same published custom form and no fictional storage source', async () => {
     vi.mocked(submitCustody).mockResolvedValue({

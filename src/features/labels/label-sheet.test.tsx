@@ -8,6 +8,84 @@ vi.mock('qrcode', () => ({
 }));
 import { LabelSheet, barcodePayload } from './label-sheet';
 
+it('reflows a resized preview without remounting its QR image or changing printable identity', async () => {
+  const record = {
+    kind: 'quantity' as const,
+    key: '7b84a7cf-197b-45b1-8016-87482d124cb4',
+    name: '3FT adapter',
+    humanId: '00124',
+    path: '/inventory/quantity/7b84a7cf-197b-45b1-8016-87482d124cb4',
+  };
+  const props = {
+    records: [record],
+    origin: 'https://inventory.example.test',
+    preview: false,
+    page: 'letter' as const,
+    format: 'qr' as const,
+  };
+  const view = render(
+    <LabelSheet {...props} size="70x35" generation="small" />,
+  );
+  await waitFor(() =>
+    expect(document.querySelector('.label-card')).toHaveAttribute(
+      'data-code-ready',
+      'true',
+    ),
+  );
+  const card = document.querySelector('.label-card');
+  const qr = screen.getByRole('img', { name: 'QR code for 3FT adapter' });
+  view.rerender(<LabelSheet {...props} size="90x50" generation="large" />);
+  expect(document.querySelector('.label-card')).toBe(card);
+  expect(screen.getByRole('img', { name: 'QR code for 3FT adapter' })).toBe(qr);
+  expect((card as HTMLElement).style.width).toBe('90mm');
+  expect((card as HTMLElement).style.height).toBe('50mm');
+  expect(card).toHaveTextContent('Item code: 00124');
+  await waitFor(() => expect(card).toHaveAttribute('data-code-ready', 'true'));
+});
+
+it('retains later record images across earlier queue inserts, removals, reorders and copy changes', async () => {
+  const rows = ['A', 'B', 'C'].map((name) => ({
+    kind: 'quantity' as const,
+    key: `key-${name}`,
+    name,
+    path: `/inventory/quantity/${name}`,
+  }));
+  const props = {
+    origin: 'https://inventory.example.test',
+    preview: false,
+    size: '90x50' as const,
+    page: 'letter' as const,
+    format: 'qr' as const,
+    generation: 'same',
+  };
+  const view = render(<LabelSheet {...props} records={rows} />);
+  await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(3));
+  const b = screen.getByRole('img', { name: 'QR code for B' });
+  const c = screen.getByRole('img', { name: 'QR code for C' });
+  const added = {
+    ...rows[0],
+    key: 'key-D',
+    name: 'D',
+    path: '/inventory/quantity/D',
+  };
+  view.rerender(<LabelSheet {...props} records={[added, ...rows]} />);
+  expect(screen.getByRole('img', { name: 'QR code for B' })).toBe(b);
+  expect(screen.getByRole('img', { name: 'QR code for C' })).toBe(c);
+  view.rerender(
+    <LabelSheet {...props} records={[rows[2], rows[0], rows[0], rows[1]]} />,
+  );
+  expect(screen.getByRole('img', { name: 'QR code for B' })).toBe(b);
+  expect(screen.getByRole('img', { name: 'QR code for C' })).toBe(c);
+  await waitFor(() =>
+    expect(screen.getAllByRole('img', { name: 'QR code for A' })).toHaveLength(
+      2,
+    ),
+  );
+  view.rerender(<LabelSheet {...props} records={[rows[1], rows[2]]} />);
+  expect(screen.getByRole('img', { name: 'QR code for B' })).toBe(b);
+  expect(screen.getByRole('img', { name: 'QR code for C' })).toBe(c);
+});
+
 it('does not reuse a previous QR while the same card identity receives a new path', async () => {
   const id = crypto.randomUUID();
   const record = {

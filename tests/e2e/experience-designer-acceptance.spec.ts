@@ -137,10 +137,6 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   const initialSectionCount = await designer
     .locator('[data-section-id]')
     .count();
-  const firstHeading = await designer
-    .getByLabel('Section heading')
-    .first()
-    .inputValue();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Retirable fields');
   let control = fieldControl(designer, fieldName);
@@ -223,15 +219,16 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
 
   designer = await openDesigner(page, category);
   let section = designer.locator('[data-section-id]').last();
+  await fieldControl(designer, fieldName).click();
   await expect(
     section.getByRole('button', { name: `Drag ${fieldName}` }),
   ).toBeVisible();
   await section.getByText('Section options').click();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('Move 1 controls');
-    await dialog.accept(firstHeading);
-  });
   await section.getByRole('button', { name: 'Remove section' }).click();
+  let removal = designer.getByRole('dialog', {
+    name: 'Remove Retirable fields?',
+  });
+  await removal.getByRole('button', { name: 'Remove section' }).click();
   await expect(designer.locator('[data-section-id]')).toHaveCount(
     initialSectionCount,
   );
@@ -239,8 +236,8 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
     designer
       .locator('[data-section-id]')
       .first()
-      .getByRole('button', { name: `Drag ${fieldName}` }),
-  ).toBeVisible();
+      .locator(`[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`),
+  ).toHaveCount(1);
   await saveDesigner(designer);
   await retainedValue();
 
@@ -260,6 +257,7 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await expect(edit.getByLabel(fieldName)).toHaveCount(0);
 
   designer = await openDesigner(page, category);
+  await designer.getByText(/Hidden & unplaced/).click();
   await designer.getByRole('button', { name: `Restore ${fieldName}` }).click();
   await saveDesigner(designer);
   await retainedValue();
@@ -286,15 +284,17 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
     .getByLabel('Section')
     .selectOption({ label: 'Temporary placement' });
   section = designer.locator('[data-section-id]').last();
+  await fieldControl(designer, fieldName).click();
   await expect(
     section.getByRole('button', { name: `Drag ${fieldName}` }),
   ).toBeVisible();
   await section.getByText('Section options').click();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('remove custom field placements');
-    await dialog.accept('');
-  });
   await section.getByRole('button', { name: 'Remove section' }).click();
+  removal = designer.getByRole('dialog', {
+    name: 'Remove Temporary placement?',
+  });
+  await removal.getByLabel('Destination').selectOption('');
+  await removal.getByRole('button', { name: 'Remove section' }).click();
   await expect(designer.locator('[data-section-id]')).toHaveCount(
     initialSectionCount,
   );

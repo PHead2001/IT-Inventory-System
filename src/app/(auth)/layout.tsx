@@ -4,6 +4,7 @@ import {
   MotionPreference,
   MotionToggle,
 } from '@/components/experience/motion-preference';
+import { AmbientLight } from '@/components/experience/ambient-light';
 
 export default function AuthLayout({
   children,
@@ -13,6 +14,7 @@ export default function AuthLayout({
   return (
     <MotionPreference>
       <main className="experience-auth">
+        <AmbientLight className="experience-ambient-auth" />
         <div className="experience-auth-story" aria-hidden="true">
           <p className="experience-eyebrow">Inventory · space · custody</p>
           <h2>Know where everything belongs.</h2>

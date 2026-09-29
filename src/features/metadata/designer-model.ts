@@ -4,6 +4,7 @@ import {
   type MetadataDefinition,
 } from './contracts';
 import { z } from 'zod';
+import { controlKinds, controlVisible, formKinds } from './effective-controls';
 
 export type Field = MetadataDefinition['fields'][number];
 export type Section = MetadataDefinition['layout'][number];
@@ -48,14 +49,67 @@ export function moveControl(
   const sourceIndex = source.controls.findIndex(
     (control) => control.id === controlId,
   );
+  const original = source.controls[sourceIndex];
+  if (controlMoveBlockReason(def, controlId, sectionId)) return def;
+  const transferred =
+    source === target
+      ? original
+      : transferControl(def, source, target, original);
+  if (!transferred) return def;
   const [control] = source.controls.splice(sourceIndex, 1);
   const adjusted = source === target && index > sourceIndex ? index - 1 : index;
   target.controls.splice(
     Math.max(0, Math.min(adjusted, target.controls.length)),
     0,
-    control,
+    source === target ? control : transferred,
   );
   return copy;
+}
+
+/** Carry the source section's restrictions with a control when its parent changes. */
+export function controlMoveBlockReason(
+  def: MetadataDefinition,
+  controlId: string,
+  destinationId: string,
+): string | null {
+  const source = def.layout.find((section) =>
+    section.controls.some((control) => control.id === controlId),
+  );
+  const destination = def.layout.find(
+    (section) => section.id === destinationId,
+  );
+  if (!source || !destination) return 'This section is unavailable.';
+  if (source === destination) return null;
+  const control = source.controls.find((item) => item.id === controlId)!;
+  const kinds = controlKinds(def, source, control);
+  if (!kinds.length) return 'This control has no effective form type.';
+  if (
+    source.visible !== false &&
+    control.visible !== false &&
+    destination.visible === false
+  )
+    return 'This section is hidden.';
+  if (
+    kinds.some((kind) => !(destination.applies_to ?? formKinds).includes(kind))
+  )
+    return 'This section excludes a form type used by the control.';
+  return null;
+}
+
+function transferControl(
+  def: MetadataDefinition,
+  source: Section,
+  target: Section,
+  control: Control,
+): Control | null {
+  const kinds = controlKinds(def, source, control);
+  // An empty intersection cannot be encoded in the persisted control schema.
+  if (controlMoveBlockReason(def, control.id, target.id)) return null;
+  return {
+    ...control,
+    applies_to: kinds,
+    visible: source.visible === false ? false : control.visible,
+  };
 }
 
 export const protectedBuiltins = new Set(['name', 'category_id', 'asset_tag']);
@@ -90,28 +144,70 @@ export function removeSection(
   destinationId: string | null,
 ): MetadataDefinition {
   const source = def.layout.find((section) => section.id === id);
-  if (!source || sectionHasProtectedControls(source) || destinationId === id)
-    return def;
+  if (!source || destinationId === id) return def;
   if (
     destinationId &&
     !def.layout.some((section) => section.id === destinationId)
   )
     return def;
-  if (
-    !destinationId &&
-    source.controls.some((control) => control.kind === 'builtin')
-  )
-    return def;
-  return {
+  const destination = def.layout.find(
+    (section) => section.id === destinationId,
+  );
+  const transferred = destination
+    ? source.controls.map((control) =>
+        transferControl(def, source, destination, control),
+      )
+    : [];
+  if (transferred.some((control) => control === null)) return def;
+  const next = {
     ...def,
     layout: def.layout
       .filter((section) => section.id !== id)
       .map((section) =>
         section.id === destinationId
-          ? { ...section, controls: [...section.controls, ...source.controls] }
+          ? {
+              ...section,
+              controls: [...section.controls, ...(transferred as Control[])],
+            }
           : section,
       ),
   };
+  // Removal is a layout operation. It may unplace optional built-ins, but
+  // protected controls and required custom fields must remain reachable.
+  for (const kind of formKinds) {
+    for (const builtin of kind === 'asset'
+      ? ['name', 'category_id', 'asset_tag']
+      : ['name', 'category_id']) {
+      const count = next.layout.reduce(
+        (total, section) =>
+          total +
+          section.controls.filter(
+            (control) =>
+              control.kind === 'builtin' &&
+              control.builtin === builtin &&
+              controlVisible(next, section, control, kind),
+          ).length,
+        0,
+      );
+      if (count !== 1) return def;
+    }
+    for (const field of next.fields.filter(
+      (entry) => entry.required && entry.applies_to.includes(kind),
+    )) {
+      if (
+        !next.layout.some((section) =>
+          section.controls.some(
+            (control) =>
+              control.kind === 'field' &&
+              control.field_id === field.id &&
+              controlVisible(next, section, control, kind),
+          ),
+        )
+      )
+        return def;
+    }
+  }
+  return next;
 }
 
 export function optionPath(options: Option[], id: string): string | null {
@@ -372,28 +468,20 @@ function defaultObeysRules(field: Field): boolean {
 export function designerIssues(def: MetadataDefinition): string[] {
   const issues: string[] = [];
   const effective = (kind: 'quantity' | 'asset') =>
-    def.layout
-      .filter(
-        (section) =>
-          section.visible !== false &&
-          (section.applies_to ?? ['quantity', 'asset']).includes(kind),
-      )
-      .flatMap((section) =>
-        section.controls.filter(
-          (control) =>
-            control.visible !== false &&
-            (control.applies_to ?? ['quantity', 'asset']).includes(kind),
-        ),
-      );
+    def.layout.flatMap((section) =>
+      section.controls.filter((control) =>
+        controlVisible(def, section, control, kind),
+      ),
+    );
   for (const kind of ['quantity', 'asset'] as const) {
     const shown = effective(kind);
     for (const name of kind === 'asset'
       ? ['name', 'category_id', 'asset_tag']
       : ['name', 'category_id']) {
       if (
-        !shown.some(
+        shown.filter(
           (control) => control.kind === 'builtin' && control.builtin === name,
-        )
+        ).length !== 1
       )
         issues.push(
           `${name === 'category_id' ? 'Category' : name === 'asset_tag' ? 'Asset tag' : 'Name'} must stay visible on ${kind} forms.`,

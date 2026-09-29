@@ -28,6 +28,7 @@ import {
 } from './contents-contract';
 import type { Space } from './spaces';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
+import { AmbientLight } from '@/components/experience/ambient-light';
 import styles from './room-visual.module.css';
 import {
   availableSpaces,
@@ -373,6 +374,7 @@ export function SpacesWorkspace({
     : 1;
   return (
     <div className={styles.workspace}>
+      <AmbientLight className="experience-ambient-spaces" />
       {notice && (
         <p
           role="status"
@@ -552,8 +554,21 @@ export function SpacesWorkspace({
             ) : (
               <div>
                 <p className={styles.panelEyebrow}>Location inventory</p>
+                <h2 className={styles.selectionTitle}>
+                  {selection.space.name}
+                </h2>
                 <p className={styles.breadcrumb}>
-                  Choose a location to view its inventory.
+                  {
+                    scoped.filter((location) => location.can_hold_inventory)
+                      .length
+                  }{' '}
+                  inventory destinations across{' '}
+                  {
+                    scoped.filter((location) => !location.can_hold_inventory)
+                      .length
+                  }{' '}
+                  groups. Choose a location in the map or browser to view its
+                  current contents.
                 </p>
               </div>
             )}

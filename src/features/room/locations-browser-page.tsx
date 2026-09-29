@@ -1,6 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { useState } from 'react';
+import { motion } from 'motion/react';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { LocationBrowser } from './location-browser';
 
@@ -10,6 +12,7 @@ export function LocationsBrowserPage({
   locations: LocationRef[];
 }) {
   const [code, setCode] = useState<string | null>(null);
+  const reducedMotion = useEffectiveReducedMotion();
   const selected = locations.find((location) => location.code === code);
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
@@ -18,12 +21,18 @@ export function LocationsBrowserPage({
         selectedCode={code}
         onSelect={setCode}
       />
-      <section
+      <motion.section
         aria-label="Selected location"
         className="experience-surface min-w-0 self-start p-4"
+        layout={!reducedMotion}
       >
         {selected ? (
-          <>
+          <motion.div
+            key={selected.code}
+            initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+          >
             <p className="experience-eyebrow">Selected location</p>
             <h2 className="mt-1 break-words text-xl font-semibold">
               {selected.name}
@@ -52,11 +61,31 @@ export function LocationsBrowserPage({
                 Open in Spaces
               </Link>
             </div>
-          </>
+          </motion.div>
         ) : (
-          <p className="text-slate-300">Select a location to see details.</p>
+          <div>
+            <p className="experience-eyebrow">Location hierarchy</p>
+            <h2 className="mt-1 text-xl font-semibold">
+              Find a physical place
+            </h2>
+            <p className="experience-muted mt-2 text-sm leading-6">
+              Browse {locations.length} logical locations, including{' '}
+              {
+                locations.filter((location) => location.can_hold_inventory)
+                  .length
+              }{' '}
+              inventory destinations. Select a group to explore its contents or
+              a destination to see the stock held there.
+            </p>
+            <Link
+              href="/room"
+              className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-200 underline"
+            >
+              Open Spaces &amp; maps
+            </Link>
+          </div>
         )}
-      </section>
+      </motion.section>
     </div>
   );
 }
