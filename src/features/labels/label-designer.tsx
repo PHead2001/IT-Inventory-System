@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { flushSync } from 'react-dom';
+import { waitForSheetReadiness } from './sheet-readiness';
 import type {
   CategoryRef,
   LocationRef,
@@ -113,6 +114,7 @@ export function LabelDesigner({
   const queueEpoch = useRef(0);
   const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
+  const activePrintAbort = useRef<AbortController | null>(null);
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
@@ -121,6 +123,7 @@ export function LabelDesigner({
   useEffect(
     () => () => {
       queueEpoch.current++;
+      activePrintAbort.current?.abort();
       clearPrintAuthorization.current?.();
     },
     [],
@@ -181,6 +184,7 @@ export function LabelDesigner({
 
   const invalidate = () => {
     queueEpoch.current++;
+    activePrintAbort.current?.abort();
     clearPrintAuthorization.current?.();
     setRefreshPending(true);
     setRefreshFailed(false);
@@ -193,6 +197,7 @@ export function LabelDesigner({
       return;
     }
     const epoch = ++queueEpoch.current;
+    activePrintAbort.current?.abort();
     setBusy(true);
     try {
       const rows = await getQueueRecords([key]);
@@ -282,6 +287,7 @@ export function LabelDesigner({
   useEffect(() => {
     if (!hydrated) return;
     const generation = ++queueEpoch.current;
+    activePrintAbort.current?.abort();
     clearPrintAuthorization.current?.();
     if (!entries.length) {
       queueMicrotask(() => {
@@ -350,6 +356,9 @@ export function LabelDesigner({
     )
       return;
     const epoch = ++queueEpoch.current;
+    activePrintAbort.current?.abort();
+    const printAbort = new AbortController();
+    activePrintAbort.current = printAbort;
     setBusy(true);
     try {
       const fresh = await getQueueRecords(
@@ -378,24 +387,46 @@ export function LabelDesigner({
       const descriptiveChange = fresh.some(
         (row, index) => signature(row) !== signature(prepared[index]),
       );
+      const refreshedRows = descriptiveChange
+        ? expandLabels(entries, fresh)
+        : null;
+      const printGeneration = refreshedRows
+        ? JSON.stringify([
+            selectionKey,
+            totalCopies(entries),
+            job,
+            refreshedRows.map(signature),
+          ])
+        : sheetKey;
       if (descriptiveChange) {
         // Browser print captures the current DOM immediately. Commit the refreshed
         // descriptive text before checking codes or opening the print dialog.
         flushSync(() => {
           setLive(fresh);
           setPrepared(fresh);
-          setPrintRows(expandLabels(entries, fresh));
+          setPrintRows(refreshedRows);
           setMessage('Label information refreshed from current inventory.');
         });
       }
-      await document.fonts?.ready;
-      const images = Array.from(
-        document.querySelectorAll<HTMLImageElement>(
-          '.label-print-root .label-card img',
-        ),
+      const sheet = document.querySelector<HTMLElement>('.label-print-root');
+      if (!sheet) {
+        setMessage('Print preview is unavailable. Prepare it again.');
+        return;
+      }
+      const readiness = await waitForSheetReadiness(
+        sheet,
+        printGeneration,
+        totalCopies(entries),
+        printAbort.signal,
+        () => epoch === queueEpoch.current,
       );
-      await Promise.all(images.map((image) => image.decode?.()));
-      if (epoch !== queueEpoch.current) return;
+      if (readiness === 'cancelled' || epoch !== queueEpoch.current) return;
+      if (readiness !== 'ready') {
+        setMessage(
+          'Wait for every code and label text to fit, or choose a larger label.',
+        );
+        return;
+      }
       if (
         job.format === 'code128' &&
         !formatAcknowledged &&
@@ -409,20 +440,7 @@ export function LabelDesigner({
         );
         return;
       }
-      const ready = document.querySelectorAll(
-        '.label-print-root .label-card[data-code-ready="true"]',
-      ).length;
-      if (ready !== totalCopies(entries)) {
-        setMessage(
-          'Wait for every code and label text to fit, or choose a larger label.',
-        );
-        return;
-      }
-      const sheet = document.querySelector<HTMLElement>('.label-print-root');
-      if (!sheet) {
-        setMessage('Print preview is unavailable. Prepare it again.');
-        return;
-      }
+      if (epoch !== queueEpoch.current || printAbort.signal.aborted) return;
       // The final check grants exactly one print lifecycle. A second
       // beforeprint (including Ctrl/Cmd+P) cannot reuse that grant.
       clearPrintAuthorization.current?.();
@@ -455,6 +473,9 @@ export function LabelDesigner({
       setRefreshFailed(true);
       setMessage('Final label check failed. Printing is blocked; retry.');
     } finally {
+      printAbort.abort();
+      if (activePrintAbort.current === printAbort)
+        activePrintAbort.current = null;
       setBusy(false);
     }
   };
@@ -467,6 +488,7 @@ export function LabelDesigner({
       return;
     }
     setEntries(next);
+    activePrintAbort.current?.abort();
     clearPrintAuthorization.current?.();
   };
   const submitSearch = (event: FormEvent) => {
@@ -499,8 +521,14 @@ export function LabelDesigner({
         sheet.querySelectorAll<HTMLElement>('.label-card'),
       );
       const ready =
+        sheet.dataset.sheetGeneration === sheetKey &&
         cards.length === displayRows.length &&
-        cards.every((card) => card.dataset.codeReady === 'true');
+        cards.every(
+          (card) =>
+            card.dataset.sheetGeneration === sheetKey &&
+            card.dataset.codeReady === 'true' &&
+            card.dataset.textMeasured === 'true',
+        );
       const imagesReady = Array.from(
         sheet.querySelectorAll<HTMLImageElement>('img'),
       ).every((image) => image.complete && image.naturalWidth > 0);
@@ -519,7 +547,12 @@ export function LabelDesigner({
     observer.observe(sheet, {
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-code-ready', 'data-code-fallback'],
+      attributeFilter: [
+        'data-code-ready',
+        'data-code-fallback',
+        'data-text-measured',
+        'data-sheet-generation',
+      ],
     });
     sheet.addEventListener('load', check, true);
     sheet.addEventListener('error', check, true);
@@ -1035,6 +1068,7 @@ export function LabelDesigner({
               size={job.size}
               page={job.page}
               format={job.format}
+              generation={sheetKey}
             />
           </div>
         )}

@@ -50,6 +50,7 @@ export function LabelSheet({
   size,
   page,
   format,
+  generation,
 }: {
   records: LabelRecord[];
   origin: string;
@@ -57,6 +58,7 @@ export function LabelSheet({
   size: LabelSize;
   page: 'A4' | 'letter';
   format: 'qr' | 'code128';
+  generation: string;
 }) {
   const [width, height] = size.split('x').map(Number);
   return (
@@ -78,6 +80,7 @@ export function LabelSheet({
       <div
         className="label-print-root mt-6 flex flex-wrap content-start gap-[3mm] rounded-xl bg-white p-[3mm] text-black"
         aria-label="Print preview"
+        data-sheet-generation={generation}
       >
         {records.map((record, index) => (
           <LabelCard
@@ -96,6 +99,7 @@ export function LabelSheet({
             width={width}
             height={height}
             format={format}
+            generation={generation}
           />
         ))}
       </div>
@@ -110,6 +114,7 @@ function LabelCard({
   width,
   height,
   format,
+  generation,
 }: {
   record: LabelRecord;
   origin: string;
@@ -117,29 +122,43 @@ function LabelCard({
   width: number;
   height: number;
   format: 'qr' | 'code128';
+  generation: string;
 }) {
-  const [qr, setQr] = useState<string | null>(null);
-  const [qrFailed, setQrFailed] = useState(false);
-  const [barcodeWidthMm, setBarcodeWidthMm] = useState<number | null>(null);
+  const [qrResult, setQrResult] = useState<{
+    url: string;
+    image: string | null;
+  } | null>(null);
+  const [barcodeResult, setBarcodeResult] = useState<{
+    key: string;
+    width: number | null;
+  } | null>(null);
   const [textOverflow, setTextOverflow] = useState(false);
+  const [measuredGeneration, setMeasuredGeneration] = useState<string | null>(
+    null,
+  );
   const [compact, setCompact] = useState(false);
   const svg = useRef<SVGSVGElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
   const payload = barcodePayload(record);
   const url = origin + record.path;
+  const qr = qrResult?.url === url ? qrResult.image : null;
+  const qrFailed = qrResult?.url === url && qrResult.image === null;
+  const barcodeKey = `${format}:${payload ?? ''}:${width}`;
+  const barcodeWidthMm =
+    barcodeResult?.key === barcodeKey ? barcodeResult.width : null;
+  const barcodeResolved =
+    format !== 'code128' || !payload || barcodeResult?.key === barcodeKey;
   useEffect(() => {
     let current = true;
     qrImage(url)
       .then((image) => {
         if (current) {
-          setQr(image);
-          setQrFailed(false);
+          setQrResult({ url, image });
         }
       })
       .catch(() => {
         if (current) {
-          setQr(null);
-          setQrFailed(true);
+          setQrResult({ url, image: null });
         }
       });
     return () => {
@@ -171,11 +190,14 @@ function LabelCard({
       element.setAttribute('preserveAspectRatio', 'none');
       // Each horizontal SVG unit renders at 0.3 mm; never shrink modules to fit.
       const physicalWidth = modules * 0.3;
-      setBarcodeWidthMm(physicalWidth <= width - 8 ? physicalWidth : null);
+      setBarcodeResult({
+        key: barcodeKey,
+        width: physicalWidth <= width - 8 ? physicalWidth : null,
+      });
     } catch {
-      setBarcodeWidthMm(null);
+      setBarcodeResult({ key: barcodeKey, width: null });
     }
-  }, [payload, format, width]);
+  }, [payload, format, width, barcodeKey]);
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
   const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);
   const identifier =
@@ -191,9 +213,15 @@ function LabelCard({
     .slice(-2)
     .join(' / ');
   useEffect(() => {
+    let current = true;
     const box = textBox.current;
     if (!box) return;
     const measure = () => {
+      if (!current) return;
+      if (document.fonts && document.fonts.status !== 'loaded') {
+        setMeasuredGeneration(null);
+        return;
+      }
       const over =
         box.scrollHeight > box.clientHeight + 1 ||
         Array.from(box.querySelectorAll<HTMLElement>('[data-fit-text]')).some(
@@ -201,8 +229,13 @@ function LabelCard({
             line.scrollHeight > line.clientHeight + 1 ||
             line.scrollWidth > line.clientWidth + 1,
         );
-      if (over && !compact) setCompact(true);
-      else setTextOverflow(over);
+      if (over && !compact) {
+        setMeasuredGeneration(null);
+        setCompact(true);
+      } else {
+        setTextOverflow(over);
+        setMeasuredGeneration(generation);
+      }
     };
     measure();
     const observer =
@@ -211,7 +244,10 @@ function LabelCard({
         : new ResizeObserver(measure);
     observer?.observe(box);
     void document.fonts?.ready.then(measure);
-    return () => observer?.disconnect();
+    return () => {
+      current = false;
+      observer?.disconnect();
+    };
   }, [
     record.name,
     identifier,
@@ -220,13 +256,24 @@ function LabelCard({
     height,
     useBarcode,
     compact,
+    generation,
   ]);
   return (
     <article
       className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
-      data-code-ready={Boolean(!textOverflow && (qr || useBarcode))}
-      data-code-fallback={format === 'code128' && !useBarcode}
+      data-sheet-generation={generation}
+      data-text-measured={measuredGeneration === generation}
+      data-code-ready={Boolean(
+        measuredGeneration === generation &&
+        barcodeResolved &&
+        !textOverflow &&
+        (qr || useBarcode),
+      )}
+      data-code-failed={qrFailed && barcodeResolved && !useBarcode}
+      data-code-fallback={
+        format === 'code128' && barcodeResolved && !useBarcode
+      }
       data-text-overflow={textOverflow}
     >
       {preview && (

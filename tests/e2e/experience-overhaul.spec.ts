@@ -296,17 +296,13 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   await expect(
     firstSection.getByRole('button', { name: 'Drag Name' }),
   ).toBeVisible();
-  await page.waitForTimeout(150);
-  const crossSource = await firstSection
-    .getByRole('button', { name: 'Drag Name' })
-    .boundingBox();
-  const crossTarget = await empty.locator('.border-dashed').boundingBox();
-  expect(crossSource && crossTarget).toBeTruthy();
-  await page.mouse.move(
-    crossSource!.x + crossSource!.width / 2,
-    crossSource!.y + crossSource!.height / 2,
-  );
+  const crossHandle = firstSection.getByRole('button', { name: 'Drag Name' });
+  // Hover performs Playwright's live hit testing at the exact pointer position.
+  // Keep that pointer in place for down, then discover the drop target while held.
+  await crossHandle.hover();
   await page.mouse.down();
+  const crossTarget = await empty.locator('.border-dashed').boundingBox();
+  expect(crossTarget).toBeTruthy();
   await page.mouse.move(
     crossTarget!.x + crossTarget!.width / 2,
     crossTarget!.y + crossTarget!.height / 2,
@@ -822,11 +818,15 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByText('Pan and rotate').click();
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const panned = await view();
+  const initialFocusCount = Number(
+    await viewer.getAttribute('data-focus-count'),
+  );
   await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.waitForTimeout(50);
-  expect(await view(), 'the full-motion focus is still in flight').toBe(panned);
   await page.getByRole('button', { name: 'Reduce motion' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await expect
+    .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
+    .toBeGreaterThan(initialFocusCount);
   await expect.poll(view).not.toBe(panned);
   const settled = await view();
   await viewer.getByRole('button', { name: 'Pan left' }).click();
@@ -839,9 +839,32 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();
-  await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.waitForTimeout(50);
-  expect(await view()).toBe(fullPan);
+  const fullMotionMs = await viewer.evaluate(async (element) => {
+    const before = Number(element.dataset.focusCount);
+    const button = Array.from(element.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent?.trim() === 'Center selected',
+    );
+    if (!button) throw new Error('Center selected control unavailable');
+    return await new Promise<number>((resolve, reject) => {
+      const started = performance.now();
+      const observer = new MutationObserver(() => {
+        if (Number(element.dataset.focusCount) <= before) return;
+        observer.disconnect();
+        clearTimeout(timeout);
+        resolve(performance.now() - started);
+      });
+      observer.observe(element, {
+        attributes: true,
+        attributeFilter: ['data-focus-count'],
+      });
+      const timeout = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error('Full-motion focus never completed'));
+      }, 5_000);
+      button.click();
+    });
+  });
+  expect(fullMotionMs).toBeGreaterThanOrEqual(250);
   await expect.poll(view).not.toBe(fullPan);
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
