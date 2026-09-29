@@ -249,6 +249,111 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   ).toEqual([]);
 });
 
+test('the first styled paint is reduced before hydration and the saved preference wins afterward', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  async function inspect(saved: boolean) {
+    await page.evaluate(
+      (value) =>
+        localStorage.setItem('it-inventory-reduce-motion', String(value)),
+      saved,
+    );
+    const probe = await context.newPage();
+    await probe.emulateMedia({ reducedMotion: 'no-preference' });
+    let release!: () => void;
+    const scripts = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await probe.route('**/*', async (route) => {
+      if (route.request().resourceType() === 'script') await scripts;
+      await route.continue();
+    });
+    try {
+      await probe.goto('/dashboard', { waitUntil: 'commit' });
+      await probe.waitForFunction(
+        () => document.body !== null && document.styleSheets.length > 0,
+      );
+      const before = await probe.evaluate(() => {
+        const element = document.createElement('div');
+        element.style.animation = 'first-paint-probe 2s linear';
+        document.body.append(element);
+        const duration = getComputedStyle(element).animationDuration;
+        element.remove();
+        return {
+          motion: document.documentElement.dataset.motion,
+          duration: Number.parseFloat(duration),
+        };
+      });
+      expect(before.motion).toBe('reduced');
+      expect(before.duration).toBeLessThan(0.001);
+      release();
+      await expect(
+        probe.getByRole('heading', { name: 'Low-stock overview' }),
+      ).toBeVisible();
+      await expect(probe.locator('html')).toHaveAttribute(
+        'data-motion',
+        saved ? 'reduced' : 'full',
+      );
+      await expect(
+        probe.getByRole('button', { name: 'Reduce motion' }),
+      ).toHaveAttribute('aria-pressed', String(saved));
+    } finally {
+      release();
+      await probe.close();
+    }
+  }
+
+  await inspect(true);
+  await inspect(false);
+});
+
+test('desktop navigation and motion control stay separate and operable after long-page scrolling', async ({
+  page,
+}) => {
+  await signIn(page);
+  for (const height of [500, 330]) {
+    await page.setViewportSize({ width: 1440, height });
+    await page.goto('/inventory');
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const stack = page.locator('.experience-nav-stack');
+    await stack.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const settings = page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Settings' });
+    const toggle = page.getByRole('button', { name: 'Reduce motion' });
+    const settingsBox = await settings.boundingBox();
+    const toggleBox = await toggle.boundingBox();
+    expect(settingsBox).toBeTruthy();
+    expect(toggleBox).toBeTruthy();
+    expect(toggleBox!.y).toBeGreaterThanOrEqual(
+      settingsBox!.y + settingsBox!.height,
+    );
+    expect(toggleBox!.y + toggleBox!.height).toBeLessThanOrEqual(height);
+    expect(
+      await toggle.evaluate((button) => {
+        const box = button.getBoundingClientRect();
+        return button.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      }),
+    ).toBe(true);
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await settings.click();
+    await expect(page).toHaveURL(/\/settings$/);
+  }
+});
+
 test('configuration, site custody, and location browsing remain legible at desktop and phone widths', async ({
   page,
 }, testInfo) => {

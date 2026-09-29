@@ -151,7 +151,14 @@ test('client navigation drops queued metrics on scan and detail routes', async (
   await page.getByRole('link', { name: 'Locations', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Locations' })).toBeVisible();
   requests.length = 0;
-  await page.locator('main a[href^="/locations/"]').first().click();
+  await page
+    .getByRole('navigation', { name: 'Location browser' })
+    .getByRole('button', { name: /IT Closet ITC/ })
+    .click();
+  await page
+    .getByRole('region', { name: 'Selected location' })
+    .getByRole('link', { name: 'View contents and history' })
+    .click();
   await expect(page).toHaveURL(/\/locations\/[^/]+$/);
   await expectNoIntake(page, requests);
 });

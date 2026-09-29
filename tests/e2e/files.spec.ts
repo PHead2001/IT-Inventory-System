@@ -1,12 +1,20 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { PDFDocument } from 'pdf-lib';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+
+function richStatePath(name: string) {
+  const directory = resolve('.local-tools/experience-visual/rich-states');
+  mkdirSync(directory, { recursive: true });
+  return join(directory, name + '.png');
+}
 
 async function login(page: Page, role: 'staff' | 'viewer') {
   await page.goto('/login');
@@ -43,6 +51,40 @@ function png(color: number) {
   }
   return PNG.sync.write(image);
 }
+function equipmentPhoto() {
+  const image = new PNG({ width: 640, height: 480 });
+  const paint = (
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    color: [number, number, number],
+  ) => {
+    for (let y = top; y < top + height; y++) {
+      for (let x = left; x < left + width; x++) {
+        const index = (y * image.width + x) * 4;
+        image.data[index] = color[0];
+        image.data[index + 1] = color[1];
+        image.data[index + 2] = color[2];
+        image.data[index + 3] = 255;
+      }
+    }
+  };
+  paint(0, 0, 640, 480, [225, 234, 239]);
+  paint(30, 50, 580, 370, [177, 191, 201]);
+  paint(65, 140, 510, 190, [31, 48, 64]);
+  paint(75, 152, 490, 15, [75, 94, 109]);
+  for (let port = 0; port < 12; port++) {
+    const x = 86 + port * 39;
+    paint(x, 205, 31, 38, [9, 20, 30]);
+    paint(x + 3, 209, 25, 27, [78, 95, 106]);
+    paint(x + 7, 209, 17, 21, [14, 31, 43]);
+    paint(x + 12, 247, 6, 6, port % 3 === 0 ? [70, 225, 135] : [84, 99, 111]);
+  }
+  paint(455, 280, 88, 22, [55, 168, 185]);
+  paint(470, 285, 58, 12, [205, 243, 240]);
+  return PNG.sync.write(image);
+}
 const sha256 = (bytes: Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
 
@@ -65,14 +107,40 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await files.getByLabel('Add recognition photo').setInputFiles({
     name: 'first.png',
     mimeType: 'image/png',
-    buffer: png(210),
+    buffer: equipmentPhoto(),
   });
+  let releaseValidation!: () => void;
+  const validationGate = new Promise<void>((resolve) => {
+    releaseValidation = resolve;
+  });
+  const holdValidation = async (route: import('@playwright/test').Route) => {
+    await validationGate;
+    await route.continue();
+  };
+  await page.route('**/api/inventory-files/validate', holdValidation);
   const firstValidation = page.waitForResponse(
     (response) => response.url().includes('/api/inventory-files/validate'),
     { timeout: 20_000 },
   );
-  await files.getByRole('button', { name: 'Upload and review' }).click();
+  const firstRequest = page.waitForRequest((request) =>
+    request.url().includes('/api/inventory-files/validate'),
+  );
+  try {
+    await files.getByRole('button', { name: 'Upload and review' }).click();
+    await firstRequest;
+    await expect(files.getByRole('button', { name: 'Working…' })).toBeVisible();
+    await testInfo.attach('pending-photo-validation-mobile', {
+      body: await page.screenshot({
+        path: richStatePath('pending-photo-validation-mobile'),
+        fullPage: true,
+      }),
+      contentType: 'image/png',
+    });
+  } finally {
+    releaseValidation();
+  }
   const firstResult = await firstValidation;
+  await page.unroute('**/api/inventory-files/validate', holdValidation);
   expect(firstResult.ok(), JSON.stringify(await firstResult.json())).toBe(true);
   await expect(
     cards.getByRole('listitem').getByText('first.png', { exact: true }),
@@ -81,8 +149,14 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await expect(
     files.getByRole('button', { name: 'Preview first.png' }).locator('img'),
   ).toBeVisible();
+  await expect(
+    files.getByRole('button', { name: 'Preview first.png' }).locator('img'),
+  ).toHaveJSProperty('naturalWidth', 320);
   await testInfo.attach('ready-quantity-photo-mobile', {
-    body: await page.screenshot({ fullPage: true }),
+    body: await page.screenshot({
+      path: richStatePath('ready-quantity-photo-mobile'),
+      fullPage: true,
+    }),
     contentType: 'image/png',
   });
   await page.goto('/inventory?q=' + encodeURIComponent(quantityName));
@@ -96,9 +170,22 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await expect(listRow.locator('img[alt="first.png"]')).toBeVisible();
   await page.goto(detailUrl);
   await files.getByRole('button', { name: 'View photo' }).click();
-  await expect(
-    page.getByRole('dialog', { name: 'first.png' }).locator('img'),
-  ).toBeVisible();
+  const openedPhoto = page
+    .getByRole('dialog', { name: 'first.png' })
+    .locator('img');
+  await expect(openedPhoto).toBeVisible();
+  await expect(openedPhoto).toHaveJSProperty('naturalWidth', 640);
+  await expect(openedPhoto).toHaveJSProperty('naturalHeight', 480);
+  const photoBounds = await openedPhoto.boundingBox();
+  expect(photoBounds?.width).toBeGreaterThan(250);
+  expect(photoBounds?.height).toBeGreaterThan(180);
+  await testInfo.attach('populated-photo-viewer-mobile', {
+    body: await page.screenshot({
+      path: richStatePath('populated-photo-viewer-mobile'),
+      fullPage: false,
+    }),
+    contentType: 'image/png',
+  });
   await page.getByRole('button', { name: 'Close photo' }).click();
   expect(
     await page.evaluate(
@@ -126,6 +213,13 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     await expect(
       viewerFiles.getByRole('button', { name: 'Remove' }),
     ).toHaveCount(0);
+    await testInfo.attach('read-only-populated-files-mobile', {
+      body: await viewer.screenshot({
+        path: richStatePath('read-only-populated-files-mobile'),
+        fullPage: true,
+      }),
+      contentType: 'image/png',
+    });
   } finally {
     await viewerContext.close();
   }
@@ -144,6 +238,14 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   );
   await files.getByRole('button', { name: 'Upload and review' }).click();
   expect((await rejectedValidation).ok()).toBe(false);
+  await expect(files.getByRole('alert')).toBeVisible();
+  await testInfo.attach('invalid-photo-error-mobile', {
+    body: await page.screenshot({
+      path: richStatePath('invalid-photo-error-mobile'),
+      fullPage: true,
+    }),
+    contentType: 'image/png',
+  });
   await expect(
     cards.getByRole('listitem').getByText('first.png', { exact: true }),
   ).toBeVisible();
@@ -252,6 +354,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     cards.getByText('Updated manual title', { exact: true }),
   ).toBeVisible();
   await expect(files.getByText('Original: manual.pdf')).toBeVisible();
+  await files.locator('summary').filter({ hasText: 'File history' }).click();
   await expect(
     files.getByText(/renamed manual.pdf → Updated manual title/),
   ).toBeVisible();

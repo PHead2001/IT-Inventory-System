@@ -5,6 +5,7 @@ import {
   Component,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +33,7 @@ import {
   availableSpaces,
   containingSpace,
   resolveSpace,
+  spaces,
   spaceLocations,
   spaceRoom,
 } from './spaces';
@@ -123,6 +125,17 @@ export function SpacesWorkspace({
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [notice, setNotice] = useState(initialNotice);
   const [focusTick, setFocusTick] = useState(0);
+  const [focusEpoch, setFocusEpoch] = useState(0);
+  const [focusOnRestore, setFocusOnRestore] = useState(Boolean(initialCode));
+  const cancelFocus = useCallback(() => setFocusOnRestore(false), []);
+  const selectionRef = useRef(selection);
+  const [focusCompletion, setFocusCompletion] = useState<{
+    scope: string;
+    request: string;
+    code: string | null;
+    count: number;
+  }>({ scope: '', request: '', code: null, count: 0 });
+  const activeFocusIdentity = useRef('');
   const [retryTick, setRetryTick] = useState(0);
   const [cameraViews, setCameraViews] = useState<Map<string, CameraView>>(
     () => new Map(),
@@ -134,7 +147,10 @@ export function SpacesWorkspace({
   const result = contents?.key === attemptKey ? contents.result : undefined;
   const error = contents?.key === attemptKey ? contents.error : undefined;
   const loading = Boolean(selection.code && contents?.key !== attemptKey);
-  const room = useMemo(() => spaceRoom(selection.space), [selection.space]);
+  const room = useMemo(() => {
+    const registered = spaces.find((space) => space.id === selection.space.id);
+    return registered ? spaceRoom(registered) : null;
+  }, [selection.space.id]);
   const viewKey = useMemo(
     () =>
       room && typeof window !== 'undefined'
@@ -161,18 +177,53 @@ export function SpacesWorkspace({
     [scoped, selection.code],
   );
   const focusRequest = useMemo(
-    () => ({ code: bound ? selection.code : null, requestId: focusTick }),
-    [bound, selection.code, focusTick],
+    () => ({
+      code: bound ? selection.code : null,
+      requestId: focusEpoch + focusTick,
+    }),
+    [bound, selection.code, focusEpoch, focusTick],
   );
+  const focusScope = [
+    userId,
+    typeof window === 'undefined' ? '' : window.location.origin,
+    selection.space.id,
+  ].join('|');
+  const focusIdentity = [
+    focusScope,
+    selection.code ?? '',
+    focusEpoch,
+    focusTick,
+  ].join('|');
+  useLayoutEffect(() => {
+    activeFocusIdentity.current = focusIdentity;
+    selectionRef.current = selection;
+  }, [focusIdentity, selection]);
+  const shownFocusCompletion =
+    focusCompletion.scope === focusScope
+      ? {
+          code:
+            focusCompletion.request === focusIdentity
+              ? focusCompletion.code
+              : null,
+          count: focusCompletion.count,
+        }
+      : { code: null, count: 0 };
   useEffect(() => {
     function pop() {
-      setSelection(
-        selectionFromUrl(locations, {
-          space: initialSpace,
-          code: initialCode,
-          page: initialPage,
-        }),
-      );
+      const next = selectionFromUrl(locations, {
+        space: initialSpace,
+        code: initialCode,
+        page: initialPage,
+      });
+      if (
+        next.space.id !== selectionRef.current.space.id ||
+        next.code !== selectionRef.current.code
+      ) {
+        setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
+        setFocusOnRestore(Boolean(next.code));
+        setFocusEpoch((epoch) => epoch + 1);
+      }
+      setSelection(next);
     }
     window.addEventListener('popstate', pop);
     let saved: string | null = null;
@@ -194,7 +245,12 @@ export function SpacesWorkspace({
           ),
         );
       if (space)
-        queueMicrotask(() => setSelection({ space, code: null, page: 1 }));
+        queueMicrotask(() => {
+          setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
+          setFocusOnRestore(false);
+          setFocusEpoch((epoch) => epoch + 1);
+          setSelection({ space, code: null, page: 1 });
+        });
     }
     return () => window.removeEventListener('popstate', pop);
   }, [locations, initialSpace, initialCode, initialPage, userId]);
@@ -281,21 +337,31 @@ export function SpacesWorkspace({
     selection.page,
     userId,
   ]);
-  const navigate = useCallback((next: Selection) => {
-    const params = new URLSearchParams();
-    params.set('space', next.space.id);
-    if (next.code) params.set('location', next.code);
-    if (next.page > 1) params.set('page', String(next.page));
-    window.history.pushState(null, '', '/room?' + params);
-    setSelection(next);
-    setNotice(null);
-  }, []);
+  const navigate = useCallback(
+    (next: Selection) => {
+      if (next.space.id !== selection.space.id || next.code !== selection.code)
+        setFocusEpoch((epoch) => epoch + 1);
+      if (next.space.id !== selection.space.id || next.code !== selection.code)
+        setFocusOnRestore(Boolean(next.code));
+      if (next.space.id !== selection.space.id)
+        setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
+      const params = new URLSearchParams();
+      params.set('space', next.space.id);
+      if (next.code) params.set('location', next.code);
+      if (next.page > 1) params.set('page', String(next.page));
+      window.history.pushState(null, '', '/room?' + params);
+      setSelection(next);
+      setNotice(null);
+    },
+    [selection.space.id, selection.code],
+  );
   const selectCode = (code: string) => {
     const location = locations.find((item) => item.code === code);
     if (!location) return;
     const space = containingSpace(locations, code);
     if (!space) return;
     if (selection.code === code && selection.space.id === space.id) {
+      setFocusOnRestore(true);
       setFocusTick((tick) => tick + 1);
       return;
     }
@@ -340,7 +406,10 @@ export function SpacesWorkspace({
         {room && (
           <button
             className={styles.commandButton}
-            onClick={() => setVisible((value) => !value)}
+            onClick={() => {
+              if (visible) setFocusOnRestore(false);
+              setVisible((value) => !value);
+            }}
           >
             {visible ? 'Hide room' : 'Show room'}
           </button>
@@ -363,6 +432,8 @@ export function SpacesWorkspace({
             <div
               data-testid="room-viewer"
               data-selected-code={selection.code ?? ''}
+              data-focused-code={shownFocusCompletion.code ?? ''}
+              data-focus-count={shownFocusCompletion.count}
               data-camera-view={
                 viewKey ? JSON.stringify(initialView) : undefined
               }
@@ -412,12 +483,27 @@ export function SpacesWorkspace({
                     selectedCode={selection.code}
                     highlightedCodes={highlightedCodes}
                     focusRequest={focusRequest}
+                    focusOnRestore={focusOnRestore && bound}
                     onSelect={selectCode}
                     onReady={() => {}}
                     onFailure={setSceneError}
-                    onFocusComplete={() => {}}
+                    onFocusComplete={(code) => {
+                      if (activeFocusIdentity.current !== focusIdentity) return;
+                      setFocusOnRestore(false);
+                      setFocusCompletion((current) => ({
+                        scope: focusScope,
+                        request: focusIdentity,
+                        code,
+                        count:
+                          current.scope === focusScope ? current.count + 1 : 1,
+                      }));
+                    }}
+                    onFocusCancel={cancelFocus}
                     canFocusSelected={bound}
-                    onRequestFocus={() => setFocusTick((tick) => tick + 1)}
+                    onRequestFocus={() => {
+                      setFocusOnRestore(true);
+                      setFocusTick((tick) => tick + 1);
+                    }}
                   />
                 </SceneBoundary>
               )}

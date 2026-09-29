@@ -2259,7 +2259,7 @@ export function MetadataSettings({
                 <DragOverlay dropAnimation={null}>
                   {(source) => (
                     <motion.div
-                      initial={{ opacity: 0, scale: 0.96 }}
+                      initial={false}
                       animate={{ opacity: 1, scale: 1 }}
                       className="rounded-lg border border-cyan-400 bg-slate-900 px-4 py-3 text-sm font-semibold shadow-2xl"
                     >

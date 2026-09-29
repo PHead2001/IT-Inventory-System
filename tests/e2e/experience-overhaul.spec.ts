@@ -172,6 +172,18 @@ test('Spaces links follow location ancestry even when codes omit or spoof a root
   await expect(
     page.getByRole('link', { name: `Show ${staging} in Spaces` }),
   ).toHaveAttribute('href', `/room?location=${staging}`);
+  await page.getByRole('link', { name: `Show ${staging} in Spaces` }).click();
+  await expect(page.getByRole('combobox', { name: 'Space' })).toHaveValue(
+    'it-office',
+  );
+  await expect(
+    page
+      .getByRole('region', { name: 'Location inventory' })
+      .getByRole('heading', {
+        name: new RegExp(staging),
+      }),
+  ).toBeVisible();
+  await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   const spoof = `ITO-SPOOF-${suffix}`;
   await makeLocation(spoof, 'IT Closet (ITC)');
   await page.goto('/locations/' + spoof);
@@ -762,6 +774,35 @@ test('a user camera pan is restored after leaving and returning to the modeled s
   for (const key of ['position', 'target'] as const)
     for (let index = 0; index < 3; index++)
       expect(restored[key][index]).toBeCloseTo(moved[key][index], 2);
+});
+
+test('Back into a selected modeled space focuses from its saved camera baseline', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await signIn(page);
+  await page.goto('/room?location=ITC-S1A');
+  const viewer = page.getByTestId('room-viewer');
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  await toolbar.locator('summary').click();
+  await toolbar.getByRole('button', { name: 'Pan right' }).click();
+  const displaced = JSON.parse(
+    (await viewer.getAttribute('data-camera-view'))!,
+  ) as {
+    target: number[];
+  };
+  await page.getByLabel('Space', { exact: true }).selectOption('it-office');
+  await expect(viewer).toHaveCount(0);
+  await page.goBack();
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const focused = JSON.parse(
+    (await viewer.getAttribute('data-camera-view'))!,
+  ) as {
+    target: number[];
+  };
+  expect(focused.target).not.toEqual(displaced.target);
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
 });
 
 test('local and OS reduced motion settle room focus without disabling manual camera controls', async ({

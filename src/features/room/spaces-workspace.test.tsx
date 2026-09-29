@@ -1,9 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import { spaces } from './spaces';
 import type { CameraView } from './scene/camera-view';
+
+const focusCallbacks: Array<(code: string | null) => void> = [];
+const roomReferences: object[] = [];
 
 vi.mock('next/dynamic', () => ({
   default: () =>
@@ -11,14 +14,22 @@ vi.mock('next/dynamic', () => ({
       selectedCode: string | null;
       onSelect: (code: string) => void;
       focusRequest: { requestId: number };
+      focusOnRestore: boolean;
       initialView?: CameraView | null;
       onViewChange?: (view: CameraView) => void;
+      onFocusComplete?: (code: string | null) => void;
+      onFocusCancel?: () => void;
+      onFailure?: (message: string) => void;
+      room: object;
     }) {
+      if (props.onFocusComplete) focusCallbacks.push(props.onFocusComplete);
+      roomReferences.push(props.room);
       return (
         <div
           data-testid="scene-selection"
           data-code={props.selectedCode ?? ''}
           data-focus={props.focusRequest.requestId}
+          data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
           <button onClick={() => props.onSelect('ITC-B')}>
@@ -27,6 +38,13 @@ vi.mock('next/dynamic', () => ({
           <button onClick={() => props.onSelect('ITC-A')}>
             Choose A in scene
           </button>
+          <button onClick={() => props.onSelect('ITC-S1A')}>
+            Choose shelf 1A in scene
+          </button>
+          <button onClick={() => props.onFailure?.('Graphics failed.')}>
+            Fail room
+          </button>
+          <button onClick={props.onFocusCancel}>Cancel focus</button>
           <button
             onClick={() =>
               props.onViewChange?.({
@@ -87,6 +105,24 @@ const locations: LocationRef[] = [
     can_hold_inventory: false,
     parentId: null,
   },
+  {
+    id: 'shelf-1a',
+    code: 'ITC-S1A',
+    name: 'Shelf 1A',
+    breadcrumb: 'IT Closet / Shelf 1A',
+    active: true,
+    can_hold_inventory: true,
+    parentId: 'root',
+  },
+  {
+    id: 'drawer-1',
+    code: 'ITC-D01',
+    name: 'Drawer 1',
+    breadcrumb: 'IT Closet / Drawer 1',
+    active: true,
+    can_hold_inventory: true,
+    parentId: 'root',
+  },
 ];
 function response(name: string, code = 'ITC-A', page = 1, total = 1) {
   return {
@@ -119,7 +155,11 @@ function response(name: string, code = 'ITC-A', page = 1, total = 1) {
     }),
   };
 }
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  focusCallbacks.length = 0;
+  roomReferences.length = 0;
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -232,6 +272,172 @@ it('restores the compatible modeled-space camera after hiding and switching spac
       screen.getByTestId('scene-selection').getAttribute('data-initial-view')!,
     ),
   ).toEqual(saved);
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'false',
+  );
+});
+
+it('keeps new location focus pending across graphics recovery, then preserves the restored view', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock', 'ITC-D01')),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-S1A"
+    />,
+  );
+  act(() => focusCallbacks.at(-1)!('ITC-S1A'));
+  await user.click(screen.getByRole('button', { name: 'Record camera view' }));
+  const saved = screen
+    .getByTestId('room-viewer')
+    .getAttribute('data-camera-view');
+  await user.click(screen.getByRole('button', { name: 'Fail room' }));
+  expect(screen.getByText('Room view unavailable')).toBeVisible();
+  await user.click(
+    screen.getAllByRole('button', { name: 'Drawer 1 ITC-D01' })[0],
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-initial-view',
+    saved,
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'true',
+  );
+  act(() => focusCallbacks.at(-1)!('ITC-D01'));
+  expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+    'data-focused-code',
+    'ITC-D01',
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'false',
+  );
+  await user.click(screen.getByRole('button', { name: 'Hide room' }));
+  await user.click(screen.getByRole('button', { name: 'Show room' }));
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-initial-view',
+    saved,
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'false',
+  );
+});
+
+it('clears an unfinished focus on manual cancellation and hiding the room', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock', 'ITC-S1A')),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-S1A"
+    />,
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'true',
+  );
+  await user.click(screen.getByRole('button', { name: 'Cancel focus' }));
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'false',
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Choose shelf 1A in scene' }),
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'true',
+  );
+  await user.click(screen.getByRole('button', { name: 'Hide room' }));
+  await user.click(screen.getByRole('button', { name: 'Show room' }));
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'false',
+  );
+});
+
+it('keeps the same room definition when an SSR-equivalent space becomes canonical', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock', 'ITC-B')),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={{ ...spaces[0] }}
+      initialCode="ITC-A"
+    />,
+  );
+  const initialRoom = roomReferences.at(-1);
+  await user.click(screen.getByRole('button', { name: 'Record camera view' }));
+  const saved = screen
+    .getByTestId('room-viewer')
+    .getAttribute('data-camera-view');
+  await user.click(screen.getByRole('button', { name: 'Choose B in scene' }));
+  expect(roomReferences.at(-1)).toBe(initialRoom);
+  expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+    'data-camera-view',
+    saved,
+  );
+  act(() => focusCallbacks.at(-1)!('ITC-B'));
+  expect(screen.getByTestId('room-viewer')).toHaveAttribute(
+    'data-focused-code',
+    'ITC-B',
+  );
+});
+
+it('counts only completed focus for the current actor and space', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock')),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-A"
+    />,
+  );
+  const viewer = screen.getByTestId('room-viewer');
+  const staleCompletion = focusCallbacks.at(-1)!;
+  act(() => staleCompletion('ITC-A'));
+  expect(viewer).toHaveAttribute('data-focused-code', 'ITC-A');
+  expect(viewer).toHaveAttribute('data-focus-count', '1');
+  await user.click(screen.getByRole('button', { name: 'Choose A in scene' }));
+  expect(viewer).toHaveAttribute('data-focused-code', '');
+  expect(viewer).toHaveAttribute('data-focus-count', '1');
+  act(() => staleCompletion('ITC-A'));
+  expect(viewer).toHaveAttribute('data-focus-count', '1');
+  act(() => focusCallbacks.at(-1)!('ITC-A'));
+  expect(viewer).toHaveAttribute('data-focus-count', '2');
+  await user.selectOptions(screen.getByLabelText('Space'), 'it-office');
+  await user.selectOptions(screen.getByLabelText('Space'), 'it-closet');
+  const returnedViewer = screen.getByTestId('room-viewer');
+  expect(returnedViewer).toHaveAttribute('data-focus-count', '0');
+  await user.click(screen.getByRole('button', { name: 'Choose A in scene' }));
+  expect(returnedViewer).toHaveAttribute('data-selected-code', 'ITC-A');
+  act(() => staleCompletion('ITC-A'));
+  expect(returnedViewer).toHaveAttribute('data-focus-count', '0');
+  act(() => focusCallbacks.at(-1)!('ITC-A'));
+  expect(returnedViewer).toHaveAttribute('data-focused-code', 'ITC-A');
+  expect(returnedViewer).toHaveAttribute('data-focus-count', '1');
 });
 
 it('restores URL selection on Back and refocuses a repeated selection', async () => {
@@ -269,6 +475,44 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   );
 });
 
+it('replays focus for a modeled location reached through browser history', async () => {
+  window.history.replaceState(null, '', '/room?location=ITC-S1A');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response('Stock', 'ITC-S1A')),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-S1A"
+    />,
+  );
+  act(() => focusCallbacks.at(-1)!('ITC-S1A'));
+  await user.click(
+    screen.getAllByRole('button', { name: 'Drawer 1 ITC-D01' })[0],
+  );
+  act(() => focusCallbacks.at(-1)!('ITC-D01'));
+  const beforeBack = Number(
+    screen.getByTestId('scene-selection').getAttribute('data-focus'),
+  );
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-S1A',
+  );
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-focus-on-restore',
+    'true',
+  );
+  expect(
+    Number(screen.getByTestId('scene-selection').getAttribute('data-focus')),
+  ).toBeGreaterThan(beforeBack);
+});
+
 it('pages contents without remounting the room or delaying selection', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-A');
   const fetcher = vi.fn(async (url: string) =>
@@ -291,15 +535,20 @@ it('pages contents without remounting the room or delaying selection', async () 
   );
   await screen.findByText('Page stock');
   const scene = screen.getByTestId('scene-selection');
+  const focusBeforePage = scene.getAttribute('data-focus');
   await user.click(screen.getByRole('button', { name: 'Next' }));
   await waitFor(() =>
     expect(screen.getByText('30 results · Page 2 of 2')).toBeVisible(),
   );
   expect(screen.getByTestId('scene-selection')).toBe(scene);
+  expect(scene).toHaveAttribute('data-focus', focusBeforePage);
   expect(fetcher).toHaveBeenLastCalledWith(
     expect.stringContaining('page=2'),
     expect.objectContaining({ cache: 'no-store' }),
   );
+  window.history.replaceState(null, '', '/room?location=ITC-A');
+  act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+  expect(scene).toHaveAttribute('data-focus', focusBeforePage);
 });
 
 it('rejects a successful response for the wrong user or location', async () => {

@@ -45,11 +45,11 @@ function systemSnapshot() {
 }
 
 export function useEffectiveReducedMotion() {
-  const local = useSyncExternalStore(subscribe, snapshot, () => false);
+  const local = useSyncExternalStore(subscribe, snapshot, () => true);
   const system = useSyncExternalStore(
     subscribeSystem,
     systemSnapshot,
-    () => false,
+    () => true,
   );
   return local || system;
 }

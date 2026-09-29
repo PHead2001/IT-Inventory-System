@@ -85,9 +85,11 @@ for (const role of ['staff', 'viewer'] as const)
       await expect(
         page.getByRole('link', { name: 'Locations', exact: true }),
       ).toBeVisible();
-      await page.getByRole('link', { name: 'Room', exact: true }).click();
+      await page
+        .getByRole('link', { name: 'Spaces & maps', exact: true })
+        .click();
       await expect(
-        page.getByRole('heading', { name: 'Room navigation' }),
+        page.getByRole('heading', { name: 'Spaces & maps' }),
       ).toBeVisible();
       await page.getByRole('button', { name: 'Sign out' }).click();
       await expect(page).toHaveURL(/\/login$/);
@@ -153,9 +155,10 @@ test('phone navigation remains usable and has no horizontal overflow', async ({
   expect(width.document, JSON.stringify(width.offenders)).toBeLessThanOrEqual(
     width.viewport,
   );
-  await page.getByRole('link', { name: 'Room', exact: true }).click();
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.getByRole('link', { name: 'Spaces & maps', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Room navigation' }),
+    page.getByRole('heading', { name: 'Spaces & maps' }),
   ).toBeVisible();
 });
 for (const destination of ['default', 'preview'] as const)

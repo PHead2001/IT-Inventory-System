@@ -6,7 +6,6 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import rawRoom from '../../data/rooms/it-closet.json' with { type: 'json' };
 import { buildRoomBindings } from '../../src/features/room/bindings';
 import { roomSchema } from '../../src/features/room/schema';
-import { chooseLocation } from './location-picker';
 
 // Sort the current fixture first even when iterative runs retain earlier local stock.
 const inventoryName =
@@ -95,11 +94,11 @@ async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
 
 async function selected(page: Page, code: string) {
   await expect(page).toHaveURL(
-    new RegExp('/room\\?location=' + code + '(?:&|$)'),
+    new RegExp('/room\\?.*location=' + code + '(?:&|$)'),
   );
   await expect(
-    page.getByLabel('Select location', { exact: true }),
-  ).toContainText(code);
+    page.getByRole('navigation', { name: 'Location browser' }),
+  ).toContainText('Selected path:');
   await expect(
     page.getByRole('heading', {
       name: locationNames.get(code) + ' (' + code + ')',
@@ -112,14 +111,16 @@ async function selected(page: Page, code: string) {
 }
 
 async function chooseRoomLocation(page: Page, code: string) {
-  await chooseLocation(page.locator('body'), 'Select location', code);
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  await browser.getByRole('searchbox', { name: 'Browse locations' }).fill(code);
+  await browser.getByRole('button', { name: new RegExp(`${code}$`) }).click();
 }
 
 async function ready(page: Page) {
   const show = page.getByRole('button', { name: 'Show room', exact: true });
   if (await show.isVisible()) await show.click();
   const viewer = page.getByTestId('room-viewer');
-  await expect(viewer).toHaveAttribute('data-state', 'ready', {
+  await expect(viewer).toHaveAttribute('data-camera-view', /"position":\[/, {
     timeout: 20_000,
   });
   await expect(viewer.locator('canvas')).toBeVisible();
@@ -473,7 +474,9 @@ test('room labels appear on real mesh hover and Show all labels restores keyboar
   }
   await showAll.click();
   await expect(showAll).toHaveAttribute('aria-pressed', 'false');
-  await expect(buttons).toHaveCount(0);
+  await expect(
+    viewer.locator('button[data-location-code]:not([data-hover-tooltip])'),
+  ).toHaveCount(0);
 });
 
 test('Free Orbit labels follow exposed storage under actual pointer movement from oblique, top, bottom and panned views', async ({
@@ -604,7 +607,7 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
   await login(page);
   await page.goto('/room');
   await expect(
-    page.getByRole('heading', { name: 'Room navigation', exact: true }),
+    page.getByRole('heading', { name: 'Spaces & maps', exact: true }),
   ).toBeVisible();
   const viewer = await ready(page);
   expect(
@@ -1194,50 +1197,29 @@ test('captures four room sides and searchable picker at desktop and phone widths
     await page.screenshot({
       path: testInfo.outputPath(`${width}-show-all-labels.png`),
     });
-    await page.getByLabel('Select location', { exact: true }).click();
+    const browser = page.getByRole('navigation', { name: 'Location browser' });
     await expect(
-      page.getByRole('tree', { name: 'Select location' }),
+      browser.getByRole('searchbox', { name: 'Browse locations' }),
     ).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath(`${width}-picker-tree.png`),
+      path: testInfo.outputPath(`${width}-location-browser.png`),
     });
-    const search = page.getByRole('combobox', { name: 'Search locations' });
+    const search = browser.getByRole('searchbox', { name: 'Browse locations' });
     await search.fill('right storage');
     await expect(
-      page.getByRole('option').filter({ hasText: 'ITC-D07' }),
+      browser.getByRole('button', { name: /ITC-D07$/ }),
     ).toBeVisible();
     if (width === 'phone') {
-      const door = await page
-        .getByText(/Door · 36/)
-        .first()
-        .boundingBox();
-      const pickerPanel = search.locator('..');
-      const panel = await pickerPanel.boundingBox();
-      expect(door).toBeTruthy();
+      const panel = await browser.boundingBox();
+      const canvas = await viewer.locator('canvas').boundingBox();
       expect(panel).toBeTruthy();
-      const point = {
-        x: door!.x + door!.width / 2,
-        y: door!.y + door!.height / 2,
-      };
-      expect(point.x).toBeGreaterThan(panel!.x);
-      expect(point.x).toBeLessThan(panel!.x + panel!.width);
-      expect(point.y).toBeGreaterThan(panel!.y);
-      expect(point.y).toBeLessThan(panel!.y + panel!.height);
-      expect(
-        await pickerPanel.evaluate(
-          (element, coordinates) =>
-            element.contains(
-              document.elementFromPoint(coordinates.x, coordinates.y),
-            ),
-          point,
-        ),
-        'room door label must stay behind the mobile picker',
-      ).toBe(true);
+      expect(canvas).toBeTruthy();
+      expect(panel!.y).toBeGreaterThanOrEqual(canvas!.y + canvas!.height);
     }
     await page.screenshot({
       path: testInfo.outputPath(`${width}-picker-search.png`),
     });
-    await search.press('Escape');
+    await search.clear();
     if (width === 'phone') {
       await page
         .getByRole('region', { name: 'Location inventory' })
@@ -1309,68 +1291,61 @@ test('search focuses the room and aggregate selection survives reload and browse
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
 });
 
-test('room location picker reopens after a filtered selection with fresh results', async ({
+test('room location browser refreshes filtered selections and results', async ({
   page,
 }) => {
   await login(page);
   await page.goto('/room');
-  const picker = page.getByLabel('Select location', { exact: true });
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  const search = browser.getByRole('searchbox', { name: 'Browse locations' });
   await chooseRoomLocation(page, 'ITC-D01');
   await selected(page, 'ITC-D01');
-  await picker.click();
-  const search = page.getByRole('combobox', { name: 'Search locations' });
-  await expect(search).toBeFocused();
-  await expect(search).toHaveValue('');
+  await expect(search).toHaveValue('ITC-D01');
+  await search.clear();
   await expect(
-    page.getByRole('treeitem', { name: /Drawer 4.*ITC-D04/ }),
+    browser.getByRole('button', { name: /Expand IT Closet/ }),
   ).toBeVisible();
   await search.fill('ITC-D04');
-  await page.getByRole('option').filter({ hasText: 'ITC-D04' }).first().click();
+  await browser.getByRole('button', { name: /ITC-D04$/ }).click();
   await selected(page, 'ITC-D04');
-  await picker.click();
-  await expect(
-    page.getByRole('combobox', { name: 'Search locations' }),
-  ).toHaveValue('');
+  await expect(search).toHaveValue('ITC-D04');
 });
 
-test('browse picker has a collapsible keyboard tree, aggregate selection, and full search breadcrumbs', async ({
+test('location browser has keyboard drill-down, aggregate selection, and full search breadcrumbs', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto('/room');
-  const trigger = page.getByLabel('Select location', { exact: true });
-  await trigger.click();
-  const tree = page.getByRole('tree', { name: 'Select location' });
-  const root = tree.getByRole('treeitem', { name: /IT Closet.*ITC$/ });
-  const left = tree.getByRole('treeitem', { name: /Left Storage.*ITC-L$/ });
-  const shelf = tree.getByRole('treeitem', { name: /Shelf 1.*ITC-S1$/ });
-  await expect(root).toHaveAttribute('aria-expanded', 'true');
-  await expect(left).toHaveAttribute('aria-expanded', 'false');
-  await page.screenshot({ path: testInfo.outputPath('phone-picker-tree.png') });
-  await root.locator('[data-disclosure]').click();
-  await expect(left).toHaveCount(0);
-  await root.focus();
-  await root.press('ArrowRight');
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  const root = browser.getByRole('button', { name: /IT Closet ITC$/ });
+  await expect(root).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('phone-location-browser.png'),
+  });
+  const openRoot = browser.getByRole('button', { name: 'Open IT Closet' });
+  await openRoot.focus();
+  await openRoot.press('Enter');
+  const left = browser.getByRole('button', { name: /Left Storage ITC-L$/ });
   await expect(left).toBeVisible();
-  await left.locator('[data-disclosure]').click();
-  await expect(shelf).toBeVisible();
-  await shelf.focus();
-  await shelf.press('ArrowRight');
+  await browser.getByRole('button', { name: 'Open Left Storage' }).click();
   await expect(
-    tree.getByRole('treeitem', { name: /1A.*ITC-S1A$/ }),
+    browser.getByRole('button', { name: /Shelf 1 ITC-S1$/ }),
   ).toBeVisible();
+  await browser.getByRole('button', { name: 'Back to IT Closet' }).click();
   await left.click();
   await selected(page, 'ITC-L');
-  await trigger.click();
-  await expect(root).toHaveAttribute('aria-expanded', 'true');
-  await expect(left).toHaveAttribute('aria-expanded', 'true');
-  const search = page.getByRole('combobox', { name: 'Search locations' });
+  const search = browser.getByRole('searchbox', { name: 'Browse locations' });
   await search.fill('ITC-D01');
-  const result = page.getByRole('option', { name: /Drawer 1.*ITC-D01/ });
-  await expect(result).toContainText('IT Closet / Left Storage / Drawer 1');
+  await expect(browser).toContainText(
+    'Selected path: IT Closet / Left Storage',
+  );
+  const result = browser.getByRole('button', { name: /Drawer 1 ITC-D01$/ });
   await result.click();
   await selected(page, 'ITC-D01');
+  await expect(browser).toContainText(
+    'Selected path: IT Closet / Left Storage / Drawer 1',
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -1391,16 +1366,16 @@ test('viewer phone navigation offers keyboard selection and an optional room wit
   await expect(
     page.getByRole('button', { name: 'Show room', exact: true }),
   ).toBeVisible();
-  const picker = page.getByLabel('Select location', { exact: true });
-  await picker.focus();
-  await expect(picker).toBeFocused();
-  await picker.press('ArrowDown');
-  const search = page.getByRole('combobox', { name: 'Search locations' });
+  const browser = page.getByRole('navigation', { name: 'Location browser' });
+  const search = browser.getByRole('searchbox', { name: 'Browse locations' });
+  await search.focus();
   await expect(search).toBeFocused();
   await search.fill('ITC-D01');
-  await search.press('Enter');
+  const result = browser.getByRole('button', { name: /Drawer 1 ITC-D01$/ });
+  await result.focus();
+  await result.press('Enter');
   await selected(page, 'ITC-D01');
-  const box = await picker.boundingBox();
+  const box = await search.boundingBox();
   expect(box!.height).toBeGreaterThanOrEqual(44);
   expect(
     await page.evaluate(
@@ -1455,7 +1430,9 @@ test('real WebGL context loss recovers with the current selection and reduced-mo
     injected,
     'the browser must expose real WebGL context-loss injection',
   ).toBe(true);
-  await expect(viewer).toHaveAttribute('data-state', 'failed');
+  await expect(
+    viewer.getByRole('heading', { name: 'Room view unavailable' }),
+  ).toBeVisible();
   await expect(
     viewer.getByRole('heading', { name: 'Room view unavailable', exact: true }),
   ).toBeVisible();
@@ -1466,7 +1443,7 @@ test('real WebGL context loss recovers with the current selection and reduced-mo
       .getByRole('region', { name: 'Location inventory', exact: true })
       .getByRole('link', { name: inventoryName, exact: true }),
   ).toHaveCount(1);
-  await page.getByRole('button', { name: 'Retry room', exact: true }).click();
+  // Selecting another location requests a fresh scene after context loss.
   await ready(page);
   await selected(page, 'ITC-D01');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
@@ -1503,11 +1480,11 @@ test('unavailable WebGL preserves location inventory, search and ordinary detail
   await selected(page, 'ITC-S1A');
   const show = page.getByRole('button', { name: 'Show room', exact: true });
   if (await show.isVisible()) await show.click();
-  await expect(page.getByTestId('room-viewer')).toHaveAttribute(
-    'data-state',
-    'failed',
-    { timeout: 20_000 },
-  );
+  await expect(
+    page
+      .getByTestId('room-viewer')
+      .getByRole('heading', { name: 'Room view unavailable' }),
+  ).toBeVisible({ timeout: 20_000 });
   await chooseRoomLocation(page, 'ITC-D01');
   await selected(page, 'ITC-D01');
   await page

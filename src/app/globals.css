@@ -147,9 +147,18 @@ a {
   padding: 28px 18px 28px 0;
   border-right: 1px solid #79c9df1b;
 }
-.experience-navigation {
+.experience-nav-stack {
   position: sticky;
   top: 24px;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.experience-navigation {
   order: 1;
 }
 .experience-nav-controls {
@@ -431,6 +440,11 @@ a {
     padding: 14px 0 0;
     border: 0;
   }
+  .experience-nav-stack {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
   .experience-nav-controls {
     order: 0;
     margin-top: 0;
@@ -450,7 +464,6 @@ a {
   }
   .experience-navigation {
     display: none;
-    position: static;
     margin-top: 10px;
     padding: 14px;
     border: 1px solid #6595a650;

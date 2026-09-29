@@ -268,68 +268,54 @@ produced two designer verification requests. Those observations determine the
 focused-loading and verification work, rather than speculative auth changes.
 
 Settings routes and name-derived site-code behavior are implemented with focused
-component coverage, pending integrated browser acceptance. Root inspection caught
-that the first site-code edit still placed Code before Name; the corrected order now
-has a DOM-order regression. The earlier local Storage
-exception is not carried forward: the existing `v1.77.9` fix passed the original
-denial-then-large-upload browser regression and a same-agent connection recovery
-probe on September 28. An unrelated site-form locator failure from the full Files
-run is not represented as a green full-suite result.
+component and browser coverage. The corrected Name-before-Code order has a DOM-order
+regression. The earlier local Storage `v1.77.9` failure passed its original
+denial-then-large-upload browser regression and a same-agent recovery probe. The
+baseline's 49 category-form fetches and two designer identity checks remain
+historical measurements, not matched final-source performance proof.
 
-The functional working tree has passed a fresh local database gate (481 pgTAP
-assertions, all configured integration suites and generated-type comparison),
-including atomic form saving, versioned legacy form reads and Item code contracts.
-Independent source reviews accepted the publication/compatibility and designer
-identity boundaries after fixes. These are working-tree checkpoints, not final-SHA
-certification. The focused production-build Chromium sweep now passes all 17
-cases in `experience-overhaul.spec.ts` and `metadata-designer.spec.ts`, including
-on-screen pointer reflow/resize before release, gesture interruption on account
-switch, rendered QR/Code 128 decoding and PDF dimensions, phone layouts, persisted
-layout reload, unsaved recovery and legacy draft discard. The adapted legacy
-custody flow now passes 3/3 browser cases, including bounded label search.
-Remaining legacy suites, final visual acceptance and the matched performance
-comparison are outstanding.
+The pushed checkpoint `3d32be39dea752d09c0bcd62589e32497a896164` passed 626
+application tests, 481 pgTAP assertions, all configured database integration suites
+and generated-type comparison locally. Its full production-build E2E run passed 56
+of 87 browser cases and failed 31; adaptation and triage continue. Focused browser
+checks have covered designer pointer reflow/resize and interruption, mobile panels,
+save/recovery, native CLS/INP attribution, rendered label codes and corrected print
+pagination. Focused successes do not turn the 87-case run green. Exact-checkpoint
+CI run `36502707682` passed its application job, while the database job was cancelled
+after about 30 minutes, consistent with its configured timeout; the cancellation initiator was not confirmed. The required gate failed. Cancellation does not by
+itself prove a database regression, nor does the local database pass replace CI.
 
-The initial PR checkpoint `78ec7dc9a46881c634c573f1401735002f1a2248` received a
-completed Codex review with no findings; its Linux CI passed application and
-database checks but failed seven of 65 browser cases. The later pushed checkpoint
-is `5c05437`, with further visual, test and review fixes in a dirty working tree.
-Checkpoint CI reported a `designer-model.test.ts` formatting failure, corrected
-locally but not certified on a new SHA. A newer Codex P2 location-ancestry finding
-has a local fix with eight unit and one browser checks passed; its review thread
-remains unresolved and the fix is unpushed. The emitted telemetry wire field is
-`eventTarget`; the focused browser rerun passed native INP and verified a native
-CLS shift of 0.0020345 with `hadRecentInput: false`, source
-`inventory-location-results-tree-2`, and an emitted 0.002 value. None of these local corrections
-replace fresh exact-SHA CI and review.
+The earlier checkpoint `78ec7dc9a46881c634c573f1401735002f1a2248` had a
+finding-free Codex review but seven of 65 browser cases failed. A location-ancestry
+P2 and a newer P2 from the `3d32be3` review have local corrections; their review
+threads still need green replies. The current dirty tree also includes first-paint
+reduced-motion, sticky navigation, RoomDefinition identity and camera focus after
+restore corrections. Focused browser/unit checks and independent review support
+those corrections, but broad local/browser reruns and exact-final-SHA review/CI are
+pending. The emitted telemetry field is `eventTarget`; a focused browser check
+observed a native CLS shift of 0.0020345 with `hadRecentInput: false`, source
+`inventory-location-results-tree-2`, and an emitted 0.002 value.
 
-Hosted acceptance is pending. The earlier Supabase PR22 child
-`bhqrwxclpggeurtbzfps` was removed before configuration completed. A replacement
-child, `hshhtmnwejpfjyzuzdej`, was observed `ACTIVE_HEALTHY` with
-`FUNCTIONS_DEPLOYED`. A user-authorized PR22 preview secret was retrieved to an
-ignored local file; the child's Vercel branch environment and exact `5c05437`
-deployment were verified ready. Three temporary staff/viewer/maintainer accounts
-are recorded in an ignored ledger, and their sign-in and membership reads passed.
-The preview-only file-validation HMAC pair is installed: its database key is active
-and TLS-verified, and the matching branch-only Vercel environment setting is added.
-The current `5c05437` deployment predates that setting. A new deployment, hosted
-workflows and supported fixture cleanup remain pending. The PR was closed
-and reopened under owner authorization;
-that workflow does not grant production access or establish preview acceptance.
+Hosted evidence exists on the isolated PR22 preview, but final-SHA hosted acceptance
+is pending. The replacement Supabase child `hshhtmnwejpfjyzuzdej` is active and
+healthy with functions deployed, and the preview-only file-validation HMAC pair is
+configured on that child and its Vercel branch environment. The exact `3d32be3`
+preview deployment passed ten signed-in stages across staff/viewer/maintainer roles,
+items, files and forms, plus seven direct negative API checks. Supported cleanup
+confirmed two temporary files and four storage objects removed. Temporary actors
+and fictional inventory remain intentionally in the isolated preview for final-SHA
+checks and supported cleanup. Neither preview health nor these stages establish
+final-source hosted acceptance. PR22 was closed and reopened under owner
+authorization; no production access follows from that action.
 
-The representative visual/navigation slice has 14 focused component tests passing
-across inventory rows, room links and the measured static closet preview. App-wide
-visual propagation has 60 working-tree captures. Root found a four-child designer
-grid defect; its layout and wrapping corrections are in the working tree. Root
-accepted a fresh 1440px desktop designer view with the selected field readable
-across three panes; focused 1024px and 390px geometry checks passed. Telemetry has 42 focused
-unit tests passing. The restored label guards have 19 focused unit tests passing.
-These working-tree checks do not establish final rendered acceptance across all
-routes and states or full E2E behavior. A confirmed print defect produced five
-pages for one label. The corrected print flow passed the focused browser case at
-`experience-overhaul.spec.ts:852`, including rendered QR/Code 128, quiet zones and
-the direct-print guard. Poppler inspection found one page in each of four
-one-label size/paper PDFs and two pages in each of two 20-label PDFs.
+The visual propagation has rich desktop/phone captures and two real interaction
+recordings. Root accepted representative Overview, inventory and designer direction,
+including a corrected three-pane desktop designer and narrower panel modes, but
+final visual acceptance across routes and states is pending. Focused print evidence
+corrected a one-label/five-page defect: a browser case decoded QR/Code 128 and
+checked the direct-print guard; Poppler found one page in each of four one-label
+size/paper PDFs and two pages in each of two 20-label PDFs. Physical print and
+hardware-specific behavior remain separate acceptance work.
 
 Completion requires evidence for every listed boundary; an implementation commit
 or a partial checkpoint alone is insufficient.
@@ -345,30 +331,29 @@ scenario with normal visual effects enabled; report median and nearest-rank p95
 Supabase HTTP fetch counts and summed parallel request durations must not be
 presented as SQL query counts or critical-path latency.
 
-| Requirement                            | Local implementation and evidence                                                                                                                                                                                                                                                                                                                                                                                                                       | Remaining acceptance evidence                                                                                                                                                                                                                                         |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Settings landing and five sections     | Addressable routes, focused loading and name-derived site-code behavior have component checks. `experience-overhaul.spec.ts` covers deep links, active navigation, Back/Forward, selected-area loading and viewer explanation in the 17-case local sweep.                                                                                                                                                                                               | Rerun on final candidate, including label defaults without form-definition fetches and read-only states; hosted role proof.                                                                                                                                           |
-| Designer workspace and sections        | The 17-case sweep covers held pointer reflow/resize, cancellation, undo, phone panels, persistence and recovery. `designer-model.test.ts` covers cross-section moves and hierarchy constraints.                                                                                                                                                                                                                                                         | Final rendered interaction recordings, edge autoscroll, keyboard reordering/focus, empty targets and nonempty section removal; recheck after the local formatting correction.                                                                                         |
-| Protected visibility/applicability     | The 481-assertion DB gate and `designer-model.test.ts` cover protected controls, type/ancestor limits and publication blockers; versioned legacy reads were included in integration validation.                                                                                                                                                                                                                                                         | Final candidate DB/UI run for hide/restore, hidden values, old revisions and safe overlays; hosted role behavior.                                                                                                                                                     |
-| One Save changes                       | DB/integration gate exercised atomic save and publication; local browser sweep covered targeted confirmation, stale edit retention, direct phone save and draft recovery/discard.                                                                                                                                                                                                                                                                       | Final candidate receipt/retry, stale/ABA/actor denial and open-form conflict evidence, plus signed-in hosted save.                                                                                                                                                    |
-| Permission interruption                | Local browser sweep covered coalesced same-user checks, transient retry, account switch during a gesture and recovery.                                                                                                                                                                                                                                                                                                                                  | Final logout/revocation and direct API-denial proof; hosted cross-account/role checks.                                                                                                                                                                                |
-| Measured performance and telemetry     | Baseline has 36 captures and five warm samples per scenario. Filtered collector and 42 unit/emitted-payload tests pass locally; route/token redaction and native CLS/INP browser evidence passed, including the `eventTarget` wire field.                                                                                                                                                                                                               | Matched final normal-motion warm/cold and feedback/content-ready runs with median/p95, requests, payload, bundle and long-task provenance.                                                                                                                            |
-| Site suggestion and quantity Item code | Local DB gate covered normalization, uniqueness and Item code contracts. Component and browser checks cover site-code suggestion, quantity form/display, label identity and scanner-safe QR; the 17-case sweep decoded rendered QR/Code 128.                                                                                                                                                                                                            | Final candidate collision/retry, omission-versus-clear, history/export and all create/edit/search/scanner paths; hosted write/read roles.                                                                                                                             |
-| Automatic label preview and printing   | `label-designer.test.tsx`, `label-sheet.test.tsx` and the 17-case browser sweep cover automatic validation, retained sheets, rapid edits, authorization, rendered code decoding and PDF dimensions. Nineteen focused label guard tests and custody 3/3 pass locally. The one-label/five-page print defect was fixed; a focused browser case passed, and Poppler confirmed four one-label PDFs at one page each and two 20-label PDFs at two pages each. | Final-source lifecycle/error/read-only states and visual print inspection across both 70x35 and 90x50 sizes on Letter and A4.                                                                                                                                         |
-| Locations and Spaces                   | `spaces.test.ts` and the local browser sweep cover fallback/old links, ancestry, A/B/A stale results, history, immediate heading, failed contents and camera restore. Separate room E2E cases exist for real WebGL and fallback. The ancestry fix passed eight unit and one browser checks locally.                                                                                                                                                     | Final full room suite for dense/empty/paginated contents, same-location refocus, modeled/inventory-only spaces, WebGL loss and phone navigation; resolve the P2 thread after final evidence.                                                                          |
-| App-wide visuals                       | Shared shell/auth/Overview and representative inventory/detail styles exist in the dirty tree; 14 focused component tests cover inventory rows, room links and the static preview. Sixty app-wide captures exist; the four-child designer grid/wrapping fixes have root-accepted 1440px selected-field readability and focused 1024px/390px geometry passes.                                                                                            | Root rendered acceptance across every named route and state; real interaction recordings, 200% zoom, focus, contrast, clipping, reduced motion and normal-motion performance.                                                                                         |
-| Compatibility and final delivery       | Earlier 481 pgTAP assertions, configured integration suites, generated types, 17 focused overhaul cases and 3 adapted custody cases passed on working-tree checkpoints. PR22's replacement child and three role sign-in/membership reads passed; preview-only HMAC database and branch environment settings are installed.                                                                                                                              | Deploy after the environment change, then complete app/DB/browser gates on final source, hosted staff/viewer/maintainer workflows with supported fixture cleanup, independent review, exact-SHA CI/Codex, zero actionable threads and clean local/remote HEAD parity. |
+| Requirement                            | Local implementation and evidence                                                                                                                                                                                                                                                         | Remaining acceptance evidence                                                                                                                                                                                                                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Settings landing and five sections     | Addressable routes, focused loading and name-derived site-code behavior have component/browser checks. The pushed app gate has 626 passing tests.                                                                                                                                         | Recheck every role/state on final source; verify label defaults stay independent of form-definition reads and all deep links/Back/Forward paths remain stable.                                                                                 |
+| Designer workspace and sections        | Focused browser runs cover held pointer reflow/resize, cancellation, undo, phone panels, persistence and recovery. The corrected three-pane desktop and narrow panel layouts have captured bounds; two real interaction recordings exist.                                                 | Final-source pointer edge autoscroll, keyboard reordering/focus, empty targets, nonempty section removal and rendered review at phone/desktop/200% zoom.                                                                                       |
+| Protected visibility/applicability     | The 481-assertion local DB gate and designer tests cover protected controls, type/ancestor limits and publication blockers; versioned legacy reads were included in integration validation.                                                                                               | Exact-final-source DB/UI hide/restore, hidden values, old revisions and safe overlays; hosted role behavior.                                                                                                                                   |
+| One Save changes                       | Local DB/integration gate exercised atomic save/publication; focused browser work covered confirmation, stale edit retention, direct phone save and draft recovery/discard. Hosted `3d32be3` role/item/form stages passed.                                                                | Final-source receipt/retry, stale/ABA/actor denial and open-form conflict evidence; repeat hosted writes on final SHA.                                                                                                                         |
+| Permission interruption                | Focused browser runs covered same-user coalescing, transient retry, account switch during a gesture and recovery. Seven hosted direct negative API checks passed.                                                                                                                         | Final logout/revocation, cross-account and role behavior on exact final source; retain no actionable authorization findings.                                                                                                                   |
+| Measured performance and telemetry     | Historical baseline has 36 captures/five warm samples per scenario. Filtered collector and focused unit/emitted-payload tests pass; route/token redaction and native CLS/INP browser evidence passed, including the `eventTarget` wire field.                                             | Matched final normal-motion warm/cold and feedback/content-ready runs with median/p95, requests, payload, bundle and long-task provenance. Historical 49-form observations are not matched proof.                                              |
+| Site suggestion and quantity Item code | Local DB gate covered normalization, uniqueness and Item code contracts. Component/focused browser checks cover site-code suggestion, quantity form/display, label identity and scanner-safe QR; hosted `3d32be3` item stages passed.                                                     | Final-source collision/retry, omission-versus-clear, history/export and create/edit/search/scanner paths; repeat hosted write/read roles.                                                                                                      |
+| Automatic label preview and printing   | Focused unit/browser work covers automatic validation, retained sheets, rapid edits, authorization, code decoding and PDF dimensions. The one-label/five-page print defect was corrected; Poppler confirmed four one-label PDFs at one page each and two 20-label PDFs at two pages each. | Final-source lifecycle/error/read-only states, visual inspection for 70x35 and 90x50 on Letter/A4, with physical-printer verification explicitly unperformed.                                                                                  |
+| Locations and Spaces                   | Focused source/browser checks cover fallback/old links, ancestry, stale A/B/A results, history, immediate heading, failed contents and camera restore. Local ancestry P2, RoomDefinition identity and focus-after-restore corrections have focused evidence.                              | Full final-source room suite: dense/empty/paginated contents, same-location refocus, modeled/inventory-only spaces, WebGL loss and phone navigation; green review replies.                                                                     |
+| App-wide visuals                       | Shared shell/auth/Overview and route-level propagation have rich captures and two real recordings. Root accepted representative direction and selected-field readability in the designer; reduced-motion first paint and sticky navigation fixes are dirty-tree focused work.             | Root acceptance of every named route/state, 200% zoom, keyboard focus, contrast, clipping, phone, print and reduced-motion behavior; hardware limits stated explicitly.                                                                        |
+| Compatibility and final delivery       | Pushed `3d32be3` passed 626 app tests and local 481 pgTAP/all configured integrations/types. Hosted matching deployment passed ten signed-in stages and seven negative API checks; preview HMAC is configured. Two files/four objects were cleaned up.                                    | Resolve 31 of 87 browser failures and rerun the full gate; repair/certify CI database timeout; repeat local, hosted and performance checks on final SHA; resolve both P2 threads, fresh review, zero actionable threads and clean HEAD parity. |
 
-The lead must deploy the updated branch environment and complete hosted role
-workflows, accept the rendered
-route and motion evidence, resolve
-the verified P2 review thread, and obtain a fresh review plus matching final-SHA CI.
-The browser owner must complete the remaining targeted/full runtime checks; source
-tests and preview health alone cannot close those gates.
+The lead must accept the final rendered route and motion evidence, arrange matched
+performance checks and explicit hardware limitations, obtain final-SHA local/hosted/CI gates,
+and resolve both P2 review threads with fresh review. The browser owner must finish
+E2E adaptation and rerun the complete suite; 56/87 is a checkpoint, not acceptance.
+Temporary preview actors and fictional inventory need supported cleanup only after
+the final-SHA hosted run no longer needs them.
 
-No merge or production mutation, permission grant, secret installation, setting
-change or promotion is authorized. The goal separately authorizes minimal fictional
-fixtures and, if required, an environment-specific file-validation HMAC pair through
-the documented process in the verified isolated preview. Existing preview credentials
-belong to their verified environment; prior PR20 credentials cannot be reused for a
-new child implicitly.
+No merge, production mutation, permission grant or promotion is authorized. The
+goal's narrow authorization for fictional fixtures and a preview-only
+file-validation HMAC pair has been used in the isolated PR22 child. Further
+environment changes require the same verified boundary; prior PR20 credentials
+cannot be reused for a new child implicitly.

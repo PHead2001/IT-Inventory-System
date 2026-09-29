@@ -52,6 +52,21 @@ describe('workspace navigation', () => {
     expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument();
   });
 
+  it('keeps navigation and motion controls together for sticky scrolling', () => {
+    render(<Navigation />);
+    const navigation = screen.getByRole('navigation', {
+      name: 'Main navigation',
+    });
+    const stack = navigation.parentElement;
+    expect(stack).toHaveClass('experience-nav-stack');
+    expect(stack).toContainElement(
+      screen.getByRole('button', { name: 'Reduce motion' }),
+    );
+    expect(stack).toContainElement(
+      screen.getByRole('button', { name: 'Menu' }),
+    );
+  });
+
   it('offers one compact mobile menu control with native route links', async () => {
     const user = userEvent.setup();
     render(<Navigation />);

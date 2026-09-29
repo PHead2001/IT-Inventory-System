@@ -60,7 +60,7 @@ export function Navigation() {
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
-    <>
+    <div className="experience-nav-stack">
       <div className="experience-nav-controls">
         <button
           type="button"
@@ -114,6 +114,6 @@ export function Navigation() {
           ))}
         </LayoutGroup>
       </nav>
-    </>
+    </div>
   );
 }

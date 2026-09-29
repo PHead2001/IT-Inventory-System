@@ -50,9 +50,11 @@ export type RoomSceneProps = {
   selectedCode: string | null;
   highlightedCodes: string[];
   focusRequest: { code: string | null; requestId: number };
+  focusOnRestore?: boolean;
   onSelect(code: string): void;
   onReady(): void;
   onFocusComplete(code: string | null): void;
+  onFocusCancel?(): void;
   onFailure(message: string): void;
   canFocusSelected: boolean;
   onRequestFocus(): void;
@@ -573,9 +575,11 @@ function CameraRig({
   bindings,
   focusRequest,
   onFocusComplete,
+  onFocusCancel,
   onReady,
   onFailure,
   initialView,
+  focusOnRestore,
   onViewChange,
   command,
   orbitMode,
@@ -586,9 +590,11 @@ function CameraRig({
   | 'bindings'
   | 'focusRequest'
   | 'onFocusComplete'
+  | 'onFocusCancel'
   | 'onReady'
   | 'onFailure'
   | 'initialView'
+  | 'focusOnRestore'
   | 'onViewChange'
 > & {
   command: ViewCommand;
@@ -769,7 +775,8 @@ function CameraRig({
           controls.current.minZoom,
           controls.current.maxZoom,
         );
-        lastFocusRequest.current = { ...focusRequest, room };
+        if (!focusOnRestore)
+          lastFocusRequest.current = { ...focusRequest, room };
       }
       camera.updateProjectionMatrix();
     }
@@ -785,11 +792,13 @@ function CameraRig({
     invalidate,
     writeTelemetry,
     initialView,
+    focusOnRestore,
     focusRequest,
     emitView,
   ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
+    if (animation.current) onFocusCancel?.();
     animation.current = null;
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (orbitMode !== 'guided') {
@@ -819,7 +828,16 @@ function CameraRig({
       emitView();
       invalidate();
     } else emitView();
-  }, [orbitMode, camera, gl, invalidate, room, writeTelemetry, emitView]);
+  }, [
+    orbitMode,
+    camera,
+    gl,
+    invalidate,
+    room,
+    writeTelemetry,
+    emitView,
+    onFocusCancel,
+  ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (
@@ -904,6 +922,7 @@ function CameraRig({
     )
       return;
     lastCommandId.current = command.id;
+    if (animation.current) onFocusCancel?.();
     animation.current = null;
     const control = controls.current;
     if (command.kind === 'fit') {
@@ -976,6 +995,7 @@ function CameraRig({
     invalidate,
     writeTelemetry,
     emitView,
+    onFocusCancel,
   ]);
   useFrame(() => {
     if (!ready.current) {
@@ -1038,6 +1058,7 @@ function CameraRig({
       screenSpacePanning
       zoomSpeed={0.7}
       onStart={() => {
+        if (animation.current) onFocusCancel?.();
         animation.current = null;
         manualGesture.current.active = true;
         if (controls.current)
