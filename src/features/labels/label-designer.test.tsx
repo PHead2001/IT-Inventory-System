@@ -20,23 +20,31 @@ vi.mock('./label-sheet', () => ({
     format,
     size,
     page,
+    generation,
   }: {
     records: LiveLabel[];
     format: string;
     size: string;
     page: string;
+    generation: string;
   }) => (
     <div
       className="label-print-root"
       data-size={size}
       data-page={page}
+      data-sheet-generation={generation}
       aria-label="Print preview"
     >
       {records.map((record, index) => (
         <div
           key={index}
           className="label-card"
-          data-code-ready="true"
+          data-code-ready={record.name.includes('delayed') ? 'false' : 'true'}
+          data-sheet-generation={generation}
+          data-text-measured={
+            record.name.includes('delayed') ? 'false' : 'true'
+          }
+          data-text-overflow="false"
           data-code-fallback={
             format === 'code128' && record.kind === 'quantity'
           }
@@ -124,6 +132,39 @@ it('automatically validates the initial queue and prints only after final revali
   expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
     'data-print-authorized',
   );
+});
+
+it('waits for the refreshed generation to finish code and fit measurement before printing', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    { ...quantity, name: 'Fresh adapters delayed' },
+    asset,
+  ]);
+  fireEvent.click(printButton());
+  await screen.findAllByText(/Fresh adapters delayed/);
+  expect(window.print).not.toHaveBeenCalled();
+  const refreshed = Array.from(
+    document.querySelectorAll<HTMLElement>('.label-card'),
+  ).find((card) => card.textContent?.includes('Fresh adapters delayed'))!;
+  expect(refreshed.dataset.codeReady).toBe('false');
+  refreshed.dataset.textMeasured = 'true';
+  expect(window.print).not.toHaveBeenCalled();
+  refreshed.dataset.codeReady = 'true';
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+});
+
+it('cancels a pending final print when the designer unmounts', async () => {
+  const view = render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    { ...quantity, name: 'Fresh adapters delayed' },
+    asset,
+  ]);
+  fireEvent.click(printButton());
+  await screen.findAllByText(/Fresh adapters delayed/);
+  view.unmount();
+  expect(window.print).not.toHaveBeenCalled();
 });
 
 it('consumes one beforeprint lease even when afterprint never fires', async () => {

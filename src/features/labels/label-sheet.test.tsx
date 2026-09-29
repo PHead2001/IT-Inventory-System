@@ -1,9 +1,120 @@
 import { expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+const qrMocks = vi.hoisted(() => ({
+  render: vi.fn(async () => 'data:image/png;base64,iVBORw0KGgo='),
+}));
 vi.mock('qrcode', () => ({
-  default: { toDataURL: async () => 'data:image/png;base64,iVBORw0KGgo=' },
+  default: { toDataURL: qrMocks.render },
 }));
 import { LabelSheet, barcodePayload } from './label-sheet';
+
+it('does not reuse a previous QR while the same card identity receives a new path', async () => {
+  const id = crypto.randomUUID();
+  const record = {
+    kind: 'quantity' as const,
+    key: id,
+    name: 'Adapters',
+    context: 'Cables',
+    path: '/inventory/quantity/' + id,
+    state: 'active',
+  };
+  const view = render(
+    <LabelSheet
+      records={[record]}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="90x50"
+      page="letter"
+      format="qr"
+      generation="first"
+    />,
+  );
+  await waitFor(() =>
+    expect(document.querySelector('.label-card')).toHaveAttribute(
+      'data-code-ready',
+      'true',
+    ),
+  );
+  let resolveNext!: (image: string) => void;
+  qrMocks.render.mockReturnValueOnce(
+    new Promise<string>((resolve) => {
+      resolveNext = resolve;
+    }),
+  );
+  view.rerender(
+    <LabelSheet
+      records={[{ ...record, path: record.path + '/changed' }]}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="90x50"
+      page="letter"
+      format="qr"
+      generation="second"
+    />,
+  );
+  expect(document.querySelector('.label-card')).toHaveAttribute(
+    'data-code-ready',
+    'false',
+  );
+  expect(
+    screen.queryByRole('img', { name: 'QR code for Adapters' }),
+  ).toBeNull();
+  resolveNext('data:image/png;base64,iVBORw0KGgo=');
+  await waitFor(() =>
+    expect(document.querySelector('.label-card')).toHaveAttribute(
+      'data-code-ready',
+      'true',
+    ),
+  );
+});
+
+it('does not mark current-generation text measured before fonts settle', async () => {
+  const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+  let finishFonts!: () => void;
+  const fonts = {
+    status: 'loading',
+    ready: new Promise<void>((resolve) => {
+      finishFonts = resolve;
+    }),
+  };
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: fonts,
+  });
+  try {
+    render(
+      <LabelSheet
+        records={[
+          {
+            kind: 'quantity',
+            key: crypto.randomUUID(),
+            name: 'Adapters',
+            context: 'Cables',
+            path: '/inventory/quantity/font-check',
+            state: 'active',
+          },
+        ]}
+        origin="https://inventory.example.test"
+        preview={false}
+        size="90x50"
+        page="letter"
+        format="qr"
+        generation="font-check"
+      />,
+    );
+    const card = document.querySelector('.label-card');
+    expect(card).toHaveAttribute('data-text-measured', 'false');
+    expect(card).toHaveAttribute('data-code-ready', 'false');
+    fonts.status = 'loaded';
+    finishFonts();
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-text-measured', 'true'),
+    );
+  } finally {
+    if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+    else Reflect.deleteProperty(document, 'fonts');
+  }
+});
 
 it('keeps quantity identity as the canonical QR URL even when Code 128 is selected', async () => {
   const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
@@ -24,6 +135,7 @@ it('keeps quantity identity as the canonical QR URL even when Code 128 is select
       size="90x50"
       page="letter"
       format="code128"
+      generation="test"
     />,
   );
   await waitFor(() =>
@@ -63,6 +175,7 @@ it('uses the full name and short physical context without slicing by character c
       size="70x35"
       page="letter"
       format="qr"
+      generation="test"
     />,
   );
   expect(screen.getByText(name.trim())).toBeInTheDocument();
@@ -94,6 +207,7 @@ it('scales Code 128 bars and quiet zones at physical module width', async () => 
       size="90x50"
       page="letter"
       format="code128"
+      generation="test"
     />,
   );
   const svg = screen.getByRole('img', { name: 'Code 128 LOC:ITC' });
@@ -130,6 +244,7 @@ it('shows the quantity Item code as human identity while retaining stable QR nav
       size="70x35"
       page="A4"
       format="qr"
+      generation="test"
     />,
   );
   expect(screen.getByText('SKU-0042')).toBeInTheDocument();
@@ -182,6 +297,7 @@ it('reports measured text overflow and denies code readiness for a physically un
         size="70x35"
         page="letter"
         format="qr"
+        generation="test"
       />,
     );
     await waitFor(() =>
