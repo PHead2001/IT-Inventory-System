@@ -1237,7 +1237,7 @@ export function MetadataSettings({
             {dirty ? ' · Unsaved changes' : ' · Saved'}
           </p>
           {!recovery && (
-            <div className="sticky top-20 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-500/30 bg-slate-950/95 p-2 shadow-lg backdrop-blur-sm">
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-500/30 bg-slate-950/95 p-2 shadow-lg backdrop-blur-sm xl:top-20">
               <Button
                 type="button"
                 disabled={

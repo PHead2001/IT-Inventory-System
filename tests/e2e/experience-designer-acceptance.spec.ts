@@ -138,6 +138,48 @@ test('keyboard width editing retains focus and survives reload', async ({
   await expect(reloaded.getByLabel('Width')).toHaveValue(chosen);
 });
 
+test('advanced JSON action stays clickable below sticky Save at a constrained viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 450 });
+  await signIn(page);
+  const designer = await openDesigner(page, 'Cables');
+  await designer.getByText('Advanced JSON recovery', { exact: true }).click();
+  await designer
+    .getByRole('button', { name: 'Load current document JSON' })
+    .click();
+  await designer
+    .getByRole('navigation', { name: 'Designer panels' })
+    .getByRole('button', { name: 'Inspector' })
+    .click();
+  await expect(
+    designer.getByRole('heading', { name: 'Inspector' }),
+  ).toBeVisible();
+  const apply = designer.getByRole('button', {
+    name: 'Apply JSON to visual editor',
+  });
+  await expect(apply).toBeEnabled();
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  const save = designer.getByRole('button', { name: 'Save changes' });
+  await expect(save).toBeInViewport();
+  expect(
+    await apply.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return hit === button || button.contains(hit);
+    }),
+  ).toBe(true);
+  await apply.click();
+  await expect(designer.getByRole('status')).toContainText(
+    'JSON applied to the local editor',
+  );
+});
+
 test('nonempty section removal moves or unplaces a populated custom field, and hide/restore keeps its value', async ({
   page,
 }) => {
