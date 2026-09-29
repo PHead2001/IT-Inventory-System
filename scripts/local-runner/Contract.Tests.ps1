@@ -137,7 +137,10 @@ using System.IO;
 public class ArgvSink {
     public static int Main(string[] args) {
         if (args[0] == "--block") System.Threading.Thread.Sleep(3000);
-        File.WriteAllLines(args[args.Length - 1] + ".argv", args);
+        string capture = Environment.GetEnvironmentVariable("ITIR_NATIVE_ARGV_PATH");
+        File.WriteAllLines(String.IsNullOrEmpty(capture) ? args[args.Length - 1] + ".argv" : capture, args);
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        if (args[0] == "--output") Console.WriteLine("/mnt/c/fixture image");
         return args[args.Length - 1].Contains("fail-key") ? 9 : 0;
     }
 }
@@ -158,6 +161,76 @@ public class ArgvSink {
     if ((Invoke-RunnerNative $sink $arguments) -ne 0 -or
         (Compare-Object $arguments ([IO.File]::ReadAllLines($probePath + '.argv')) -SyncWindow 0)) {
         throw 'Native SSH command quotes, empty values or backslashes changed.'
+    }
+
+    $outputResult = Invoke-RunnerNative $sink @('--output', (Join-Path $testRoot 'captured-output')) -CaptureOutput
+    if ($outputResult.ExitCode -ne 0 -or $outputResult.Output.Trim() -cne '/mnt/c/fixture image') { throw 'Trusted native output capture failed.' }
+    $outputResult = Invoke-RunnerNative $sink @('--output', (Join-Path $testRoot 'fail-key-output')) -CaptureOutput
+    if ($outputResult.ExitCode -ne 9) { throw 'Trusted native output capture lost the failing exit code.' }
+
+    # WSL's default-shell route consumes Windows backslashes. All Linux
+    # conversion commands must use --exec with their exact native argv.
+    $previousArgvPath = $env:ITIR_NATIVE_ARGV_PATH
+    $env:ITIR_NATIVE_ARGV_PATH = Join-Path $testRoot 'wsl-argv.txt'
+    try {
+        $windowsImage = Join-Path $testRoot 'image with spaces\source.img'
+        $windowsDisk = Join-Path $testRoot 'image with spaces\target.vhdx'
+        $converterCommands = @(
+            ,@('wslpath', '-a', $windowsImage)
+            ,@('wslpath', '-a', $windowsDisk)
+            ,@('sh', '-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils')
+            ,@('qemu-img', 'convert', '-f', 'qcow2', '-O', 'vhdx', '-o', 'subformat=dynamic', '/mnt/c/image with spaces/source.img', '/mnt/c/image with spaces/target.vhdx')
+        )
+        if ($converterCommands.Count -ne 4) { throw 'Conversion argv tests did not produce four separate command arrays.' }
+        foreach ($converterCommand in $converterCommands) {
+            if ((Invoke-ConverterCommand $stage.helperName $converterCommand -Executable $sink) -ne 0) { throw 'Conversion argv sink failed.' }
+            $captured = [IO.File]::ReadAllLines($env:ITIR_NATIVE_ARGV_PATH)
+            $expected = @('-d', $stage.helperName, '-u', 'root', '--exec') + $converterCommand
+            if ($captured.Count -ne $expected.Count -or (Compare-Object $expected $captured -SyncWindow 0)) {
+                throw 'WSL conversion command lost --exec, backslashes, spaces or its fixed shell script argument.'
+            }
+        }
+    } finally { $env:ITIR_NATIVE_ARGV_PATH = $previousArgvPath }
+
+    $realConverterCommand = (Get-Command Invoke-ConverterCommand).ScriptBlock
+    $script:pathResult = [pscustomobject]@{ ExitCode = 0; Output = "/mnt/c/fixture image`n" }
+    function Invoke-ConverterCommand {
+        param($Name, $Command, [switch]$CaptureOutput)
+        if ($Name -cne $stage.helperName -or $Command.Count -ne 3 -or $Command[0] -cne 'wslpath' -or
+            $Command[1] -cne '-a' -or $Command[2] -cne $windowsImage -or -not $CaptureOutput) { throw 'WSL path helper constructed the wrong command.' }
+        return $script:pathResult
+    }
+    if ((Get-ConverterLinuxPath $stage.helperName $windowsImage) -cne '/mnt/c/fixture image') { throw 'Valid WSL path output was rejected.' }
+    foreach ($case in @('exit', 'null', 'empty', 'relative', 'multiple-lines')) {
+        $script:pathResult.ExitCode = 0; $script:pathResult.Output = '/mnt/c/fixture image'
+        switch ($case) {
+            'exit' { $script:pathResult.ExitCode = 9; $script:pathResult.Output = $null }
+            'null' { $script:pathResult.Output = $null }
+            'empty' { $script:pathResult.Output = "`n " }
+            'relative' { $script:pathResult.Output = 'relative/path' }
+            'multiple-lines' { $script:pathResult.Output = "/mnt/c/first`n/mnt/c/second" }
+        }
+        $rejected = $false
+        try { Get-ConverterLinuxPath $stage.helperName $windowsImage | Out-Null } catch {
+            $rejected = $true
+            if ($case -eq 'exit' -and $_.Exception.Message -cne 'Image converter path translation failed (exit 9).') {
+                throw 'Failed WSL path translation did not check exit status before missing output.'
+            }
+        }
+        if (-not $rejected) { throw "Invalid WSL path result $case was accepted." }
+    }
+    Set-Item -Path Function:\Invoke-ConverterCommand -Value $realConverterCommand
+
+    $setupAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Setup.ps1'), [ref]$null, [ref]$null)
+    $linuxTranslations = @($setupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Get-ConverterLinuxPath' }, $true))
+    $converterCalls = @($setupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Invoke-ConverterCommand' }, $true))
+    $shellRoutedLinuxCalls = @($setupAst.FindAll({
+        param($node)
+        $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'wsl.exe' -and
+            $node.CommandElements.Extent.Text -contains '-d'
+    }, $true))
+    if ($linuxTranslations.Count -ne 2 -or $converterCalls.Count -ne 2 -or $shellRoutedLinuxCalls.Count -ne 0) {
+        throw 'A setup conversion command bypassed the verified --exec/output helpers.'
     }
 
     # Load definitions only; never execute Runner.ps1's action dispatch.

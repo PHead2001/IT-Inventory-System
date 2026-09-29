@@ -139,8 +139,8 @@ try {
         throw 'WSL converter registration cannot be proven as this setup-owned import.'
     }
     Assert-ConverterOwnership $stage $registrations[0] $helperRoot
-    & wsl.exe -d $helper -u root -- sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils'
-    if ($LASTEXITCODE -ne 0) { throw 'qemu-utils installation failed in the dedicated image converter.' }
+    $exitCode = Invoke-ConverterCommand $helper @('sh', '-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils')
+    if ($exitCode -ne 0) { throw 'qemu-utils installation failed in the dedicated image converter.' }
     $receiptPath = Join-Path $imageDir 'converted-vhdx.json'
     $receipt = Read-RunnerJson $receiptPath
     $verifiedImage = $false
@@ -159,10 +159,10 @@ try {
         if (Test-Path -LiteralPath $partialPath) { Remove-Item -LiteralPath $partialPath -Force }
         if (Test-Path -LiteralPath $vhdxPath) { Remove-Item -LiteralPath $vhdxPath -Force }
         if (Test-Path -LiteralPath $receiptPath) { Remove-Item -LiteralPath $receiptPath -Force }
-        $linuxImage = (& wsl.exe -d $helper -u root -- wslpath -a $imagePath).Trim()
-        $linuxVhdx = (& wsl.exe -d $helper -u root -- wslpath -a $partialPath).Trim()
-        & wsl.exe -d $helper -u root -- qemu-img convert -f qcow2 -O vhdx -o subformat=dynamic $linuxImage $linuxVhdx
-        if ($LASTEXITCODE -ne 0) { throw 'Ubuntu image conversion failed.' }
+        $linuxImage = Get-ConverterLinuxPath $helper $imagePath
+        $linuxVhdx = Get-ConverterLinuxPath $helper $partialPath
+        $exitCode = Invoke-ConverterCommand $helper @('qemu-img', 'convert', '-f', 'qcow2', '-O', 'vhdx', '-o', 'subformat=dynamic', $linuxImage, $linuxVhdx)
+        if ($exitCode -ne 0) { throw 'Ubuntu image conversion failed.' }
         if (-not (Test-VHD -Path $partialPath)) { throw 'Completed conversion failed Hyper-V VHDX validation.' }
         Resize-VHD -Path $partialPath -SizeBytes 64GB
         $convertedHash = (Get-FileHash -LiteralPath $partialPath -Algorithm SHA256).Hash.ToLowerInvariant()

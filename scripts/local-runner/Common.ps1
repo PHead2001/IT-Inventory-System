@@ -142,7 +142,7 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string] $Value) {
     return '"' + $escaped + '"'
 }
 
-function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [string] $InputText = $null) {
+function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [string] $InputText = $null, [switch] $CaptureOutput) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable
     $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
@@ -151,18 +151,42 @@ function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [strin
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.RedirectStandardInput = $true
+    if ($CaptureOutput) { $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false) }
     $process = [Diagnostics.Process]::Start($start)
     try {
-        # Drain both streams concurrently without logging guest output or JIT data.
-        $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+        # Only trusted setup path translation captures output. Guest output and
+        # JIT data keep the existing discard behavior; stderr is never logged.
+        if ($CaptureOutput) { $output = $process.StandardOutput.ReadToEndAsync() }
+        else { $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null) }
         $errorOutput = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
         if ($null -ne $InputText) { $process.StandardInput.WriteLine($InputText) }
         $process.StandardInput.Close()
         $process.WaitForExit()
-        [void]$output.GetAwaiter().GetResult()
+        $captured = $output.GetAwaiter().GetResult()
         [void]$errorOutput.GetAwaiter().GetResult()
+        if ($CaptureOutput) { return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $captured } }
         return $process.ExitCode
     } finally { $process.Dispose() }
+}
+
+function Invoke-ConverterCommand([string] $Name, [string[]] $Command, [switch] $CaptureOutput, [string] $Executable = 'wsl.exe') {
+    if ($Name -notmatch '^ITInventoryImageConverter-[0-9a-f]{32}$' -or $Command.Count -eq 0) {
+        throw 'Image converter command requires its exact recorded identity and a command.'
+    }
+    # -- alone lets WSL invoke the default Linux shell, which consumes Windows
+    # path backslashes. --exec passes the native argv directly to the command.
+    $arguments = @('-d', $Name, '-u', 'root', '--exec') + $Command
+    return Invoke-RunnerNative $Executable $arguments -CaptureOutput:$CaptureOutput
+}
+
+function Get-ConverterLinuxPath([string] $Name, [string] $Path) {
+    $Path = Assert-OwnedPath $Path
+    $result = Invoke-ConverterCommand $Name @('wslpath', '-a', $Path) -CaptureOutput
+    if ($result.ExitCode -ne 0) { throw "Image converter path translation failed (exit $($result.ExitCode))." }
+    if ([string]::IsNullOrWhiteSpace([string]$result.Output)) { throw 'Image converter path translation returned no path.' }
+    $linuxPath = ([string]$result.Output).Trim()
+    if ($linuxPath -notmatch '^/[^\r\n\x00]+$') { throw 'Image converter path translation did not return one absolute Linux path.' }
+    return $linuxPath
 }
 
 function New-RunnerSshKey([string] $Path, [string] $Executable = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source) {
