@@ -45,24 +45,42 @@ function entryFor(record: LiveLabel): QueueEntry {
     lifecycleAcknowledged: record.state === 'active',
   };
 }
-function signature(
-  record: LabelRecord & { tag?: string | null; categoryName?: string | null },
-): string {
+function signature(record: LabelRecord): string {
   return JSON.stringify([
     record.kind,
     record.key,
     record.name,
-    record.context,
-    record.state,
-    record.tag,
+    record.path,
+    record.barcode,
     record.humanId,
     record.categoryName,
+    record.manufacturer,
+    record.model,
+    record.serialNumber,
+    record.locationHierarchy,
   ]);
+}
+function printableRecord(record: LiveLabel): LabelRecord {
+  return {
+    kind: record.kind,
+    key: record.key,
+    name: record.name,
+    path: record.path,
+    barcode: record.barcode,
+    humanId: record.humanId,
+    categoryName: record.categoryName,
+    manufacturer: record.manufacturer,
+    model: record.model,
+    serialNumber: record.serialNumber,
+    locationHierarchy: record.locationHierarchy,
+  };
 }
 function expandLabels(entries: QueueEntry[], rows: LiveLabel[]): LabelRecord[] {
   const byId = new Map(rows.map((record) => [queueIdentity(record), record]));
   return entries.flatMap((entry) =>
-    Array.from({ length: entry.copies }, () => byId.get(queueIdentity(entry))!),
+    Array.from({ length: entry.copies }, () =>
+      printableRecord(byId.get(queueIdentity(entry))!),
+    ),
   );
 }
 const emptyInitial: LiveLabel[] = [];
@@ -407,6 +425,10 @@ export function LabelDesigner({
           setPrintRows(refreshedRows);
           setMessage('Label information refreshed from current inventory.');
         });
+      } else {
+        // Holdings can change without changing permanent print content.
+        setLive(fresh);
+        setPrepared(fresh);
       }
       const sheet = document.querySelector<HTMLElement>('.label-print-root');
       if (!sheet) {
@@ -811,7 +833,7 @@ export function LabelDesigner({
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.categoryName ?? record.context} · ${record.state}`
+                        ? `${record.name} · ${record.categoryName ?? 'Uncategorized'} · ${record.holdingContext} · ${record.state}`
                         : `${id} · unavailable`}
                     </span>
                     <div className={styles.queueActions}>

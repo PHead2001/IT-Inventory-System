@@ -64,6 +64,7 @@ const quantity: LiveLabel = {
   key: quantityId,
   name: 'Adapters',
   context: 'Cables',
+  holdingContext: 'ITC-S1A: 3',
   categoryName: 'Cables',
   state: 'active',
   tag: null,
@@ -75,6 +76,7 @@ const asset: LiveLabel = {
   key: assetId,
   name: 'Laptop',
   context: 'Computers / Shelf 1A',
+  holdingContext: 'Computers / Shelf 1A',
   categoryName: 'Computers',
   state: 'active',
   tag: 'lap-001',
@@ -132,6 +134,40 @@ it('automatically validates the initial queue and prints only after final revali
   expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
     'data-print-authorized',
   );
+});
+
+it('updates stock and custody context without regenerating permanent print content', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const sheet = document.querySelector('.label-print-root')!;
+  const originalGeneration = sheet.getAttribute('data-sheet-generation');
+  const originalCard = sheet.querySelector('.label-card');
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    {
+      ...quantity,
+      context: 'Cables / ITC-S1A: 9',
+      holdingContext: 'ITC-S1A: 9',
+    },
+    {
+      ...asset,
+      context: 'Computers / West Office [W-01] · assigned site',
+      holdingContext: 'West Office [W-01] · assigned site',
+    },
+  ]);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('ITC-S1A: 9'),
+  );
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    'West Office [W-01] · assigned site',
+  );
+  expect(sheet).toHaveAttribute('data-sheet-generation', originalGeneration);
+  expect(sheet.querySelector('.label-card')).toBe(originalCard);
+  expect(sheet).not.toHaveTextContent('ITC-S1A: 9');
+  expect(sheet).not.toHaveTextContent('West Office');
 });
 
 it('waits for the refreshed generation to finish code and fit measurement before printing', async () => {
@@ -478,12 +514,12 @@ it('requires acknowledgement of changed tag and then revalidates automatically',
   await waitFor(() => expect(printButton()).toBeEnabled());
   mocks.getQueueRecords.mockResolvedValueOnce([
     quantity,
-    { ...asset, tag: 'lap-002' },
+    { ...asset, tag: 'lap-002', barcode: 'lap-002' },
   ]);
   fireEvent.click(printButton());
   mocks.getQueueRecords.mockResolvedValue([
     quantity,
-    { ...asset, tag: 'lap-002' },
+    { ...asset, tag: 'lap-002', barcode: 'lap-002' },
   ]);
   fireEvent.click(
     await screen.findByRole('button', { name: 'Acknowledge changes' }),

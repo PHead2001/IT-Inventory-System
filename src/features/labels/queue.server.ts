@@ -42,6 +42,11 @@ const liveRow = z.object({
   tag: z.string().nullable(),
   item_code: z.string().nullable().default(null),
   category_name: z.string().nullable(),
+  manufacturer: z.string().nullable(),
+  model: z.string().nullable(),
+  serial_number: z.string().nullable(),
+  location_hierarchy: z.string().nullable(),
+  holding_context: z.string(),
 });
 const filterInput = z.object({
   q: z.string().max(200),
@@ -66,8 +71,10 @@ export type LabelCandidate = {
   holdingContext: string;
 };
 export type LiveLabel = LabelRecord & {
+  context: string;
+  holdingContext: string;
+  state: string;
   tag: string | null;
-  categoryName: string | null;
 };
 
 export async function searchLabelRecords(input: LabelSearchFilters): Promise<{
@@ -143,10 +150,15 @@ export async function getQueueRecords(
       key: row.key,
       name: row.name,
       context: row.context,
+      locationHierarchy: row.location_hierarchy,
+      holdingContext: row.holding_context,
       state: row.state,
       tag: row.tag,
       humanId: row.kind === 'quantity' ? row.item_code : null,
       categoryName: row.category_name,
+      manufacturer: row.manufacturer,
+      model: row.model,
+      serialNumber: row.serial_number,
       barcode: row.tag,
       path:
         row.kind === 'location'

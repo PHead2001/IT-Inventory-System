@@ -96,8 +96,50 @@ select ok((public.inventory_label_resolve(jsonb_build_array(
   (select id::text from public.quantity_items where name='QueueSearch Cables'))))
  ->0->>'context') like '%IT Closet / Left Storage / Shelf 1 / 1A: 5; IT Closet / Left Storage / Shelf 1 / 1B: 5%',
  'queued quantity context contains both readable holding paths and counts');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'holding_context'),
+ 'IT Closet / Left Storage / Shelf 1 / 1A: 5; IT Closet / Left Storage / Shelf 1 / 1B: 5',
+ 'screen holding context remains live and separate from print fields');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'model'),'C-100','quantity print projection keeps product model');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'manufacturer'),'Northwind','quantity print projection keeps manufacturer');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'location_hierarchy'),null,'quantity print projection has no current storage path');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','asset','key',
+  (select id::text from public.serialized_assets where name='QueueSearch Asset'))))
+ ->0->>'serial_number'),'QueueSearch SN','asset print projection keeps serial');
+select is((public.inventory_label_resolve('[{"kind":"location","key":"ITC"}]'::jsonb)
+ ->0->>'location_hierarchy'),'IT Closet','location print projection keeps its own hierarchy');
 select throws_ok($$select public.inventory_label_resolve('[{"key":"ITC"}]'::jsonb)$$,
  '22023','invalid_label_selection','missing kind is rejected');
+reset role;
+
+update public.stock_balances set quantity=9 where item_id=(
+ select id from public.quantity_items where name='QueueSearch Cables')
+ and location_id=(select id from public.locations where code='ITC-S1A');
+select set_config('request.jwt.claims',json_build_object(
+ 'sub',(select id from label_actors where kind='viewer'),'role','authenticated')::text,true);
+set local role authenticated;
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'holding_context'),
+ 'IT Closet / Left Storage / Shelf 1 / 1A: 9; IT Closet / Left Storage / Shelf 1 / 1B: 5',
+ 'screen holding context changes after balance changes');
+select is((public.inventory_label_resolve(jsonb_build_array(
+ jsonb_build_object('kind','quantity','key',
+  (select id::text from public.quantity_items where name='QueueSearch Cables'))))
+ ->0->>'model'),'C-100','print product model stays stable after balance changes');
 reset role;
 
 select set_config('request.jwt.claims',json_build_object(
