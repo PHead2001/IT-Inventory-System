@@ -5,6 +5,7 @@ import {
   createAuthDiagnostic,
   observeAuthStage,
   observeAuthStageSync,
+  type AuthDiagnosticStage,
 } from './diagnostic.server';
 
 beforeEach(() => {
@@ -104,4 +105,48 @@ it('preserves operation results and original failures when logging fails', async
       throw original;
     }),
   ).rejects.toBe(original);
+});
+
+it('allows only the fixed proxy and inventory stages without recording operation data', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+  vi.stubEnv('VERCEL_ENV', 'preview');
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const diagnostic = createAuthDiagnostic();
+  const result = { secret: 'never-log-this-value' };
+  for (const stage of [
+    'proxy.getClaims',
+    'inventory.pageMembership',
+    'inventory.parallelReads',
+    'inventory.search',
+    'inventory.categories',
+    'inventory.locations',
+    'inventory.sites',
+    'inventory.fileSummaries',
+  ] as const) {
+    expect(await observeAuthStage(diagnostic, stage, async () => result)).toBe(
+      result,
+    );
+  }
+  await observeAuthStage(
+    diagnostic,
+    'inventory.unapproved' as AuthDiagnosticStage,
+    async () => result,
+  );
+  expect(info).toHaveBeenCalledTimes(8);
+  const lines = info.mock.calls.map(([line]) => String(line));
+  expect(lines.join(' ')).not.toContain(result.secret);
+  expect(
+    lines.map(
+      (line) => JSON.parse(line.slice('AUTH_DIAGNOSTIC '.length)).stage,
+    ),
+  ).toEqual([
+    'proxy.getClaims',
+    'inventory.pageMembership',
+    'inventory.parallelReads',
+    'inventory.search',
+    'inventory.categories',
+    'inventory.locations',
+    'inventory.sites',
+    'inventory.fileSummaries',
+  ]);
 });

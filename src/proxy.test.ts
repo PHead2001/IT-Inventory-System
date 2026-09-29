@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { CookieMethodsServer } from '@supabase/ssr';
+vi.mock('server-only', () => ({}));
 const sdk = vi.hoisted(() => ({ createServerClient: vi.fn() }));
 vi.mock('@supabase/ssr', () => sdk);
 vi.mock('./lib/supabase/config', () => ({
@@ -11,6 +12,10 @@ vi.mock('./lib/supabase/config', () => ({
   }),
 }));
 import { proxy } from './proxy';
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 it('preserves refreshed cookie chunks and cache headers across writes', async () => {
   sdk.createServerClient.mockImplementation(
     (_url, _key, options: { cookies: CookieMethodsServer }) => ({
@@ -78,4 +83,33 @@ it('overwrites a caller-supplied return header with a canonical matched path', a
   expect(
     invalidResponse.headers.get('x-middleware-request-x-inventory-return'),
   ).toBe('');
+});
+it('times claims with a fixed stage while preserving results and original failures', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+  vi.stubEnv('VERCEL_ENV', 'preview');
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  const getClaims = vi.fn().mockResolvedValue({ data: null, error: null });
+  sdk.createServerClient.mockReturnValue({ auth: { getClaims } });
+  const request = new NextRequest('http://localhost:3000/inventory');
+  const response = await proxy(request);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  expect(getClaims).toHaveBeenCalledOnce();
+  const event = JSON.parse(
+    String(info.mock.calls[0][0]).slice('AUTH_DIAGNOSTIC '.length),
+  );
+  expect(event.stage).toBe('proxy.getClaims');
+  expect(Object.keys(event).sort()).toEqual([
+    'correlation',
+    'durationMs',
+    'stage',
+  ]);
+  expect(info.mock.calls.flat().join(' ')).not.toContain('/inventory');
+  const original = new Error('original claims failure');
+  getClaims.mockRejectedValue(original);
+  info.mockImplementation(() => {
+    throw new Error('observer failed');
+  });
+  await expect(
+    proxy(new NextRequest('http://localhost:3000/inventory')),
+  ).rejects.toBe(original);
 });

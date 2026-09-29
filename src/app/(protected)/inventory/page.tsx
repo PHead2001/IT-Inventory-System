@@ -15,23 +15,47 @@ import { readFilters } from '@/features/inventory/read-model';
 import { getSites } from '@/features/custody/queries.server';
 import { getFileListSummaries } from '@/features/files/list.server';
 import { Download } from 'lucide-react';
+import {
+  createAuthDiagnostic,
+  observeAuthStage,
+} from '@/lib/auth/diagnostic.server';
 export default async function InventoryPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { member } = await requireMember();
+  const diagnostic = createAuthDiagnostic();
+  const { member } = await observeAuthStage(
+    diagnostic,
+    'inventory.pageMembership',
+    () => requireMember(),
+  );
   const raw = await searchParams;
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
-  const [result, categories, locations, sites] = await Promise.all([
-    getInventory(params),
-    getCategories(),
-    getLocations(),
-    getSites(),
-  ]);
-  const fileSummaries = await getFileListSummaries(result.rows);
+  const [result, categories, locations, sites] = await observeAuthStage(
+    diagnostic,
+    'inventory.parallelReads',
+    () =>
+      Promise.all([
+        observeAuthStage(diagnostic, 'inventory.search', () =>
+          getInventory(params),
+        ),
+        observeAuthStage(diagnostic, 'inventory.categories', () =>
+          getCategories(),
+        ),
+        observeAuthStage(diagnostic, 'inventory.locations', () =>
+          getLocations(),
+        ),
+        observeAuthStage(diagnostic, 'inventory.sites', () => getSites()),
+      ]),
+  );
+  const fileSummaries = await observeAuthStage(
+    diagnostic,
+    'inventory.fileSummaries',
+    () => getFileListSummaries(result.rows),
+  );
   const filters = readFilters(params);
   const exportParams = new URLSearchParams();
   if (filters.query) exportParams.set('q', filters.query);

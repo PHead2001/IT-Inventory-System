@@ -12,6 +12,14 @@ export type AuthDiagnosticStage =
   | 'member.client'
   | 'member.getUser'
   | 'member.membership'
+  | 'proxy.getClaims'
+  | 'inventory.pageMembership'
+  | 'inventory.parallelReads'
+  | 'inventory.search'
+  | 'inventory.categories'
+  | 'inventory.locations'
+  | 'inventory.sites'
+  | 'inventory.fileSummaries'
   | 'cookie.getAll'
   | 'cookie.setAll';
 const stages: ReadonlySet<AuthDiagnosticStage> = new Set([
@@ -24,6 +32,14 @@ const stages: ReadonlySet<AuthDiagnosticStage> = new Set([
   'member.client',
   'member.getUser',
   'member.membership',
+  'proxy.getClaims',
+  'inventory.pageMembership',
+  'inventory.parallelReads',
+  'inventory.search',
+  'inventory.categories',
+  'inventory.locations',
+  'inventory.sites',
+  'inventory.fileSummaries',
   'cookie.getAll',
   'cookie.setAll',
 ]);

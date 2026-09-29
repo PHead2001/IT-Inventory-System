@@ -2,6 +2,10 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseConfig } from './lib/supabase/config';
 import { validReturnPath } from './features/scan/targets';
+import {
+  createAuthDiagnostic,
+  observeAuthStage,
+} from './lib/auth/diagnostic.server';
 
 export async function proxy(request: NextRequest) {
   // Replace any caller-supplied header with a value derived from the matched URL.
@@ -34,7 +38,10 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  await supabase.auth.getClaims();
+  const diagnostic = createAuthDiagnostic();
+  await observeAuthStage(diagnostic, 'proxy.getClaims', () =>
+    supabase.auth.getClaims(),
+  );
   return response;
 }
 export const config = {
