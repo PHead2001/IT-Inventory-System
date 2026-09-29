@@ -127,6 +127,49 @@ async function verifiedPreviewPdf(page: Page, destination: string) {
   }
 }
 
+test('larger labels retry normal text fitting while preserving the QR and print barrier', async ({
+  page,
+}, testInfo) => {
+  await signIn(page);
+  // A wide-letter name requires four normal lines on 70x35 but fits three on 90x50.
+  const name = 'W'.repeat(48);
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  await form.getByLabel('Name', { exact: true }).fill(name);
+  await form.getByLabel('Initial quantity').fill('1');
+  await chooseLocation(form, 'Initial location', 'ITC-S1A');
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const id = page.url().split('/').at(-1)!;
+  await page.goto('/labels?quantity=' + id);
+  await readyPreview(page, 1);
+  const size = page.getByLabel('Label size', { exact: true });
+  await size.selectOption('70x35');
+  const card = page.locator('.label-card').first();
+  const title = card.locator('strong[data-fit-text]');
+  await expect
+    .poll(() => title.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe('10.6667px');
+  const originalQr = await card.getByRole('img').elementHandle();
+  await size.selectOption('90x50');
+  await expect
+    .poll(() => title.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe('12px');
+  await expect(card).toHaveAttribute('data-text-overflow', 'false');
+  await expect(card).toHaveAttribute('data-text-measured', 'true');
+  await expect(card).toHaveAttribute('data-code-ready', 'true');
+  expect(
+    await card
+      .getByRole('img')
+      .evaluate((element, previous) => element === previous, originalQr),
+  ).toBe(true);
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('.label-print-root')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  await card.screenshot({ path: testInfo.outputPath('refitted-label.png') });
+});
+
 test('printed QR and Code 128 decode from rendered label cards with physical size and page breaks', async ({
   page,
 }, testInfo) => {

@@ -66,6 +66,50 @@ async function chooseControlSection(control: Locator, name: string) {
   await section.selectOption(id!);
 }
 
+test('a serialized control excluded by its section can recover through a compatible destination', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  const designer = await openDesigner(page, category);
+  // New categories inherit the canonical baseline's placed Serial Number.
+  await expect(
+    designer.getByRole('button', { name: 'Drag Serial Number' }),
+  ).toBeVisible();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const source = designer.locator('[data-section-id]').last();
+  await source.getByLabel('Section heading').fill('Quantity only');
+  const control = fieldControl(designer, 'Serial Number');
+  await openLayout(control);
+  await chooseControlSection(control, 'Quantity only');
+  await source.getByText('Section options').click();
+  await source.getByLabel('Applies to Quantity only').selectOption('quantity');
+  await expect(control.getByTitle('Form types using this control')).toHaveText(
+    'No form type',
+  );
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const destination = designer.locator('[data-section-id]').last();
+  await destination.getByLabel('Section heading').fill('Serialized recovery');
+  await destination.getByText('Section options').click();
+  await destination
+    .getByLabel('Applies to Serialized recovery')
+    .selectOption('asset');
+  await openLayout(control);
+  await chooseControlSection(control, 'Serialized recovery');
+  await expect(
+    destination.getByRole('button', { name: 'Drag Serial Number' }),
+  ).toBeVisible();
+  await expect(control.getByTitle('Form types using this control')).toHaveText(
+    'Serialized',
+  );
+  await saveDesigner(designer);
+  await openDesigner(page, category);
+  const restored = fieldControl(designer, 'Serial Number');
+  await expect(restored.getByTitle('Form types using this control')).toHaveText(
+    'Serialized',
+  );
+});
+
 test('held section drag autoscrolls at the viewport edge', async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 640 });
