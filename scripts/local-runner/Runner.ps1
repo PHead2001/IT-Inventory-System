@@ -20,6 +20,7 @@ function Invoke-GitHub([string] $Uri, [string] $Method = 'GET', $Body = $null, [
 
 function Get-OwnerToken {
     Assert-SecureRoot
+    Initialize-RunnerDpapi
     $credentialPath = Join-Path $script:RunnerRoot 'credential.dpapi'
     $record = Read-RunnerJson $credentialPath
     if ($null -eq $record -or $record.scope -ne 'LocalMachine' -or $record.tag -ne $script:RunnerTag) {
@@ -540,6 +541,7 @@ switch ($Action) {
         Assert-Administrator
         Assert-SecureRoot
         [void](Get-RunnerConfig)
+        Initialize-RunnerDpapi
         $secret = Read-Host 'Repository-scoped GitHub fine-grained token' -AsSecureString
         $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
         try {

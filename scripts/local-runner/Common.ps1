@@ -13,6 +13,12 @@ $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
 $script:RunnerOperationStage = 'idle'
 $script:RunnerSessionName = $null
 
+function Initialize-RunnerDpapi {
+    # Fresh Windows PowerShell 5.1 sessions do not preload ProtectedData.
+    # Fail before a secure prompt/read if its framework assembly is unavailable.
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
+}
+
 function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
     Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{
         atUtc = [DateTime]::UtcNow.ToString('o'); stage = $Stage; code = $Code; sessionName = $SessionName

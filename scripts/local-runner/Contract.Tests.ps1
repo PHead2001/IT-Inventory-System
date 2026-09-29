@@ -9,6 +9,11 @@ foreach ($file in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1')) {
     if ($errors.Count -gt 0) { throw "PowerShell parse error in $($file.Name): $($errors[0].Message)" }
 }
 
+# Keep DPAPI proof in a fresh -NoProfile process rather than inheriting any
+# assemblies imported by these contract checks or an interactive owner shell.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Dpapi.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell DPAPI regression failed.' }
+
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($testRoot)
@@ -298,6 +303,15 @@ public class ArgvSink {
 
     # Load definitions only; never execute Runner.ps1's action dispatch.
     $runnerAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
+    $tokenReader = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-OwnerToken' }, $true)
+    $runnerSwitch = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.SwitchStatementAst] }, $true)
+    $credentialWriter = @($runnerSwitch.Clauses | Where-Object { $_.Item1.Value -eq 'StoreCredential' })[0].Item2
+    if ($tokenReader.Extent.Text.IndexOf('Initialize-RunnerDpapi') -lt 0 -or
+        $tokenReader.Extent.Text.IndexOf('Initialize-RunnerDpapi') -gt $tokenReader.Extent.Text.IndexOf('::Unprotect') -or
+        $credentialWriter.Extent.Text.IndexOf('Initialize-RunnerDpapi') -lt 0 -or
+        $credentialWriter.Extent.Text.IndexOf('Initialize-RunnerDpapi') -gt $credentialWriter.Extent.Text.IndexOf('Read-Host')) {
+        throw 'Credential protect/unprotect entrypoints do not initialize DPAPI before use/input.'
+    }
     foreach ($definition in $runnerAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
         Invoke-Expression $definition.Extent.Text
     }
