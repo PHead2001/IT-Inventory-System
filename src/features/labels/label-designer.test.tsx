@@ -106,6 +106,32 @@ beforeEach(() => {
   vi.stubGlobal('print', vi.fn());
 });
 
+it('describes queued locations as locations while retaining inventory category fallbacks', async () => {
+  const location: LiveLabel = {
+    kind: 'location',
+    key: 'ITC-S1A',
+    name: 'Shelf 1A',
+    context: 'IT Closet / Shelf 1A',
+    holdingContext: 'IT Closet / Shelf 1A',
+    categoryName: null,
+    state: 'active',
+    tag: null,
+    barcode: 'ITC-S1A',
+    path: '/locations/ITC-S1A',
+  };
+  const uncategorized = { ...quantity, categoryName: null };
+  mocks.getQueueRecords.mockResolvedValue([location, uncategorized]);
+  render(<LabelDesigner {...props} initial={[location, uncategorized]} />);
+  await waitFor(() =>
+    expect(
+      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · active'),
+    ).toBeInTheDocument(),
+  );
+  expect(
+    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · active'),
+  ).toBeInTheDocument();
+});
+
 it('automatically validates the initial queue and prints only after final revalidation', async () => {
   let authorizedDuringPrint = false;
   vi.stubGlobal(

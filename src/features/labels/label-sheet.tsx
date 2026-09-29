@@ -186,7 +186,7 @@ function LabelCard({
   const [measuredGeneration, setMeasuredGeneration] = useState<string | null>(
     null,
   );
-  const [compact, setCompact] = useState(false);
+  const [compactKey, setCompactKey] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
   const payload = barcodePayload(record);
@@ -251,6 +251,20 @@ function LabelCard({
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
   const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);
   const printable = printableLabelLines(record);
+  // Fitting belongs to the current content/layout, independently of QR identity.
+  const fittingKey = JSON.stringify([
+    record.name,
+    printable.identifier,
+    printable.details,
+    printable.serial,
+    width,
+    height,
+    useBarcode,
+    Boolean(qr),
+    preview,
+  ]);
+  const compact = compactKey === fittingKey;
+  const measurementKey = JSON.stringify([generation, fittingKey]);
   useEffect(() => {
     let current = true;
     const box = textBox.current;
@@ -270,10 +284,11 @@ function LabelCard({
         );
       if (over && !compact) {
         setMeasuredGeneration(null);
-        setCompact(true);
+        setCompactKey(fittingKey);
       } else {
+        if (!compact) setCompactKey(null);
         setTextOverflow(over);
-        setMeasuredGeneration(generation);
+        setMeasuredGeneration(measurementKey);
       }
     };
     measure();
@@ -297,15 +312,17 @@ function LabelCard({
     useBarcode,
     compact,
     generation,
+    fittingKey,
+    measurementKey,
   ]);
   return (
     <article
       className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
       data-sheet-generation={generation}
-      data-text-measured={measuredGeneration === generation}
+      data-text-measured={measuredGeneration === measurementKey}
       data-code-ready={Boolean(
-        measuredGeneration === generation &&
+        measuredGeneration === measurementKey &&
         barcodeResolved &&
         !textOverflow &&
         (qr || useBarcode),

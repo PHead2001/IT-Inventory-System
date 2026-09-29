@@ -315,6 +315,39 @@ public class ArgvSink {
     foreach ($definition in $runnerAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
         Invoke-Expression $definition.Extent.Text
     }
+    $cloudConfig = Get-GuestCloudConfig 'ssh-ed25519 dummy-public-key runner-contract'
+    if ($cloudConfig -notmatch '(?m)^groups:\r?\n  - docker\r?\nusers:' -or
+        $cloudConfig -notmatch '(?m)^    groups: \[sudo, docker\]' -or
+        $cloudConfig.IndexOf('groups:') -ge $cloudConfig.IndexOf('package_update:')) {
+        throw 'Guest Docker group was not declared before user/group setup and package installation.'
+    }
+    $seedDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-SeedDisk' }, $true)
+    if (@($seedDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Get-GuestCloudConfig' }, $true)).Count -ne 1) {
+        throw 'Actual seed disk bypassed the guest user/group configuration contract.'
+    }
+    $realSessionAlive = (Get-Command Assert-SessionAlive).ScriptBlock
+    $realNativeCommand = (Get-Command Invoke-RunnerNative).ScriptBlock
+    $script:readinessCalls = 0; $script:readinessSleeps = 0
+    function Assert-SessionAlive { param($State) }
+    function Start-Sleep { param($Seconds) $script:readinessSleeps++ }
+    function Invoke-RunnerNative {
+        param($Executable, $Arguments)
+        $script:readinessCalls++
+        $remoteCommand = $Arguments[$Arguments.Count - 1]
+        if ($Executable -cne 'ssh.exe' -or $Arguments -notcontains 'runner@172.30.240.2' -or
+            $remoteCommand -notmatch 'cloud-init status --wait' -or $remoteCommand -notmatch 'test -S /var/run/docker.sock' -or
+            $remoteCommand -notmatch 'test "\$\(id -un\)" = runner' -or $remoteCommand -notmatch 'timeout 10 docker info' -or $remoteCommand -match '\bsudo\b') {
+            throw 'Guest readiness did not check unprivileged runner access to Docker.'
+        }
+        # A socket can exist while runner access fails. That attempt must retry.
+        if ($script:readinessCalls -eq 1) { return 1 }
+        return 0
+    }
+    Wait-Guest ([pscustomobject]@{ instancePath = Join-Path $testRoot 'readiness' }) ([pscustomobject]@{ guestIp = '172.30.240.2' })
+    if ($script:readinessCalls -ne 2 -or $script:readinessSleeps -ne 1) { throw 'Guest readiness accepted a Docker access failure.' }
+    Set-Item -Path Function:\Assert-SessionAlive -Value $realSessionAlive
+    Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
+    Remove-Item -Path Function:\Start-Sleep
     $script:fakeVm = [pscustomobject]@{
         Name = $validName; Notes = ''; Path = $validInstance; State = 'Off'
         AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff'
@@ -366,7 +399,12 @@ public class ArgvSink {
         [pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = '192.0.2.1'; PrefixLength = 24; InterfaceIndex = 7 },
         [pscustomobject]@{ AddressFamily = 'IPv6'; IPAddress = '2001:db8::1'; PrefixLength = 64; InterfaceIndex = 7 }
     )
-    $script:fakeRoutes = @([pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/0'; NextHop = '192.0.2.2'; InterfaceIndex = 7 })
+    $script:fakeRoutes = @(
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/0'; NextHop = '192.0.2.2'; InterfaceIndex = 7 },
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/24'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '128.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 }
+    )
     $script:inspectionFailure = $false
     function Get-NetIPAddress { if ($script:inspectionFailure) { throw 'synthetic inspection failure' }; return $script:fakeAddresses }
     function Get-NetRoute { return $script:fakeRoutes }
@@ -391,6 +429,15 @@ public class ArgvSink {
         @($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.RemoteIPAddress -eq '192.0.2.1/32' -and $_.Weight -gt 100 }).Count -ne 1 -or
         @($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.RemoteIPAddress -eq '::/0' -and $_.Weight -gt 100 }).Count -ne 1) {
         throw 'Public database routing weakened host/IPv6 denial or opened unused 6543.'
+    }
+    foreach ($prefix in @('203.0.113.0/24', '0.0.0.0/1', '128.0.0.0/1')) {
+        if (@($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.Direction -eq 'Outbound' -and $_.RemoteIPAddress -ceq $prefix -and $_.Weight -gt 110 }).Count -ne 1) {
+            throw "Gateway/VPN route $prefix could bypass isolation using public HTTP/DNS/database allows."
+        }
+    }
+    if (@($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '0.0.0.0/0' -and $_.Action -eq 'Deny' }).Count -ne 0 -or
+        @($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Inbound' -and $_.RemoteIPAddress -eq '172.30.240.1' -and $_.LocalPort -eq 22 -and $_.Stateful -eq $true }).Count -ne 1) {
+        throw 'Route isolation changed the default Internet route or required stateful host SSH rule.'
     }
     $fingerprint = Get-HostNetworkFingerprint
     [Array]::Reverse($script:fakeAddresses)

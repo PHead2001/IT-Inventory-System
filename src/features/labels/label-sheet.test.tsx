@@ -8,6 +8,75 @@ vi.mock('qrcode', () => ({
 }));
 import { LabelSheet, barcodePayload } from './label-sheet';
 
+it.each(['size', 'text'] as const)(
+  'retries normal text sizing after %s changes while retaining its QR',
+  async (change) => {
+    const overflow = vi
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('text-[9pt]') &&
+          this.textContent === 'Long adapter name' &&
+          (this.closest('.label-card') as HTMLElement)?.style.height === '35mm'
+          ? 20
+          : 0;
+      });
+    try {
+      const record = {
+        kind: 'quantity' as const,
+        key: 'fit-record',
+        name: 'Long adapter name',
+        path: '/inventory/quantity/fit-record',
+      };
+      const props = {
+        records: [record],
+        origin: 'https://inventory.example.test',
+        preview: false,
+        page: 'letter' as const,
+        format: 'qr' as const,
+      };
+      const view = render(
+        <LabelSheet {...props} size="70x35" generation="small" />,
+      );
+      await waitFor(() =>
+        expect(screen.getByText(record.name)).toHaveClass('text-[8pt]'),
+      );
+      await waitFor(() =>
+        expect(document.querySelector('.label-card')).toHaveAttribute(
+          'data-code-ready',
+          'true',
+        ),
+      );
+      const card = document.querySelector('.label-card');
+      const qr = screen.getByRole('img');
+      const qrCalls = qrMocks.render.mock.calls.length;
+      const name = change === 'text' ? 'Adapter' : record.name;
+      view.rerender(
+        <LabelSheet
+          {...props}
+          records={[{ ...record, name }]}
+          size={change === 'size' ? '90x50' : '70x35'}
+          generation="refitted"
+        />,
+      );
+      expect(screen.getByText(name)).toHaveClass('text-[9pt]');
+      expect(document.querySelector('.label-card')).toBe(card);
+      expect(screen.getByRole('img')).toBe(qr);
+      expect(qrMocks.render.mock.calls.length).toBe(qrCalls);
+      await waitFor(() =>
+        expect(card).toHaveAttribute('data-code-ready', 'true'),
+      );
+      view.rerender(
+        <LabelSheet {...props} size="70x35" generation="small-again" />,
+      );
+      await waitFor(() =>
+        expect(screen.getByText(record.name)).toHaveClass('text-[8pt]'),
+      );
+    } finally {
+      overflow.mockRestore();
+    }
+  },
+);
+
 it('reflows a resized preview without remounting its QR image or changing printable identity', async () => {
   const record = {
     kind: 'quantity' as const,

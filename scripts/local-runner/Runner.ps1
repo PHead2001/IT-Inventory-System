@@ -55,25 +55,15 @@ function Assert-InstalledHost($Config) {
     if (Get-RunnerState) { throw 'Runner state exists. Stop or investigate it before launching another.' }
 }
 
-function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config) {
-    [void](Assert-OwnedPath $Path)
-    New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
-    $mounted = Mount-VHD -Path $Path -Passthru
-    try {
-        $mountedPath = (Get-VHD -DiskNumber $mounted.DiskNumber).Path
-        if (-not [string]::Equals([IO.Path]::GetFullPath($mountedPath), [IO.Path]::GetFullPath($Path), [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Seed disk identity changed after mount; refusing to format.'
-        }
-        $disk = Get-Disk -Number $mounted.DiskNumber
-        if ($disk.PartitionStyle -ne 'RAW') { throw 'Seed disk is not blank.' }
-        $partition = $disk | Initialize-Disk -PartitionStyle MBR -PassThru | New-Partition -UseMaximumSize -AssignDriveLetter
-        $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
-        $letter = $partition.DriveLetter
-        $root = "$($letter):\"
-        $userData = @"
+function Get-GuestCloudConfig([string] $PublicKey) {
+    # cloud-init's users/groups module runs before package installation. Declare
+    # docker here so runner membership succeeds before docker.io creates it.
+    return @"
 #cloud-config
 hostname: itir-guest
 manage_etc_hosts: true
+groups:
+  - docker
 users:
   - name: runner
     lock_passwd: true
@@ -89,6 +79,24 @@ growpart:
   devices: ['/']
 resize_rootfs: true
 "@
+}
+
+function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config) {
+    [void](Assert-OwnedPath $Path)
+    New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
+    $mounted = Mount-VHD -Path $Path -Passthru
+    try {
+        $mountedPath = (Get-VHD -DiskNumber $mounted.DiskNumber).Path
+        if (-not [string]::Equals([IO.Path]::GetFullPath($mountedPath), [IO.Path]::GetFullPath($Path), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Seed disk identity changed after mount; refusing to format.'
+        }
+        $disk = Get-Disk -Number $mounted.DiskNumber
+        if ($disk.PartitionStyle -ne 'RAW') { throw 'Seed disk is not blank.' }
+        $partition = $disk | Initialize-Disk -PartitionStyle MBR -PassThru | New-Partition -UseMaximumSize -AssignDriveLetter
+        $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
+        $letter = $partition.DriveLetter
+        $root = "$($letter):\"
+        $userData = Get-GuestCloudConfig $PublicKey
         $network = @"
 version: 2
 ethernets:
@@ -125,7 +133,9 @@ function Set-IsolatedAdapter([string] $VmName) {
             $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress "$ip/32" -Weight 250 -Passthru
         }
     }
-    foreach ($route in @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.NextHop -eq '0.0.0.0' -and $_.DestinationPrefix -ne '0.0.0.0/0' })) {
+    # Corporate/VPN destinations can have public prefixes behind a gateway.
+    # Deny every non-default route, including split-default VPN /1 prefixes.
+    foreach ($route in @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -ne '0.0.0.0/0' })) {
         if ($route.DestinationPrefix -match '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$') {
             $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $route.DestinationPrefix -Weight 220 -Passthru
         }
@@ -262,7 +272,7 @@ function Wait-Guest($State, $Config) {
     $limit = [DateTime]::UtcNow.AddMinutes(12)
     while ([DateTime]::UtcNow -lt $limit) {
         Assert-SessionAlive $State
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test -S /var/run/docker.sock'))
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test -S /var/run/docker.sock && test "$(id -un)" = runner && timeout 10 docker info >/dev/null 2>&1'))
         if ($exitCode -eq 0) { return }
         Start-Sleep -Seconds 10
     }

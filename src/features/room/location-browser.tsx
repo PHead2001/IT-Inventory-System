@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -19,7 +19,8 @@ export function LocationBrowser({
   onSelect: (code: string) => void;
 }) {
   const [query, setQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
+  const statusId = useId();
   const reducedMotion = useEffectiveReducedMotion();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [level, setLevel] = useState<string | null | undefined>(undefined);
@@ -46,7 +47,10 @@ export function LocationBrowser({
   const current = locations.find((location) => location.id === visibleLevel);
   return (
     <nav
+      ref={navigationRef}
+      tabIndex={-1}
       aria-label="Location browser"
+      aria-describedby={statusId}
       className="experience-surface min-w-0 p-3"
     >
       <label
@@ -56,7 +60,6 @@ export function LocationBrowser({
         Browse locations
       </label>
       <input
-        ref={searchRef}
         id="location-browser-search"
         type="search"
         value={query}
@@ -69,7 +72,7 @@ export function LocationBrowser({
           className="mt-2 min-h-11 text-sm text-cyan-300 underline md:hidden"
           onClick={() => {
             setLevel(current.parentId);
-            searchRef.current?.focus();
+            navigationRef.current?.focus();
           }}
         >
           Back to{' '}
@@ -78,6 +81,9 @@ export function LocationBrowser({
             : 'spaces'}
         </button>
       )}
+      <p id={statusId} role="status" className="sr-only">
+        Browsing {search ? 'search results' : (current?.breadcrumb ?? 'spaces')}
+      </p>
       {selected && (
         <p className="my-2 break-words text-xs leading-5 text-slate-300">
           Selected path: {selected.breadcrumb}
@@ -111,7 +117,7 @@ export function LocationBrowser({
                 className="min-h-11 min-w-11 rounded border border-slate-700"
                 onClick={() => {
                   setLevel(row.location.id);
-                  searchRef.current?.focus();
+                  navigationRef.current?.focus();
                 }}
               >
                 ›

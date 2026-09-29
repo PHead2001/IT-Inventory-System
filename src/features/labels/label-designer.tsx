@@ -833,7 +833,7 @@ export function LabelDesigner({
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.categoryName ?? 'Uncategorized'} · ${record.holdingContext} · ${record.state}`
+                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
                         : `${id} · unavailable`}
                     </span>
                     <div className={styles.queueActions}>
