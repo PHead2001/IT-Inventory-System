@@ -66,7 +66,19 @@ export function moveControl(
   return copy;
 }
 
-/** Carry the source section's restrictions with a control when its parent changes. */
+/** Preserve effective scope, or recover intrinsic scope from an excluding parent. */
+function transferKinds(
+  def: MetadataDefinition,
+  source: Section,
+  control: Control,
+) {
+  const effective = controlKinds(def, source, control);
+  return effective.length
+    ? effective
+    : controlKinds(def, { ...source, applies_to: formKinds }, control);
+}
+
+/** Carry the source section's effective restrictions when its parent changes. */
 export function controlMoveBlockReason(
   def: MetadataDefinition,
   controlId: string,
@@ -81,7 +93,7 @@ export function controlMoveBlockReason(
   if (!source || !destination) return 'This section is unavailable.';
   if (source === destination) return null;
   const control = source.controls.find((item) => item.id === controlId)!;
-  const kinds = controlKinds(def, source, control);
+  const kinds = transferKinds(def, source, control);
   if (!kinds.length) return 'This control has no effective form type.';
   if (
     source.visible !== false &&
@@ -102,8 +114,8 @@ function transferControl(
   target: Section,
   control: Control,
 ): Control | null {
-  const kinds = controlKinds(def, source, control);
-  // An empty intersection cannot be encoded in the persisted control schema.
+  const kinds = transferKinds(def, source, control);
+  // Intrinsically empty scope still cannot be encoded in the persisted schema.
   if (controlMoveBlockReason(def, control.id, target.id)) return null;
   return {
     ...control,

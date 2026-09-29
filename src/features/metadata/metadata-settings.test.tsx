@@ -348,6 +348,77 @@ describe('category form designer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
     expect(empty.querySelector('[data-control-id]')).toBeNull();
   });
+  it('offers a compatible section to recover an excluded serialized control without changing its scope', () => {
+    const variant = structuredClone(form);
+    variant.published_definition.layout.push(
+      {
+        id: id(41),
+        label: 'Quantity only',
+        applies_to: ['quantity'],
+        controls: [
+          { id: id(40), kind: 'builtin', builtin: 'serial_number', width: 6 },
+        ],
+      },
+      {
+        id: id(42),
+        label: 'Serialized only',
+        applies_to: ['asset'],
+        controls: [],
+      },
+      {
+        id: id(43),
+        label: 'Another quantity section',
+        applies_to: ['quantity'],
+        controls: [],
+      },
+    );
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[{ id: id(1), name: 'Cables', active: true }]}
+        forms={{ [id(1)]: variant }}
+      />,
+    );
+    const control = screen
+      .getByRole('button', { name: 'Drag Serial Number' })
+      .closest('[data-control-id]') as HTMLElement;
+    const destinations = within(control).getByLabelText('Section');
+    expect(
+      within(destinations).getByRole('option', { name: /Serialized only/ }),
+    ).not.toBeDisabled();
+    expect(
+      within(destinations).getByRole('option', {
+        name: /Another quantity section/,
+      }),
+    ).toBeDisabled();
+    fireEvent.change(destinations, { target: { value: id(42) } });
+    const moved = screen
+      .getByRole('button', { name: 'Drag Serial Number' })
+      .closest('[data-control-id]') as HTMLElement;
+    expect(moved.closest('[data-section-id]')).toHaveAttribute(
+      'data-section-id',
+      id(42),
+    );
+    expect(
+      within(moved).getByTitle('Form types using this control'),
+    ).toHaveTextContent('Serialized');
+    fireEvent.click(screen.getByText('Advanced JSON recovery'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Load current document JSON' }),
+    );
+    const recovered = JSON.parse(
+      (screen.getByLabelText('Form definition JSON') as HTMLTextAreaElement)
+        .value,
+    ) as MetadataDefinition;
+    expect(recovered.layout[2].controls[0].applies_to).toEqual(['asset']);
+    expect(recovered.layout[1].controls).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(
+      screen
+        .getByRole('button', { name: 'Drag Serial Number' })
+        .closest('[data-section-id]'),
+    ).toHaveAttribute('data-section-id', id(41));
+  });
   it('disables quantity, serialized and hidden destinations that would reject a control move', () => {
     const variant = structuredClone(form);
     variant.published_definition.layout[0].controls.push({

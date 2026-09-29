@@ -149,7 +149,105 @@ describe('form designer model', () => {
       ),
     ).toBe(false);
   });
-  it('preserves moved control scope and rejects an unrepresentable empty intersection', () => {
+  it.each(['builtin', 'field'] as const)(
+    'recovers an excluded optional %s control using its own serialized scope',
+    (kind) => {
+      const draft = definition();
+      draft.fields[0].required = false;
+      draft.layout[0].controls = draft.layout[0].controls.filter(
+        (control) => control.kind !== 'field',
+      );
+      draft.layout.push({
+        id: id(30),
+        label: 'Quantity only',
+        applies_to: ['quantity'],
+        controls: [
+          kind === 'builtin'
+            ? { id: id(31), kind, builtin: 'serial_number', width: 6 }
+            : { id: id(31), kind, field_id: id(1), width: 6 },
+        ],
+      });
+      draft.layout.push({
+        id: id(34),
+        label: 'Serialized only',
+        applies_to: ['asset'],
+        controls: [],
+      });
+      draft.layout.push({
+        id: id(35),
+        label: 'Another quantity section',
+        applies_to: ['quantity'],
+        controls: [],
+      });
+      draft.layout.push({
+        id: id(36),
+        label: 'Hidden',
+        visible: false,
+        controls: [],
+      });
+      expect(
+        controlKinds(draft, draft.layout[2], draft.layout[2].controls[0]),
+      ).toEqual([]);
+      expect(controlMoveBlockReason(draft, id(31), id(34))).toBeNull();
+      expect(controlMoveBlockReason(draft, id(31), id(35))).toMatch(
+        /excludes a form type/,
+      );
+      expect(controlMoveBlockReason(draft, id(31), id(36))).toMatch(/hidden/);
+      for (const destination of [id(6), id(34)]) {
+        const next = moveControl(draft, id(31), destination, 0);
+        expect(next).not.toBe(draft);
+        const section = next.layout.find((item) => item.id === destination)!;
+        expect(section.controls[0].applies_to).toEqual(['asset']);
+        expect(controlKinds(next, section, section.controls[0])).toEqual([
+          'asset',
+        ]);
+        expect(next.fields).toEqual(draft.fields);
+        expect(next.layout[2].controls).toEqual([]);
+      }
+      expect(moveControl(draft, id(31), id(35), 0)).toBe(draft);
+      expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
+
+      draft.layout[2].visible = false;
+      const hiddenMove = moveControl(draft, id(31), id(34), 0);
+      expect(hiddenMove.layout[3].controls[0].visible).toBe(false);
+      expect(
+        controlVisible(
+          hiddenMove,
+          hiddenMove.layout[3],
+          hiddenMove.layout[3].controls[0],
+          'asset',
+        ),
+      ).toBe(false);
+
+      // Removing a section shares the transfer path and must preserve protection.
+      draft.layout[0].controls.push({
+        id: id(37),
+        kind: 'builtin',
+        builtin: 'asset_tag',
+        width: 6,
+      });
+      const removed = removeSection(draft, id(30), id(34));
+      expect(removed).not.toBe(draft);
+      const destination = removed.layout.find((item) => item.id === id(34))!;
+      expect(destination.controls[0].applies_to).toEqual(['asset']);
+      expect(destination.controls[0].visible).toBe(false);
+    },
+  );
+  it('cannot recover a missing field or an intrinsic/control scope contradiction', () => {
+    const draft = definition();
+    draft.layout[0].controls[2].field_id = id(99);
+    expect(controlMoveBlockReason(draft, id(5), id(6))).toMatch(
+      /no effective form type/,
+    );
+    expect(moveControl(draft, id(5), id(6), 0)).toBe(draft);
+    draft.layout[0].controls[2].field_id = id(1);
+    draft.layout[0].controls[2].applies_to = ['quantity'];
+    expect(controlMoveBlockReason(draft, id(5), id(6))).toMatch(
+      /no effective form type/,
+    );
+    expect(moveControl(draft, id(5), id(6), 0)).toBe(draft);
+  });
+  it('preserves moved control scope and rejects an intrinsically empty intersection', () => {
     const draft = definition();
     draft.layout.push({
       id: id(30),
@@ -166,12 +264,12 @@ describe('form designer model', () => {
     ).toEqual(['quantity']);
     expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
 
-    draft.layout[2].applies_to = ['asset'];
+    draft.layout[2].controls[0].builtin = 'serial_number';
     draft.layout[2].controls[0].applies_to = ['quantity'];
     expect(moveControl(draft, id(31), id(6), 0)).toBe(draft);
     expect(removeSection(draft, id(30), id(6))).toBe(draft);
 
-    draft.layout[2].applies_to = ['quantity'];
+    draft.layout[2].controls[0].builtin = 'description';
     draft.layout[1].visible = false;
     expect(moveControl(draft, id(31), id(6), 0)).toBe(draft);
     expect(removeSection(draft, id(30), id(6))).toBe(draft);
