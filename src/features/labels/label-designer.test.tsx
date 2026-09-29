@@ -1,14 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { queueStorageKey } from './queue-model';
 import type { LiveLabel } from './queue.server';
-import { defaultFilters, queueStorageKey } from './queue-model';
 
 const mocks = vi.hoisted(() => ({
   getQueueRecords: vi.fn(),
@@ -25,19 +18,28 @@ vi.mock('./label-sheet', () => ({
   LabelSheet: ({
     records,
     format,
+    size,
+    page,
   }: {
     records: LiveLabel[];
     format: string;
+    size: string;
+    page: string;
   }) => (
-    <div className="label-print-root" aria-label="Print preview">
+    <div
+      className="label-print-root"
+      data-size={size}
+      data-page={page}
+      aria-label="Print preview"
+    >
       {records.map((record, index) => (
         <div
+          key={index}
           className="label-card"
           data-code-ready="true"
           data-code-fallback={
             format === 'code128' && record.kind === 'quantity'
           }
-          key={index}
         >
           {record.name} / {record.key}
         </div>
@@ -48,6 +50,7 @@ vi.mock('./label-sheet', () => ({
 import { LabelDesigner } from './label-designer';
 
 const quantityId = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+const assetId = 'd6a2c785-1489-4dd0-83ea-d8dc2f249711';
 const quantity: LiveLabel = {
   kind: 'quantity',
   key: quantityId,
@@ -61,14 +64,14 @@ const quantity: LiveLabel = {
 };
 const asset: LiveLabel = {
   kind: 'asset',
-  key: 'd6a2c785-1489-4dd0-83ea-d8dc2f249711',
-  name: 'Old laptop name',
+  key: assetId,
+  name: 'Laptop',
   context: 'Computers / Shelf 1A',
   categoryName: 'Computers',
   state: 'active',
   tag: 'lap-001',
   barcode: 'lap-001',
-  path: '/inventory/assets/d6a2c785-1489-4dd0-83ea-d8dc2f249711',
+  path: '/inventory/assets/' + assetId,
 };
 const props = {
   locations: [],
@@ -78,6 +81,9 @@ const props = {
   preview: false,
   initial: [quantity, asset],
 };
+const printButton = () =>
+  screen.getByRole('button', { name: /Print selected labels/ });
+
 beforeEach(() => {
   sessionStorage.clear();
   mocks.getQueueRecords.mockReset().mockResolvedValue([quantity, asset]);
@@ -90,401 +96,426 @@ beforeEach(() => {
   vi.stubGlobal('print', vi.fn());
 });
 
-it('starts a new job from shared defaults while retaining valid saved-job choices', async () => {
-  const defaults = {
-    size: '70x35' as const,
-    page: 'A4' as const,
-    format: 'code128' as const,
-  };
-  const first = render(<LabelDesigner {...props} defaults={defaults} />);
-  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
-    '70x35',
-  );
-  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
-  expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('code128');
-  first.unmount();
-  sessionStorage.setItem(
-    queueStorageKey(props.origin, props.memberId),
-    JSON.stringify({
-      entries: [],
-      filters: defaultFilters,
-      job: { size: '90x50', page: 'letter', format: 'qr' },
-    }),
-  );
-  render(<LabelDesigner {...props} defaults={defaults} />);
-  await waitFor(() =>
-    expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
-      '90x50',
-    ),
-  );
-  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('letter');
-  expect(screen.getByRole('combobox', { name: 'Code' })).toHaveValue('qr');
-});
-
-it('keeps a pending Add from being silently cancelled by print settings or queue edits', async () => {
-  mocks.searchLabelRecords.mockResolvedValue({
-    rows: [
-      {
-        kind: 'asset',
-        key: asset.key,
-        name: asset.name,
-        categoryName: 'Computers',
-        status: 'active',
-        assetTag: asset.tag,
-        serialNumber: null,
-        manufacturer: null,
-        model: null,
-        holdingContext: 'ITC-S1A',
-      },
-    ],
-    total: 1,
-    page: 1,
-    pageSize: 25,
-  });
-  let resolveAdd!: (rows: LiveLabel[]) => void;
-  mocks.getQueueRecords.mockImplementation(
-    () =>
-      new Promise<LiveLabel[]>((resolve) => {
-        resolveAdd = resolve;
-      }),
-  );
-  render(<LabelDesigner {...props} initial={[quantity]} />);
-  await screen.findByRole('link', { name: asset.name });
-  const queue = screen.getByRole('region', { name: 'Label queue' });
-  fireEvent.change(within(queue).getByRole('spinbutton'), {
-    target: { value: '3' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Add to queue' }));
-  for (const label of ['Label size', 'Page', 'Code'])
-    expect(screen.getByRole('combobox', { name: label })).toBeDisabled();
-  expect(within(queue).getByRole('spinbutton')).toBeDisabled();
-  expect(within(queue).getByRole('button', { name: 'Remove' })).toBeDisabled();
-  await act(async () => resolveAdd([asset]));
-  await waitFor(() => expect(queue).toHaveTextContent('2 distinct records'));
-  expect(within(queue).getAllByRole('spinbutton')[0]).toHaveValue(3);
-  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeEnabled();
-  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
-    target: { value: '70x35' },
-  });
-  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
-    '70x35',
-  );
-  expect(queue).toHaveTextContent('2 distinct records');
-  expect(within(queue).getAllByRole('spinbutton')[0]).toHaveValue(3);
-});
-
-it('keeps long search result names, identifiers, and site context inside the flexible text column', async () => {
-  const longName = 'A'.repeat(200);
-  const longContext = `Site ${'North'.repeat(50)}: 1 + 4 more; see item details`;
-  mocks.searchLabelRecords.mockResolvedValue({
-    rows: [
-      {
-        kind: 'asset',
-        key: asset.key,
-        name: longName,
-        categoryName: 'Computers',
-        status: 'active',
-        assetTag: null,
-        serialNumber: null,
-        manufacturer: null,
-        model: null,
-        holdingContext: longContext,
-      },
-    ],
-    total: 1,
-    page: 1,
-    pageSize: 25,
-  });
-  render(<LabelDesigner {...props} initial={[]} />);
-  const link = await screen.findByRole('link', { name: longName });
-  const textColumn = link.parentElement;
-  expect(textColumn).toHaveClass('min-w-0', 'flex-1', 'basis-56');
-  expect(textColumn).toHaveClass('[overflow-wrap:anywhere]');
-  expect(link).toHaveClass('[overflow-wrap:anywhere]');
-  expect(screen.getByText(/see item details/)).toHaveClass(
-    '[overflow-wrap:anywhere]',
-  );
-  expect(textColumn?.parentElement).toHaveClass('max-w-full', 'min-w-0');
-  expect(screen.getByRole('button', { name: 'Add to queue' })).toBeEnabled();
-});
-
-it('prints every mixed-queue copy only after a fresh exact-ID read', async () => {
+it('automatically validates the initial queue and prints only after final revalidation', async () => {
+  let authorizedDuringPrint = false;
   vi.stubGlobal(
     'print',
     vi.fn(() => {
-      expect(document.querySelector('.label-print-root')).toHaveAttribute(
-        'data-print-authorized',
-        'true',
+      window.dispatchEvent(new Event('beforeprint'));
+      authorizedDuringPrint =
+        document
+          .querySelector('.label-print-root')
+          ?.getAttribute('data-print-authorized') === 'true';
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  expect(
+    screen.queryByRole('button', { name: 'Prepare full print preview' }),
+  ).toBeNull();
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(1);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2);
+  expect(authorizedDuringPrint).toBe(true);
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+});
+
+it('consumes one beforeprint lease even when afterprint never fires', async () => {
+  const captures: boolean[] = [];
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      window.dispatchEvent(new Event('beforeprint'));
+      captures.push(
+        document
+          .querySelector('.label-print-root')
+          ?.getAttribute('data-print-authorized') === 'true',
+      );
+      window.dispatchEvent(new Event('beforeprint'));
+      captures.push(
+        document
+          .querySelector('.label-print-root')
+          ?.getAttribute('data-print-authorized') === 'true',
       );
     }),
   );
   render(<LabelDesigner {...props} />);
-  await waitFor(() =>
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(2),
-  );
-  fireEvent.change(screen.getAllByRole('spinbutton')[0], {
-    target: { value: '3' },
-  });
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(4),
-  );
-  expect(mocks.getQueueRecords).toHaveBeenCalledWith([
-    { kind: 'quantity', key: quantityId },
-    { kind: 'asset', key: asset.key },
-  ]);
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
-  expect(document.querySelector('.label-print-root')).toHaveAttribute(
-    'data-print-authorized',
-    'true',
-  );
-  window.dispatchEvent(new Event('afterprint'));
+  expect(captures).toEqual([true, false]);
+  window.dispatchEvent(new Event('beforeprint'));
   expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
     'data-print-authorized',
   );
-  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2);
 });
 
-it('blocks printing after tag change until explicit acknowledgement and re-preview', async () => {
+it('revokes print authorization when the print dialog throws', async () => {
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      window.dispatchEvent(new Event('beforeprint'));
+      expect(document.querySelector('.label-print-root')).toHaveAttribute(
+        'data-print-authorized',
+        'true',
+      );
+      throw new Error('Print dialog failed');
+    }),
+  );
   render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
   );
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  await waitFor(() => expect(printButton()).toBeDisabled());
+});
+
+it('expires print authorization when the browser emits no print events', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+});
+
+it.each(['archived', 'retired'])(
+  'requires initial %s lifecycle acknowledgement before printing',
+  async (state) => {
+    const historical = { ...asset, state };
+    mocks.getQueueRecords.mockResolvedValue([quantity, historical]);
+    render(<LabelDesigner {...props} initial={[quantity, historical]} />);
+    expect(
+      await screen.findByRole('button', { name: 'Acknowledge changes' }),
+    ).toBeVisible();
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Acknowledge changes' }),
+    );
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(window.print).not.toHaveBeenCalled();
+  },
+);
+
+it('rejects a same-count final response with different selected identities', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const otherAsset = { ...asset, key: '8d05f5f0-f737-47c0-b28b-c703c60bed74' };
+  mocks.getQueueRecords.mockResolvedValueOnce([quantity, otherAsset]);
+  fireEvent.click(printButton());
+  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('reflows copies and paper locally without another inventory read', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getAllByRole('spinbutton')[0], {
+    target: { value: '2' },
+  });
   await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
+    expect(document.querySelectorAll('.label-card')).toHaveLength(3),
   );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
+    target: { value: '70x35' },
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Page' }), {
+    target: { value: 'A4' },
+  });
+  expect(document.querySelector('.label-print-root')).toHaveAttribute(
+    'data-size',
+    '70x35',
+  );
+  expect(document.querySelector('.label-print-root')).toHaveAttribute(
+    'data-page',
+    'A4',
+  );
+  expect(printButton()).toBeEnabled();
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(1);
+});
+
+it('starts from shared job defaults and restores local choices for the same member', async () => {
+  const defaults = { size: '70x35', page: 'A4', format: 'qr' } as const;
+  const view = render(<LabelDesigner {...props} defaults={defaults} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '70x35',
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
+    target: { value: '90x50' },
+  });
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).job.size,
+    ).toBe('90x50'),
+  );
+  view.unmount();
+  render(<LabelDesigner {...props} defaults={defaults} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '90x50',
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+});
+
+it('locks print and job settings while adding a record asynchronously', async () => {
+  const nextId = '8d05f5f0-f737-47c0-b28b-c703c60bed74';
+  const next = { ...quantity, key: nextId, name: 'Cables' };
+  mocks.searchLabelRecords.mockResolvedValueOnce({
+    rows: [
+      {
+        kind: 'quantity',
+        key: nextId,
+        name: 'Cables',
+        categoryName: 'Cables',
+        status: 'active',
+        holdingContext: 'Shelf 1A',
+        itemCode: null,
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const add = await screen.findByRole('button', { name: 'Add to queue' });
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(add);
+  expect(printButton()).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Page' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Code' })).toBeDisabled();
+  mocks.getQueueRecords.mockResolvedValueOnce([quantity, asset, next]);
+  finish([next]);
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(3),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('rejects an Add response for a different identity without queueing it', async () => {
+  const requestedId = '8d05f5f0-f737-47c0-b28b-c703c60bed74';
+  const wrongId = '482b9fd0-2464-45d6-b57d-3dbe61956971';
+  mocks.searchLabelRecords.mockResolvedValueOnce({
+    rows: [
+      {
+        kind: 'quantity',
+        key: requestedId,
+        name: 'Requested cables',
+        categoryName: 'Cables',
+        status: 'active',
+        holdingContext: 'Shelf 1A',
+        itemCode: null,
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    { ...quantity, key: wrongId, name: 'Wrong cables' },
+  ]);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  expect(
+    await screen.findByText('That record is unavailable to this account.'),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('region', { name: 'Label queue' }),
+  ).not.toHaveTextContent(wrongId);
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '2 distinct records',
+  );
+  expect(document.querySelectorAll('.label-card')).toHaveLength(2);
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('blocks refresh when the response contains every selected row plus an extra identity', async () => {
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    quantity,
+    asset,
+    { ...quantity, key: '8d05f5f0-f737-47c0-b28b-c703c60bed74' },
+  ]);
+  render(<LabelDesigner {...props} />);
+  expect(await screen.findByText(/unexpected.*record/i)).toBeVisible();
+  expect(printButton()).toBeDisabled();
+  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('retains the old sheet but denies printing during a new selection validation', async () => {
+  let finish!: (rows: LiveLabel[]) => void;
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+  expect(document.querySelectorAll('.label-card')).toHaveLength(2);
+  expect(printButton()).toBeDisabled();
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+  finish([asset]);
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(1),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+});
+
+it('ignores an obsolete response after rapid selection changes', async () => {
+  let finish!: (rows: LiveLabel[]) => void;
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  finish([asset]);
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(0),
+  );
+  expect(printButton()).toBeDisabled();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('blocks unavailable rows and offers a bounded explicit retry after read failure', async () => {
+  mocks.getQueueRecords.mockRejectedValueOnce(new Error('network'));
+  render(<LabelDesigner {...props} />);
+  await screen.findByRole('button', { name: 'Retry label refresh' });
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry label refresh' }));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([quantity]);
+  fireEvent.click(printButton());
+  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('requires acknowledgement of changed tag and then revalidates automatically', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    quantity,
+    { ...asset, tag: 'lap-002' },
+  ]);
+  fireEvent.click(printButton());
   mocks.getQueueRecords.mockResolvedValue([
     quantity,
     { ...asset, tag: 'lap-002' },
   ]);
   fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  expect(
     await screen.findByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeInTheDocument();
+  );
+  expect(printButton()).toBeDisabled();
+  await waitFor(() => expect(printButton()).toBeEnabled());
   expect(window.print).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge changes' }));
-  expect(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  ).toBeDisabled();
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(
-      screen.getByRole('button', { name: /Print selected labels/ }),
-    ).toBeEnabled(),
-  );
 });
 
-it('refreshes ordinary display text without approval and blocks inaccessible IDs', async () => {
-  mocks.getQueueRecords.mockResolvedValueOnce([
-    quantity,
-    { ...asset, name: 'Current laptop name', context: 'Computers / Shelf 2A' },
-  ]);
+it('requires acknowledgement when Code 128 falls back to QR', async () => {
   render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  expect(
-    await screen.findByText(/Current laptop name \/ d6a2c785/),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeNull();
-  mocks.getQueueRecords.mockResolvedValueOnce([quantity]);
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
-  expect(window.print).not.toHaveBeenCalled();
-  expect(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  ).toBeDisabled();
-});
-
-it('prints refreshed descriptive text in the same action without confirmation', async () => {
-  render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
-  );
-  mocks.getQueueRecords.mockResolvedValue([
-    quantity,
-    {
-      ...asset,
-      name: 'Renamed laptop',
-      categoryName: 'Renamed computers',
-      context: 'Renamed computers / Shelf 2A',
-    },
-  ]);
-  vi.stubGlobal(
-    'print',
-    vi.fn(() => {
-      expect(
-        screen.getByText(/Renamed laptop \/ d6a2c785/),
-      ).toBeInTheDocument();
-      expect(document.querySelector('.label-print-root')).toHaveAttribute(
-        'data-print-authorized',
-        'true',
-      );
-    }),
-  );
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
-  expect(document.querySelector('.label-print-root')).toHaveAttribute(
-    'data-print-authorized',
-    'true',
-  );
-  window.dispatchEvent(new Event('afterprint'));
-  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
-    'data-print-authorized',
-  );
-  expect(screen.getByRole('status')).toHaveTextContent(
-    'Label information refreshed',
-  );
-  expect(
-    screen.queryByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeNull();
-});
-
-it('clears print authorization even when the browser print call throws', async () => {
-  let sheet: Element | null = null;
-  vi.stubGlobal(
-    'print',
-    vi.fn(() => {
-      sheet = document.querySelector('.label-print-root');
-      throw new Error('print unavailable');
-    }),
-  );
-  render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
-  );
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  await screen.findByText(
-    'Final label check failed. Printing is blocked; retry.',
-  );
-  expect(sheet).not.toHaveAttribute('data-print-authorized');
-});
-
-it('closes authorization after a bounded wait if the browser omits afterprint', async () => {
-  const scheduled = vi.spyOn(window, 'setTimeout');
-  render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
-  );
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
-  const deadline = scheduled.mock.calls.find(
-    ([, delay]) => delay === 30_000,
-  )?.[0];
-  expect(deadline).toBeTypeOf('function');
-  expect(document.querySelector('.label-print-root')).toHaveAttribute(
-    'data-print-authorized',
-    'true',
-  );
-  (deadline as () => void)();
-  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
-    'data-print-authorized',
-  );
-  scheduled.mockRestore();
-});
-
-it('requires one explicit acknowledgement for an initially archived record', async () => {
-  const archived = { ...quantity, state: 'archived' };
-  mocks.getQueueRecords.mockResolvedValue([archived]);
-  render(<LabelDesigner {...props} initial={[archived]} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  expect(
-    await screen.findByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeVisible();
-  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
-  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge changes' }));
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(1),
-  );
-  expect(
-    screen.queryByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeNull();
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
-});
-
-it('requires explicit acknowledgement when requested Code 128 falls back to QR', async () => {
-  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
   fireEvent.change(screen.getByRole('combobox', { name: 'Code' }), {
     target: { value: 'code128' },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  await waitFor(() =>
-    expect(document.querySelectorAll('.label-card')).toHaveLength(2),
-  );
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
-  expect(
     await screen.findByRole('button', { name: 'Acknowledge QR fallback' }),
-  ).toBeVisible();
-  expect(window.print).not.toHaveBeenCalled();
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Acknowledge QR fallback' }),
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: /Print selected labels/ }),
-  );
+  fireEvent.click(printButton());
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
 });
 
-it('ignores a stale preflight when the queue changes during its read', async () => {
-  let finish!: (rows: LiveLabel[]) => void;
-  mocks.getQueueRecords.mockReturnValue(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  render(<LabelDesigner {...props} />);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Prepare full print preview' }),
-  );
-  fireEvent.change(screen.getAllByRole('spinbutton')[0], {
-    target: { value: '2' },
+it('shows a quantity Item code in search results without replacing its UUID route', async () => {
+  mocks.searchLabelRecords.mockResolvedValueOnce({
+    rows: [
+      {
+        kind: 'quantity',
+        key: quantityId,
+        name: 'Adapters',
+        categoryName: 'Cables',
+        status: 'active',
+        holdingContext: 'Shelf 1A',
+        itemCode: 'SKU-0042',
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
   });
-  finish([quantity, asset]);
-  await waitFor(() =>
-    expect(
-      screen.getByRole('button', { name: 'Prepare full print preview' }),
-    ).toBeEnabled(),
+  render(<LabelDesigner {...props} />);
+  expect(await screen.findByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Adapters' })).toHaveAttribute(
+    'href',
+    '/inventory/quantity/' + quantityId,
   );
-  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
-  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('keeps printing disabled until the sheet font is ready', async () => {
+  const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+  let finish!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const fonts = { status: 'loading', ready };
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: fonts,
+  });
+  try {
+    render(<LabelDesigner {...props} />);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.label-card')).toHaveLength(2),
+    );
+    expect(printButton()).toBeDisabled();
+    fonts.status = 'loaded';
+    finish();
+    await waitFor(() => expect(printButton()).toBeEnabled());
+  } finally {
+    if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+    else Reflect.deleteProperty(document, 'fonts');
+  }
 });

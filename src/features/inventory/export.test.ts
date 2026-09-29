@@ -60,6 +60,35 @@ describe('inventory CSV', () => {
       result.csv.slice(1).split('\r\n')[0].split(',').slice(0, 15),
     ).toEqual(legacyInventoryHeaders.map(csvText));
   });
+  it('appends Item Code after the existing CSV columns and neutralizes formula text', () => {
+    const row = {
+      entity_id: id,
+      kind: 'quantity',
+      name: 'Cable',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: 0,
+      location_name: null,
+      location_code: null,
+      breadcrumb: null,
+      item_code: '=SKU-0001',
+    };
+    const csv = exportCsv(
+      'inventory',
+      { rows: [row], total: 1, exported_at: at },
+      'Preview',
+    ).csv;
+    const [header, body] = csv.slice(1).split('\r\n');
+    expect(header.split(',').slice(0, 15)).toEqual(
+      legacyInventoryHeaders.map(csvText),
+    );
+    expect(header.endsWith('"Item Code (SKU)"')).toBe(true);
+    expect(body.endsWith('"\'=SKU-0001"')).toBe(true);
+  });
   it('exports one low-stock row per definition and no global total in holding rows', () => {
     const low = exportCsv(
       'low_stock',

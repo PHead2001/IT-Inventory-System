@@ -9,8 +9,11 @@ export default async function LoginPage({
   const next = validReturnPath((await searchParams).next);
   return (
     <>
-      <h1 className="text-2xl font-semibold">Welcome back</h1>
-      <p className="mb-7 mt-2 text-sm text-slate-400">
+      <p className="experience-eyebrow">Member access</p>
+      <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+        Welcome back
+      </h1>
+      <p className="mb-7 mt-2 text-sm text-[#9cafc4]">
         Sign in with your invited IT Inventory account.
       </p>
       <AuthForm mode="login" next={next ?? undefined} />
@@ -20,7 +23,7 @@ export default async function LoginPage({
       >
         Forgot password?
       </Link>
-      <p className="mt-3 text-xs leading-5 text-slate-500">
+      <p className="mt-3 text-xs leading-5 text-[#9cafc4]">
         Access is invitation-only. Contact the application owner if you need an
         account.
       </p>

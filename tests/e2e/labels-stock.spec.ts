@@ -24,6 +24,17 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   ).toBeVisible();
 }
 
+async function openEditForm(
+  page: Page,
+  name: 'Edit asset metadata' | 'Edit quantity metadata',
+) {
+  const form = page.getByRole('form', { name });
+  if (!(await form.isVisible()))
+    await page.locator('summary').filter({ hasText: name }).click();
+  await expect(form).toBeVisible();
+  return form;
+}
+
 async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
   const image = PNG.sync.read(png);
   const rgba = new Uint8ClampedArray(image.data);
@@ -54,15 +65,25 @@ async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
 
 async function generatedLocationQr(page: Page, code = rootCode) {
   await page.goto('/labels?location=' + code);
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
+  await readyPreview(page, 1);
   const card = page.locator('.label-card').first();
   const qr = card.getByRole('img', { name: /QR code for/ });
   await expect(qr).toBeVisible();
   const source = await qr.getAttribute('src');
   expect(source).toMatch(/^data:image\/png;base64,/);
   return { card, source: source! };
+}
+
+async function readyPreview(page: Page, count: number) {
+  await expect(
+    page.getByRole('status').filter({
+      hasText: 'Print preview refreshed from current inventory',
+    }),
+  ).toBeVisible();
+  await expect(page.locator('.label-card')).toHaveCount(count);
+  await expect(page.locator('.label-card[data-code-ready="true"]')).toHaveCount(
+    count,
+  );
 }
 
 async function verifiedPreviewPdf(page: Page, destination: string) {
@@ -72,6 +93,7 @@ async function verifiedPreviewPdf(page: Page, destination: string) {
   );
   await page.evaluate(() => {
     window.print = () => {
+      window.dispatchEvent(new Event('beforeprint'));
       document.body.dataset.verifiedPrint =
         document
           .querySelector('.label-print-root')
@@ -135,9 +157,7 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     .locator('select')
     .filter({ has: page.locator('option[value="code128"]') });
   await codeFormat.selectOption('code128');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
+  await readyPreview(page, 1);
   const barcode = card.getByRole('img', { name: 'Code 128 LOC:ITC' });
   await expect(barcode).toBeVisible();
   await expect(barcode).not.toHaveClass(/hidden/);
@@ -154,9 +174,7 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     ),
   ).toBe('LOC:ITC');
   await codeFormat.selectOption('qr');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
+  await readyPreview(page, 1);
   for (const code of [
     'ITC-L',
     'ITC-R',
@@ -176,10 +194,7 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
     );
     await page.getByRole('button', { name: 'Add location label' }).click();
   }
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
-  await expect(page.locator('.label-card')).toHaveCount(11);
+  await readyPreview(page, 11);
   await page.emulateMedia({ media: 'print' });
   await expect(page.locator('.label-print-root')).toBeHidden();
   await page.emulateMedia({ media: 'screen' });
@@ -461,7 +476,7 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     id = page.url().split('/').at(-1)!;
   } else {
     await page.goto('/inventory/assets/' + id);
-    form = page.getByRole('form', { name: 'Edit asset metadata' });
+    form = await openEditForm(page, 'Edit asset metadata');
     await form.getByLabel('Name', { exact: true }).fill(originalName);
     await form.getByRole('button', { name: 'Review metadata' }).click();
     await form.getByRole('button', { name: 'Confirm save' }).click();
@@ -470,11 +485,9 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     ).toBeVisible();
   }
   await page.goto('/labels?asset=' + id);
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
-  const card = page.locator('.label-card').first();
-  await expect(card).toContainText(id);
+  await readyPreview(page, 1);
+  const card = page.locator('.label-card').filter({ hasText: originalName });
+  await expect(card).toBeVisible();
   const initialCode = await decodeScreenshot(
     page,
     await card.screenshot({
@@ -523,7 +536,7 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
       }),
   ).toBeVisible();
   await page.reload();
-  form = page.getByRole('form', { name: 'Edit asset metadata' });
+  form = await openEditForm(page, 'Edit asset metadata');
   await form
     .getByLabel('Name', { exact: true })
     .fill('Renamed ' + originalName);
@@ -533,9 +546,7 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
     page.getByRole('heading', { name: 'Renamed ' + originalName, exact: true }),
   ).toBeVisible();
   await page.goto('/labels?asset=' + id);
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
+  await readyPreview(page, 1);
   await expect(card).toContainText('Renamed Label asset');
   expect(
     await decodeScreenshot(
@@ -621,13 +632,10 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   );
   const copies = page.getByRole('spinbutton');
   await copies.first().fill('10');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
-  await expect(page.locator('.label-card')).toHaveCount(12);
+  await readyPreview(page, 12);
   const quantityCard = page
     .locator('.label-card')
-    .filter({ hasText: quantityId })
+    .filter({ hasText: quantityName })
     .first();
   const quantityQr = quantityCard.getByRole('img', { name: /QR code for/ });
   await expect(quantityQr).toBeVisible();
@@ -649,12 +657,13 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
 
   const editor = await context.newPage();
   await editor.goto('/inventory/quantity/' + quantityId);
-  form = editor.getByRole('form', { name: 'Edit quantity metadata' });
-  await form.getByLabel('Name', { exact: true }).fill('Fresh ' + quantityName);
+  form = await openEditForm(editor, 'Edit quantity metadata');
+  const freshQuantityName = 'Fresh adapters ' + suffix.slice(0, 8);
+  await form.getByLabel('Name', { exact: true }).fill(freshQuantityName);
   await form.getByRole('button', { name: 'Review metadata' }).click();
   await form.getByRole('button', { name: 'Confirm save' }).click();
   await expect(
-    editor.getByRole('heading', { name: 'Fresh ' + quantityName }),
+    editor.getByRole('heading', { name: freshQuantityName }),
   ).toBeVisible();
   // The prepared preview is now stale. Browser Ctrl/Cmd+P never runs the
   // application's revalidation, so its print media must conceal the sheet.
@@ -672,13 +681,15 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     'data-print-called',
     'yes',
   );
-  await expect(page.getByRole('status')).toContainText(
-    'Label information refreshed',
-  );
-  await expect(quantityCard).toContainText('Fresh Queue adapters');
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Label information refreshed' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.label-card').filter({ hasText: freshQuantityName }),
+  ).toHaveCount(10);
 
   await editor.goto('/inventory/assets/' + assetId);
-  form = editor.getByRole('form', { name: 'Edit asset metadata' });
+  form = await openEditForm(editor, 'Edit asset metadata');
   await form.getByLabel('Asset tag').fill('Q2-' + suffix);
   await form.getByRole('button', { name: 'Review metadata' }).click();
   await form.getByRole('button', { name: 'Confirm save' }).click();

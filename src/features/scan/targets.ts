@@ -82,10 +82,10 @@ export function parseScan(value: string, origin: string): ScanTarget | null {
 
 export function validIdentifier(value: string): boolean {
   return (
-    value.length >= 1 &&
-    value.length <= 100 &&
+    [...value].length >= 1 &&
+    [...value].length <= 100 &&
     value.trim() === value &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !/[\u0000-\u001f\u007f-\u009f]/.test(value)
   );
 }
 

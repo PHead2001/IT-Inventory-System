@@ -254,7 +254,9 @@ export function FilesPanel({
         ].includes(file.type)
       )
         throw new Error(
-          'Choose a JPEG, PNG, still WebP, or PDF file. HEIC needs conversion first.',
+          parentType === 'quantity'
+            ? 'Choose a JPEG, PNG, or still WebP photo. HEIC needs conversion first.'
+            : 'Choose a JPEG, PNG, still WebP, or PDF file. HEIC needs conversion first.',
         );
       const safeName = file.name
         .trim()
@@ -451,21 +453,30 @@ export function FilesPanel({
   return (
     <section
       aria-label="Inventory files"
-      className="my-6 rounded-xl border border-slate-800 bg-slate-900/50 p-5"
+      aria-busy={busy}
+      className="experience-surface my-5 min-w-0 p-4"
     >
       <h2 className="text-xl font-semibold">
         {parentType === 'quantity'
           ? 'Recognition photo'
           : 'Photos and documents'}
       </h2>
-      <p className="mt-2 text-sm text-slate-400">
-        JPEG, PNG, still WebP{parentType === 'asset' ? ', or PDF' : ''} · Up to
-        20 MiB. Photos are normalized before display. PDFs download as
-        attachments.
+      <p className="experience-muted mt-2 text-sm">
+        {parentType === 'quantity'
+          ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
+          : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
       </p>
       {message && (
-        <p role="alert" className="mt-3 text-amber-200">
+        <p
+          role="alert"
+          className="experience-feedback mt-3 break-words text-amber-100"
+        >
           {message}
+        </p>
+      )}
+      {busy && (
+        <p role="status" className="mt-2 text-sm text-cyan-200">
+          File request in progress…
         </p>
       )}
       {staff && (
@@ -482,13 +493,13 @@ export function FilesPanel({
           {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
         </button>
       )}
-      <ul className="mt-4 space-y-3">
+      <ul className="mt-3 space-y-2">
         {cards
           .filter((card) => card.state === 'ready' || staff)
           .map((card) => (
             <li
               key={card.id}
-              className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-700 p-3 sm:flex-row sm:flex-wrap sm:items-center"
+              className="flex min-w-0 flex-col gap-3 rounded-lg border border-cyan-100/15 bg-slate-950/40 p-3 sm:flex-row sm:flex-wrap sm:items-center"
             >
               <div className="flex min-w-0 items-start gap-3 sm:min-w-64 sm:flex-1">
                 <span className="w-16 shrink-0">
@@ -498,6 +509,11 @@ export function FilesPanel({
                   <p className="break-words font-medium [overflow-wrap:anywhere]">
                     {card.name}
                   </p>
+                  <span className="mt-1 inline-block rounded-full border border-cyan-200/20 px-2 py-0.5 text-xs text-cyan-100">
+                    {card.state === 'ready'
+                      ? 'Validated'
+                      : `Pending · ${card.state}`}
+                  </span>
                   <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
                     Original: {card.filename}
                   </p>
@@ -575,10 +591,12 @@ export function FilesPanel({
           ))}
       </ul>
       {!cards.some((card) => card.state === 'ready') && (
-        <p className="mt-3 text-sm text-slate-400">No ready files yet.</p>
+        <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
+          No ready files yet.
+        </p>
       )}
       {staff && (
-        <div className="mt-5 space-y-3 border-t border-slate-700 pt-4">
+        <div className="mt-4 space-y-3 border-t border-cyan-100/15 pt-4">
           <label className="block text-sm font-medium" htmlFor="inventory-file">
             Add{' '}
             {parentType === 'quantity' ? 'recognition photo' : 'photo or PDF'}
@@ -600,7 +618,7 @@ export function FilesPanel({
             <label className="block text-sm">
               Replace a ready file
               <select
-                className="mt-1 block min-h-11 w-full rounded border border-slate-700 bg-slate-950 p-2"
+                className="experience-field mt-1 block min-h-11 w-full p-2"
                 value={replace}
                 onChange={(event) => setReplace(event.target.value)}
               >
@@ -632,7 +650,7 @@ export function FilesPanel({
           <button
             type="button"
             disabled={!file || busy || replaceUnavailable}
-            className="min-h-11 rounded bg-cyan-700 px-4 py-2 disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
             onClick={() => void upload()}
           >
             {busy ? 'Working…' : 'Upload and review'}
@@ -644,8 +662,10 @@ export function FilesPanel({
           This record is archived or retired; its files remain manageable.
         </p>
       )}
-      <div className="mt-5 border-t border-slate-700 pt-4">
-        <h3 className="font-semibold">File history</h3>
+      <details className="mt-4 border-t border-cyan-100/15 pt-3">
+        <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+          File history{history.length > 0 ? ` · ${history.length} shown` : ''}
+        </summary>
         {history.length === 0 ? (
           <p className="mt-2 text-sm text-slate-400">No file changes yet.</p>
         ) : (
@@ -671,7 +691,7 @@ export function FilesPanel({
             More file history
           </button>
         )}
-      </div>
+      </details>
       {preview && (
         <div
           role="dialog"
@@ -707,6 +727,7 @@ function FileThumb({
 }) {
   const [client] = useState(createSupabaseBrowserClient);
   const [url, setUrl] = useState<string | null>(null);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   useEffect(() => {
     if (card.state !== 'ready' || card.type === 'application/pdf') return;
     let cancelled = false;
@@ -716,9 +737,15 @@ function FileThumb({
       p_file_id: card.id,
       p_variant: 'thumbnail',
     }).then(async ({ data, error }) => {
-      if (error || typeof data !== 'string') return;
+      if (error || typeof data !== 'string') {
+        if (!cancelled) setThumbnailFailed(true);
+        return;
+      }
       const result = await client.storage.from(bucket).download(data);
-      if (result.error || !result.data) return;
+      if (result.error || !result.data) {
+        if (!cancelled) setThumbnailFailed(true);
+        return;
+      }
       localUrl = URL.createObjectURL(result.data);
       if (!cancelled) setUrl(localUrl);
       else URL.revokeObjectURL(localUrl);
@@ -730,15 +757,15 @@ function FileThumb({
   }, [card.id, card.state, card.type, client]);
   if (card.state !== 'ready' || card.type === 'application/pdf')
     return (
-      <span className="rounded bg-slate-800 px-3 py-2 text-xs">
-        {card.type === 'application/pdf' ? 'PDF' : 'File'}
+      <span className="flex h-16 w-16 items-center justify-center rounded-lg border border-cyan-100/20 bg-slate-950 px-2 text-center text-xs text-slate-300">
+        {card.type === 'application/pdf' ? 'PDF' : card.state}
       </span>
     );
   return (
     <button
       type="button"
       aria-label={'Preview ' + card.name}
-      className="min-h-11 min-w-16 rounded bg-slate-800 text-xs text-cyan-300"
+      className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border border-cyan-100/20 bg-slate-950 text-xs text-cyan-200"
       onClick={() => void read(card, 'thumbnail', false)}
     >
       {url ? (
@@ -746,8 +773,10 @@ function FileThumb({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={url} alt="" className="h-16 w-16 rounded object-cover" />
         </>
+      ) : thumbnailFailed ? (
+        'Preview unavailable'
       ) : (
-        'Photo'
+        'Loading preview…'
       )}
     </button>
   );

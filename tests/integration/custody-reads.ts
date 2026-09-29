@@ -114,6 +114,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           { id: uid(), kind: 'field', field_id: fieldId, width: 6 },
         ],
       },

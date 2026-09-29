@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "defaultSpaceId": "it-closet",
+  "spaces": [
+    {
+      "id": "it-closet",
+      "rootCode": "ITC",
+      "name": "IT Closet",
+      "kind": "modeled",
+      "geometryId": "it-closet"
+    },
+    {
+      "id": "it-office",
+      "rootCode": "ITO",
+      "name": "IT Office",
+      "kind": "inventory",
+      "geometryId": null
+    }
+  ]
+}

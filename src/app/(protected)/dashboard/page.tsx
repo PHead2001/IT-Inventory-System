@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { ArrowRight, Download, Map } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getLowStockDashboard } from '@/features/inventory/queries.server';
-import { Pagination, panel } from '@/features/inventory/components/read-ui';
+import { Pagination } from '@/features/inventory/components/read-ui';
 import { RefreshButton } from '@/features/inventory/components/refresh-button';
+import { ClosetPreview } from '@/components/experience/closet-preview';
 
 export default async function DashboardPage({
   searchParams,
@@ -15,105 +17,136 @@ export default async function DashboardPage({
   const lastPage = Math.max(1, Math.ceil(result.total / result.pageSize));
   if (result.page > lastPage) redirect('/dashboard?page=1');
   return (
-    <>
-      <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
-        Storage availability · Overview
-      </p>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold">Low-stock overview</h1>
+    <div className="space-y-5">
+      <section className="experience-overview-hero experience-surface-bright">
+        <div>
+          <p className="experience-eyebrow">Storage availability · Overview</p>
+          <h1 className="experience-heading mt-3">Low-stock overview</h1>
+          <p className="experience-muted mt-3 max-w-xl text-sm leading-6">
+            Keep storage ready for the next request. See which items need
+            attention.
+          </p>
+          <Link
+            href="/room"
+            className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white"
+          >
+            <Map size={16} aria-hidden="true" /> Explore Spaces &amp; maps{' '}
+            <ArrowRight size={15} aria-hidden="true" />
+          </Link>
+        </div>
+        <div className="experience-closet-preview">
+          <ClosetPreview />
+        </div>
+      </section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="experience-eyebrow">Live inventory</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">
+            Storage health
+          </h2>
+        </div>
         <RefreshButton />
       </div>
-      <p className="mt-3 text-slate-400">
-        Restocking uses available storage across all locations, including
-        inactive ones. Assigned site holdings remain part of total recorded
-        equipment, but cannot be issued from storage. Out of stock is included
-        in needs restocking.
-      </p>
-      <dl className="mt-6 grid gap-3 sm:grid-cols-3">
-        <div className={panel}>
-          <dt className="text-sm text-slate-400">Needs restocking</dt>
-          <dd className="mt-1 text-3xl font-semibold text-amber-200">
-            {result.needsRestockingCount}
-          </dd>
+      <dl className="experience-stat-grid">
+        <div className="experience-stat experience-surface">
+          <dt className="experience-muted text-xs">Needs restocking</dt>
+          <dd className="text-amber-200">{result.needsRestockingCount}</dd>
         </div>
-        <div className={panel}>
-          <dt className="text-sm text-slate-400">Out of stock (subset)</dt>
-          <dd className="mt-1 text-3xl font-semibold text-red-200">
-            {result.outOfStockCount}
-          </dd>
+        <div className="experience-stat experience-surface">
+          <dt className="experience-muted text-xs">Out of stock (subset)</dt>
+          <dd className="text-red-200">{result.outOfStockCount}</dd>
         </div>
-        <div className={panel}>
-          <dt className="text-sm text-slate-400">Monitored active items</dt>
-          <dd className="mt-1 text-3xl font-semibold">
-            {result.configuredCount}
-          </dd>
+        <div className="experience-stat experience-surface">
+          <dt className="experience-muted text-xs">Monitored active items</dt>
+          <dd>{result.configuredCount}</dd>
         </div>
       </dl>
-      <div className="my-5 flex flex-wrap gap-5 text-sm">
-        <Link
-          href="/inventory?lowStock=true"
-          className="min-h-11 py-3 text-cyan-300 underline"
-        >
-          View filtered inventory
-        </Link>
-        <a
-          href="/api/exports/inventory?export=low_stock"
-          className="min-h-11 py-3 text-cyan-300 underline"
-        >
-          Download low-stock CSV
-        </a>
-      </div>
-      {result.configuredCount === 0 ? (
-        <p className={panel}>
-          No active quantity items have a reorder threshold. Staff can set one
-          on a quantity item; 0 alerts when available storage reaches zero.
-        </p>
-      ) : result.needsRestockingCount === 0 ? (
-        <p className={panel}>No monitored items need restocking.</p>
-      ) : (
-        <>
-          <h2 className="mb-3 text-xl font-semibold">
-            Items needing attention
-          </h2>
-          <ul className="space-y-3">
-            {result.rows.map((row) => (
-              <li key={row.id} className={panel}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+      <section aria-labelledby="attention-heading">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="experience-eyebrow">Action queue</p>
+            <h2
+              id="attention-heading"
+              className="mt-1 text-lg font-semibold tracking-tight"
+            >
+              Items needing attention
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-4 text-xs font-semibold text-cyan-200">
+            <Link
+              href="/inventory?lowStock=true"
+              className="inline-flex min-h-11 items-center gap-1 hover:text-white"
+            >
+              View filtered inventory{' '}
+              <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+            <a
+              href="/api/exports/inventory?export=low_stock"
+              className="inline-flex min-h-11 items-center gap-1 hover:text-white"
+            >
+              <Download size={14} aria-hidden="true" /> Download low-stock CSV
+            </a>
+          </div>
+        </div>
+        {result.configuredCount === 0 ? (
+          <p className="experience-surface p-5 text-sm text-slate-300">
+            No active quantity items have a reorder threshold. Staff can set one
+            on a quantity item; 0 alerts when available storage reaches zero.
+          </p>
+        ) : result.needsRestockingCount === 0 ? (
+          <p className="experience-surface p-5 text-sm text-slate-300">
+            No monitored items need restocking.
+          </p>
+        ) : (
+          <>
+            <ul className="experience-surface overflow-hidden">
+              {result.rows.map((row) => (
+                <li key={row.id} className="experience-attention-row">
+                  <div className="min-w-0">
                     <Link
                       href={'/inventory/quantity/' + row.id}
-                      className="font-semibold text-cyan-200 underline"
+                      className="block truncate text-sm font-semibold"
                     >
                       {row.name}
                     </Link>
-                    <p className="mt-1 text-sm text-slate-400">
-                      {row.categoryName}
+                    <p className="experience-muted mt-1 truncate text-xs">
+                      {row.categoryName} ·{' '}
+                      <Link
+                        href={'/inventory/quantity/' + row.id}
+                        className="text-cyan-200"
+                      >
+                        View item and locations
+                      </Link>
                     </p>
                   </div>
-                  <strong className="text-sm text-amber-200">
+                  <p className="experience-attention-metrics">
+                    Available <strong>{row.availableQuantity}</strong> ·
+                    Assigned <strong>{row.assignedQuantity}</strong>
+                    <br />
+                    Total <strong>{row.ownedQuantity}</strong> · Threshold{' '}
+                    <strong>{row.reorderThreshold}</strong>
+                  </p>
+                  <strong
+                    className="experience-status"
+                    data-state={row.stockState}
+                  >
                     {row.stockState === 'out_of_stock'
                       ? 'Out of stock'
                       : 'Needs restocking'}
                   </strong>
-                </div>
-                <p className="mt-2 text-sm">
-                  Available in storage: {row.availableQuantity} · Assigned to
-                  sites: {row.assignedQuantity} · Total recorded:{' '}
-                  {row.ownedQuantity} · Reorder threshold:{' '}
-                  {row.reorderThreshold}
-                </p>
-                <Link
-                  className="mt-2 inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
-                  href={'/inventory/quantity/' + row.id}
-                >
-                  View item and locations
-                </Link>
-              </li>
-            ))}
-          </ul>
-          <Pagination result={result} base="/dashboard" params={params} />
-        </>
-      )}
-    </>
+                </li>
+              ))}
+            </ul>
+            <Pagination result={result} base="/dashboard" params={params} />
+          </>
+        )}
+      </section>
+      <p className="experience-muted max-w-3xl text-xs leading-5">
+        Restocking includes available storage across all locations, including
+        inactive ones. Assigned site holdings remain recorded equipment, but
+        cannot be issued from storage. Out of stock is included in needs
+        restocking.
+      </p>
+    </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   describeValues,
   describeSearchBatch,
 } from '@/features/metadata/queries.server';
+import { containingSpace } from '@/features/room/spaces';
 
 const dashboardSchema = z.object({
   configured_count: z.number().int().nonnegative(),
@@ -83,9 +84,15 @@ export async function getLocations() {
     )
     .order('breadcrumb')
     .order('code');
-  return requireData(data, error, 'Locations could not be loaded.').map(
-    mapLocation,
-  );
+  const locations = requireData(
+    data,
+    error,
+    'Locations could not be loaded.',
+  ).map(mapLocation);
+  return locations.map((location) => ({
+    ...location,
+    spaceRootCode: containingSpace(locations, location.code)?.rootCode ?? null,
+  }));
 }
 export async function getLocation(code: string) {
   const locations = await getLocations();
@@ -266,6 +273,7 @@ export async function getQuantityDetail(
       ...metadata(row, categories),
       customDisplay,
       archived: row.archived,
+      itemCode: row.item_code,
       reorderThreshold: row.reorder_threshold,
     },
     stockSummary: {

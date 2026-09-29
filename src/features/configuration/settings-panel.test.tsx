@@ -81,6 +81,23 @@ beforeEach(() => {
   mocks.refresh.mockReset();
 });
 
+it('shows category actions and form deep links without label controls in category mode', () => {
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  expect(screen.getByRole('link', { name: 'Edit form' })).toHaveAttribute(
+    'href',
+    `/settings/forms/${source.id}`,
+  );
+  expect(screen.getByRole('button', { name: 'Rename' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Remove' })).toBeVisible();
+  expect(screen.queryByRole('combobox', { name: 'Size' })).toBeNull();
+});
+
+it('shows only shared print defaults in label mode', () => {
+  render(<SettingsPanel mode="labels" labelDefaults={defaults} canManage />);
+  expect(screen.getByRole('combobox', { name: 'Size' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Add category' })).toBeNull();
+});
+
 it('explains read-only settings without exposing configuration mutations', () => {
   render(
     <SettingsPanel

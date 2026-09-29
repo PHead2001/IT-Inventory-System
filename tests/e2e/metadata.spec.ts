@@ -20,7 +20,7 @@ async function publishDefinition(
   definition: unknown,
 ) {
   const current = await client.rpc(
-    'metadata_form_get' as never,
+    'metadata_form_get_v2' as never,
     {
       p_category_id: categoryId,
     } as never,
@@ -31,51 +31,35 @@ async function publishDefinition(
     draft_version: string | null;
     published_revision_id: string;
   };
-  const draft = await client.rpc(
-    'metadata_draft_save' as never,
+  const payload = {
+    category_id: categoryId,
+    expected_actor_id: actorId,
+    expected_draft_id: baseline.draft_id,
+    expected_draft_version: baseline.draft_version ?? '0',
+    expected_published_revision_id: baseline.published_revision_id,
+    definition,
+  };
+  const first = await client.rpc(
+    'metadata_form_save' as never,
     {
       p_request_id: randomUUID(),
-      p_payload: {
-        category_id: categoryId,
-        expected_actor_id: actorId,
-        expected_draft_id: baseline.draft_id,
-        expected_draft_version: baseline.draft_version ?? '0',
-        expected_published_revision_id: baseline.published_revision_id,
-        definition,
-      },
+      p_payload: payload,
     } as never,
   );
-  expect(draft.error).toBeNull();
-  const saved = draft.data as { draft_id: string; version: string };
-  const reviewed = await client.rpc(
-    'metadata_publish_review' as never,
-    {
-      p_payload: {
-        category_id: categoryId,
-        expected_actor_id: actorId,
-        expected_draft_id: saved.draft_id,
-        expected_draft_version: saved.version,
-        expected_published_revision_id: baseline.published_revision_id,
-      },
-    } as never,
-  );
-  expect(reviewed.error).toBeNull();
-  const review = reviewed.data as { token: string };
-  const published = await client.rpc(
-    'metadata_publish' as never,
-    {
-      p_request_id: randomUUID(),
-      p_payload: {
-        category_id: categoryId,
-        expected_actor_id: actorId,
-        expected_draft_id: saved.draft_id,
-        expected_draft_version: saved.version,
-        expected_published_revision_id: baseline.published_revision_id,
-        review_token: review.token,
-      },
-    } as never,
-  );
+  expect(first.error).toBeNull();
+  const firstResult = first.data as { status: string; token?: string };
+  const published =
+    firstResult.status === 'confirmation_required'
+      ? await client.rpc(
+          'metadata_form_save' as never,
+          {
+            p_request_id: randomUUID(),
+            p_payload: { ...payload, review_token: firstResult.token },
+          } as never,
+        )
+      : first;
   expect(published.error).toBeNull();
+  expect((published.data as { status: string }).status).toBe('saved');
   return (published.data as { published_revision_id: string })
     .published_revision_id;
 }
@@ -136,6 +120,13 @@ test('published custom field creates and edits with explicit schema-stale review
             builtin: 'category_id',
             width: 12,
           },
+          {
+            id: randomUUID(),
+            kind: 'builtin',
+            builtin: 'asset_tag',
+            width: 6,
+            applies_to: ['asset'],
+          },
           { id: randomUUID(), kind: 'field', field_id: fieldId, width: 6 },
         ],
       },
@@ -176,6 +167,10 @@ test('published custom field creates and edits with explicit schema-stale review
   await expect(page.locator('pre')).toContainText('hello');
   await page.goto(detailUrl);
 
+  await page
+    .locator('summary')
+    .filter({ hasText: 'Edit quantity metadata' })
+    .click();
   const editForm = page.getByRole('form', { name: 'Edit quantity metadata' });
   await editForm.getByLabel(/Tracking note/).fill('world');
   await editForm.getByRole('button', { name: 'Review metadata' }).click();

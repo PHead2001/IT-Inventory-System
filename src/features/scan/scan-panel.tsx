@@ -9,7 +9,12 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { IScannerControls } from '@zxing/browser';
-import { resolveScan, type ScanResolution } from './resolve.server';
+import styles from './scan-visual.module.css';
+import {
+  resolveItemCode,
+  resolveScan,
+  type ScanResolution,
+} from './resolve.server';
 
 export function ScanPanel() {
   const router = useRouter();
@@ -19,7 +24,9 @@ export function ScanPanel() {
   const mounted = useRef(true);
   const consumed = useRef(false);
   const [camera, setCamera] = useState<'idle' | 'starting' | 'running'>('idle');
+  const [cameraIssue, setCameraIssue] = useState(false);
   const [input, setInput] = useState('');
+  const [mode, setMode] = useState<'identifier' | 'item_code'>('identifier');
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<ScanResolution | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +56,10 @@ export function ScanPanel() {
   }, [stop]);
 
   const open = useCallback(
-    async (text: string) => {
+    async (
+      text: string,
+      lookupMode: 'identifier' | 'item_code' = 'identifier',
+    ) => {
       if (consumed.current) return;
       consumed.current = true;
       stop();
@@ -57,7 +67,10 @@ export function ScanPanel() {
       setBusy(true);
       setMessage('');
       try {
-        const resolution = await resolveScan(text);
+        const resolution =
+          lookupMode === 'item_code'
+            ? await resolveItemCode(text)
+            : await resolveScan(text);
         if (!mounted.current || token !== generation.current) return;
         setResult(resolution);
         if (
@@ -66,9 +79,17 @@ export function ScanPanel() {
         ) {
           router.push(resolution.matches[0].path);
         } else if (resolution.status === 'invalid')
-          setMessage('This is not a supported inventory label or identifier.');
+          setMessage(
+            lookupMode === 'item_code'
+              ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
+              : 'This is not a supported inventory label or identifier.',
+          );
         else if (resolution.status === 'unknown')
-          setMessage('No matching location or asset was found.');
+          setMessage(
+            lookupMode === 'item_code'
+              ? 'No quantity item has that exact Item code (SKU).'
+              : 'No matching location, asset, or quantity item was found.',
+          );
         else if (resolution.status === 'ambiguous')
           setMessage(
             'This identifier matches more than one record. Choose the intended record.',
@@ -89,10 +110,12 @@ export function ScanPanel() {
 
   const start = async () => {
     stop();
+    setCameraIssue(false);
     consumed.current = false;
     setResult(null);
     setMessage('');
     if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraIssue(true);
       setMessage(
         'Camera access is unavailable in this browser. Enter the label text below.',
       );
@@ -129,6 +152,7 @@ export function ScanPanel() {
     } catch (error) {
       if (!mounted.current || token !== generation.current) return;
       stop();
+      setCameraIssue(true);
       setMessage(
         error instanceof DOMException && error.name === 'NotAllowedError'
           ? 'Camera permission was denied. Allow it in your browser settings or enter a label below.'
@@ -140,94 +164,140 @@ export function ScanPanel() {
     event.preventDefault();
     if (!busy) {
       consumed.current = false;
-      void open(input);
+      void open(input, mode);
     }
   };
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-slate-700 p-4">
-        <h2 className="text-xl font-semibold">Camera</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Point your camera at an inventory QR or Code 128 label. Scanning opens
-          information only.
-        </p>
-        <video
-          ref={video}
-          muted
-          playsInline
-          aria-label="Camera preview"
-          className={`mt-4 w-full max-w-lg rounded bg-black ${camera === 'idle' ? 'hidden' : ''}`}
-        />
-        <div className="mt-4 flex flex-wrap gap-3">
-          {camera === 'idle' ? (
-            <button
-              type="button"
-              onClick={() => void start()}
-              className="rounded bg-cyan-400 px-4 py-2 font-semibold text-slate-950"
-            >
-              {message ? 'Retry camera' : 'Start camera'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={stop}
-              className="rounded border border-slate-500 px-4 py-2"
-            >
-              Stop camera
-            </button>
+    <div className={styles.workspace}>
+      <div className={styles.columns}>
+        <section
+          className={`${styles.card} ${styles.cameraCard}`}
+          aria-label="Camera scanner"
+        >
+          <p className={styles.eyebrow}>01 / Scan a label</p>
+          <h2 className={styles.title}>Camera scanner</h2>
+          <p className={styles.description}>
+            Point your camera at an inventory QR or Code 128 label. Scanning
+            opens information only.
+          </p>
+          <video
+            ref={video}
+            muted
+            playsInline
+            aria-label="Camera preview"
+            hidden={camera === 'idle'}
+            className={styles.preview}
+          />
+          <div className={styles.cameraActions}>
+            {camera === 'idle' ? (
+              <button
+                type="button"
+                onClick={() => void start()}
+                className={styles.primaryButton}
+              >
+                {cameraIssue ? 'Retry camera' : 'Start camera'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={stop}
+                className={styles.secondaryButton}
+              >
+                Stop camera
+              </button>
+            )}
+          </div>
+          {camera === 'starting' && (
+            <p role="status" className={styles.hint}>
+              Starting camera…
+            </p>
           )}
-        </div>
+          {camera === 'running' && (
+            <p role="status" className={styles.hint}>
+              Camera active. Hold a label in view, or stop and enter its code
+              manually.
+            </p>
+          )}
+          <p className={styles.hint}>
+            Camera access starts only when you choose Start camera.
+          </p>
+        </section>
+        <form onSubmit={submit} className={styles.card}>
+          <p className={styles.eyebrow}>02 / Enter manually</p>
+          <h2 className={styles.title}>Manual lookup</h2>
+          <p className={styles.description}>
+            Use this when a camera is unavailable or a label will not scan.
+          </p>
+          <fieldset className={styles.fieldset}>
+            <legend className={styles.legend}>Look up as</legend>
+            <label className={styles.radioChoice}>
+              <input
+                type="radio"
+                name="scan-mode"
+                checked={mode === 'identifier'}
+                onChange={() => {
+                  stop();
+                  consumed.current = false;
+                  setResult(null);
+                  setMessage('');
+                  setMode('identifier');
+                }}
+              />
+              Label or identifier
+            </label>
+            <label className={styles.radioChoice}>
+              <input
+                type="radio"
+                name="scan-mode"
+                checked={mode === 'item_code'}
+                onChange={() => {
+                  stop();
+                  consumed.current = false;
+                  setResult(null);
+                  setMessage('');
+                  setMode('item_code');
+                }}
+              />
+              Quantity Item code (SKU)
+            </label>
+          </fieldset>
+          <label htmlFor="scan-text" className={styles.fieldLabel}>
+            {mode === 'item_code'
+              ? 'Enter the exact Item code (SKU)'
+              : 'Paste a label URL, barcode text, or exact identifier'}
+          </label>
+          <input
+            id="scan-text"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            maxLength={1024}
+            className={styles.input}
+          />
+          <p className={styles.hint}>
+            {mode === 'item_code'
+              ? 'Use this mode for quantity codes beginning with / or containing a colon. Text that looks like a URL is matched only against stored Item codes.'
+              : 'Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are checked for exact matches across locations, assets, and quantity items.'}
+          </p>
+          <div className={styles.submitRow}>
+            <button disabled={busy} className={styles.primaryButton}>
+              {busy ? 'Looking up…' : 'Open'}
+            </button>
+          </div>
+        </form>
       </div>
-      <form
-        onSubmit={submit}
-        className="space-y-3 rounded-xl border border-slate-700 p-4"
-      >
-        <label htmlFor="scan-text" className="block font-semibold">
-          Paste a label URL, barcode text, or exact identifier
-        </label>
-        <input
-          id="scan-text"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          maxLength={1024}
-          className="w-full rounded border border-slate-500 bg-slate-950 p-3"
-        />
-        <p className="text-sm text-slate-400">
-          Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are
-          checked for exact matches.
-        </p>
-        <button
-          disabled={busy}
-          className="rounded bg-cyan-400 px-4 py-2 font-semibold text-slate-950"
-        >
-          {busy ? 'Looking up…' : 'Open'}
-        </button>
-      </form>
       {message && (
-        <p
-          role="status"
-          className="rounded border border-amber-700 p-3 text-amber-200"
-        >
+        <p role="status" className={styles.message}>
           {message}
         </p>
       )}
       {result && result.matches.length > 0 && (
-        <ul className="space-y-2">
+        <ul className={styles.results} aria-label="Matching records">
           {result.matches.map((match) => (
-            <li
-              key={match.path}
-              className="rounded border border-slate-700 p-3"
-            >
-              <Link
-                href={match.path}
-                onClick={stop}
-                className="text-cyan-300 underline"
-              >
+            <li key={match.path} className={styles.result}>
+              <Link href={match.path} onClick={stop} className="underline">
                 {match.label}
               </Link>
-              <span className="ml-3 text-sm capitalize text-slate-400">
-                {match.state}
-              </span>
+              <span className={styles.state}>{match.state}</span>
             </li>
           ))}
         </ul>

@@ -1,5 +1,7 @@
 import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
+import { Box } from 'lucide-react';
+import styles from './inventory-visual.module.css';
 import { InventoryListThumbnail } from '@/features/files/list-thumbnail';
 import type { FileListSummary } from '@/features/files/list.server';
 import type {
@@ -8,9 +10,8 @@ import type {
   LocationRef,
   PageResult,
 } from '../contracts-ui';
-export const panel = 'rounded-xl border border-slate-800 bg-slate-900/50 p-5';
-export const field =
-  'min-h-11 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm';
+export const panel = 'experience-surface min-w-0 p-5';
+export const field = 'experience-field min-h-11 w-full px-3 py-2 text-sm';
 export function LocationLink({ location }: { location: LocationRef }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-x-3">
@@ -20,7 +21,7 @@ export function LocationLink({ location }: { location: LocationRef }) {
       >
         {location.breadcrumb} <span className="text-xs">({location.code})</span>
       </Link>
-      <ShowInRoom code={location.code} />
+      <ShowInRoom location={location} />
     </span>
   );
 }
@@ -34,7 +35,7 @@ export function InventoryRows({
   if (!rows.length)
     return <p className={panel}>No inventory matches these filters.</p>;
   return (
-    <ul className="space-y-3">
+    <ul className={`experience-surface ${styles.list}`}>
       {rows.map((row) => {
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
@@ -47,105 +48,139 @@ export function InventoryRows({
               (row.location?.id ?? '') +
               (row.site?.id ?? '')
             }
-            className={panel}
+            className={styles.row}
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              {summary?.thumbnail_path && (
-                <InventoryListThumbnail
-                  path={summary.thumbnail_path}
-                  name={summary.photo_name ?? row.name}
-                />
-              )}
-              <div className="min-w-0">
-                <Link
-                  className="break-words text-lg font-semibold text-cyan-200 underline"
-                  href={
-                    '/inventory/' +
-                    (row.kind === 'quantity' ? 'quantity' : 'assets') +
-                    '/' +
-                    row.id
-                  }
+            <div className={styles.rowGrid}>
+              <div className={styles.identity}>
+                <span
+                  className={styles.thumbnail}
+                  aria-hidden={!summary?.thumbnail_path}
                 >
-                  {row.name}
-                </Link>
-                <p className="mt-1 text-sm text-slate-400">
-                  {row.categoryName} ·{' '}
-                  {row.kind === 'quantity'
-                    ? 'Quantity inventory'
-                    : 'Serialized asset'}{' '}
-                  · {row.status}
-                </p>
-                {summary &&
-                  (summary.photo_count > 0 || summary.document_count > 0) && (
-                    <div
-                      role="group"
-                      aria-label={`Files for ${row.name}`}
-                      className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-400"
-                    >
-                      <span>
-                        {summary.photo_count}{' '}
-                        {summary.photo_count === 1 ? 'photo' : 'photos'}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        {summary.document_count}{' '}
-                        {summary.document_count === 1 ? 'PDF' : 'PDFs'}
-                      </span>
-                    </div>
+                  {summary?.thumbnail_path ? (
+                    <InventoryListThumbnail
+                      path={summary.thumbnail_path}
+                      name={summary.photo_name ?? row.name}
+                    />
+                  ) : (
+                    <Box size={24} strokeWidth={1.5} aria-hidden="true" />
                   )}
-                {row.kind === 'quantity' &&
-                  row.status === 'active' &&
-                  (row.stockState === 'needs_restocking' ||
-                    row.stockState === 'out_of_stock') && (
-                    <p className="mt-2 text-sm font-medium text-amber-200">
-                      {row.stockState === 'out_of_stock'
-                        ? 'Out of stock'
-                        : 'Needs restocking'}{' '}
-                      · Available in storage{' '}
-                      {row.availableQuantity ?? row.recordedTotal} / threshold{' '}
-                      {row.reorderThreshold}
+                </span>
+                <div className="min-w-0">
+                  <Link
+                    className={styles.name}
+                    href={
+                      '/inventory/' +
+                      (row.kind === 'quantity' ? 'quantity' : 'assets') +
+                      '/' +
+                      row.id
+                    }
+                  >
+                    {row.name}
+                  </Link>
+                  <p className={styles.meta}>
+                    {row.categoryName} ·{' '}
+                    {row.kind === 'quantity'
+                      ? 'Quantity inventory'
+                      : 'Serialized asset'}{' '}
+                    · <span className={styles.status}>{row.status}</span>
+                  </p>
+                  {row.kind === 'quantity' && row.itemCode && (
+                    <p className={styles.meta}>
+                      Item code (SKU): {row.itemCode}
                     </p>
                   )}
+                </div>
               </div>
-              <span>
-                {row.kind === 'quantity'
-                  ? (row.quantity ?? 0) + ' units'
-                  : row.assetTag || 'Untagged'}
-              </span>
+              <div className={styles.metric}>
+                <span className={styles.label}>
+                  {row.kind === 'quantity' ? 'This holding' : 'Asset tag'}
+                </span>
+                <strong>
+                  {row.kind === 'quantity'
+                    ? (row.quantity ?? 0) + ' units'
+                    : row.assetTag || 'Untagged'}
+                </strong>
+                {row.kind === 'quantity' &&
+                  row.availableQuantity !== undefined && (
+                    <span className={styles.meta}>
+                      Available {row.availableQuantity} · Assigned{' '}
+                      {row.assignedQuantity} · Total recorded{' '}
+                      {row.ownedQuantity}
+                    </span>
+                  )}
+              </div>
+              <div className={styles.location}>
+                <span className={styles.label}>Storage / custody</span>
+                {row.site ? (
+                  <Link
+                    className="text-cyan-300 underline [overflow-wrap:anywhere]"
+                    href={`/sites/${encodeURIComponent(row.site.code)}`}
+                  >
+                    Assigned to {row.site.name} ({row.site.code}) · no room
+                    model
+                  </Link>
+                ) : row.location ? (
+                  <>
+                    {row.status === 'retired' ? 'Last recorded storage: ' : ''}
+                    <LocationLink location={row.location} />
+                  </>
+                ) : (
+                  'No positive stock or active site holding — unlocated definition'
+                )}
+              </div>
             </div>
-            {row.serialNumber && (
-              <p className="mt-2 break-all text-sm">
-                Serial: {row.serialNumber}
-              </p>
-            )}
-            {row.customSummary && (
-              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">
-                {row.customSummary}
-              </p>
-            )}
-            {row.kind === 'quantity' && row.availableQuantity !== undefined && (
-              <p className="mt-2 text-sm text-slate-400">
-                Available {row.availableQuantity} · Assigned{' '}
-                {row.assignedQuantity} · Total recorded {row.ownedQuantity}
-              </p>
-            )}
-            <p className="mt-3 text-sm">
-              {row.site ? (
-                <Link
-                  className="text-cyan-300 underline [overflow-wrap:anywhere]"
-                  href={`/sites/${encodeURIComponent(row.site.code)}`}
-                >
-                  Assigned to {row.site.name} ({row.site.code}) · no room model
-                </Link>
-              ) : row.location ? (
-                <>
-                  {row.status === 'retired' ? 'Last recorded storage: ' : ''}
-                  <LocationLink location={row.location} />
-                </>
-              ) : (
-                'No positive stock or active site holding — unlocated definition'
+            <div className={styles.footer}>
+              {row.serialNumber && (
+                <span className="[overflow-wrap:anywhere]">
+                  Serial: {row.serialNumber}
+                </span>
               )}
-            </p>
+              {summary &&
+                (summary.photo_count > 0 || summary.document_count > 0) && (
+                  <span
+                    role="group"
+                    aria-label={`Files for ${row.name}`}
+                    className="flex flex-wrap gap-x-2"
+                  >
+                    <span>
+                      {summary.photo_count}{' '}
+                      {summary.photo_count === 1 ? 'photo' : 'photos'}
+                    </span>
+                    <span>
+                      {summary.document_count}{' '}
+                      {summary.document_count === 1 ? 'PDF' : 'PDFs'}
+                    </span>
+                  </span>
+                )}
+              {row.kind === 'quantity' &&
+                row.status === 'active' &&
+                (row.stockState === 'needs_restocking' ||
+                  row.stockState === 'out_of_stock') && (
+                  <span className={styles.alert}>
+                    {row.stockState === 'out_of_stock'
+                      ? 'Out of stock'
+                      : 'Needs restocking'}{' '}
+                    · Available in storage{' '}
+                    {row.availableQuantity ?? row.recordedTotal} / threshold{' '}
+                    {row.reorderThreshold}
+                  </span>
+                )}
+              {row.customSummary && (
+                <span className="min-w-0 basis-full">
+                  <span className={styles.summary}>{row.customSummary}</span>
+                  <Link
+                    href={
+                      '/inventory/' +
+                      (row.kind === 'quantity' ? 'quantity' : 'assets') +
+                      '/' +
+                      row.id
+                    }
+                  >
+                    Full details
+                  </Link>
+                </span>
+              )}
+            </div>
           </li>
         );
       })}

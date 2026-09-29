@@ -11,7 +11,10 @@ export default async function SetPasswordPage() {
   if (error || !user) redirect('/forgot-password');
   return (
     <>
-      <h1 className="mb-6 text-2xl font-semibold">Set your password</h1>
+      <p className="experience-eyebrow">Account security</p>
+      <h1 className="mb-6 mt-2 text-3xl font-semibold tracking-tight">
+        Set your password
+      </h1>
       <AuthForm mode="password" />
     </>
   );

@@ -18,6 +18,10 @@ export type FieldType = (typeof fieldTypes)[number];
 const uuid = z.guid().refine((value) => value === value.toLowerCase(), {
   message: 'Use a canonical lowercase UUID.',
 });
+const appliesTo = z
+  .array(z.enum(['quantity', 'asset']))
+  .min(1)
+  .max(2);
 const option = z.strictObject({
   id: uuid,
   label: z.string(),
@@ -29,7 +33,7 @@ export const metadataField = z.strictObject({
   type: z.enum(fieldTypes),
   label: z.string(),
   help: z.string().nullish(),
-  applies_to: z.array(z.enum(['quantity', 'asset'])),
+  applies_to: appliesTo,
   required: z.boolean(),
   default: z.unknown().optional(),
   rules: z.record(z.string(), z.unknown()).default({}),
@@ -51,6 +55,8 @@ const control = z
       z.literal(9),
       z.literal(12),
     ]),
+    visible: z.boolean().optional(),
+    applies_to: appliesTo.optional(),
   })
   .superRefine((value, context) => {
     const expected =
@@ -75,6 +81,8 @@ export const metadataDefinition = z.strictObject({
     z.strictObject({
       id: uuid,
       label: z.string(),
+      visible: z.boolean().optional(),
+      applies_to: appliesTo.optional(),
       controls: z.array(control),
     }),
   ),
@@ -118,6 +126,49 @@ export const reviewSchema = z.object({
   affected_assets: z.string().regex(/^\d+$/),
   expires_at: z.iso.datetime({ offset: true }),
 });
+
+const decimalCount = z.string().regex(/^\d+$/);
+export const formSaveResult = z.discriminatedUnion('status', [
+  z.strictObject({
+    status: z.literal('saved'),
+    changed: z.literal(true),
+    entity_id: uuid,
+    version: z.string().regex(/^[1-9]\d*$/),
+    event_id: uuid,
+    category_id: uuid,
+    published_revision_id: uuid,
+  }),
+  z.strictObject({
+    status: z.literal('confirmation_required'),
+    changed: z.literal(false),
+    token: uuid,
+    expires_at: z.iso.datetime({ offset: true }),
+    category_id: uuid,
+    expected_published_revision_id: uuid,
+    expected_draft_id: uuid.nullable(),
+    expected_draft_version: decimalCount,
+    reasons: z.array(
+      z.strictObject({
+        kind: z.enum([
+          'field_retired',
+          'required_tightened',
+          'applicability_narrowed',
+          'rules_tightened',
+          'choice_retired',
+          'section_removed',
+        ]),
+        id: uuid,
+        field_id: uuid.optional(),
+        affected_kinds: z.array(z.enum(['quantity', 'asset'])).max(2),
+      }),
+    ),
+    affected_quantity: decimalCount,
+    affected_assets: decimalCount,
+    newly_needs_quantity: decimalCount,
+    newly_needs_assets: decimalCount,
+  }),
+]);
+export type FormSaveResult = z.infer<typeof formSaveResult>;
 
 export function formatCustomValue(value: unknown, paths: unknown): string {
   if (Array.isArray(paths) && paths.length > 0) {

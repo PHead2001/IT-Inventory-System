@@ -6,6 +6,8 @@ export type LocationRef = {
   active: boolean;
   can_hold_inventory: boolean;
   parentId: string | null;
+  /** Registry root derived from the authorized parent hierarchy, never from a code prefix. */
+  spaceRootCode?: string | null;
   sortOrder?: number;
 };
 export type CategoryRef = { id: string; name: string; active: boolean };
@@ -40,6 +42,7 @@ export type StockState =
   'disabled' | 'in_stock' | 'needs_restocking' | 'out_of_stock' | 'archived';
 export type QuantityItem = Metadata & {
   archived: boolean;
+  itemCode: string | null;
   reorderThreshold: number | null;
 };
 export type AssetItem = Metadata & {
@@ -58,6 +61,7 @@ export type InventoryResult = {
   custodyKind?: 'storage' | 'site' | 'unlocated' | 'retired';
   quantity: number | null;
   assetTag: string | null;
+  itemCode?: string | null;
   serialNumber: string | null;
   recordedTotal: number | null;
   availableQuantity?: string | null;

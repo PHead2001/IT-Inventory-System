@@ -1,20 +1,42 @@
 import Link from 'next/link';
+import { Boxes } from 'lucide-react';
+import {
+  MotionPreference,
+  MotionToggle,
+} from '@/components/experience/motion-preference';
+
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <main className="flex min-h-screen items-center justify-center p-5">
-      <section className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900/60 p-6 sm:p-8">
-        <Link
-          href="/login"
-          className="mb-8 block text-sm font-semibold tracking-widest text-cyan-300"
-        >
-          IT INVENTORY
-        </Link>
-        {children}
-      </section>
-    </main>
+    <MotionPreference>
+      <main className="experience-auth">
+        <div className="experience-auth-story" aria-hidden="true">
+          <p className="experience-eyebrow">Inventory · space · custody</p>
+          <h2>Know where everything belongs.</h2>
+          <p>
+            A clear view of equipment, storage and the spaces connecting them.
+          </p>
+          <div className="experience-auth-orbit" />
+        </div>
+        <section className="experience-auth-panel experience-surface-bright w-full">
+          <Link href="/login" className="experience-brand mb-9">
+            <span className="experience-brand-mark">
+              <Boxes size={19} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <span>
+              <strong>IT Inventory</strong>
+              <small>Secure workspace</small>
+            </span>
+          </Link>
+          {children}
+          <footer className="mt-7 border-t border-cyan-200/15 pt-4">
+            <MotionToggle />
+          </footer>
+        </section>
+      </main>
+    </MotionPreference>
   );
 }

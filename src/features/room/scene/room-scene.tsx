@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { Group, MathUtils, OrthographicCamera, Vector3 } from 'three';
 import { Button } from '@/components/ui/button';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { RoomDefinition, RoomNode } from '../schema';
 import { findFocusBinding, type RoomBinding } from '../bindings';
 import { toScenePosition, toSceneSize } from '../coordinates';
@@ -40,6 +41,8 @@ import {
   type VisibleHover,
 } from './visible-hover-runtime';
 import { placeHoverTooltip } from './visible-hover';
+import { validCameraView, type CameraView } from './camera-view';
+import styles from '../room-visual.module.css';
 
 export type RoomSceneProps = {
   room: RoomDefinition;
@@ -47,12 +50,16 @@ export type RoomSceneProps = {
   selectedCode: string | null;
   highlightedCodes: string[];
   focusRequest: { code: string | null; requestId: number };
+  focusOnRestore?: boolean;
   onSelect(code: string): void;
   onReady(): void;
   onFocusComplete(code: string | null): void;
+  onFocusCancel?(): void;
   onFailure(message: string): void;
   canFocusSelected: boolean;
   onRequestFocus(): void;
+  initialView?: CameraView | null;
+  onViewChange?: (view: CameraView) => void;
 };
 type ViewCommand = {
   kind:
@@ -553,13 +560,27 @@ type Animation = {
   started: number;
   code: string | null;
 };
+export function finishFocusAnimation(
+  camera: OrthographicCamera,
+  target: Vector3,
+  motion: Pick<Animation, 'to' | 'offset' | 'toZoom'>,
+) {
+  target.copy(motion.to);
+  camera.position.copy(motion.to).add(motion.offset);
+  camera.zoom = motion.toZoom;
+  camera.updateProjectionMatrix();
+}
 function CameraRig({
   room,
   bindings,
   focusRequest,
   onFocusComplete,
+  onFocusCancel,
   onReady,
   onFailure,
+  initialView,
+  focusOnRestore,
+  onViewChange,
   command,
   orbitMode,
   manualGesture,
@@ -569,8 +590,12 @@ function CameraRig({
   | 'bindings'
   | 'focusRequest'
   | 'onFocusComplete'
+  | 'onFocusCancel'
   | 'onReady'
   | 'onFailure'
+  | 'initialView'
+  | 'focusOnRestore'
+  | 'onViewChange'
 > & {
   command: ViewCommand;
   orbitMode: OrbitMode;
@@ -597,7 +622,15 @@ function CameraRig({
   } | null>(null);
   const ready = useRef(false);
   const renderedOnce = useRef(false);
-  const reduced = useRef(false);
+  const viewCallback = useRef(onViewChange);
+  const modeValue = useRef(orbitMode);
+  useEffect(() => {
+    viewCallback.current = onViewChange;
+  }, [onViewChange]);
+  useEffect(() => {
+    modeValue.current = orbitMode;
+  }, [orbitMode]);
+  const reduced = useEffectiveReducedMotion();
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
     [room],
@@ -657,15 +690,41 @@ function CameraRig({
       camera.projectionMatrix.elements,
     );
   }, [camera, gl]);
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => {
-      reduced.current = media.matches;
+  const emitView = useCallback(() => {
+    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    const view: CameraView = {
+      position: camera.position.toArray() as [number, number, number],
+      target: controls.current.target.toArray() as [number, number, number],
+      zoom: camera.zoom,
+      mode: modeValue.current,
     };
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
+    if (!validCameraView(view)) return;
+    gl.domElement.dataset.cameraView = JSON.stringify(view);
+    viewCallback.current?.(view);
+  }, [camera, gl]);
+  useEffect(
+    () => () => {
+      if (!animation.current) emitView();
+    },
+    [emitView],
+  );
+  useEffect(() => {
+    const motion = animation.current;
+    if (
+      !reduced ||
+      !motion ||
+      !controls.current ||
+      !(camera instanceof OrthographicCamera)
+    )
+      return;
+    animation.current = null;
+    finishFocusAnimation(camera, controls.current.target, motion);
+    controls.current.update();
+    writeTelemetry();
+    emitView();
+    onFocusComplete(motion.code);
+    invalidate();
+  }, [reduced, camera, writeTelemetry, emitView, onFocusComplete, invalidate]);
   useEffect(() => {
     const canvas = gl.domElement;
     const lost = (event: Event) => {
@@ -708,21 +767,44 @@ function CameraRig({
       camera.position.add(frame.target.clone().sub(controls.current.target));
       controls.current.target.copy(frame.target);
       camera.zoom = frame.zoom;
+      if (validCameraView(initialView)) {
+        camera.position.set(...initialView.position);
+        controls.current.target.set(...initialView.target);
+        camera.zoom = MathUtils.clamp(
+          initialView.zoom,
+          controls.current.minZoom,
+          controls.current.maxZoom,
+        );
+        if (!focusOnRestore)
+          lastFocusRequest.current = { ...focusRequest, room };
+      }
       camera.updateProjectionMatrix();
     }
     controls.current.update();
     writeTelemetry();
+    emitView();
     invalidate();
-  }, [camera, currentFrame, initialTarget, room, invalidate, writeTelemetry]);
+  }, [
+    camera,
+    currentFrame,
+    initialTarget,
+    room,
+    invalidate,
+    writeTelemetry,
+    initialView,
+    focusOnRestore,
+    focusRequest,
+    emitView,
+  ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
+    if (animation.current) onFocusCancel?.();
     animation.current = null;
-    if (
-      !(camera instanceof OrthographicCamera) ||
-      !controls.current ||
-      orbitMode !== 'guided'
-    )
+    if (!(camera instanceof OrthographicCamera) || !controls.current) return;
+    if (orbitMode !== 'guided') {
+      emitView();
       return;
+    }
     const control = controls.current;
     const constrained = guidedOffset(
       camera.position,
@@ -743,9 +825,19 @@ function CameraRig({
       camera.position.copy(control.target).add(constrained);
       control.update();
       writeTelemetry();
+      emitView();
       invalidate();
-    }
-  }, [orbitMode, camera, gl, invalidate, room, writeTelemetry]);
+    } else emitView();
+  }, [
+    orbitMode,
+    camera,
+    gl,
+    invalidate,
+    room,
+    writeTelemetry,
+    emitView,
+    onFocusCancel,
+  ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
     if (
@@ -786,13 +878,14 @@ function CameraRig({
         )
       : fitZoom.current;
     const offset = camera.position.clone().sub(controls.current.target);
-    if (reduced.current) {
+    if (reduced) {
       controls.current.target.copy(target);
       camera.position.copy(target).add(offset);
       camera.zoom = zoom;
       camera.updateProjectionMatrix();
       controls.current.update();
       writeTelemetry();
+      emitView();
       onFocusComplete(focusRequest.code);
     } else
       animation.current = {
@@ -817,6 +910,8 @@ function CameraRig({
     onFocusComplete,
     invalidate,
     writeTelemetry,
+    emitView,
+    reduced,
   ]);
   useEffect(() => {
     if (
@@ -827,6 +922,7 @@ function CameraRig({
     )
       return;
     lastCommandId.current = command.id;
+    if (animation.current) onFocusCancel?.();
     animation.current = null;
     const control = controls.current;
     if (command.kind === 'fit') {
@@ -888,6 +984,7 @@ function CameraRig({
     camera.updateProjectionMatrix();
     control.update();
     writeTelemetry();
+    emitView();
     invalidate();
   }, [
     command,
@@ -897,6 +994,8 @@ function CameraRig({
     currentFrame,
     invalidate,
     writeTelemetry,
+    emitView,
+    onFocusCancel,
   ]);
   useFrame(() => {
     if (!ready.current) {
@@ -925,6 +1024,7 @@ function CameraRig({
     writeTelemetry();
     if (t === 1) {
       animation.current = null;
+      emitView();
       onFocusComplete(motion.code);
     } else invalidate();
   });
@@ -958,6 +1058,7 @@ function CameraRig({
       screenSpacePanning
       zoomSpeed={0.7}
       onStart={() => {
+        if (animation.current) onFocusCancel?.();
         animation.current = null;
         manualGesture.current.active = true;
         if (controls.current)
@@ -984,6 +1085,7 @@ function CameraRig({
       onEnd={() => {
         manualGesture.current.active = false;
         manualStart.current = null;
+        emitView();
       }}
     />
   );
@@ -1075,13 +1177,18 @@ export default function RoomScene(props: RoomSceneProps) {
     (): OrbitMode => 'guided',
   );
   const [ephemeralMode, setEphemeralMode] = useState<OrbitMode | null>(null);
-  const orbitMode = ephemeralMode ?? persistedMode;
+  const orbitMode =
+    ephemeralMode ??
+    (validCameraView(props.initialView)
+      ? props.initialView.mode
+      : persistedMode);
   const chooseMode = (mode: OrbitMode) => {
+    setEphemeralMode(mode);
     try {
       window.localStorage.setItem(ORBIT_MODE_KEY, mode);
       window.dispatchEvent(new Event('room-orbit-mode-change'));
     } catch {
-      setEphemeralMode(mode);
+      /* Local room mode remains usable without storage. */
     }
   };
   const requestCommand = useCallback((kind: ViewCommand['kind']) => {
@@ -1102,11 +1209,11 @@ export default function RoomScene(props: RoomSceneProps) {
     ['tilt-down', 'Tilt down'],
   ];
   return (
-    <div className="space-y-3">
+    <div className={styles.scene}>
       <div
         role="toolbar"
         aria-label="Room camera controls"
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/70 p-2"
+        className={styles.cameraToolbar}
       >
         {(
           [
@@ -1136,7 +1243,7 @@ export default function RoomScene(props: RoomSceneProps) {
         <div
           role="group"
           aria-label="Orbit mode"
-          className="flex rounded-md border border-slate-600 p-0.5"
+          className={styles.controlGroup}
         >
           {(['guided', 'free'] as const).map((mode) => (
             <Button
@@ -1151,7 +1258,11 @@ export default function RoomScene(props: RoomSceneProps) {
             </Button>
           ))}
         </div>
-        <div role="group" aria-label="Room zoom" className="flex gap-1">
+        <div
+          role="group"
+          aria-label="Room zoom"
+          className={styles.controlGroup}
+        >
           <Button
             type="button"
             variant="outline"
@@ -1182,11 +1293,9 @@ export default function RoomScene(props: RoomSceneProps) {
         >
           Show all labels
         </Button>
-        <details className="relative">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center rounded-md border border-slate-600 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-cyan-300">
-            Pan and rotate
-          </summary>
-          <div className="absolute left-0 top-full z-30 mt-1 grid w-48 grid-cols-2 gap-1 rounded-md border border-slate-600 bg-slate-900 p-2 shadow-xl">
+        <details className={styles.moreControls}>
+          <summary className={styles.moreSummary}>Pan and rotate</summary>
+          <div className={styles.moreMenu}>
             {secondaryControls.map(([kind, label]) => (
               <Button
                 key={kind}
@@ -1201,10 +1310,7 @@ export default function RoomScene(props: RoomSceneProps) {
           </div>
         </details>
       </div>
-      <div
-        className="relative h-[440px] overflow-hidden rounded-xl border border-slate-700 bg-slate-950 sm:h-[580px]"
-        aria-label="Interactive room canvas"
-      >
+      <div className={styles.canvasFrame} aria-label="Interactive room canvas">
         <Canvas
           onFailure={props.onFailure}
           orthographic
@@ -1300,18 +1406,18 @@ export default function RoomScene(props: RoomSceneProps) {
         )}
       </div>
       {selectedLabel && (
-        <p role="status" className="text-sm text-cyan-200">
+        <p role="status" className={styles.sceneStatus}>
           Selected location: {selectedLabel}
           {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
         </p>
       )}
       {showAllLabels && suppressedLabels > 0 && (
-        <p role="status" className="text-xs text-slate-400">
+        <p role="status" className={styles.sceneNote}>
           Some room labels are hidden at this view. Zoom in or use the location
           picker.
         </p>
       )}
-      <p className="text-xs text-slate-400">
+      <p className={styles.sceneNote}>
         Drag to rotate; right-drag to pan; scroll or pinch to zoom. Double-click
         exposed floor to recenter. Guided keeps the operational view; Free Orbit
         rotates around and above or below the room. Hover an object to see its

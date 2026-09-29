@@ -68,6 +68,18 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    ['--import', 'tsx', 'tests/integration/metadata-form-save.ts'],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/metadata-compatibility.ts'],
+    localTestEnv(status),
+  );
+  node(
+    ['--import', 'tsx', 'tests/integration/item-code.ts'],
+    localTestEnv(status),
+  );
+  node(
     ['--import', 'tsx', 'tests/integration/custody.ts'],
     localTestEnv(status),
   );
@@ -91,7 +103,21 @@ try {
   else if (command === 'types') types(false);
   else if (command === 'types-check') types(true);
   else if (command === 'test') test();
-  else if (command === 'validate') {
+  else if (command === 'test-form-save') {
+    const status = localStatus();
+    verifyLocalStorageRuntime();
+    node(
+      ['--import', 'tsx', 'tests/integration/metadata-form-save.ts'],
+      localTestEnv(status),
+    );
+  } else if (command === 'test-compatibility') {
+    const status = localStatus();
+    verifyLocalStorageRuntime();
+    node(
+      ['--import', 'tsx', 'tests/integration/metadata-compatibility.ts'],
+      localTestEnv(status),
+    );
+  } else if (command === 'validate') {
     reset();
     test();
     types(true);

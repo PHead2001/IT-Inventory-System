@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
   resolve: vi.fn(),
+  resolveItemCode: vi.fn(),
   push: vi.fn(),
 }));
 vi.mock('@zxing/browser', async () => {
@@ -19,7 +20,10 @@ vi.mock('@zxing/browser', async () => {
     },
   };
 });
-vi.mock('./resolve.server', () => ({ resolveScan: mocks.resolve }));
+vi.mock('./resolve.server', () => ({
+  resolveScan: mocks.resolve,
+  resolveItemCode: mocks.resolveItemCode,
+}));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
 import { ScanPanel } from './scan-panel';
 beforeEach(() => {
@@ -30,6 +34,7 @@ beforeEach(() => {
   });
   mocks.decode.mockResolvedValue({ stop: mocks.stop });
   mocks.resolve.mockResolvedValue({ status: 'unknown', matches: [] });
+  mocks.resolveItemCode.mockResolvedValue({ status: 'unknown', matches: [] });
 });
 afterEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', {
@@ -125,6 +130,59 @@ it('reports denied camera permission and leaves manual lookup usable', async () 
   });
   fireEvent.click(screen.getByRole('button', { name: 'Open' }));
   await waitFor(() => expect(mocks.resolve).toHaveBeenCalledWith('LOC:ITC'));
+});
+it('keeps the camera action honest after a manual lookup misses', async () => {
+  render(<ScanPanel />);
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'UNKNOWN' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  expect(await screen.findByText(/No matching location/)).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Start camera' }),
+  ).toBeInTheDocument();
+});
+it('routes explicit Item code input through exact quantity lookup without interpreting URL-like text', async () => {
+  mocks.resolveItemCode.mockResolvedValue({
+    status: 'found',
+    matches: [
+      {
+        kind: 'quantity',
+        path: '/inventory/quantity/7b84a7cf-197b-45b1-8016-87482d124cb4',
+        state: 'active',
+        label: 'Cable (/SKU)',
+      },
+    ],
+  });
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByLabelText('Quantity Item code (SKU)'));
+  const input = screen.getByLabelText('Enter the exact Item code (SKU)');
+  fireEvent.change(input, { target: { value: '/SKU' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  await waitFor(() =>
+    expect(mocks.resolveItemCode).toHaveBeenCalledWith('/SKU'),
+  );
+  await waitFor(() =>
+    expect(mocks.push).toHaveBeenCalledWith(
+      '/inventory/quantity/7b84a7cf-197b-45b1-8016-87482d124cb4',
+    ),
+  );
+  expect(mocks.resolve).not.toHaveBeenCalled();
+});
+it('keeps camera payloads in label mode even when manual Item code mode is selected', async () => {
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByLabelText('Quantity Item code (SKU)'));
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+  mocks.decode.mock.calls[0][2]({
+    getText: () => 'https://evil.test/inventory/quantity/abc',
+  });
+  await waitFor(() =>
+    expect(mocks.resolve).toHaveBeenCalledWith(
+      'https://evil.test/inventory/quantity/abc',
+    ),
+  );
+  expect(mocks.resolveItemCode).not.toHaveBeenCalled();
 });
 it('releases camera when the scan page unmounts', async () => {
   const page = render(<ScanPanel />);

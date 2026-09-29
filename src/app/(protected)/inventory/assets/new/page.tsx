@@ -17,10 +17,8 @@ export default async function NewAssetPage() {
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
-  if (!categories.some((category) => category.active))
+  const initialCategory = categories.find((category) => category.active);
+  if (!initialCategory)
     return (
       <p role="alert">
         An active category is required before staff can create assets. Ask a
@@ -31,14 +29,16 @@ export default async function NewAssetPage() {
         .
       </p>
     );
+  const forms = await getPublishedForms([initialCategory.id]);
   return (
     <>
-      <h1 className="mb-5 text-3xl font-semibold">Create serialized asset</h1>
-      <p className="mb-5 text-slate-400">
+      <p className="experience-eyebrow">Inventory · New record</p>
+      <h1 className="experience-heading mt-3">Create serialized asset</h1>
+      <p className="experience-muted mb-5 mt-3 max-w-2xl text-sm">
         Record one physical asset at its current location. Tags and serial
         numbers are optional.
       </p>
-      <div className={panel}>
+      <div className={`${panel} max-w-5xl`}>
         <MetadataForm
           kind="asset"
           categories={categories}

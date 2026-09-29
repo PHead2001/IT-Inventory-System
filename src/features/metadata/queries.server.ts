@@ -14,7 +14,7 @@ export async function getPublishedForms(
   const { supabase } = await requireMember();
   const pairs = await Promise.all(
     categoryIds.map(async (id) => {
-      const { data, error } = await supabase.rpc('metadata_form_get', {
+      const { data, error } = await supabase.rpc('metadata_form_get_v2', {
         p_category_id: id,
       });
       if (error)
@@ -23,6 +23,14 @@ export async function getPublishedForms(
     }),
   );
   return Object.fromEntries(pairs);
+}
+
+/** Load only the form used by an inventory page's initial category. */
+export async function getPublishedForm(
+  categoryId: string,
+): Promise<MetadataForm | null> {
+  const forms = await getPublishedForms([categoryId]);
+  return forms[categoryId] ?? null;
 }
 
 export type DescribedValue = {

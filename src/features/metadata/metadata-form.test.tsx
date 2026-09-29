@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { submitInventory } from '@/features/inventory/actions';
 import { submitCustody } from '@/features/custody/actions';
+import { fetchCategoryForm } from './form-fetch.actions';
 import {
   MetadataForm,
   MetadataFormPreview,
@@ -17,6 +18,7 @@ vi.mock('@/features/inventory/actions', () => ({
   findDuplicateSerials: vi.fn(),
 }));
 vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
+vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('@/features/locations/location-picker', () => ({
   LocationPicker: () => <div>Location picker</div>,
 }));
@@ -85,6 +87,7 @@ const item = {
   version: 1,
   archived: false,
   reorderThreshold: null,
+  itemCode: null,
   customValues: {},
   validatedFormRevisionId: firstRevision,
   needsMetadata: false,
@@ -96,6 +99,46 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  it('omits a section whose only control does not apply to an asset while keeping quantity item code', () => {
+    const current = form();
+    current.published_definition.layout.push({
+      id: '00000000-0000-4000-8000-000000000025',
+      label: 'Identification',
+      controls: [
+        {
+          id: '00000000-0000-4000-8000-000000000026',
+          kind: 'builtin',
+          builtin: 'item_code',
+          width: 12,
+        },
+      ],
+    });
+    const { unmount } = render(
+      <MetadataFormPreview
+        kind="asset"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Identification' }),
+    ).toBeNull();
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    unmount();
+    render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Identification' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Item code (SKU)')).toBeInTheDocument();
+  });
   it('previews live controls in order without submitting inventory', () => {
     const { container } = render(
       <MetadataFormPreview
@@ -150,6 +193,28 @@ describe('published metadata form', () => {
     expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
     expect(screen.getByText('Not set')).toBeInTheDocument();
   });
+  it('validates quantity Item code by Unicode characters and keeps its display text', () => {
+    const current = form();
+    current.published_definition.layout[0].controls.push({
+      id: '00000000-0000-4000-8000-000000000024',
+      kind: 'builtin',
+      builtin: 'item_code',
+      width: 'Auto',
+    });
+    render(<MetadataForm {...props} forms={{ [categoryId]: current }} />);
+    const input = screen.getByLabelText('Item code (SKU)');
+    expect(input).not.toHaveAttribute('maxLength');
+    fireEvent.change(input, { target: { value: '😀'.repeat(101) } });
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
+    fireEvent.change(input, { target: { value: '😀'.repeat(100) } });
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeEnabled();
+  });
   it('preserves false, zero and empty strings as values distinct from missing', () => {
     const definition = {
       fields: [
@@ -165,7 +230,32 @@ describe('published metadata form', () => {
           type: 'short_text' as const,
         },
       ],
-      layout: [],
+      layout: [
+        {
+          id: sectionId,
+          label: 'Values',
+          controls: [
+            {
+              id: '00000000-0000-4000-8000-000000000021',
+              kind: 'field' as const,
+              field_id: fieldId,
+              width: 'Auto' as const,
+            },
+            {
+              id: '00000000-0000-4000-8000-000000000022',
+              kind: 'field' as const,
+              field_id: sectionId,
+              width: 'Auto' as const,
+            },
+            {
+              id: '00000000-0000-4000-8000-000000000023',
+              kind: 'field' as const,
+              field_id: firstRevision,
+              width: 'Auto' as const,
+            },
+          ],
+        },
+      ],
     };
     const patch = buildCustomPatch(
       definition,
@@ -187,6 +277,24 @@ describe('published metadata form', () => {
     expect(buildCustomPatch(definition, 'quantity', {}, [], true).set).toEqual(
       {},
     );
+    const hidden = {
+      ...definition,
+      layout: definition.layout.map((section) => ({
+        ...section,
+        controls: section.controls.map((control, index) =>
+          index === 0 ? { ...control, visible: false } : control,
+        ),
+      })),
+    };
+    expect(
+      buildCustomPatch(
+        hidden,
+        'quantity',
+        { [fieldId]: false, [sectionId]: 0 },
+        [fieldId, sectionId],
+        false,
+      ),
+    ).toEqual({ set: { [sectionId]: 0 }, unset: [] });
   });
   it('records an opening site assignment with the same published custom form and no fictional storage source', async () => {
     vi.mocked(submitCustody).mockResolvedValue({
@@ -324,6 +432,65 @@ describe('published metadata form', () => {
       'aria-checked',
       'false',
     );
+  });
+  it('refetches a secondary category after a schema conflict without losing entered values', async () => {
+    const secondary = { ...form(), category_id: otherCategory };
+    const revised = { ...form(secondRevision), category_id: otherCategory };
+    vi.mocked(fetchCategoryForm)
+      .mockResolvedValueOnce({ ok: true, form: secondary })
+      .mockResolvedValueOnce({ ok: true, form: revised });
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'stale_schema',
+      message: 'The form changed.',
+    });
+    render(
+      <MetadataForm
+        {...props}
+        categories={[
+          ...props.categories,
+          { id: otherCategory, name: 'Adapters', active: true },
+        ]}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: otherCategory },
+    });
+    await waitFor(() =>
+      expect(fetchCategoryForm).toHaveBeenCalledWith(otherCategory),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review metadata' }),
+      ).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Edited cable' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalled());
+    expect(
+      (vi.mocked(submitInventory).mock.calls[0][0] as { payload: unknown })
+        .payload,
+    ).toMatchObject({
+      expected_published_revision_id: firstRevision,
+    });
+    await waitFor(() => expect(fetchCategoryForm).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByText(/published form changed/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
+    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use reviewed form revision' }),
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeEnabled();
   });
   it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
     const choiceId = '00000000-0000-4000-8000-000000000020';

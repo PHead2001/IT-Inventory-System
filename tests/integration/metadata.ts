@@ -164,6 +164,7 @@ function form(categoryId: string) {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           { id: uid(), kind: 'field', field_id: flag, width: 'Auto' },
           { id: uid(), kind: 'field', field_id: note, width: 6 },
           { id: uid(), kind: 'field', field_id: choice, width: 6 },
@@ -756,6 +757,32 @@ async function main() {
       form(categoryId).definition,
     ) as unknown as Record<string, unknown>;
     mutate(document);
+    if (description === 'unknown executable key') {
+      await failure(
+        maintainer.client,
+        'metadata_draft_save',
+        {
+          category_id: categoryId,
+          expected_draft_version: '0',
+          definition: document,
+        },
+        'P1030',
+      );
+      await failure(
+        maintainer.client,
+        'metadata_form_save',
+        {
+          category_id: categoryId,
+          expected_actor_id: maintainer.id,
+          expected_draft_id: null,
+          expected_draft_version: '0',
+          expected_published_revision_id: originalPublished,
+          definition: document,
+        },
+        expectedCode,
+      );
+      continue;
+    }
     await save(maintainer.client, categoryId, '0', document);
     const impact = await review(maintainer.client, categoryId);
     await failure(
@@ -1159,6 +1186,7 @@ async function main() {
           controls: [
             { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
             { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+            { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
             { id: uid(), kind: 'field', field_id: fieldId, width: 'Auto' },
           ],
         },
@@ -1254,6 +1282,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           { id: uid(), kind: 'field', field_id: applicabilityField, width: 6 },
         ],
       },
@@ -1870,6 +1899,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           ...typedFields.map((field) => ({
             id: uid(),
             kind: 'field',
@@ -1977,6 +2007,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           { id: uid(), kind: 'field', field_id: optionalField, width: 6 },
         ],
       },
@@ -2327,6 +2358,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           ...budgetFields.map((field) => ({
             id: uid(),
             kind: 'field',
@@ -2456,6 +2488,7 @@ async function main() {
         controls: [
           { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
           { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
           { id: uid(), kind: 'field', field_id: pathField, width: 12 },
           { id: uid(), kind: 'field', field_id: hierarchyField, width: 12 },
         ],

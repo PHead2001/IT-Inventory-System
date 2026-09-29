@@ -48,8 +48,10 @@ test('phone Settings reviews referenced removal and shares label defaults with n
   );
   await signIn(page, 'staff');
   try {
-    await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await page.goto('/settings/categories');
+    await expect(
+      page.getByRole('heading', { name: 'Categories', level: 1 }),
+    ).toBeVisible();
     await noHorizontalOverflow(page);
     await page.getByLabel('Display name').fill(firstName);
     await expect(page.getByLabel('Permanent code')).toHaveValue(code);
@@ -72,7 +74,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     ).toBeVisible();
     await form.getByRole('button', { name: 'Confirm save' }).click();
     await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
-    await page.goto('/settings');
+    await page.goto('/settings/categories');
     const current = page.locator('li').filter({ hasText: code });
     await current.getByRole('button', { name: 'Remove' }).click();
     await current
@@ -85,6 +87,13 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await noHorizontalOverflow(page);
     await current.getByRole('button', { name: 'Confirm removal' }).click();
     await expect(current).toContainText('Removed');
+    await page.goto('/settings/labels');
+    await expect(
+      page.getByRole('heading', {
+        name: 'Labels & printing defaults',
+        level: 1,
+      }),
+    ).toBeVisible();
     await page.getByRole('combobox', { name: 'Size' }).selectOption('70x35');
     await page.getByRole('combobox', { name: 'Page' }).selectOption('A4');
     await page
@@ -105,7 +114,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await noHorizontalOverflow(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
     await signIn(page, 'viewer');
-    await page.goto('/settings');
+    await page.goto('/settings/categories');
     await expect(page.getByText(renamed)).toBeVisible();
     await expect(page.getByRole('note')).toContainText(
       'Settings are read-only for your account',
@@ -113,6 +122,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await expect(
       page.getByRole('button', { name: 'Add category' }),
     ).toHaveCount(0);
+    await page.goto('/settings/labels');
     await expect(
       page.getByRole('button', { name: 'Save shared defaults' }),
     ).toHaveCount(0);

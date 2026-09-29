@@ -1,0 +1,204 @@
+.workspace {
+  display: grid;
+  gap: 18px;
+  max-width: 1080px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  align-items: start;
+  gap: 18px;
+}
+.card {
+  min-width: 0;
+  padding: clamp(18px, 3vw, 26px);
+  border: 1px solid #63829766;
+  border-radius: 15px;
+  background: #101e30ed;
+  box-shadow:
+    inset 0 1px #d1f4ff0d,
+    0 18px 32px #0208102e;
+}
+.cameraCard {
+  background:
+    radial-gradient(circle at 86% 4%, #50def225, transparent 38%),
+    linear-gradient(145deg, #16344a, #101e30 68%);
+  border-color: #50def263;
+}
+.eyebrow {
+  color: #67e0ef;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+.title {
+  margin-top: 7px;
+  color: #f0faff;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.description {
+  margin-top: 8px;
+  color: #acc5d7;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.preview {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  margin-top: 17px;
+  border: 1px solid #74a9b98c;
+  border-radius: 10px;
+  background: #020810;
+  object-fit: contain;
+}
+.preview[hidden] {
+  display: none;
+}
+.cameraActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 19px;
+}
+.primaryButton {
+  min-height: 44px;
+  padding: 0 17px;
+  border: 1px solid #91f2fa;
+  border-radius: 9px;
+  background: #75e2ec;
+  color: #06131d;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.primaryButton:hover {
+  background: #a1f4fa;
+}
+.primaryButton:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.secondaryButton {
+  min-height: 44px;
+  padding: 0 17px;
+  border: 1px solid #6995a8a8;
+  border-radius: 9px;
+  background: #12283a;
+  color: #f0faff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hint {
+  color: #9cafc4;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.fieldset {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.legend {
+  margin-bottom: 6px;
+  color: #dff3fb;
+  font-size: 12px;
+  font-weight: 700;
+}
+.radioChoice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid #5a7c8d66;
+  border-radius: 8px;
+  color: #cedfe9;
+  font-size: 12px;
+  cursor: pointer;
+}
+.radioChoice:has(input:checked) {
+  border-color: #50def2a8;
+  background: #50def214;
+  color: #effcff;
+}
+.radioChoice input {
+  width: 16px;
+  height: 16px;
+  accent-color: #67e0ef;
+}
+.fieldLabel {
+  display: block;
+  margin-top: 16px;
+  color: #e6f4fa;
+  font-size: 12px;
+  font-weight: 700;
+}
+.input {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 7px;
+  padding: 10px 12px;
+  border: 1px solid #7294a6a8;
+  border-radius: 9px;
+  background: #081724;
+  color: #f0faff;
+}
+.submitRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 17px;
+}
+.message {
+  padding: 13px 15px;
+  border: 1px solid #dbaa6880;
+  border-radius: 10px;
+  background: #3a2b29;
+  color: #ffe4bf;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.results {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+.result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px solid #63829766;
+  border-radius: 9px;
+  background: #10283a;
+}
+.result a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: #8bedf7;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.state {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #4b76984a;
+  color: #d9ecf5;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+@media (max-width: 780px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}

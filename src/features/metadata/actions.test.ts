@@ -16,6 +16,7 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }));
 import {
   reviewMetadataPublish,
+  saveMetadataForm,
   submitMetadataDraft,
   verifyMetadataDesignerIdentity,
 } from './actions';
@@ -69,6 +70,89 @@ beforeEach(() => {
 });
 
 describe('metadata designer identity boundary', () => {
+  it('invokes form-save RPC with its Supabase client receiver', async () => {
+    const rpc = vi.fn(function (this: { rest: { endpoint: string } }) {
+      expect(this.rest.endpoint).toBe('/rest/v1');
+      return Promise.resolve({
+        data: null,
+        error: { code: 'P1002' },
+      });
+    });
+    mocks.createClient.mockResolvedValue({
+      auth: { getUser: mocks.getUser },
+      from: mocks.from,
+      rest: { endpoint: '/rest/v1' },
+      rpc,
+    });
+    expect(
+      await saveMetadataForm({
+        requestId,
+        expectedActorId: actor,
+        payload: { ...baseline, definition: {} },
+      }),
+    ).toMatchObject({ ok: false, code: 'P1002' });
+    expect(rpc).toHaveBeenCalledWith('metadata_form_save', {
+      p_request_id: requestId,
+      p_payload: { ...baseline, definition: {} },
+    });
+  });
+  async function allActorGates() {
+    return Promise.all([
+      verifyMetadataDesignerIdentity(actor),
+      saveMetadataForm({
+        requestId,
+        expectedActorId: actor,
+        payload: { ...baseline, definition: {} },
+      }),
+      submitMetadataDraft({
+        operation: 'metadata_draft_discard',
+        requestId,
+        expectedActorId: actor,
+        payload: baseline,
+      }),
+      reviewMetadataPublish({
+        categoryId: category,
+        expectedActorId: actor,
+        expectedDraftId: draft,
+        expectedDraftVersion: '1',
+        expectedPublishedRevisionId: published,
+      }),
+    ]);
+  }
+  it('treats returned transient auth errors as retryable across every actor gate', async () => {
+    mocks.getUser.mockResolvedValue({
+      data: { user: null },
+      error: { status: 503, code: 'service_unavailable' },
+    });
+    for (const result of await allActorGates())
+      expect(result).toMatchObject({ ok: false, code: 'identity_unverified' });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('treats known auth denial and an actual missing user as terminal', async () => {
+    mocks.getUser.mockResolvedValue({
+      data: { user: null },
+      error: { status: 401, code: 'invalid_jwt' },
+    });
+    for (const result of await allActorGates())
+      expect(result).toMatchObject({ ok: false, code: 'P1001' });
+    mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
+    for (const result of await allActorGates())
+      expect(result).toMatchObject({ ok: false, code: 'P1001' });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('keeps returned membership errors retryable and proven inactive membership terminal', async () => {
+    mocks.maybeSingle.mockResolvedValue({
+      data: null,
+      error: { status: 500, code: 'server_error' },
+    });
+    for (const result of await allActorGates())
+      expect(result).toMatchObject({ ok: false, code: 'identity_unverified' });
+    mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
+    for (const result of await allActorGates())
+      expect(result).toMatchObject({ ok: false, code: 'P1001' });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
   it('rejects an actor switch before mutation, review, or receipt replay', async () => {
     mocks.getUser.mockResolvedValue({
       data: { user: { id: nextActor } },

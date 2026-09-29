@@ -30,6 +30,34 @@ export async function getLabelDefaults(): Promise<LabelDefaults> {
   return labelDefaults.parse(data);
 }
 
+export async function getConfigurationCategories() {
+  const { supabase, member } = await requireMember();
+  const { data, error } = await supabase
+    .from('configuration_categories')
+    .select('id,code,name,active,sort_order,version,removed_at')
+    .order('sort_order')
+    .order('code');
+  if (error) throw new Error('Categories could not be loaded.');
+  return {
+    categories: z.array(category).parse(data),
+    canManage: member.role === 'staff' && member.can_manage_configuration,
+    memberId: member.user_id,
+  };
+}
+
+export async function getLabelSettings() {
+  const { supabase, member } = await requireMember();
+  const { data, error } = await supabase
+    .from('configuration_label_defaults')
+    .select('size,page,format,version')
+    .single();
+  if (error) throw new Error('Shared label defaults could not be loaded.');
+  return {
+    labelDefaults: labelDefaults.parse(data),
+    canManage: member.role === 'staff' && member.can_manage_configuration,
+  };
+}
+
 export async function getConfiguration() {
   const { supabase, member } = await requireMember();
   const [categories, defaults] = await Promise.all([

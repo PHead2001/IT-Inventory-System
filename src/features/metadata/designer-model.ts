@@ -17,6 +17,7 @@ export const builtins = [
   'manufacturer',
   'model',
   'reorder_threshold',
+  'item_code',
   'asset_tag',
   'serial_number',
 ] as const;
@@ -55,6 +56,62 @@ export function moveControl(
     control,
   );
   return copy;
+}
+
+export const protectedBuiltins = new Set(['name', 'category_id', 'asset_tag']);
+export function sectionHasProtectedControls(section: Section): boolean {
+  return section.controls.some(
+    (control) =>
+      control.kind === 'builtin' &&
+      protectedBuiltins.has(control.builtin ?? ''),
+  );
+}
+
+export function moveSection(
+  def: MetadataDefinition,
+  id: string,
+  index: number,
+): MetadataDefinition {
+  const copy = structuredClone(def);
+  const from = copy.layout.findIndex((section) => section.id === id);
+  if (from < 0) return def;
+  const [section] = copy.layout.splice(from, 1);
+  copy.layout.splice(
+    Math.max(0, Math.min(index, copy.layout.length)),
+    0,
+    section,
+  );
+  return copy;
+}
+
+export function removeSection(
+  def: MetadataDefinition,
+  id: string,
+  destinationId: string | null,
+): MetadataDefinition {
+  const source = def.layout.find((section) => section.id === id);
+  if (!source || sectionHasProtectedControls(source) || destinationId === id)
+    return def;
+  if (
+    destinationId &&
+    !def.layout.some((section) => section.id === destinationId)
+  )
+    return def;
+  if (
+    !destinationId &&
+    source.controls.some((control) => control.kind === 'builtin')
+  )
+    return def;
+  return {
+    ...def,
+    layout: def.layout
+      .filter((section) => section.id !== id)
+      .map((section) =>
+        section.id === destinationId
+          ? { ...section, controls: [...section.controls, ...source.controls] }
+          : section,
+      ),
+  };
 }
 
 export function optionPath(options: Option[], id: string): string | null {
@@ -314,6 +371,48 @@ function defaultObeysRules(field: Field): boolean {
 
 export function designerIssues(def: MetadataDefinition): string[] {
   const issues: string[] = [];
+  const effective = (kind: 'quantity' | 'asset') =>
+    def.layout
+      .filter(
+        (section) =>
+          section.visible !== false &&
+          (section.applies_to ?? ['quantity', 'asset']).includes(kind),
+      )
+      .flatMap((section) =>
+        section.controls.filter(
+          (control) =>
+            control.visible !== false &&
+            (control.applies_to ?? ['quantity', 'asset']).includes(kind),
+        ),
+      );
+  for (const kind of ['quantity', 'asset'] as const) {
+    const shown = effective(kind);
+    for (const name of kind === 'asset'
+      ? ['name', 'category_id', 'asset_tag']
+      : ['name', 'category_id']) {
+      if (
+        !shown.some(
+          (control) => control.kind === 'builtin' && control.builtin === name,
+        )
+      )
+        issues.push(
+          `${name === 'category_id' ? 'Category' : name === 'asset_tag' ? 'Asset tag' : 'Name'} must stay visible on ${kind} forms.`,
+        );
+    }
+    for (const field of def.fields.filter(
+      (item) => item.required && item.applies_to.includes(kind),
+    )) {
+      if (
+        !shown.some(
+          (control) =>
+            control.kind === 'field' && control.field_id === field.id,
+        )
+      )
+        issues.push(
+          `${field.label || 'A required field'} must be visible on ${kind} forms.`,
+        );
+    }
+  }
   if (def.fields.length > 100) issues.push('At most 100 fields are supported.');
   let totalOptions = 0;
   const controls = def.layout.flatMap((section) => section.controls);

@@ -15,8 +15,6 @@ async function choose(form: Locator, label: string, code: string) {
   await chooseLocation(form, label, code);
 }
 async function openForm(page: Page, name: string) {
-  if (name === 'Edit quantity metadata' || name === 'Edit asset metadata')
-    return page.getByRole('form', { name, exact: true });
   await page
     .locator('summary')
     .filter({ hasText: new RegExp('^' + name + '$') })
@@ -120,7 +118,8 @@ test('archiving stocked quantity clears every location in one reviewed operation
       name: 'Current stock — 0 available in storage',
     }),
   ).toBeVisible();
-  await expect(page.getByText(/Quantity inventory · Archived/)).toBeVisible();
+  await expect(page.getByText(/Quantity inventory/).first()).toBeVisible();
+  await expect(page.getByText(/Archived · Version/)).toBeVisible();
   await page.getByRole('link', { name: 'View all item history' }).click();
   const event = page.locator('li').filter({
     has: page.getByRole('heading', { name: 'Definition archived' }),
@@ -300,7 +299,8 @@ test('quantity core persists multi-location receives, partial and all transfers,
     .getByRole('button', { name: 'Confirm archive and clear stock' })
     .click();
   await version(page, 9);
-  await expect(page.getByText(/Quantity inventory · Archived/)).toBeVisible();
+  await expect(page.getByText(/Quantity inventory/).first()).toBeVisible();
+  await expect(page.getByText(/Archived · Version/)).toBeVisible();
   form = await openForm(page, 'Restore quantity definition');
   await form.getByLabel('Reason (required)').fill('Needed again');
   await confirm(form, 'Restore quantity definition');

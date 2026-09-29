@@ -21,39 +21,43 @@ export default async function SiteOpeningPage({
   if (!site || (kind !== 'quantity' && kind !== 'asset')) notFound();
   if (member.role !== 'staff')
     return (
-      <p>
+      <p className="experience-feedback" data-tone="error">
         Read-only access. Staff membership is required to record site holdings.
       </p>
     );
   if (!site.active)
     return (
-      <p>This site is archived. Choose an active site for opening holdings.</p>
+      <p className="experience-feedback" data-tone="error">
+        This site is archived. Choose an active site for opening holdings.
+      </p>
     );
   const [categories, locations] = await Promise.all([
     getCategories(),
     getLocations(),
   ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
+  const initialCategory = categories.find((category) => category.active);
+  const forms = initialCategory
+    ? await getPublishedForms([initialCategory.id])
+    : {};
   return (
     <>
       <Link
-        className="text-cyan-300 underline"
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
         href={`/sites/${encodeURIComponent(code)}`}
       >
         Back to {site.name}
       </Link>
-      <h1 className="my-4 text-3xl font-semibold">
+      <p className="experience-eyebrow mt-3">Site / Opening record</p>
+      <h1 className="experience-heading my-3 break-words">
         Record existing{' '}
         {kind === 'asset' ? 'serialized asset' : 'quantity holding'} at{' '}
         {site.name}
       </h1>
-      <p className="mb-5 text-slate-400">
+      <p className="mb-5 max-w-3xl text-sm leading-6 text-slate-300">
         Use this only for equipment already at the site before it was recorded
         here. Ordinary future issues start from a real storage holding.
       </p>
-      <div className={panel}>
+      <div className={panel + ' max-w-5xl'}>
         <MetadataForm
           kind={kind}
           categories={categories}

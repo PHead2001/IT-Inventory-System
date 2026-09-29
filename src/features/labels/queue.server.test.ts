@@ -31,6 +31,7 @@ it('queries as the signed-in member and preserves one record-level result per ID
           category_name: 'Cables',
           status: 'active',
           asset_tag: null,
+          item_code: '0001-A/B',
           serial_number: null,
           manufacturer: null,
           model: null,
@@ -54,7 +55,12 @@ it('queries as the signed-in member and preserves one record-level result per ID
     total: 1,
     page: 2,
     rows: [
-      { key: id, kind: 'quantity', holdingContext: 'ITC-S1A: 8; ITC-S1B: 4' },
+      {
+        key: id,
+        kind: 'quantity',
+        itemCode: '0001-A/B',
+        holdingContext: 'ITC-S1A: 8; ITC-S1B: 4',
+      },
     ],
   });
 });
@@ -78,6 +84,7 @@ it('resolves exact mixed IDs in one caller-scoped request and maps stable QR rou
         context: 'Adapters',
         state: 'archived',
         tag: null,
+        item_code: '0001-A/B',
         category_name: 'Adapters',
       },
     ],
@@ -96,6 +103,7 @@ it('resolves exact mixed IDs in one caller-scoped request and maps stable QR rou
     '/inventory/quantity/' + id,
   ]);
   expect(result[1].state).toBe('archived');
+  expect(result[1].humanId).toBe('0001-A/B');
 });
 
 it('rejects duplicate/oversized input before the RPC and propagates read failure', async () => {

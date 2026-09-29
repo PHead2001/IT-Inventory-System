@@ -24,6 +24,7 @@ import {
   LocationLink,
   panel,
 } from '@/features/inventory/components/read-ui';
+import styles from '@/features/inventory/components/inventory-visual.module.css';
 export default async function QuantityPage({
   params,
 }: {
@@ -34,134 +35,180 @@ export default async function QuantityPage({
   const detail = await getQuantityDetail(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
-  const [categories, locations, sites, siteHoldings, assignments] =
-    await Promise.all([
-      getCategories(),
-      getLocations(),
-      getSites(),
-      getEntitySiteHoldings(id),
-      getEntityAssignments('quantity', id),
-    ]);
-  const forms = await getPublishedForms(
-    categories.map((category) => category.id),
-  );
-  const archiveReview =
+  const [
+    categories,
+    locations,
+    sites,
+    siteHoldings,
+    assignments,
+    forms,
+    archiveReview,
+  ] = await Promise.all([
+    getCategories(),
+    getLocations(),
+    getSites(),
+    getEntitySiteHoldings(id),
+    getEntityAssignments('quantity', id),
+    member.role === 'staff'
+      ? getPublishedForms([item.categoryId])
+      : Promise.resolve({}),
     member.role === 'staff' && !item.archived
-      ? await getQuantityArchiveReview(id)
-      : null;
+      ? getQuantityArchiveReview(id)
+      : Promise.resolve(null),
+  ]);
   return (
     <>
-      <Link href="/inventory" className="text-sm text-cyan-300 underline">
-        Back to inventory
-      </Link>
-      <h1 className="mt-4 break-words text-3xl font-semibold">{item.name}</h1>
-      <Link
-        href={'/labels?quantity=' + item.id}
-        className="mt-3 inline-block min-h-11 py-3 text-cyan-300 underline"
-      >
-        Add quantity QR label to queue
-      </Link>
-      <p className="mt-2 text-slate-400">
-        {item.categoryName} · Quantity inventory ·{' '}
-        {item.archived ? 'Archived' : 'Active'} · Version {item.version}
-      </p>
-      <p className="mt-3 text-sm">
-        Reorder threshold:{' '}
-        {stockSummary.reorderThreshold === null
-          ? 'Monitoring disabled'
-          : stockSummary.reorderThreshold + ' units'}
+      <section className={`experience-surface-bright ${styles.detailHero}`}>
+        <Link href="/inventory" className="text-sm text-cyan-200 underline">
+          ← Back to inventory
+        </Link>
+        <div className={`${styles.detailHead} mt-4`}>
+          <div className={styles.detailTitle}>
+            <p className="experience-eyebrow">
+              {item.categoryName} · Quantity inventory
+            </p>
+            <h1 className="experience-heading mt-2">{item.name}</h1>
+            <p className="experience-muted mt-2 text-sm">
+              {item.archived ? 'Archived' : 'Active'} · Version {item.version}
+            </p>
+          </div>
+          <div className={styles.detailActions}>
+            <Link href={'/labels?quantity=' + item.id}>
+              Add quantity QR label to queue
+            </Link>
+          </div>
+        </div>
+        <dl className={styles.facts}>
+          <div className={styles.fact}>
+            <dt>Available in storage</dt>
+            <dd>{stockSummary.availableQuantity} units</dd>
+          </div>
+          <div className={styles.fact}>
+            <dt>Assigned to sites</dt>
+            <dd>{stockSummary.assignedQuantity} units</dd>
+          </div>
+          <div className={styles.fact}>
+            <dt>Total recorded</dt>
+            <dd>{stockSummary.ownedQuantity} units</dd>
+          </div>
+          <div className={styles.fact}>
+            <dt>Reorder threshold</dt>
+            <dd>
+              {stockSummary.reorderThreshold === null
+                ? 'Monitoring disabled'
+                : `${stockSummary.reorderThreshold} units`}
+            </dd>
+          </div>
+          {item.itemCode && (
+            <div className={styles.fact}>
+              <dt>Item code (SKU)</dt>
+              <dd>{item.itemCode}</dd>
+            </div>
+          )}
+        </dl>
         {(stockSummary.stockState === 'needs_restocking' ||
           stockSummary.stockState === 'out_of_stock') && (
-          <span className="ml-2 font-medium text-amber-200">
-            ·{' '}
+          <p className="mt-3 text-sm font-semibold text-amber-200">
             {stockSummary.stockState === 'out_of_stock'
               ? 'Out of stock'
               : 'Needs restocking'}{' '}
-            (available in storage {stockSummary.availableQuantity})
-          </span>
+            · available in storage {stockSummary.availableQuantity} / threshold{' '}
+            {stockSummary.reorderThreshold}
+          </p>
         )}
         {stockSummary.stockState === 'in_stock' && (
-          <span className="ml-2 text-emerald-200">
-            · Above threshold (available in storage{' '}
+          <p className="mt-3 text-sm text-emerald-200">
+            Above threshold (available in storage{' '}
             {stockSummary.availableQuantity})
-          </span>
+          </p>
         )}
-      </p>
-      <section className={panel + ' my-5'}>
-        <h2 className="font-semibold">Item details</h2>
-        <p className="mt-2 whitespace-pre-wrap break-words">
-          {item.description || 'No description'}
-        </p>
-        <p className="mt-2 break-words text-sm text-slate-400">
-          Manufacturer: {item.manufacturer || 'Not set'} · Model:{' '}
-          {item.model || 'Not set'}
-        </p>
       </section>
-      <CustomMetadataList
-        values={item.customDisplay}
-        needsMetadata={item.needsMetadata}
-      />
-      <FilesPanel
-        parentType="quantity"
-        parentId={item.id}
-        active={!item.archived}
-        staff={member.role === 'staff'}
-      />
-      <section className="my-6">
-        <h2 className="mb-3 text-xl font-semibold">
-          Current stock — {stockSummary.availableQuantity} available in storage
-        </h2>
-        <p className="mb-3 text-sm text-slate-400">
-          {stockSummary.assignedQuantity} assigned to sites ·{' '}
-          {stockSummary.ownedQuantity} total recorded across storage and sites.
-          Inactive storage remains included in availability until moved.
-        </p>
-        {balances.some((b) => b.quantity > 0) ? (
-          <ul className="space-y-3">
-            {balances
-              .filter((b) => b.quantity > 0)
-              .map((b) => (
-                <li className={panel} key={b.location.id}>
-                  <LocationLink location={b.location} />
-                  <p className="mt-2">{b.quantity} units</p>
-                  {!b.location.active && (
-                    <p className="mt-1 text-sm text-amber-200">
-                      Inactive location: existing stock remains recorded and can
-                      be evacuated.
+      <div className={styles.recordGrid}>
+        <div className={styles.recordMain}>
+          <section className={panel + ' my-5'}>
+            <h2 className="font-semibold">Item details</h2>
+            <p className="mt-2 whitespace-pre-wrap break-words">
+              {item.description || 'No description'}
+            </p>
+            <p className="mt-2 break-words text-sm text-slate-400">
+              Manufacturer: {item.manufacturer || 'Not set'} · Model:{' '}
+              {item.model || 'Not set'}
+            </p>
+          </section>
+          <CustomMetadataList
+            values={item.customDisplay}
+            needsMetadata={item.needsMetadata}
+          />
+          <section className="my-6">
+            <h2 className="mb-3 text-xl font-semibold">
+              Current stock — {stockSummary.availableQuantity} available in
+              storage
+            </h2>
+            <p className="mb-3 text-sm text-slate-400">
+              {stockSummary.assignedQuantity} assigned to sites ·{' '}
+              {stockSummary.ownedQuantity} total recorded across storage and
+              sites. Inactive storage remains included in availability until
+              moved.
+            </p>
+            {balances.some((b) => b.quantity > 0) ? (
+              <ul className="space-y-3">
+                {balances
+                  .filter((b) => b.quantity > 0)
+                  .map((b) => (
+                    <li className={panel} key={b.location.id}>
+                      <LocationLink location={b.location} />
+                      <p className="mt-2">{b.quantity} units</p>
+                      {!b.location.active && (
+                        <p className="mt-1 text-sm text-amber-200">
+                          Inactive location: existing stock remains recorded and
+                          can be evacuated.
+                        </p>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p className={panel}>No positive stock at any location.</p>
+            )}
+          </section>
+          <section
+            className="my-6 space-y-3"
+            aria-label="Assigned site holdings"
+          >
+            <h2 className="text-xl font-semibold">
+              Assigned to properties / sites
+            </h2>
+            {siteHoldings.length ? (
+              <ul className="space-y-3">
+                {siteHoldings.map((holding) => (
+                  <li className={panel} key={holding.site_id}>
+                    <Link
+                      className="text-cyan-300 underline"
+                      href={`/sites/${encodeURIComponent(holding.site_code)}`}
+                    >
+                      {holding.site_name} ({holding.site_code})
+                    </Link>
+                    <p>
+                      {holding.quantity} units
+                      {!holding.site_active ? ' · Archived site' : ''}
                     </p>
-                  )}
-                </li>
-              ))}
-          </ul>
-        ) : (
-          <p className={panel}>No positive stock at any location.</p>
-        )}
-      </section>
-      <section className="my-6 space-y-3" aria-label="Assigned site holdings">
-        <h2 className="text-xl font-semibold">
-          Assigned to properties / sites
-        </h2>
-        {siteHoldings.length ? (
-          <ul className="space-y-3">
-            {siteHoldings.map((holding) => (
-              <li className={panel} key={holding.site_id}>
-                <Link
-                  className="text-cyan-300 underline"
-                  href={`/sites/${encodeURIComponent(holding.site_code)}`}
-                >
-                  {holding.site_name} ({holding.site_code})
-                </Link>
-                <p>
-                  {holding.quantity} units
-                  {!holding.site_active ? ' · Archived site' : ''}
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className={panel}>No outstanding site holdings.</p>
-        )}
-      </section>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={panel}>No outstanding site holdings.</p>
+            )}
+          </section>
+        </div>
+        <aside className={styles.recordAside} aria-label="Record attachments">
+          <FilesPanel
+            parentType="quantity"
+            parentId={item.id}
+            active={!item.archived}
+            staff={member.role === 'staff'}
+          />
+        </aside>
+      </div>
       {member.role === 'staff' && (
         <section aria-label="Quantity actions" className="mb-8 space-y-3">
           <h2 className="text-xl font-semibold">Manage quantity inventory</h2>
@@ -175,10 +222,11 @@ export default async function QuantityPage({
               ] as const)
           ).map((operation) =>
             operation === 'quantity_update' ? (
-              <section key={operation} className={panel}>
-                <h3 className="mb-4 text-lg font-semibold">
-                  Edit quantity metadata
-                </h3>
+              <details
+                key={operation}
+                className={`${panel} ${styles.editDisclosure}`}
+              >
+                <summary>Edit quantity metadata</summary>
                 <MetadataForm
                   kind="quantity"
                   item={item}
@@ -186,7 +234,7 @@ export default async function QuantityPage({
                   locations={locations}
                   forms={forms}
                 />
-              </section>
+              </details>
             ) : (
               <OperationPanel
                 key={operation}
@@ -278,7 +326,9 @@ export default async function QuantityPage({
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
-      <HistoryList events={history} />
+      <div className={styles.history}>
+        <HistoryList events={history} />
+      </div>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"
         href={'/history?type=quantity&entityId=' + item.id}

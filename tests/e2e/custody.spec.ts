@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
+import { PNG } from 'pngjs';
+import {
+  BinaryBitmap,
+  HybridBinarizer,
+  MultiFormatReader,
+  RGBLuminanceSource,
+} from '@zxing/library';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
@@ -24,10 +31,8 @@ function custodyForm(page: Page, title: string) {
 async function createSite(page: Page, siteCode: string, name: string) {
   await page.goto('/settings/sites');
   const form = custodyForm(page, 'Add property / site');
-  await form
-    .getByLabel('Permanent code (uppercase letters, digits, hyphens)')
-    .fill(siteCode);
   await form.getByLabel('Name', { exact: true }).fill(name);
+  await form.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await form.getByRole('button', { name: 'Save site' }).click();
   await expect(form.getByRole('status')).toContainText('Site saved');
   await page.goto('/sites/' + siteCode);
@@ -60,6 +65,23 @@ async function createQuantity(
 async function submitCustody(form: Locator, title: string) {
   await form.getByRole('button', { name: title, exact: true }).click();
   await expect(form.getByRole('status')).toContainText('Custody saved');
+}
+function decodeQrDataUrl(source: string) {
+  expect(source).toMatch(/^data:image\/png;base64,/);
+  const image = PNG.sync.read(Buffer.from(source.split(',')[1], 'base64'));
+  const gray = new Uint8ClampedArray(image.width * image.height);
+  for (let index = 0; index < gray.length; index++)
+    gray[index] = image.data[index * 4];
+  return new MultiFormatReader()
+    .decode(
+      new BinaryBitmap(
+        new HybridBinarizer(
+          new RGBLuminanceSource(gray, image.width, image.height),
+        ),
+      ),
+      new Map(),
+    )
+    .getText();
 }
 async function noHorizontalOverflow(page: Page) {
   const layout = await page.evaluate(() => ({
@@ -128,16 +150,39 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     'Location saved',
   );
   await page.goto('/locations/' + locationCode);
-  await expect(page.getByText('No room model for this location')).toBeVisible();
+  const officeSpace = page.getByRole('link', {
+    name: `Show ${locationCode} in Spaces`,
+  });
+  await expect(officeSpace).toHaveAttribute(
+    'href',
+    '/room?location=' + locationCode,
+  );
+  await officeSpace.click();
+  await expect(page.getByRole('combobox', { name: 'Space' })).toHaveValue(
+    'it-office',
+  );
+  await expect(
+    page.getByRole('heading', { name: 'IT Office inventory' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Location inventory' }),
+  ).toContainText(`Fictional overflow cabinet (${locationCode})`);
+  await expect(page.getByTestId('room-viewer')).toHaveCount(0);
+  await page.goto('/locations/' + locationCode);
   await expect(
     page.getByRole('link', { name: 'Print location label' }),
   ).toBeVisible();
   await noHorizontalOverflow(page);
   await page.goto('/labels?location=' + locationCode);
   await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
+  await expect(
+    page.getByRole('status').filter({
+      hasText: 'Print preview refreshed from current inventory',
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.label-card[data-code-ready="true"]').first(),
+  ).toBeVisible();
   await expect(page.locator('.label-card').first()).toContainText(locationCode);
   await expect(
     page
@@ -168,7 +213,10 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await assign
     .getByLabel('Destination site')
     .selectOption({ label: `${siteName} (${siteCode})` });
-  await submitCustody(assign, 'Assign asset to a site');
+  await assign.getByRole('button', { name: 'Assign asset to a site' }).click();
+  await expect(
+    page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
+  ).toBeVisible();
   await page.reload();
   await expect(
     page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
@@ -185,17 +233,23 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
   await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
-  const assetCard = page
-    .locator('.label-card')
-    .filter({ hasText: assetId })
-    .first();
+  await expect(
+    page.getByRole('status').filter({
+      hasText: 'Print preview refreshed from current inventory',
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.label-card[data-code-ready="true"]').first(),
+  ).toBeVisible();
+  const assetCard = page.locator('.label-card').filter({ hasText: name });
   await expect(assetCard).toBeVisible();
+  await expect(assetCard).toContainText(name);
   const originalQr = assetCard.getByRole('img', { name: /QR code for/ });
   await expect(originalQr).toBeVisible();
   const originalQrBytes = await originalQr.getAttribute('src');
+  expect(decodeQrDataUrl(originalQrBytes!)).toBe(
+    process.env.APP_ORIGIN + '/inventory/assets/' + assetId,
+  );
   await page.goto('/sites/' + siteCode);
   await expect(page.getByRole('link', { name })).toBeVisible();
   await expect(
@@ -237,18 +291,23 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
   await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
-  await page
-    .getByRole('button', { name: 'Prepare full print preview' })
-    .click();
-  const returnedCard = page
-    .locator('.label-card')
-    .filter({ hasText: assetId })
-    .first();
+  await expect(
+    page.getByRole('status').filter({
+      hasText: 'Print preview refreshed from current inventory',
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.label-card[data-code-ready="true"]').first(),
+  ).toBeVisible();
+  const returnedCard = page.locator('.label-card').filter({ hasText: name });
   await expect(returnedCard).toBeVisible();
   const returnedQr = returnedCard.getByRole('img', { name: /QR code for/ });
   await expect(returnedQr).toBeVisible();
   expect(await returnedQr.getAttribute('src')).toBe(originalQrBytes);
   await noHorizontalOverflow(page);
+  const labelSearch = page.getByRole('form', { name: 'Search label records' });
+  await labelSearch.getByRole('textbox').fill(name);
+  await labelSearch.getByRole('button', { name: 'Search' }).click();
   await page
     .getByRole('region', { name: 'Label search results' })
     .getByRole('link', { name })
@@ -319,7 +378,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(overReturn.getByRole('status')).toContainText(
     'valid whole-unit quantity',
   );
-  await page.goto('/sites/' + aCode);
+  await page.goto('/settings/sites/' + aCode);
   const archiveSite = custodyForm(page, `Manage Fictional site ${aCode}`);
   await archiveSite.getByLabel('Active site').uncheck();
   await archiveSite
@@ -354,9 +413,8 @@ test('site movements distinguish available, assigned and recorded; dated activit
   const row = page
     .locator('li')
     .filter({ has: page.getByRole('link', { name }) });
-  await expect(row).toContainText(
-    'Available in storage: 7 · Assigned to sites: 3 · Total recorded: 10',
-  );
+  await expect(row).toContainText('Available 7 · Assigned 3');
+  await expect(row).toContainText('Total 10 · Threshold 7');
   await page.goto('/inventory/quantity/' + id);
   const returned = custodyForm(page, 'Return to storage');
   await returned

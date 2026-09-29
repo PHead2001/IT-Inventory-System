@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { requireMember } from '@/lib/auth/session.server';
 import { getSites } from '@/features/custody/queries.server';
-import { panel } from '@/features/inventory/components/read-ui';
+import { field, panel } from '@/features/inventory/components/read-ui';
 
 export default async function SitesPage({
   searchParams,
@@ -22,8 +22,9 @@ export default async function SitesPage({
   );
   return (
     <>
-      <h1 className="text-3xl font-semibold">Properties and sites</h1>
-      <p className="my-4 text-slate-400">
+      <p className="experience-eyebrow">Inventory · Site custody</p>
+      <h1 className="experience-heading mt-3">Properties and sites</h1>
+      <p className="experience-muted my-4 max-w-2xl text-sm">
         Sites track deployed equipment custody. They are separate from IT
         storage locations and do not have a room model.
       </p>
@@ -39,7 +40,7 @@ export default async function SitesPage({
         <label className="min-w-56 flex-1 space-y-2">
           Search sites
           <input
-            className="min-h-11 w-full rounded border border-slate-700 bg-slate-950 px-3"
+            className={field}
             name="q"
             defaultValue={params.q ?? ''}
             maxLength={100}
@@ -50,29 +51,34 @@ export default async function SitesPage({
           <select
             name="status"
             defaultValue={params.status === 'all' ? 'all' : 'active'}
-            className="min-h-11 rounded border border-slate-700 bg-slate-950 px-3"
+            className={field}
           >
             <option value="active">Active</option>
             <option value="all">All, including archived</option>
           </select>
         </label>
-        <button className="min-h-11 rounded bg-cyan-700 px-4">Search</button>
+        <button className="min-h-11 rounded-lg bg-cyan-700 px-4 font-semibold">
+          Search
+        </button>
       </form>
       {rows.length ? (
-        <ul className="space-y-3">
+        <ul className="experience-surface divide-y divide-cyan-100/10 overflow-hidden">
           {rows.map((site) => (
-            <li className={panel} key={site.id}>
+            <li
+              className="min-w-0 p-4 transition-colors hover:bg-cyan-100/5"
+              key={site.id}
+            >
               <Link
-                className="text-lg font-semibold text-cyan-300 underline"
+                className="break-words text-base font-semibold text-cyan-100 hover:underline [overflow-wrap:anywhere]"
                 href={'/sites/' + encodeURIComponent(site.code)}
               >
                 {site.name}
               </Link>
-              <p className="mt-1 text-sm text-slate-400">
+              <p className="experience-muted mt-1 text-sm">
                 {site.code} · {site.active ? 'Active' : 'Archived'}
               </p>
               {site.notes && (
-                <p className="mt-2 whitespace-pre-wrap break-words text-sm">
+                <p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-sm text-slate-200">
                   {site.notes}
                 </p>
               )}

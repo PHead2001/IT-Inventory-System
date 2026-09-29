@@ -17,10 +17,14 @@ export default async function ManageLocationPage({
   if (!location) notFound();
   return (
     <>
-      <Link className="text-cyan-300 underline" href="/settings/locations">
+      <Link
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
+        href="/settings/locations"
+      >
         All locations
       </Link>
-      <h1 className="my-4 text-3xl font-semibold">{location.name}</h1>
+      <p className="experience-eyebrow mt-3">Configuration / Location</p>
+      <h1 className="experience-heading mb-5 break-words">{location.name}</h1>
       {member.role === 'staff' && member.can_manage_configuration ? (
         <LocationManagementForm
           key={`${location.id}:${location.version}`}

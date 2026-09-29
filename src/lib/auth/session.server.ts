@@ -1,10 +1,13 @@
 import 'server-only';
+import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { isActiveMember } from './membership';
 import { validReturnPath } from '@/features/scan/targets';
-export async function requireMember() {
+// React cache is scoped to one server render/request. It coalesces nested reads
+// without reusing an Auth or membership decision on a later navigation/action.
+export const requireMember = cache(async function requireMember() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -25,4 +28,4 @@ export async function requireMember() {
     .maybeSingle();
   if (error || !isActiveMember(member)) redirect('/access-denied');
   return { supabase, member };
-}
+});

@@ -115,6 +115,55 @@ describe('inventory mutation input contracts', () => {
       initial_location_id: null,
     });
   });
+  it('keeps omitted item codes absent and trims supplied Unicode whitespace while preserving punctuation', () => {
+    for (const operation of [
+      'quantity_create',
+      'quantity_create_v2',
+      'quantity_update',
+      'quantity_update_v2',
+    ] as const) {
+      const absent = command(operation);
+      expect(absent.success).toBe(true);
+      if (!absent.success) throw new Error('Expected valid command');
+      expect(Object.hasOwn(absent.data.payload, 'item_code')).toBe(false);
+      const supplied = command(operation, {
+        ...payloads[operation],
+        item_code: '\u3000  0001-A/B.02 \u00A0',
+      });
+      expect(supplied.success).toBe(true);
+      if (!supplied.success) throw new Error('Expected valid command');
+      expect((supplied.data.payload as Record<string, unknown>).item_code).toBe(
+        '0001-A/B.02',
+      );
+      const clear = command(operation, {
+        ...payloads[operation],
+        item_code: ' \u3000 ',
+      });
+      expect(clear.success).toBe(true);
+      if (!clear.success) throw new Error('Expected valid command');
+      expect(
+        (clear.data.payload as Record<string, unknown>).item_code,
+      ).toBeNull();
+      expect(
+        command(operation, {
+          ...payloads[operation],
+          item_code: 'X'.repeat(101),
+        }).success,
+      ).toBe(false);
+      expect(
+        command(operation, { ...payloads[operation], item_code: 'A\u0085B' })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      command('quantity_create', { ...metadata, item_code: '😀'.repeat(100) })
+        .success,
+    ).toBe(true);
+    expect(
+      command('asset_create', { ...payloads.asset_create, item_code: 'Q-1' })
+        .success,
+    ).toBe(false);
+  });
 
   it('permits a zero definition with or without a chosen initial location and requires a location for positive stock', () => {
     expect(

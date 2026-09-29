@@ -2,9 +2,11 @@ import { ScanPanel } from '@/features/scan/scan-panel';
 export default function ScanPage() {
   return (
     <>
-      <h1 className="mb-2 text-3xl font-semibold">Scan and open</h1>
-      <p className="mb-6 text-slate-400">
-        Scan a label or enter its text to find a location or asset.
+      <p className="experience-eyebrow">Find / Labels</p>
+      <h1 className="experience-heading mt-3">Scan and open</h1>
+      <p className="experience-muted mb-7 mt-3 max-w-2xl text-sm leading-6">
+        Scan an inventory label or enter a code to open a location, asset, or
+        quantity item. Looking up a code does not change inventory.
       </p>
       <ScanPanel />
     </>
