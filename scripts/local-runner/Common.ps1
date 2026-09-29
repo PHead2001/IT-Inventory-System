@@ -135,6 +135,9 @@ function Test-ConvertedImageReceipt($Receipt, [string] $SourceHash, [string] $Ou
 }
 
 function ConvertTo-NativeArgument([AllowEmptyString()][string] $Value) {
+    # WSL parses its option prefix itself and does not recognize quoted flags.
+    # Leave simple tokens bare; CRT quoting is needed only for empty/complex values.
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
     # Windows CRT argument quoting: preserve empty values, embedded quotes and
     # backslashes preceding quotes or the closing delimiter.
     $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
@@ -142,7 +145,7 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string] $Value) {
     return '"' + $escaped + '"'
 }
 
-function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [string] $InputText = $null, [switch] $CaptureOutput) {
+function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [string] $InputText = $null, [switch] $CaptureOutput, [switch] $CaptureError, [ValidateRange(0, 3600)][int] $TimeoutSeconds = 0) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable
     $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
@@ -152,31 +155,93 @@ function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [strin
     $start.RedirectStandardError = $true
     $start.RedirectStandardInput = $true
     if ($CaptureOutput) { $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false) }
+    if ($CaptureError) { $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false) }
     $process = [Diagnostics.Process]::Start($start)
     try {
         # Only trusted setup path translation captures output. Guest output and
-        # JIT data keep the existing discard behavior; stderr is never logged.
+        # JIT data keep the existing discard behavior. Only fixed setup/probe
+        # commands opt into visible, bounded stderr diagnostics.
         if ($CaptureOutput) { $output = $process.StandardOutput.ReadToEndAsync() }
         else { $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null) }
-        $errorOutput = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        if ($CaptureError) { $errorOutput = $process.StandardError.ReadToEndAsync() }
+        else { $errorOutput = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null) }
         if ($null -ne $InputText) { $process.StandardInput.WriteLine($InputText) }
         $process.StandardInput.Close()
-        $process.WaitForExit()
+        if ($TimeoutSeconds -gt 0) {
+            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+                $process.Kill()
+                throw "Native command timed out after $TimeoutSeconds seconds."
+            }
+        } else { $process.WaitForExit() }
         $captured = $output.GetAwaiter().GetResult()
-        [void]$errorOutput.GetAwaiter().GetResult()
-        if ($CaptureOutput) { return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $captured } }
+        $capturedError = $errorOutput.GetAwaiter().GetResult()
+        if ($CaptureOutput -or $CaptureError) {
+            if (-not $CaptureOutput) { $captured = '' }
+            if (-not $CaptureError) { $capturedError = '' }
+            return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $captured; ErrorOutput = (ConvertTo-RunnerDiagnosticText $capturedError) }
+        }
         return $process.ExitCode
     } finally { $process.Dispose() }
 }
 
-function Invoke-ConverterCommand([string] $Name, [string[]] $Command, [switch] $CaptureOutput, [string] $Executable = 'wsl.exe') {
+function ConvertTo-RunnerDiagnosticText([string] $Text) {
+    # WSL may mix UTF-16 diagnostics with UTF-8 guest output. Remove embedded
+    # NUL/control characters and bound only the visible diagnostic, never log JIT.
+    $Text = [regex]::Replace($Text, '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '')
+    $Text = [regex]::Replace($Text, '(https?://)[^/\s@]+@', '$1[redacted]@')
+    if ($Text.Length -gt 4096) { return $Text.Substring(0, 4096) + ' [truncated]' }
+    return $Text.Trim()
+}
+
+function Invoke-ConverterCommand([string] $Name, [string[]] $Command, [switch] $CaptureOutput, [switch] $CaptureError, [string] $Executable = 'wsl.exe', [int] $TimeoutSeconds = 0) {
     if ($Name -notmatch '^ITInventoryImageConverter-[0-9a-f]{32}$' -or $Command.Count -eq 0) {
         throw 'Image converter command requires its exact recorded identity and a command.'
     }
     # -- alone lets WSL invoke the default Linux shell, which consumes Windows
     # path backslashes. --exec passes the native argv directly to the command.
     $arguments = @('-d', $Name, '-u', 'root', '--exec') + $Command
-    return Invoke-RunnerNative $Executable $arguments -CaptureOutput:$CaptureOutput
+    return Invoke-RunnerNative $Executable $arguments -CaptureOutput:$CaptureOutput -CaptureError:$CaptureError -TimeoutSeconds $TimeoutSeconds
+}
+
+function Show-ConverterCommandFailure([string] $Heading, $Result) {
+    Write-Host "$Heading (exit $($Result.ExitCode))."
+    if ($Result.Output) { Write-Host (ConvertTo-RunnerDiagnosticText $Result.Output) }
+    if ($Result.ErrorOutput) { Write-Host (ConvertTo-RunnerDiagnosticText $Result.ErrorOutput) }
+}
+
+function Assert-ConverterTools([string] $Name) {
+    # Reuse a working installed tool rather than rerunning apt on every retry.
+    $probe = Invoke-ConverterCommand $Name @('/usr/bin/qemu-img', '--version') -CaptureOutput -CaptureError -TimeoutSeconds 30
+    if ($probe.ExitCode -eq 0 -and $probe.Output -match '^qemu-img version ') { return }
+    if ($probe.ExitCode -notin @(1, 127)) {
+        Show-ConverterCommandFailure 'Converter tool probe failed; dependency install was not attempted' $probe
+        throw 'Image converter could not run its tool probe; inspect the diagnostic or use the elevated converter diagnostic menu.'
+    }
+    $install = Invoke-ConverterCommand $Name @('sh', '-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils') -CaptureError
+    if ($install.ExitCode -ne 0) {
+        Show-ConverterCommandFailure 'Fixed qemu-utils setup command failed' $install
+        throw 'qemu-utils installation failed in the dedicated image converter; see bounded diagnostic above.'
+    }
+}
+
+function Invoke-ConverterDiagnostics {
+    Assert-Administrator
+    Assert-SecureRoot
+    $stage = Read-RunnerJson (Join-Path $script:RunnerRoot 'setup-stage.json')
+    if ($null -eq $stage -or $stage.tag -ne $script:RunnerTag) { throw 'Diagnostics require the protected unfinished setup stage.' }
+    $registrations = @(Get-ConverterRegistrations $stage.helperName)
+    if ($registrations.Count -ne 1) { throw 'Diagnostics require one exact recorded converter registration.' }
+    Assert-ConverterOwnership $stage $registrations[0] (Join-Path $script:RunnerRoot 'image-converter')
+    Write-Host "Read-only converter diagnostic; PowerShell $($PSVersionTable.PSVersion); exact recorded registration verified."
+    $commands = @(
+        ,@('/usr/bin/qemu-img', '--version')
+        ,@('sh', '-c', 'printf "converter-command=ok\n"; command -v qemu-img; command -v wslpath')
+        ,@('wslpath', '-a', (Join-Path $script:RunnerRoot 'image\ubuntu-24.04-server-cloudimg-amd64.img'))
+    )
+    foreach ($command in $commands) {
+        $result = Invoke-ConverterCommand $stage.helperName $command -CaptureOutput -CaptureError -TimeoutSeconds 30
+        Show-ConverterCommandFailure "Read-only $($command[0])" $result
+    }
 }
 
 function Get-ConverterLinuxPath([string] $Name, [string] $Path) {

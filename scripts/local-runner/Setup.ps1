@@ -139,8 +139,7 @@ try {
         throw 'WSL converter registration cannot be proven as this setup-owned import.'
     }
     Assert-ConverterOwnership $stage $registrations[0] $helperRoot
-    $exitCode = Invoke-ConverterCommand $helper @('sh', '-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils')
-    if ($exitCode -ne 0) { throw 'qemu-utils installation failed in the dedicated image converter.' }
+    Assert-ConverterTools $helper
     $receiptPath = Join-Path $imageDir 'converted-vhdx.json'
     $receipt = Read-RunnerJson $receiptPath
     $verifiedImage = $false

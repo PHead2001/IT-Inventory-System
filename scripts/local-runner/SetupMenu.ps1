@@ -38,7 +38,8 @@ while ($true) {
     Write-Host '5. Enable one-job pilot and start (only after independent review)'
     Write-Host '6. Enable active pickup and start (requires successful recorded pilot proof)'
     Write-Host '7. Exit'
-    $choice = Read-Host 'Choose 1-7'
+    Write-Host '8. Diagnose recorded converter (read-only; no install)'
+    $choice = Read-Host 'Choose 1-8'
     try {
         switch ($choice) {
             '1' { & (Join-Path $PSScriptRoot 'Setup.ps1') -EnableHyperV }
@@ -61,7 +62,11 @@ while ($true) {
                 & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Start
             }
             '7' { return }
-            default { Write-Host 'Choose a number from 1 to 7.' }
+            '8' {
+                . (Join-Path $PSScriptRoot 'Common.ps1')
+                Invoke-ConverterDiagnostics
+            }
+            default { Write-Host 'Choose a number from 1 to 8.' }
         }
     } catch {
         Write-Host "Setup stopped safely: $($_.Exception.Message)" -ForegroundColor Yellow

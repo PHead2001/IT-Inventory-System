@@ -138,9 +138,11 @@ public class ArgvSink {
     public static int Main(string[] args) {
         if (args[0] == "--block") System.Threading.Thread.Sleep(3000);
         string capture = Environment.GetEnvironmentVariable("ITIR_NATIVE_ARGV_PATH");
-        File.WriteAllLines(String.IsNullOrEmpty(capture) ? args[args.Length - 1] + ".argv" : capture, args);
+        string target = String.IsNullOrEmpty(capture) ? args[args.Length - 1] + ".argv" : capture;
+        File.WriteAllLines(target, args);
+        File.WriteAllText(target + ".raw", Environment.CommandLine);
         Console.OutputEncoding = new System.Text.UTF8Encoding(false);
-        if (args[0] == "--output") Console.WriteLine("/mnt/c/fixture image");
+        if (args[0] == "--output") { Console.WriteLine("/mnt/c/fixture image"); Console.Error.WriteLine("fixed stderr diagnostic"); }
         return args[args.Length - 1].Contains("fail-key") ? 9 : 0;
     }
 }
@@ -162,11 +164,25 @@ public class ArgvSink {
         (Compare-Object $arguments ([IO.File]::ReadAllLines($probePath + '.argv')) -SyncWindow 0)) {
         throw 'Native SSH command quotes, empty values or backslashes changed.'
     }
+    if ((ConvertTo-NativeArgument '-d') -cne '-d' -or (ConvertTo-NativeArgument '') -cne '""') {
+        throw 'Native encoder quoted a WSL option or lost an empty keygen passphrase.'
+    }
+    $safeDiagnostic = ConvertTo-RunnerDiagnosticText ("w`0s`0l: https://user:password@example.test/path`n" + ('x' * 5000))
+    if ($safeDiagnostic.Length -gt 4108 -or $safeDiagnostic.Contains('password') -or $safeDiagnostic.Contains([string][char]0)) {
+        throw 'Fixed-command diagnostic was unbounded or retained control characters/URL credentials.'
+    }
 
     $outputResult = Invoke-RunnerNative $sink @('--output', (Join-Path $testRoot 'captured-output')) -CaptureOutput
     if ($outputResult.ExitCode -ne 0 -or $outputResult.Output.Trim() -cne '/mnt/c/fixture image') { throw 'Trusted native output capture failed.' }
     $outputResult = Invoke-RunnerNative $sink @('--output', (Join-Path $testRoot 'fail-key-output')) -CaptureOutput
     if ($outputResult.ExitCode -ne 9) { throw 'Trusted native output capture lost the failing exit code.' }
+    $outputResult = Invoke-RunnerNative $sink @('--output', (Join-Path $testRoot 'captured-error')) -CaptureOutput -CaptureError
+    if ($outputResult.ErrorOutput -cne 'fixed stderr diagnostic') { throw 'Fixed-command stderr capture was lost.' }
+    $timedOut = $false
+    try { Invoke-RunnerNative $sink @('--block', (Join-Path $testRoot 'timed-out')) -TimeoutSeconds 1 | Out-Null } catch {
+        $timedOut = $_.Exception.Message -ceq 'Native command timed out after 1 seconds.'
+    }
+    if (-not $timedOut -or (Test-Path -LiteralPath (Join-Path $testRoot 'timed-out.argv'))) { throw 'Native diagnostic timeout did not stop its owned process.' }
 
     # WSL's default-shell route consumes Windows backslashes. All Linux
     # conversion commands must use --exec with their exact native argv.
@@ -188,6 +204,10 @@ public class ArgvSink {
             $expected = @('-d', $stage.helperName, '-u', 'root', '--exec') + $converterCommand
             if ($captured.Count -ne $expected.Count -or (Compare-Object $expected $captured -SyncWindow 0)) {
                 throw 'WSL conversion command lost --exec, backslashes, spaces or its fixed shell script argument.'
+            }
+            $rawCommandLine = [IO.File]::ReadAllText($env:ITIR_NATIVE_ARGV_PATH + '.raw')
+            if (-not $rawCommandLine.Contains('-d ' + $stage.helperName + ' -u root --exec ')) {
+                throw 'WSL option prefix was quoted; the actual raw parser would miss converter binding.'
             }
         }
     } finally { $env:ITIR_NATIVE_ARGV_PATH = $previousArgvPath }
@@ -221,6 +241,48 @@ public class ArgvSink {
     }
     Set-Item -Path Function:\Invoke-ConverterCommand -Value $realConverterCommand
 
+    $script:toolCalls = [Collections.Generic.List[string]]::new()
+    $script:toolReady = $true; $script:installCode = 0; $script:probeCode = 127
+    function Invoke-ConverterCommand {
+        param($Name, $Command, [switch]$CaptureOutput, [switch]$CaptureError, $TimeoutSeconds)
+        $script:toolCalls.Add($Command[0])
+        if ($Command[0] -eq '/usr/bin/qemu-img') {
+            if ($TimeoutSeconds -ne 30) { throw 'Converter tool probe lost its bounded timeout.' }
+            return [pscustomobject]@{ ExitCode = $(if ($script:toolReady) { 0 } else { $script:probeCode }); Output = $(if ($script:toolReady) { 'qemu-img version 8.2.2' } else { '' }); ErrorOutput = 'missing tool' }
+        }
+        if ($Command[0] -ne 'sh' -or $Command[1] -ne '-c' -or
+            $Command[2] -cne 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils' -or -not $CaptureError) {
+            throw 'Converter dependency install was not the fixed diagnostic command.'
+        }
+        return [pscustomobject]@{ ExitCode = $script:installCode; Output = ''; ErrorOutput = 'synthetic fixed-command failure' }
+    }
+    Assert-ConverterTools $stage.helperName
+    if (($script:toolCalls -join ',') -cne '/usr/bin/qemu-img') { throw 'Resume unnecessarily reran apt for an installed qemu-img.' }
+    $script:toolCalls.Clear(); $script:toolReady = $false
+    Assert-ConverterTools $stage.helperName
+    if (($script:toolCalls -join ',') -cne '/usr/bin/qemu-img,sh') { throw 'Missing converter tools did not use the fixed install command.' }
+    $script:installCode = 100; $rejected = $false
+    try { Assert-ConverterTools $stage.helperName } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Failed fixed converter dependency command was accepted.' }
+    $script:toolCalls.Clear(); $script:probeCode = -1; $rejected = $false
+    try { Assert-ConverterTools $stage.helperName } catch { $rejected = $true }
+    if (-not $rejected -or ($script:toolCalls -join ',') -cne '/usr/bin/qemu-img') { throw 'WSL host/protected-disk failure incorrectly attempted a dependency install.' }
+    Set-Item -Path Function:\Invoke-ConverterCommand -Value $realConverterCommand
+
+    $realNativeCommand = (Get-Command Invoke-RunnerNative).ScriptBlock
+    $script:nativeTimeouts = [Collections.Generic.List[int]]::new()
+    function Invoke-RunnerNative {
+        param($Executable, $Arguments, $InputText, [switch]$CaptureOutput, [switch]$CaptureError, $TimeoutSeconds)
+        $script:nativeTimeouts.Add($TimeoutSeconds)
+        return 0
+    }
+    [void](Invoke-ConverterCommand $stage.helperName @('qemu-img', 'convert', '-f', 'qcow2', '-O', 'vhdx', '/mnt/c/source.img', '/mnt/c/target.vhdx'))
+    [void](Invoke-ConverterCommand $stage.helperName @('sh', '-c', 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-utils'))
+    if (($script:nativeTimeouts -join ',') -cne '0,0') { throw 'Mutating converter commands gained a host-client timeout that could leave guest work running.' }
+    [void](Invoke-ConverterCommand $stage.helperName @('/usr/bin/qemu-img', '--version') -TimeoutSeconds 30)
+    if ($script:nativeTimeouts[2] -ne 30) { throw 'Read-only diagnostic lost its explicit timeout.' }
+    Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
+
     $setupAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Setup.ps1'), [ref]$null, [ref]$null)
     $linuxTranslations = @($setupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Get-ConverterLinuxPath' }, $true))
     $converterCalls = @($setupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Invoke-ConverterCommand' }, $true))
@@ -229,7 +291,8 @@ public class ArgvSink {
         $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'wsl.exe' -and
             $node.CommandElements.Extent.Text -contains '-d'
     }, $true))
-    if ($linuxTranslations.Count -ne 2 -or $converterCalls.Count -ne 2 -or $shellRoutedLinuxCalls.Count -ne 0) {
+    $toolChecks = @($setupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Assert-ConverterTools' }, $true))
+    if ($linuxTranslations.Count -ne 2 -or $converterCalls.Count -ne 1 -or $toolChecks.Count -ne 1 -or $shellRoutedLinuxCalls.Count -ne 0) {
         throw 'A setup conversion command bypassed the verified --exec/output helpers.'
     }
 
@@ -496,6 +559,28 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
     if (($script:converterCalls -join ',') -ne "--terminate $($stage.helperName),--unregister $($stage.helperName),--list --quiet") {
         throw 'Converter retirement missed verified terminate/unregister/readback order.'
     }
+
+    # The elevated diagnostic requires the exact protected stage/registration,
+    # executes only three fixed read-only commands and retains no host changes.
+    $script:converterRegistration = [pscustomobject]@{ DistributionName = $stage.helperName; BasePath = $helperRoot }
+    $stage | Add-Member -NotePropertyName tag -NotePropertyValue $script:RunnerTag -Force
+    Write-RunnerJson (Join-Path $testRoot 'setup-stage.json') $stage
+    $script:diagnosticCalls = [Collections.Generic.List[string]]::new()
+    function Invoke-ConverterCommand {
+        param($Name, $Command, [switch]$CaptureOutput, [switch]$CaptureError, $TimeoutSeconds)
+        if ($Name -cne $stage.helperName -or -not $CaptureOutput -or -not $CaptureError -or $TimeoutSeconds -ne 30) { throw 'Diagnostic lost exact binding or bounded output/timeout.' }
+        $script:diagnosticCalls.Add(($Command -join '|'))
+        return [pscustomobject]@{ ExitCode = 0; Output = 'read-only fixture'; ErrorOutput = '' }
+    }
+    Invoke-ConverterDiagnostics
+    if ($script:diagnosticCalls.Count -ne 3 -or ($script:diagnosticCalls -join ',') -match 'apt-get|--import|--unregister|--terminate') {
+        throw 'Converter diagnostic installed, changed or omitted a read-only command.'
+    }
+    $script:diagnosticCalls.Clear()
+    $script:converterRegistration.BasePath = Join-Path $testRoot 'different-converter'
+    $rejected = $false
+    try { Invoke-ConverterDiagnostics } catch { $rejected = $true }
+    if (-not $rejected -or $script:diagnosticCalls.Count -ne 0) { throw 'Diagnostic invoked an unowned converter.' }
     Write-Host 'Local runner contract checks passed.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)
