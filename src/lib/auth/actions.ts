@@ -27,20 +27,27 @@ export async function login(
     const supabase = await observeAuthStage(diagnostic, 'login.client', () =>
       createSupabaseServerClient(true, diagnostic),
     );
-    const { error } = await observeAuthStage(
+    const { data, error } = await observeAuthStage(
       diagnostic,
       'login.credentials',
       () => supabase.auth.signInWithPassword(parsed.data),
     );
     if (error)
       return { error: 'Unable to sign in. Check your email and password.' };
-    const {
-      data: { user },
-      error: userError,
-    } = await observeAuthStage(diagnostic, 'login.getUser', () =>
-      supabase.auth.getUser(),
-    );
-    if (userError || !user)
+    // Password sign-in returned this user from Auth and persisted its session
+    // before resolving. Protected requests still verify their current user.
+    const user = data?.user;
+    const session = data?.session;
+    if (
+      !user ||
+      typeof user.id !== 'string' ||
+      !user.id ||
+      !session ||
+      typeof session.access_token !== 'string' ||
+      !session.access_token ||
+      typeof session.refresh_token !== 'string' ||
+      !session.refresh_token
+    )
       return { error: 'Unable to verify this account. Please try again.' };
     const { data: member, error: memberError } = await observeAuthStage(
       diagnostic,

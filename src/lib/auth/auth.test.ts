@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
   member: vi.fn(),
   from: vi.fn(),
+  eq: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: vi.fn(async () => ({
@@ -34,7 +35,13 @@ beforeEach(() => {
   vi.stubEnv('APP_ORIGIN', 'http://localhost:3000');
   vi.stubEnv('VERCEL_BRANCH_URL', undefined);
   vi.stubEnv('VERCEL_URL', undefined);
-  mocks.signInWithPassword.mockResolvedValue({ error: null });
+  mocks.signInWithPassword.mockResolvedValue({
+    data: {
+      user: { id: 'user' },
+      session: { access_token: 'test-access', refresh_token: 'test-refresh' },
+    },
+    error: null,
+  });
   mocks.signOut.mockResolvedValue({ error: null });
   mocks.verifyOtp.mockResolvedValue({ error: null });
   mocks.updateUser.mockResolvedValue({ error: null });
@@ -52,9 +59,8 @@ beforeEach(() => {
     },
     error: null,
   });
-  mocks.from.mockReturnValue({
-    select: () => ({ eq: () => ({ maybeSingle: mocks.member }) }),
-  });
+  mocks.eq.mockReturnValue({ maybeSingle: mocks.member });
+  mocks.from.mockReturnValue({ select: () => ({ eq: mocks.eq }) });
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -147,6 +153,8 @@ describe('auth boundaries', () => {
         }),
       ),
     ).rejects.toThrow('REDIRECT:/inventory');
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
   });
   it('emits only fixed login spans and preserves the authorized redirect when enabled', async () => {
     vi.stubEnv('AUTH_DIAGNOSTICS', '1');
@@ -164,7 +172,6 @@ describe('auth boundaries', () => {
     expect(events.map((event) => event.stage)).toEqual([
       'login.client',
       'login.credentials',
-      'login.getUser',
       'login.membership',
       'login.total',
     ]);
@@ -228,6 +235,36 @@ describe('auth boundaries', () => {
       ),
     ).rejects.toThrow('REDIRECT:/access-denied');
   });
+  it.each([
+    ['missing data', undefined],
+    ['missing user', { session: { access_token: 'a', refresh_token: 'r' } }],
+    [
+      'missing user ID',
+      { user: {}, session: { access_token: 'a', refresh_token: 'r' } },
+    ],
+    ['missing session', { user: { id: 'user' } }],
+    [
+      'missing access token',
+      { user: { id: 'user' }, session: { refresh_token: 'r' } },
+    ],
+    [
+      'missing refresh token',
+      { user: { id: 'user' }, session: { access_token: 'a' } },
+    ],
+  ])(
+    'rejects a %s sign-in response before membership',
+    async (_label, data) => {
+      mocks.signInWithPassword.mockResolvedValue({ data, error: null });
+      expect(
+        await login(
+          {},
+          form({ email: 'staff@example.test', password: 'Password123456' }),
+        ),
+      ).toEqual({ error: 'Unable to verify this account. Please try again.' });
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.getUser).not.toHaveBeenCalled();
+    },
+  );
   it('returns safe invalid-credential errors', async () => {
     mocks.signInWithPassword.mockResolvedValue({
       error: { message: 'internal details' },
