@@ -73,13 +73,14 @@ test('a serialized control excluded by its section can recover through a compati
   const category = await createCategory(page);
   const designer = await openDesigner(page, category);
   // New categories inherit the canonical baseline's placed Serial Number.
+  const control = fieldControl(designer, 'Serial Number');
+  await control.hover();
   await expect(
     designer.getByRole('button', { name: 'Drag Serial Number' }),
   ).toBeVisible();
   await designer.getByRole('button', { name: 'Add section' }).click();
   const source = designer.locator('[data-section-id]').last();
   await source.getByLabel('Section heading').fill('Quantity only');
-  const control = fieldControl(designer, 'Serial Number');
   await openLayout(control);
   await chooseControlSection(control, 'Quantity only');
   await source.getByText('Section options').click();
@@ -96,6 +97,7 @@ test('a serialized control excluded by its section can recover through a compati
     .selectOption('asset');
   await openLayout(control);
   await chooseControlSection(control, 'Serialized recovery');
+  await control.hover();
   await expect(
     destination.getByRole('button', { name: 'Drag Serial Number' }),
   ).toBeVisible();

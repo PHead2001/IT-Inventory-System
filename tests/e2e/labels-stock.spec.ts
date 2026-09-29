@@ -131,8 +131,8 @@ test('larger labels retry normal text fitting while preserving the QR and print 
   page,
 }, testInfo) => {
   await signIn(page);
-  // A wide-letter name requires four normal lines on 70x35 but fits three on 90x50.
-  const name = 'W'.repeat(48);
+  // The wide-letter name crosses the small label's text-height budget.
+  const name = 'W'.repeat(80);
   await page.goto('/inventory/quantity/new');
   const form = page.getByRole('form', { name: 'Create quantity inventory' });
   await form.getByLabel('Name', { exact: true }).fill(name);
@@ -144,10 +144,24 @@ test('larger labels retry normal text fitting while preserving the QR and print 
   const id = page.url().split('/').at(-1)!;
   await page.goto('/labels?quantity=' + id);
   await readyPreview(page, 1);
-  const size = page.getByLabel('Label size', { exact: true });
+  const size = page.getByRole('combobox', { name: 'Label size', exact: true });
   await size.selectOption('70x35');
   const card = page.locator('.label-card').first();
   const title = card.locator('strong[data-fit-text]');
+  await testInfo.attach('small-label-fitting', {
+    body: JSON.stringify(
+      await title.evaluate((element) => ({
+        text: element.textContent,
+        font: getComputedStyle(element).fontSize,
+        width: element.clientWidth,
+        height: element.clientHeight,
+        scrollWidth: element.scrollWidth,
+        scrollHeight: element.scrollHeight,
+        card: (element.closest('.label-card') as HTMLElement)?.style.cssText,
+      })),
+    ),
+    contentType: 'application/json',
+  });
   await expect
     .poll(() => title.evaluate((element) => getComputedStyle(element).fontSize))
     .toBe('10.6667px');
