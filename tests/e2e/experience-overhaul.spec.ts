@@ -839,31 +839,45 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();
-  const fullMotionMs = await viewer.evaluate(async (element) => {
+  await viewer.evaluate((element) => {
     const before = Number(element.dataset.focusCount);
     const button = Array.from(element.querySelectorAll('button')).find(
       (candidate) => candidate.textContent?.trim() === 'Center selected',
     );
     if (!button) throw new Error('Center selected control unavailable');
-    return await new Promise<number>((resolve, reject) => {
-      const started = performance.now();
-      const observer = new MutationObserver(() => {
-        if (Number(element.dataset.focusCount) <= before) return;
-        observer.disconnect();
-        clearTimeout(timeout);
-        resolve(performance.now() - started);
-      });
-      observer.observe(element, {
-        attributes: true,
-        attributeFilter: ['data-focus-count'],
-      });
-      const timeout = window.setTimeout(() => {
-        observer.disconnect();
-        reject(new Error('Full-motion focus never completed'));
-      }, 5_000);
-      button.click();
+    let started: number | null = null;
+    element.dataset.fullMotionSample = 'pending';
+    const finish = (result: string) => {
+      observer.disconnect();
+      button.removeEventListener('click', onClick, true);
+      clearTimeout(timeout);
+      element.dataset.fullMotionSample = result;
+    };
+    const onClick = (event: MouseEvent) => {
+      if (!event.isTrusted) return finish('untrusted click');
+      started = performance.now();
+    };
+    const observer = new MutationObserver(() => {
+      if (started === null || Number(element.dataset.focusCount) <= before)
+        return;
+      finish(String(performance.now() - started));
     });
+    observer.observe(element, {
+      attributes: true,
+      attributeFilter: ['data-focus-count'],
+    });
+    button.addEventListener('click', onClick, true);
+    const timeout = window.setTimeout(() => finish('timeout'), 5_000);
   });
+  await viewer.getByRole('button', { name: 'Center selected' }).click();
+  await expect
+    .poll(() => viewer.getAttribute('data-full-motion-sample'), {
+      timeout: 7_000,
+    })
+    .not.toBe('pending');
+  const fullMotionMs = Number(
+    await viewer.getAttribute('data-full-motion-sample'),
+  );
   expect(fullMotionMs).toBeGreaterThanOrEqual(250);
   await expect.poll(view).not.toBe(fullPan);
 
