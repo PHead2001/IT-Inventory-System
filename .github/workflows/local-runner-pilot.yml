@@ -1,0 +1,57 @@
+name: Local runner pilot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/local-runner/**
+      - .github/workflows/local-runner-pilot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    # Fork PRs must never reach the local runner. Manual runs use trusted main.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, it-inventory-ephemeral]
+    timeout-minutes: 15
+    steps:
+      # No checkout or repository execution, credentials, caches, or artifacts.
+      - name: Verify Linux and disposable Docker lifecycle
+        shell: bash
+        env:
+          PILOT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          command -v docker >/dev/null
+          command -v timeout >/dev/null
+          printf 'OS: %s; architecture: %s\n' "$(uname -s)" "$(uname -m)"
+          printf 'Workflow SHA: %s; head SHA: %s\n' "$GITHUB_SHA" "$PILOT_HEAD_SHA"
+          timeout 30s docker version --format 'Docker client: {{.Client.Version}}; server: {{.Server.Version}}'
+
+          # Alpine 3.23.3 index digest: pull reads the registry; the container has no network.
+          image='alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659'
+          container="it-inventory-pilot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            timeout 30s docker rm --force "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          timeout 180s docker pull --quiet "$image" >/dev/null
+          timeout 30s docker create --name "$container" \
+            --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 32 \
+            --memory 32m --cpus 0.25 --user 65534:65534 \
+            "$image" /bin/sh -c 'printf "Disposable container executed successfully\n"' >/dev/null
+          timeout 30s docker start --attach "$container"
+          test "$(timeout 30s docker inspect --format '{{.State.Running}}:{{.State.ExitCode}}' "$container")" = 'false:0'
+          timeout 30s docker rm "$container" >/dev/null
+          # Prove absence with a successful list query, rather than treating an inspect failure as absence.
+          test -z "$(timeout 30s docker ps --all --quiet --filter "name=^/${container}$")"
+          trap - EXIT
+          printf 'Disposable container removed successfully\n'

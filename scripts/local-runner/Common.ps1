@@ -7,10 +7,39 @@ $script:RunnerPrefix = 'ITIR-'
 $script:RunnerSwitch = 'ITIR-Isolated'
 $script:RunnerNat = 'ITIR-Nat'
 $script:RunnerTask = 'ITInventoryLocalRunner-Watchdog'
-$script:RunnerBootTask = 'ITInventoryLocalRunner-BootCleanup'
 $script:RunnerSupervisorTask = 'ITInventoryLocalRunner-Supervisor'
 $script:RunnerConfigPath = Join-Path $script:RunnerRoot 'config.json'
 $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
+$script:RunnerOperationStage = 'idle'
+$script:RunnerSessionName = $null
+
+function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{
+        atUtc = [DateTime]::UtcNow.ToString('o'); stage = $Stage; code = $Code; sessionName = $SessionName
+    })
+}
+
+function Get-HostNetworkFingerprint {
+    $records = @(
+        foreach ($ip in @(Get-NetIPAddress -ErrorAction Stop)) {
+            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, $ip.InterfaceIndex
+        }
+        foreach ($route in @(Get-NetRoute -ErrorAction Stop)) {
+            'route|{0}|{1}|{2}|{3}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, $route.InterfaceIndex
+        }
+    )
+    if ($records.Count -eq 0) { throw 'Host network inspection returned no addresses or routes.' }
+    $canonical = (@($records | Sort-Object -Unique) -join "`n")
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical)))).Replace('-', '').ToLowerInvariant() }
+    finally { $hash.Dispose() }
+}
+
+function Test-RunnerProcessIdentity([int] $ProcessId, [string] $StartUtc) {
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    return $null -ne $process -and
+        [Math]::Abs(($process.StartTime.ToUniversalTime() - [DateTime]::Parse($StartUtc).ToUniversalTime()).TotalSeconds) -lt 2
+}
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -83,6 +112,76 @@ function Test-ConvertedImageReceipt($Receipt, [string] $SourceHash, [string] $Ou
     return $null -ne $Receipt -and $Receipt.tag -eq $script:RunnerTag -and
         $Receipt.sourceSha256 -ieq $SourceHash -and $Receipt.outputSha256 -ieq $OutputHash -and
         $Receipt.completed -eq $true
+}
+
+function ConvertTo-NativeArgument([AllowEmptyString()][string] $Value) {
+    # Windows CRT argument quoting: preserve empty values, embedded quotes and
+    # backslashes preceding quotes or the closing delimiter.
+    $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+    return '"' + $escaped + '"'
+}
+
+function Invoke-RunnerNative([string] $Executable, [string[]] $Arguments, [string] $InputText = $null) {
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = $true
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        # Drain both streams concurrently without logging guest output or JIT data.
+        $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $errorOutput = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        if ($null -ne $InputText) { $process.StandardInput.WriteLine($InputText) }
+        $process.StandardInput.Close()
+        $process.WaitForExit()
+        [void]$output.GetAwaiter().GetResult()
+        [void]$errorOutput.GetAwaiter().GetResult()
+        return $process.ExitCode
+    } finally { $process.Dispose() }
+}
+
+function New-RunnerSshKey([string] $Path, [string] $Executable = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source) {
+    $Path = Assert-OwnedPath $Path
+    # The installed Windows PowerShell 5.1 drops empty native arguments; the
+    # process helper preserves the explicit empty passphrase without a shell.
+    if ((Invoke-RunnerNative $Executable @('-q', '-t', 'ed25519', '-N', '', '-f', $Path)) -ne 0) {
+        throw 'Per-VM SSH key generation failed.'
+    }
+}
+
+function Get-ConverterRegistrations([string] $Name) {
+    return @(Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
+        Get-ItemProperty -ErrorAction Stop | Where-Object DistributionName -CEQ $Name)
+}
+
+function Remove-OwnedConverter($Stage, [string] $HelperRoot) {
+    $registrations = @(Get-ConverterRegistrations $Stage.helperName)
+    if ($registrations.Count -ne 1) { throw 'Converter retirement requires one exact owned registration.' }
+    Assert-ConverterOwnership $Stage $registrations[0] $HelperRoot
+    & wsl.exe --terminate $Stage.helperName
+    if ($LASTEXITCODE -ne 0) { throw 'Owned converter termination failed; setup remains incomplete.' }
+    # Recheck the destructive target after termination.
+    $registrations = @(Get-ConverterRegistrations $Stage.helperName)
+    if ($registrations.Count -ne 1) { throw 'Converter registration changed before retirement.' }
+    Assert-ConverterOwnership $Stage $registrations[0] $HelperRoot
+    & wsl.exe --unregister $Stage.helperName
+    if ($LASTEXITCODE -ne 0 -or @(Get-ConverterRegistrations $Stage.helperName).Count -ne 0) {
+        throw 'Owned converter retirement could not be verified.'
+    }
+    $distros = @(& wsl.exe --list --quiet | ForEach-Object { $_.Trim([char]0).Trim() })
+    if ($LASTEXITCODE -ne 0 -or $distros -contains $Stage.helperName) { throw 'Retired converter is still listed or WSL readback failed.' }
+}
+
+function Assert-RunnerVmLifecycle([string] $Name) {
+    $vm = Get-VM -Name $Name -ErrorAction Stop
+    if ($vm.AutomaticStartAction -ne 'Nothing' -or $vm.AutomaticStopAction -ne 'TurnOff') {
+        throw 'VM lifecycle readback permits automatic restart or saved job state.'
+    }
 }
 
 function Exit-RunnerLock($Mutex) {
@@ -191,9 +290,18 @@ function Remove-RunnerInstance($State) {
         }
         $vmPath = [IO.Path]::GetFullPath($vm.Path)
         $ownedVmPath = [IO.Path]::GetFullPath($State.instancePath).TrimEnd('\')
-        if ($vm.Notes -ne $script:RunnerTag -or
-            -not ($vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -or
-                $vmPath.StartsWith($ownedVmPath + '\', [StringComparison]::OrdinalIgnoreCase))) {
+        $normalOwner = $vm.Notes -eq $script:RunnerTag -and
+            ($vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -or
+                $vmPath.StartsWith($ownedVmPath + '\', [StringComparison]::OrdinalIgnoreCase))
+        $provisionalOwner = $false
+        if ([string]::IsNullOrEmpty($vm.Notes) -and $State.PSObject.Properties.Name -contains 'phase' -and $State.phase -eq 'creating') {
+            $expectedBootDisk = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
+            $provisionalOwner = $vm.Name -ceq $State.vmName -and $vm.State -eq 'Off' -and
+                $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -and
+                $State.expectedBootDisk -ceq $expectedBootDisk -and $disk.Count -eq 1 -and
+                [string]::Equals([IO.Path]::GetFullPath($disk[0].Path), $expectedBootDisk, [StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not ($normalOwner -or $provisionalOwner)) {
             throw 'VM identity does not match owned state; refusing deletion.'
         }
         if ($vm.State -ne 'Off') { Stop-VM -Name $State.vmName -TurnOff -Force -ErrorAction Stop }

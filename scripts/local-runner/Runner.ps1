@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Supervise', 'EnablePilot', 'EnableActive')]
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'EnableActive')]
     [string] $Action,
-    [switch] $AtStartup
+    [ValidatePattern('^ITIR-[0-9a-f]{32}$')][string] $SessionName
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
@@ -36,9 +36,8 @@ function Assert-InstalledHost($Config) {
     Assert-SecureRoot
     if ($Config.activation -notin @('pilot', 'active')) { throw 'Runner pickup is disabled in installed config.' }
     if (-not (Get-ScheduledTask -TaskName $script:RunnerTask -ErrorAction SilentlyContinue) -or
-        -not (Get-ScheduledTask -TaskName $script:RunnerBootTask -ErrorAction SilentlyContinue) -or
         -not (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue)) {
-        throw 'Supervisor and both host watchdog tasks must be installed before runner registration.'
+        throw 'Supervisor and periodic host watchdog tasks must be installed before runner registration.'
     }
     $switch = Get-VMSwitch -Name $script:RunnerSwitch -ErrorAction SilentlyContinue
     $nat = Get-NetNat -Name $script:RunnerNat -ErrorAction SilentlyContinue
@@ -130,7 +129,7 @@ function Set-IsolatedAdapter([string] $VmName) {
             $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $route.DestinationPrefix -Weight 220 -Passthru
         }
     }
-    foreach ($port in @(80, 443)) {
+    foreach ($port in @(80, 443, 5432)) {
         $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -Protocol TCP -RemotePort $port -Weight 100 -Stateful $true -Passthru
     }
     foreach ($dns in @('1.1.1.1', '8.8.8.8')) {
@@ -164,13 +163,13 @@ function Test-GuestIsolation($State, $Config) {
     $listener = [Net.Sockets.TcpListener]::new([ipaddress]::Parse($Config.gatewayIp), 49581)
     $listener.Start()
     try {
-        & ssh.exe @args "runner@$($Config.guestIp)" 'timeout 4 bash -c "echo probe >/dev/tcp/172.30.240.1/49581" >/dev/null 2>&1; test $? -ne 0' 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0 -or $listener.Pending()) {
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 4 bash -c "echo probe >/dev/tcp/172.30.240.1/49581" >/dev/null 2>&1; test $? -ne 0'))
+        if ($exitCode -ne 0 -or $listener.Pending()) {
             throw 'Guest-to-host isolation probe failed.'
         }
     } finally { $listener.Stop() }
-    & ssh.exe @args "runner@$($Config.guestIp)" 'curl --head --fail --silent --show-error --max-time 10 https://api.github.com >/dev/null' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Guest public TLS/DNS probe failed.' }
+    $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'curl --head --fail --silent --show-error --max-time 10 https://api.github.com >/dev/null'))
+    if ($exitCode -ne 0) { throw 'Guest public TLS/DNS probe failed.' }
 }
 
 function Save-Heartbeat($State) {
@@ -184,9 +183,71 @@ function Save-Heartbeat($State) {
 }
 
 function Assert-SessionAlive($State) {
-    if ([DateTime]::UtcNow -ge [DateTime]::Parse($State.deadlineUtc)) { throw 'Host hard deadline reached.' }
+    if ([DateTime]::UtcNow -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Host hard deadline reached.' }
     if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) { throw 'Stop requested.' }
     Save-Heartbeat $State
+    $current = Get-RunnerState
+    if ($current.PSObject.Properties.Name -contains 'networkFingerprint') {
+        if ((Get-HostNetworkFingerprint) -cne $current.networkFingerprint) { throw 'Host network changed; session cannot continue.' }
+    }
+    if ($current.PSObject.Properties.Name -contains 'guardianReady' -and $current.guardianReady -eq $true -and
+        -not (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc)) {
+        throw 'Session network guardian exited; refusing further operations.'
+    }
+}
+
+function Invoke-GuardCheck([string] $Name) {
+    $mutex = Enter-RunnerLock
+    try {
+        $state = Get-RunnerState
+        if ($null -eq $state -or $state.vmName -cne $Name) { return $false }
+        Assert-StateIdentity $state
+        $code = $null
+        try {
+            if ((Get-HostNetworkFingerprint) -cne $state.networkFingerprint) { $code = 'NETWORK_CHANGED' }
+        } catch { $code = 'NETWORK_INSPECTION_FAILED' }
+        if ($null -eq $code -and -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)) { $code = 'OWNER_EXITED' }
+        if ([DateTime]::UtcNow -ge [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()) { $code = 'DEADLINE_REACHED' }
+        if ($null -ne $code) {
+            Write-RunnerFailure 'network-guard' $code $Name
+            Remove-RunnerInstance $state
+            return $false
+        }
+        $state | Add-Member -NotePropertyName guardianPid -NotePropertyValue $PID -Force
+        $state | Add-Member -NotePropertyName guardianStartUtc -NotePropertyValue ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')) -Force
+        $state | Add-Member -NotePropertyName guardianReady -NotePropertyValue $true -Force
+        Write-RunnerJson $script:RunnerStatePath $state
+        return $true
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Start-SessionGuardian($State) {
+    $installed = Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1'
+    $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Guard -SessionName $($State.vmName)"
+    $guardian = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    try {
+        $limit = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $State.vmName) { throw 'Guardian cancelled the session before boot.' }
+            if ($current.PSObject.Properties.Name -contains 'guardianReady' -and $current.guardianReady -eq $true -and
+                $current.guardianPid -eq $guardian.Id -and (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc)) { return }
+            if ($guardian.HasExited) { throw 'Network guardian exited before readiness.' }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $limit)
+        throw 'Network guardian did not confirm readiness before boot.'
+    } finally { $guardian.Dispose() }
+}
+
+function Start-GuardedVm($State) {
+    $mutex = Enter-RunnerLock
+    try {
+        Assert-SessionAlive $State
+        $current = Get-RunnerState
+        if ($current.vmName -cne $State.vmName -or $current.guardianReady -ne $true) { throw 'VM boot requires its ready guardian.' }
+        Assert-RunnerVmLifecycle $State.vmName
+        Start-VM -Name $State.vmName
+    } finally { Exit-RunnerLock $mutex }
 }
 
 function Get-SshArgs($State) {
@@ -200,8 +261,8 @@ function Wait-Guest($State, $Config) {
     $limit = [DateTime]::UtcNow.AddMinutes(12)
     while ([DateTime]::UtcNow -lt $limit) {
         Assert-SessionAlive $State
-        & ssh.exe @args "runner@$($Config.guestIp)" 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test -S /var/run/docker.sock' 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return }
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test -S /var/run/docker.sock'))
+        if ($exitCode -eq 0) { return }
         Start-Sleep -Seconds 10
     }
     throw 'Guest never reached cloud-init/Docker readiness.'
@@ -225,9 +286,11 @@ function Get-RunnerArchive($State) {
 }
 
 function Invoke-RunnerSession($Config) {
+    $script:RunnerOperationStage = 'preflight'
     Assert-InstalledHost $Config
     [void](Get-OwnerToken) # Check owner binding before changing the host or contacting GitHub.
     $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
+    $script:RunnerSessionName = $name
     $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
     $state = [ordered]@{
         tag = $script:RunnerTag; vmName = $name; instancePath = $instance
@@ -243,13 +306,29 @@ function Invoke-RunnerSession($Config) {
         Write-RunnerJson $script:RunnerStatePath $state
     } finally { Exit-RunnerLock $mutex }
     try {
+        $script:RunnerOperationStage = 'disk-copy'
         $disk = Join-Path $instance 'guest.vhdx'
         Copy-Item -LiteralPath $Config.baseVhdx -Destination $disk -ErrorAction Stop
-        & ssh-keygen.exe -q -t ed25519 -N '' -f (Join-Path $instance 'id_ed25519') | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Per-VM SSH key generation failed.' }
+        $script:RunnerOperationStage = 'key-generation'
+        New-RunnerSshKey (Join-Path $instance 'id_ed25519')
         $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
-        $vm = New-VM -Name $name -Generation 2 -VHDPath $disk -Path $instance -MemoryStartupBytes 8GB -SwitchName $script:RunnerSwitch
-        Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled
+        Assert-SessionAlive $state
+        $mutex = Enter-RunnerLock
+        try {
+            $script:RunnerOperationStage = 'vm-creation'
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
+            $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
+            $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
+            Write-RunnerJson $script:RunnerStatePath $current
+            $vm = New-VM -Name $name -Generation 2 -VHDPath $disk -Path $instance -MemoryStartupBytes 8GB -SwitchName $script:RunnerSwitch
+            Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
+            Assert-RunnerVmLifecycle $name
+            if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
+            $current.phase = 'owned'
+            Write-RunnerJson $script:RunnerStatePath $current
+        } finally { Exit-RunnerLock $mutex }
+        $script:RunnerOperationStage = 'vm-configuration'
         Set-VMProcessor -VMName $name -Count 4
         Set-VMMemory -VMName $name -DynamicMemoryEnabled $false
         Set-VMFirmware -VMName $name -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
@@ -260,25 +339,39 @@ function Invoke-RunnerSession($Config) {
         $seed = Join-Path $instance 'cidata.vhdx'
         New-SeedDisk $seed $key $mac $Config
         Add-VMHardDiskDrive -VMName $name -Path $seed
+        $script:RunnerOperationStage = 'network-isolation'
+        $mutex = Enter-RunnerLock
+        try {
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $name) { throw 'Session removed before network isolation.' }
+            $current | Add-Member -NotePropertyName networkFingerprint -NotePropertyValue (Get-HostNetworkFingerprint) -Force
+            Write-RunnerJson $script:RunnerStatePath $current
+        } finally { Exit-RunnerLock $mutex }
         $expectedRules = Set-IsolatedAdapter $name
-        Start-VM -Name $name
+        Start-SessionGuardian $state
+        Start-GuardedVm $state
+        $script:RunnerOperationStage = 'guest-readiness'
         Wait-Guest $state $Config
         Assert-SessionAlive $state
         Assert-AdapterRules $name $expectedRules
         Test-GuestIsolation $state $Config
 
+        $script:RunnerOperationStage = 'runner-download'
         $archive = Get-RunnerArchive $state
         $sshArgs = Get-SshArgs $state
-        & scp.exe @sshArgs $archive "runner@$($Config.guestIp):/home/runner/runner.tar.gz" 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Runner archive transfer failed.' }
-        & ssh.exe @sshArgs "runner@$($Config.guestIp)" 'mkdir -p ~/actions-runner && tar -xzf ~/runner.tar.gz -C ~/actions-runner && rm ~/runner.tar.gz' 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Runner archive extraction failed.' }
+        $script:RunnerOperationStage = 'runner-transfer'
+        $exitCode = Invoke-RunnerNative 'scp.exe' ($sshArgs + @($archive, "runner@$($Config.guestIp):/home/runner/runner.tar.gz"))
+        if ($exitCode -ne 0) { throw 'Runner archive transfer failed.' }
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'mkdir -p ~/actions-runner && tar -xzf ~/runner.tar.gz -C ~/actions-runner && rm ~/runner.tar.gz'))
+        if ($exitCode -ne 0) { throw 'Runner archive extraction failed.' }
         Assert-SessionAlive $state
         Assert-AdapterRules $name $expectedRules
 
         # The repository-scoped PAT remains on Windows. Only the one-job JIT value enters the guest.
         $token = Get-OwnerToken
         $parts = $Config.repo.Split('/')
+        $script:RunnerOperationStage = 'jit-registration'
+        Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
             name = $name; runner_group_id = $Config.runnerGroupId; labels = @($Config.label); work_folder = '_work'
         } $token
@@ -288,10 +381,12 @@ function Invoke-RunnerSession($Config) {
             throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
         }
         $runnerId = [long]$jit.runner.id
+        Assert-SessionAlive $state
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
         # A JIT runner exits after one job. No guest output or secret-bearing config is logged on the host.
-        $jit.encoded_jit_config | & ssh.exe @sshArgs "runner@$($Config.guestIp)" 'read -r JIT; cd ~/actions-runner; exec ./run.sh --jitconfig "$JIT" >/dev/null 2>&1' 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'JIT runner process ended abnormally; check GitHub Actions job state.' }
+        $script:RunnerOperationStage = 'job-execution'
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'read -r JIT; cd ~/actions-runner; exec ./run.sh --jitconfig "$JIT" >/dev/null 2>&1')) $jit.encoded_jit_config
+        if ($exitCode -ne 0) { throw 'JIT runner process ended abnormally; check GitHub Actions job state.' }
         Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
         return [pscustomobject]@{ name = $name; id = $runnerId }
     } finally {
@@ -299,6 +394,9 @@ function Invoke-RunnerSession($Config) {
         try {
             $current = Get-RunnerState
             if ($null -ne $current -and $current.vmName -eq $name) { Remove-RunnerInstance $current }
+        } catch {
+            Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
+            throw
         } finally { Exit-RunnerLock $mutex }
     }
 }
@@ -325,6 +423,17 @@ function Get-QueuedRunnerJob($Config, [string] $Token) {
 function Invoke-Supervisor {
     Assert-Administrator
     Assert-SecureRoot
+    # One process owns recovery and pickup, including boot and manual starts.
+    $supervisorMutex = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
+    try {
+        $mutex = Enter-RunnerLock
+        try { $stale = Get-RunnerState; if ($null -ne $stale) { Remove-RunnerInstance $stale } }
+        finally { Exit-RunnerLock $mutex }
+        Invoke-SupervisorLoop
+    } finally { Exit-RunnerLock $supervisorMutex }
+}
+
+function Invoke-SupervisorLoop {
     while (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
         $config = Get-RunnerConfig
         if ($config.activation -notin @('pilot', 'active')) {
@@ -337,11 +446,14 @@ function Invoke-Supervisor {
             return
         }
         try {
+            $script:RunnerSessionName = $null
+            $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token
             $token = $null
             if ($null -ne $job) {
                 if ($config.activation -eq 'pilot') {
+                    $script:RunnerOperationStage = 'pilot-consumption'
                     Write-RunnerJson $pilotAttemptPath ([ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id
                         consumedUtc = [DateTime]::UtcNow.ToString('o')
@@ -349,6 +461,7 @@ function Invoke-Supervisor {
                 }
                 $allocatedRunner = Invoke-RunnerSession $config
                 if ($config.activation -eq 'pilot') {
+                    $script:RunnerOperationStage = 'pilot-verification'
                     $token = Get-OwnerToken
                     $parts = $config.repo.Split('/')
                     $result = $null
@@ -372,11 +485,11 @@ function Invoke-Supervisor {
             }
         } catch {
             # API/guest failures never register a fallback runner. The next bounded poll may retry.
-            $message = $_.Exception.GetType().Name
-            Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{
-                atUtc = [DateTime]::UtcNow.ToString('o'); message = $message
-            })
-            Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner supervisor failed: $message" -ErrorAction SilentlyContinue
+            $existing = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
+            if ($null -eq $existing -or $null -eq $script:RunnerSessionName -or $existing.sessionName -cne $script:RunnerSessionName) {
+                Write-RunnerFailure $script:RunnerOperationStage 'STAGE_FAILED' $script:RunnerSessionName
+            }
+            Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner stage failed: $script:RunnerOperationStage" -ErrorAction SilentlyContinue
         }
         Start-Sleep -Seconds 30
     }
@@ -408,10 +521,10 @@ function Invoke-Watchdog {
         if ($null -eq $state) { return }
         Assert-StateIdentity $state
         $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
-        $ownerProcess = Get-Process -Id $state.supervisorPid -ErrorAction SilentlyContinue
-        $ownerAlive = $null -ne $ownerProcess -and
-            [Math]::Abs(($ownerProcess.StartTime.ToUniversalTime() - [DateTime]::Parse($state.supervisorStartUtc).ToUniversalTime()).TotalSeconds) -lt 2
-        if ($AtStartup -or [DateTime]::UtcNow -ge $deadline -or -not $ownerAlive) {
+        $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
+        $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
+            -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
+        if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead) {
             Remove-RunnerInstance $state
         }
     } finally { Exit-RunnerLock $mutex }
@@ -443,7 +556,8 @@ switch ($Action) {
     'Start' {
         Assert-Administrator
         Assert-SecureRoot
-        [void](Get-RunnerConfig)
+        $config = Get-RunnerConfig
+        if ($config.activation -eq 'disabled') { throw 'Job pickup is disabled. Open Setup and choose Enable one-job pilot after review.' }
         if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) {
             Remove-Item -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -Force
         }
@@ -473,9 +587,19 @@ switch ($Action) {
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
-        if ($null -ne $recentError) { Write-Host "Last supervisor error ($($recentError.atUtc)): $($recentError.message)" }
+        if ($null -ne $recentError) { Write-Host "Last supervisor failure ($($recentError.atUtc)): stage=$($recentError.stage); code=$($recentError.code)." }
+        $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
+        if ($null -ne $attempt) { Write-Host "Pilot consumed for job $($attempt.jobId). Failure or uncertainty requires maintainer investigation; it cannot take another pilot job." }
+        $pilot = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
+        if ($null -ne $pilot) { Write-Host "Pilot proof: status=$($pilot.status); conclusion=$($pilot.conclusion); verified=$($pilot.verified)." }
     }
     'Watchdog' { Invoke-Watchdog }
+    'Guard' {
+        Assert-Administrator
+        Assert-SecureRoot
+        if (-not $SessionName) { throw 'Network guard requires one exact session identity.' }
+        while (Invoke-GuardCheck $SessionName) { Start-Sleep -Seconds 1 }
+    }
     'Supervise' { Invoke-Supervisor }
     'EnablePilot' {
         Assert-Administrator

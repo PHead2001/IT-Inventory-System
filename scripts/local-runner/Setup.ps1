@@ -110,7 +110,8 @@ try {
         }
     }
 
-    # This dedicated WSL distribution is an image-conversion tool only. It never sees jobs or credentials.
+    # WSL is a trusted setup tool with host integration, not a security sandbox.
+    # Retire this owned converter before completed setup allows PAT storage.
     $helper = $stage.helperName
     $helperRoot = Join-Path $script:RunnerRoot 'image-converter'
     [void](Assert-OwnedPath $helperRoot)
@@ -176,6 +177,7 @@ try {
     if (-not (Test-ConvertedImageReceipt (Read-RunnerJson $receiptPath) $imageHash $vhdxHash)) {
         throw 'Converted Ubuntu image has no matching completed-conversion receipt.'
     }
+    Remove-OwnedConverter $stage $helperRoot
 
     if ($null -eq $existingSwitch) { New-VMSwitch -Name $script:RunnerSwitch -SwitchType Internal | Out-Null }
     $interface = "vEthernet ($($script:RunnerSwitch))"
@@ -190,12 +192,10 @@ try {
     }
     $installed = Join-Path $binDir 'Runner.ps1'
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Watchdog"
-    $bootAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Watchdog -AtStartup"
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $minute = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
     $boot = New-ScheduledTaskTrigger -AtStartup
     Register-ScheduledTask -TaskName $script:RunnerTask -Action $action -Trigger $minute -Principal $principal -Force | Out-Null
-    Register-ScheduledTask -TaskName $script:RunnerBootTask -Action $bootAction -Trigger $boot -Principal $principal -Force | Out-Null
     $supervisorAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Supervise"
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $script:RunnerSupervisorTask -Action $supervisorAction -Trigger $boot -Principal $principal -Settings $settings -Force | Out-Null

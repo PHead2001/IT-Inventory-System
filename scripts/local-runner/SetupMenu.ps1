@@ -34,8 +34,11 @@ while ($true) {
     Write-Host '1. Enable Hyper-V (one time; never restarts Windows automatically)'
     Write-Host '2. Install or resume setup (downloads verified Ubuntu images)'
     Write-Host '3. Store the repository-scoped GitHub token locally'
-    Write-Host '4. Exit'
-    $choice = Read-Host 'Choose 1-4'
+    Write-Host '4. Status (activation, consumed pilot, safe failure stage/code)'
+    Write-Host '5. Enable one-job pilot and start (only after independent review)'
+    Write-Host '6. Enable active pickup and start (requires successful recorded pilot proof)'
+    Write-Host '7. Exit'
+    $choice = Read-Host 'Choose 1-7'
     try {
         switch ($choice) {
             '1' { & (Join-Path $PSScriptRoot 'Setup.ps1') -EnableHyperV }
@@ -48,8 +51,17 @@ while ($true) {
             '3' {
                 & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action StoreCredential
             }
-            '4' { return }
-            default { Write-Host 'Choose a number from 1 to 4.' }
+            '4' { & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Status }
+            '5' {
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action EnablePilot
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Start
+            }
+            '6' {
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action EnableActive
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Start
+            }
+            '7' { return }
+            default { Write-Host 'Choose a number from 1 to 7.' }
         }
     } catch {
         Write-Host "Setup stopped safely: $($_.Exception.Message)" -ForegroundColor Yellow
