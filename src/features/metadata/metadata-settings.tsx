@@ -53,6 +53,8 @@ const input =
   'min-h-10 w-full min-w-0 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm';
 const label = (value: string) =>
   value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const builtinLabel = (value: string) =>
+  value === 'category_id' ? 'Category' : label(value);
 const source = (form?: MetadataForm) =>
   form?.draft_definition ??
   form?.published_definition ?? { fields: [], layout: [] };
@@ -137,10 +139,10 @@ function FieldPanel({
       className="min-w-0 space-y-3 rounded border border-slate-700 p-3"
       data-testid={`field-${field.id}`}
     >
-      <div className="flex flex-wrap gap-2">
-        <h4 className="min-w-0 flex-1 break-words font-semibold">
-          {field.label || 'Untitled field'} · {label(field.type)}
-        </h4>
+      <h4 className="min-w-0 break-words font-semibold [overflow-wrap:anywhere]">
+        {field.label || 'Untitled field'} · {label(field.type)}
+      </h4>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
         <button
           type="button"
           className="min-h-11 px-2 underline"
@@ -399,11 +401,16 @@ function SortableControl({
     <div
       ref={ref}
       data-control-id={id}
+      data-dragging={isDragging}
       style={style}
       onClick={onClick}
-      className={`min-w-0 space-y-2 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-slate-600'} ${isDragging ? 'opacity-40' : ''}`}
+      className={`min-w-0 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-slate-600'} ${isDragging ? 'opacity-40' : ''}`}
     >
-      {children(handleRef)}
+      <div
+        className={`min-w-0 space-y-2 rounded ${selected ? 'bg-cyan-400/[0.04] shadow-[0_8px_22px_-12px_rgba(34,211,238,0.9)]' : ''}`}
+      >
+        {children(handleRef)}
+      </div>
     </div>
   );
 }
@@ -423,6 +430,7 @@ function SectionDropArea({
   return (
     <div
       ref={ref}
+      data-drop-target={isDropTarget}
       className={`flex min-h-20 flex-wrap gap-3 rounded border border-dashed p-2 ${isDropTarget ? 'border-cyan-400 bg-cyan-400/10' : 'border-slate-700'}`}
     >
       {children}
@@ -1359,7 +1367,7 @@ export function MetadataSettings({
           {definition && !recovery && (
             <>
               <nav
-                className="flex gap-2 md:hidden"
+                className="flex flex-wrap gap-2 xl:hidden"
                 aria-label="Designer panels"
               >
                 {(['library', 'canvas', 'inspector'] as const).map((panel) => (
@@ -1453,9 +1461,13 @@ export function MetadataSettings({
                   finishDnd(event.canceled);
                 }}
               >
-                <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(12rem,1fr)_minmax(0,2fr)_minmax(14rem,1fr)]">
+                <div
+                  data-testid="designer-panes"
+                  className="grid min-w-0 gap-4 xl:grid-cols-[minmax(12rem,1fr)_minmax(28rem,2.5fr)_minmax(15rem,1fr)]"
+                >
                   <div
-                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
+                    data-testid="designer-library"
+                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
                   >
                     <h3 className="font-semibold">Field library</h3>
                     <div className="flex flex-wrap gap-2">
@@ -1508,34 +1520,35 @@ export function MetadataSettings({
                         </button>
                       ))}
                     </div>
-                  </div>
-                  <div className="rounded border border-slate-700 p-2 text-sm">
-                    <h4 className="font-semibold">Hidden controls</h4>
-                    {definition.layout
-                      .flatMap((section) => section.controls)
-                      .filter((control) => control.visible === false)
-                      .map((control) => (
-                        <button
-                          className="block min-h-10 underline"
-                          type="button"
-                          key={control.id}
-                          onClick={() =>
-                            updateControl(control.id, { visible: true })
-                          }
-                        >
-                          Restore{' '}
-                          {control.kind === 'builtin'
-                            ? label(control.builtin ?? '')
-                            : control.kind === 'field'
-                              ? definition.fields.find(
-                                  (field) => field.id === control.field_id,
-                                )?.label
-                              : 'help text'}
-                        </button>
-                      ))}
+                    <div className="rounded-lg border border-slate-700 p-3 text-sm">
+                      <h4 className="font-semibold">Hidden controls</h4>
+                      {definition.layout
+                        .flatMap((section) => section.controls)
+                        .filter((control) => control.visible === false)
+                        .map((control) => (
+                          <button
+                            className="block min-h-10 break-words text-left text-cyan-200 underline"
+                            type="button"
+                            key={control.id}
+                            onClick={() =>
+                              updateControl(control.id, { visible: true })
+                            }
+                          >
+                            Restore{' '}
+                            {control.kind === 'builtin'
+                              ? builtinLabel(control.builtin ?? '')
+                              : control.kind === 'field'
+                                ? definition.fields.find(
+                                    (field) => field.id === control.field_id,
+                                  )?.label
+                                : 'help text'}
+                          </button>
+                        ))}
+                    </div>
                   </div>
                   <div
-                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
+                    data-testid="designer-canvas"
+                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
                   >
                     <h3 className="font-semibold">Form canvas</h3>
                     <Button
@@ -1611,148 +1624,167 @@ export function MetadataSettings({
                                   }
                                 />
                               </label>
-                              <label className="text-xs">
-                                <input
-                                  type="checkbox"
-                                  checked={section.visible !== false}
-                                  disabled={sectionHasProtectedControls(
-                                    section,
-                                  )}
-                                  onChange={(event) =>
-                                    edit({
-                                      ...definition,
-                                      layout: definition.layout.map((item) =>
-                                        item.id === section.id
-                                          ? {
-                                              ...item,
-                                              visible: event.target.checked,
-                                            }
-                                          : item,
-                                      ),
-                                    })
-                                  }
-                                />{' '}
-                                Show section
-                              </label>
-                              <select
-                                aria-label={`Applies to ${section.label}`}
-                                className={input + ' max-w-36'}
-                                value={(
-                                  section.applies_to ?? ['quantity', 'asset']
-                                ).join(',')}
-                                disabled={sectionHasProtectedControls(section)}
-                                onChange={(event) =>
-                                  edit({
-                                    ...definition,
-                                    layout: definition.layout.map((item) =>
-                                      item.id === section.id
-                                        ? {
-                                            ...item,
-                                            applies_to:
-                                              event.target.value.split(',') as (
-                                                'quantity' | 'asset'
-                                              )[],
-                                          }
-                                        : item,
-                                    ),
-                                  })
-                                }
-                              >
-                                <option value="quantity,asset">Both</option>
-                                <option value="quantity">Quantity</option>
-                                <option value="asset">Serialized</option>
-                              </select>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                disabled={sectionIndex === 0}
-                                onClick={() => {
-                                  const layout = [...definition.layout];
-                                  [
-                                    layout[sectionIndex - 1],
-                                    layout[sectionIndex],
-                                  ] = [
-                                    layout[sectionIndex],
-                                    layout[sectionIndex - 1],
-                                  ];
-                                  edit({ ...definition, layout });
-                                }}
-                              >
-                                Section up
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                disabled={
-                                  sectionIndex === definition.layout.length - 1
-                                }
-                                onClick={() => {
-                                  const layout = [...definition.layout];
-                                  [
-                                    layout[sectionIndex + 1],
-                                    layout[sectionIndex],
-                                  ] = [
-                                    layout[sectionIndex],
-                                    layout[sectionIndex + 1],
-                                  ];
-                                  edit({ ...definition, layout });
-                                }}
-                              >
-                                Section down
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                disabled={
-                                  sectionHasProtectedControls(section) ||
-                                  section.id ===
-                                    selected?.published_definition.layout[0]
-                                      ?.id ||
-                                  definition.layout.length === 1
-                                }
-                                onClick={() => {
-                                  const destinations = definition.layout.filter(
-                                    (item) => item.id !== section.id,
-                                  );
-                                  const destination = section.controls.length
-                                    ? window.prompt(
-                                        `Move ${section.controls.length} controls to which section? Enter a section name, or leave blank to remove custom field placements. Definitions and stored values remain.`,
-                                        destinations[0]?.label ?? '',
-                                      )
-                                    : '';
-                                  if (destination === null) return;
-                                  const target = destination.trim()
-                                    ? destinations.find(
-                                        (item) =>
-                                          item.label.toLowerCase() ===
-                                          destination.trim().toLowerCase(),
-                                      )
-                                    : null;
-                                  if (destination.trim() && !target) {
-                                    setMessage(
-                                      'Choose an existing section name.',
-                                    );
-                                    return;
-                                  }
-                                  const next = removeSection(
-                                    definition,
-                                    section.id,
-                                    target?.id ?? null,
-                                  );
-                                  if (next === definition) {
-                                    setMessage(
-                                      'This section contains protected or standard controls. Move or show those controls before removing it.',
-                                    );
-                                    return;
-                                  }
-                                  edit(next);
-                                  setSelectedSectionId(
-                                    target?.id ?? destinations[0]?.id ?? null,
-                                  );
-                                }}
-                              >
-                                Remove section
-                              </Button>
+                              <details className="w-full rounded-md border border-slate-700/70 bg-slate-950/30 px-3 py-2 text-xs">
+                                <summary className="cursor-pointer font-medium text-cyan-200">
+                                  Section options
+                                </summary>
+                                <div className="flex flex-wrap gap-2 pt-3">
+                                  <label className="text-xs">
+                                    <input
+                                      type="checkbox"
+                                      checked={section.visible !== false}
+                                      disabled={sectionHasProtectedControls(
+                                        section,
+                                      )}
+                                      onChange={(event) =>
+                                        edit({
+                                          ...definition,
+                                          layout: definition.layout.map(
+                                            (item) =>
+                                              item.id === section.id
+                                                ? {
+                                                    ...item,
+                                                    visible:
+                                                      event.target.checked,
+                                                  }
+                                                : item,
+                                          ),
+                                        })
+                                      }
+                                    />{' '}
+                                    Show section
+                                  </label>
+                                  <select
+                                    aria-label={`Applies to ${section.label}`}
+                                    className={input + ' max-w-36'}
+                                    value={(
+                                      section.applies_to ?? [
+                                        'quantity',
+                                        'asset',
+                                      ]
+                                    ).join(',')}
+                                    disabled={sectionHasProtectedControls(
+                                      section,
+                                    )}
+                                    onChange={(event) =>
+                                      edit({
+                                        ...definition,
+                                        layout: definition.layout.map((item) =>
+                                          item.id === section.id
+                                            ? {
+                                                ...item,
+                                                applies_to:
+                                                  event.target.value.split(
+                                                    ',',
+                                                  ) as ('quantity' | 'asset')[],
+                                              }
+                                            : item,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <option value="quantity,asset">Both</option>
+                                    <option value="quantity">Quantity</option>
+                                    <option value="asset">Serialized</option>
+                                  </select>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={sectionIndex === 0}
+                                    onClick={() => {
+                                      const layout = [...definition.layout];
+                                      [
+                                        layout[sectionIndex - 1],
+                                        layout[sectionIndex],
+                                      ] = [
+                                        layout[sectionIndex],
+                                        layout[sectionIndex - 1],
+                                      ];
+                                      edit({ ...definition, layout });
+                                    }}
+                                  >
+                                    Section up
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={
+                                      sectionIndex ===
+                                      definition.layout.length - 1
+                                    }
+                                    onClick={() => {
+                                      const layout = [...definition.layout];
+                                      [
+                                        layout[sectionIndex + 1],
+                                        layout[sectionIndex],
+                                      ] = [
+                                        layout[sectionIndex],
+                                        layout[sectionIndex + 1],
+                                      ];
+                                      edit({ ...definition, layout });
+                                    }}
+                                  >
+                                    Section down
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={
+                                      sectionHasProtectedControls(section) ||
+                                      section.id ===
+                                        selected?.published_definition.layout[0]
+                                          ?.id ||
+                                      definition.layout.length === 1
+                                    }
+                                    onClick={() => {
+                                      const destinations =
+                                        definition.layout.filter(
+                                          (item) => item.id !== section.id,
+                                        );
+                                      const destination = section.controls
+                                        .length
+                                        ? window.prompt(
+                                            `Move ${section.controls.length} controls to which section? Enter a section name, or leave blank to remove custom field placements. Definitions and stored values remain.`,
+                                            destinations[0]?.label ?? '',
+                                          )
+                                        : '';
+                                      if (destination === null) return;
+                                      const target = destination.trim()
+                                        ? destinations.find(
+                                            (item) =>
+                                              item.label.toLowerCase() ===
+                                              destination.trim().toLowerCase(),
+                                          )
+                                        : null;
+                                      if (destination.trim() && !target) {
+                                        setMessage(
+                                          'Choose an existing section name.',
+                                        );
+                                        return;
+                                      }
+                                      const next = removeSection(
+                                        definition,
+                                        section.id,
+                                        target?.id ?? null,
+                                      );
+                                      if (next === definition) {
+                                        setMessage(
+                                          'This section contains protected or standard controls. Move or show those controls before removing it.',
+                                        );
+                                        return;
+                                      }
+                                      edit(next);
+                                      setSelectedSectionId(
+                                        target?.id ??
+                                          destinations[0]?.id ??
+                                          null,
+                                      );
+                                    }}
+                                  >
+                                    Remove section
+                                  </Button>
+                                </div>
+                              </details>
                             </div>
                             <SectionDropArea id={section.id}>
                               {section.controls.map((control, index) => {
@@ -1763,7 +1795,7 @@ export function MetadataSettings({
                                   control.kind === 'field'
                                     ? field?.label || 'Missing field'
                                     : control.kind === 'builtin'
-                                      ? label(control.builtin ?? '')
+                                      ? builtinLabel(control.builtin ?? '')
                                       : 'Help text';
                                 return (
                                   <SortableControl
@@ -1786,239 +1818,281 @@ export function MetadataSettings({
                                   >
                                     {(controlHandleRef) => (
                                       <>
-                                        <div className="flex items-center gap-2">
-                                          <button
-                                            type="button"
-                                            aria-label={`Drag ${name}`}
-                                            ref={controlHandleRef}
-                                            title="Drag to reorder"
-                                            className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
+                                        <div className="min-w-0 space-y-2">
+                                          <span
+                                            data-testid="designer-control-name"
+                                            className="block min-w-0 break-words font-medium [overflow-wrap:anywhere]"
                                           >
-                                            ⋮⋮
-                                          </button>
-                                          <span className="min-w-0 flex-1 break-words">
                                             {name}
                                           </span>
-                                        </div>
-                                        {control.kind === 'help' && (
-                                          <label className="block">
-                                            Help text
-                                            <textarea
-                                              className={input}
-                                              rows={2}
-                                              value={control.help ?? ''}
-                                              onChange={(event) =>
-                                                updateControl(control.id, {
-                                                  help: event.target.value,
-                                                })
-                                              }
-                                            />
-                                          </label>
-                                        )}
-                                        <div className="grid grid-cols-2 gap-2">
-                                          <label className="text-xs">
-                                            <input
-                                              type="checkbox"
-                                              checked={
-                                                control.visible !== false
-                                              }
-                                              disabled={
-                                                control.kind === 'builtin' &&
-                                                [
-                                                  'name',
-                                                  'category_id',
-                                                  'asset_tag',
-                                                ].includes(
-                                                  control.builtin ?? '',
-                                                )
-                                              }
-                                              onChange={(event) =>
-                                                updateControl(control.id, {
-                                                  visible: event.target.checked,
-                                                })
-                                              }
-                                            />{' '}
-                                            Show control
-                                          </label>
-                                          <select
-                                            aria-label={`Applies to ${name}`}
-                                            className={input}
-                                            value={(
-                                              control.applies_to ?? [
-                                                'quantity',
-                                                'asset',
-                                              ]
-                                            ).join(',')}
-                                            disabled={
-                                              control.kind === 'builtin' &&
-                                              [
-                                                'name',
-                                                'category_id',
-                                                'asset_tag',
-                                              ].includes(control.builtin ?? '')
-                                            }
-                                            onChange={(event) =>
-                                              updateControl(control.id, {
-                                                applies_to:
-                                                  event.target.value.split(
-                                                    ',',
-                                                  ) as ('quantity' | 'asset')[],
-                                              })
-                                            }
-                                          >
-                                            <option value="quantity,asset">
-                                              Both
-                                            </option>
-                                            <option value="quantity">
-                                              Quantity
-                                            </option>
-                                            <option value="asset">
-                                              Serialized
-                                            </option>
-                                          </select>
-                                          <label className="text-xs">
-                                            Section
-                                            <select
-                                              className={input}
-                                              value={section.id}
-                                              onChange={(event) =>
-                                                move(
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                              type="button"
+                                              aria-label={`Drag ${name}`}
+                                              ref={controlHandleRef}
+                                              title="Drag to reorder"
+                                              className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
+                                            >
+                                              ⋮⋮
+                                            </button>
+                                            <span className="shrink-0 rounded-full border border-slate-600 px-2 py-1 text-[10px] text-slate-300">
+                                              {control.width === 'Auto'
+                                                ? 'Auto'
+                                                : `${control.width}/12`}
+                                            </span>
+                                            <span
+                                              title="Form types using this control"
+                                              className="shrink-0 rounded-full border border-slate-600 px-2 py-1 text-[10px] text-slate-300"
+                                            >
+                                              {(control.applies_to?.length ??
+                                                2) > 1
+                                                ? 'Q + A'
+                                                : control.applies_to?.[0] ===
+                                                    'quantity'
+                                                  ? 'Q'
+                                                  : 'A'}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              aria-label={`Resize ${name}`}
+                                              title="Drag to snap width; width selector is also available"
+                                              className="min-h-11 min-w-11 cursor-ew-resize touch-none select-none rounded border border-slate-600 px-2 text-xs text-cyan-200"
+                                              onPointerDown={(event) =>
+                                                beginResize(
                                                   control.id,
-                                                  event.target.value,
-                                                  definition.layout.find(
-                                                    (item) =>
-                                                      item.id ===
-                                                      event.target.value,
-                                                  )?.controls.length ?? 0,
+                                                  event,
+                                                  control.width === 'Auto'
+                                                    ? field?.type === 'boolean'
+                                                      ? 3
+                                                      : 4
+                                                    : control.width,
+                                                  event.currentTarget
+                                                    .closest(
+                                                      '[data-section-id]',
+                                                    )
+                                                    ?.getBoundingClientRect()
+                                                    .width ?? 1,
                                                 )
                                               }
-                                            >
-                                              {definition.layout.map((item) => (
-                                                <option
-                                                  key={item.id}
-                                                  value={item.id}
-                                                >
-                                                  {item.label || 'Untitled'}
-                                                </option>
-                                              ))}
-                                            </select>
-                                          </label>
-                                          <label className="text-xs">
-                                            Width
-                                            <select
-                                              className={input}
-                                              value={control.width}
-                                              onChange={(event) =>
-                                                updateControl(control.id, {
-                                                  width:
-                                                    event.target.value ===
-                                                    'Auto'
-                                                      ? 'Auto'
-                                                      : (Number(
-                                                          event.target.value,
-                                                        ) as Control['width']),
-                                                })
+                                              onPointerMove={updateResize}
+                                              onPointerUp={() => endResize()}
+                                              onPointerCancel={() =>
+                                                endResize(true)
                                               }
                                             >
-                                              {widths.map((width) => (
-                                                <option
-                                                  key={width}
-                                                  value={width}
-                                                >
-                                                  {width === 'Auto'
-                                                    ? 'Auto'
-                                                    : `${width}/12`}
+                                              ↔
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <details className="rounded border border-slate-700/70 px-2 py-1">
+                                          <summary className="min-h-9 cursor-pointer py-2 text-xs font-medium text-cyan-200">
+                                            Layout options
+                                          </summary>
+                                          <div className="space-y-2 pb-2 pt-1">
+                                            {control.kind === 'help' && (
+                                              <label className="block">
+                                                Help text
+                                                <textarea
+                                                  className={input}
+                                                  rows={2}
+                                                  value={control.help ?? ''}
+                                                  onChange={(event) =>
+                                                    updateControl(control.id, {
+                                                      help: event.target.value,
+                                                    })
+                                                  }
+                                                />
+                                              </label>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <label className="text-xs">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={
+                                                    control.visible !== false
+                                                  }
+                                                  disabled={
+                                                    control.kind ===
+                                                      'builtin' &&
+                                                    [
+                                                      'name',
+                                                      'category_id',
+                                                      'asset_tag',
+                                                    ].includes(
+                                                      control.builtin ?? '',
+                                                    )
+                                                  }
+                                                  onChange={(event) =>
+                                                    updateControl(control.id, {
+                                                      visible:
+                                                        event.target.checked,
+                                                    })
+                                                  }
+                                                />{' '}
+                                                Show control
+                                              </label>
+                                              <select
+                                                aria-label={`Applies to ${name}`}
+                                                className={input}
+                                                value={(
+                                                  control.applies_to ?? [
+                                                    'quantity',
+                                                    'asset',
+                                                  ]
+                                                ).join(',')}
+                                                disabled={
+                                                  control.kind === 'builtin' &&
+                                                  [
+                                                    'name',
+                                                    'category_id',
+                                                    'asset_tag',
+                                                  ].includes(
+                                                    control.builtin ?? '',
+                                                  )
+                                                }
+                                                onChange={(event) =>
+                                                  updateControl(control.id, {
+                                                    applies_to:
+                                                      event.target.value.split(
+                                                        ',',
+                                                      ) as (
+                                                        'quantity' | 'asset'
+                                                      )[],
+                                                  })
+                                                }
+                                              >
+                                                <option value="quantity,asset">
+                                                  Both
                                                 </option>
-                                              ))}
-                                            </select>
-                                          </label>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          aria-label={`Resize ${name}`}
-                                          title="Drag to snap width; width selector is also available"
-                                          className="min-h-11 w-full cursor-ew-resize touch-none select-none rounded border border-slate-600 py-1 text-xs"
-                                          onPointerDown={(event) =>
-                                            beginResize(
-                                              control.id,
-                                              event,
-                                              control.width === 'Auto'
-                                                ? field?.type === 'boolean'
-                                                  ? 3
-                                                  : 4
-                                                : control.width,
-                                              event.currentTarget
-                                                .closest('[data-section-id]')
-                                                ?.getBoundingClientRect()
-                                                .width ?? 1,
-                                            )
-                                          }
-                                          onPointerMove={updateResize}
-                                          onPointerUp={() => endResize()}
-                                          onPointerCancel={() =>
-                                            endResize(true)
-                                          }
-                                        >
-                                          ↔ Resize width
-                                        </button>
-                                        <div className="flex flex-wrap gap-2 text-xs">
-                                          <button
-                                            type="button"
-                                            className="min-h-11 px-2 underline"
-                                            disabled={index === 0}
-                                            onClick={() =>
-                                              move(
-                                                control.id,
-                                                section.id,
-                                                index - 1,
-                                              )
-                                            }
-                                          >
-                                            Move up
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="min-h-11 px-2 underline"
-                                            disabled={
-                                              index ===
-                                              section.controls.length - 1
-                                            }
-                                            onClick={() =>
-                                              move(
-                                                control.id,
-                                                section.id,
-                                                index + 2,
-                                              )
-                                            }
-                                          >
-                                            Move down
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="min-h-11 px-2 text-rose-300 underline"
-                                            disabled={
-                                              control.kind === 'builtin'
-                                            }
-                                            onClick={() =>
-                                              edit({
-                                                ...definition,
-                                                layout: definition.layout.map(
-                                                  (item) => ({
-                                                    ...item,
-                                                    controls:
-                                                      item.controls.filter(
-                                                        (candidate) =>
-                                                          candidate.id !==
-                                                          control.id,
+                                                <option value="quantity">
+                                                  Quantity
+                                                </option>
+                                                <option value="asset">
+                                                  Serialized
+                                                </option>
+                                              </select>
+                                              <label className="text-xs">
+                                                Section
+                                                <select
+                                                  className={input}
+                                                  value={section.id}
+                                                  onChange={(event) =>
+                                                    move(
+                                                      control.id,
+                                                      event.target.value,
+                                                      definition.layout.find(
+                                                        (item) =>
+                                                          item.id ===
+                                                          event.target.value,
+                                                      )?.controls.length ?? 0,
+                                                    )
+                                                  }
+                                                >
+                                                  {definition.layout.map(
+                                                    (item) => (
+                                                      <option
+                                                        key={item.id}
+                                                        value={item.id}
+                                                      >
+                                                        {item.label ||
+                                                          'Untitled'}
+                                                      </option>
+                                                    ),
+                                                  )}
+                                                </select>
+                                              </label>
+                                              <label className="text-xs">
+                                                Width
+                                                <select
+                                                  className={input}
+                                                  value={control.width}
+                                                  onChange={(event) =>
+                                                    updateControl(control.id, {
+                                                      width:
+                                                        event.target.value ===
+                                                        'Auto'
+                                                          ? 'Auto'
+                                                          : (Number(
+                                                              event.target
+                                                                .value,
+                                                            ) as Control['width']),
+                                                    })
+                                                  }
+                                                >
+                                                  {widths.map((width) => (
+                                                    <option
+                                                      key={width}
+                                                      value={width}
+                                                    >
+                                                      {width === 'Auto'
+                                                        ? 'Auto'
+                                                        : `${width}/12`}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </label>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 text-xs">
+                                              <button
+                                                type="button"
+                                                className="min-h-11 px-2 underline"
+                                                disabled={index === 0}
+                                                onClick={() =>
+                                                  move(
+                                                    control.id,
+                                                    section.id,
+                                                    index - 1,
+                                                  )
+                                                }
+                                              >
+                                                Move up
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="min-h-11 px-2 underline"
+                                                disabled={
+                                                  index ===
+                                                  section.controls.length - 1
+                                                }
+                                                onClick={() =>
+                                                  move(
+                                                    control.id,
+                                                    section.id,
+                                                    index + 2,
+                                                  )
+                                                }
+                                              >
+                                                Move down
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="min-h-11 px-2 text-rose-300 underline"
+                                                disabled={
+                                                  control.kind === 'builtin'
+                                                }
+                                                onClick={() =>
+                                                  edit({
+                                                    ...definition,
+                                                    layout:
+                                                      definition.layout.map(
+                                                        (item) => ({
+                                                          ...item,
+                                                          controls:
+                                                            item.controls.filter(
+                                                              (candidate) =>
+                                                                candidate.id !==
+                                                                control.id,
+                                                            ),
+                                                        }),
                                                       ),
-                                                  }),
-                                                ),
-                                              })
-                                            }
-                                          >
-                                            Remove control
-                                          </button>
-                                        </div>
+                                                  })
+                                                }
+                                              >
+                                                Remove control
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </details>
                                       </>
                                     )}
                                   </SortableControl>
@@ -2112,7 +2186,8 @@ export function MetadataSettings({
                     ))}
                   </div>
                   <aside
-                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 md:block`}
+                    data-testid="designer-inspector"
+                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
                     aria-label="Designer inspector"
                   >
                     <h3 className="font-semibold">Inspector</h3>
@@ -2200,7 +2275,7 @@ export function MetadataSettings({
                                   item.id === String(source.id).slice(8),
                               );
                             return control?.kind === 'builtin'
-                              ? label(control.builtin ?? '')
+                              ? builtinLabel(control.builtin ?? '')
                               : control?.kind === 'field'
                                 ? definition.fields.find(
                                     (field) => field.id === control.field_id,
@@ -2211,61 +2286,67 @@ export function MetadataSettings({
                   )}
                 </DragOverlay>
               </DragDropProvider>
-              <div className="space-y-3">
-                <h3 className="font-semibold">Live preview</h3>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant={previewKind === 'quantity' ? 'default' : 'outline'}
-                    onClick={() => setPreviewKind('quantity')}
-                  >
-                    Quantity
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={previewKind === 'asset' ? 'default' : 'outline'}
-                    onClick={() => setPreviewKind('asset')}
-                  >
-                    Asset
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={phone ? 'default' : 'outline'}
-                    onClick={() => setPhone(!phone)}
-                  >
-                    {phone ? 'Desktop' : 'Phone'} width
-                  </Button>
-                </div>
-                {metadataDefinition.safeParse(definition).success ? (
-                  <div
-                    className={
-                      phone
-                        ? 'mx-auto w-full max-w-[390px] rounded border border-slate-600 p-3'
-                        : 'rounded border border-slate-600 p-3'
-                    }
-                  >
-                    <MetadataFormPreview
-                      key={`${categoryId}-${previewKind}-${previewVersion}`}
-                      kind={previewKind}
-                      definition={definition}
-                      categoryId={categoryId}
-                      categoryName={
-                        active.find((category) => category.id === categoryId)
-                          ?.name ?? 'Category'
+              <details className="rounded-xl border border-slate-700 bg-slate-950/30">
+                <summary className="min-h-11 cursor-pointer px-3 py-2 font-semibold text-cyan-100">
+                  Live preview · open quantity or asset form
+                </summary>
+                <div className="space-y-3 pt-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={
+                        previewKind === 'quantity' ? 'default' : 'outline'
                       }
-                    />
-                    <p className="mt-4 rounded border border-slate-700 p-2 text-xs text-slate-400">
-                      Operational stock counts, locations, status, record
-                      identity and permissions remain mandatory or separate from
-                      this layout.
-                    </p>
+                      onClick={() => setPreviewKind('quantity')}
+                    >
+                      Quantity
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={previewKind === 'asset' ? 'default' : 'outline'}
+                      onClick={() => setPreviewKind('asset')}
+                    >
+                      Asset
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={phone ? 'default' : 'outline'}
+                      onClick={() => setPhone(!phone)}
+                    >
+                      {phone ? 'Desktop' : 'Phone'} width
+                    </Button>
                   </div>
-                ) : (
-                  <p role="status">
-                    Preview is unavailable until the document shape is valid.
-                  </p>
-                )}
-              </div>
+                  {metadataDefinition.safeParse(definition).success ? (
+                    <div
+                      className={
+                        phone
+                          ? 'mx-auto w-full max-w-[390px] rounded border border-slate-600 p-3'
+                          : 'rounded border border-slate-600 p-3'
+                      }
+                    >
+                      <MetadataFormPreview
+                        key={`${categoryId}-${previewKind}-${previewVersion}`}
+                        kind={previewKind}
+                        definition={definition}
+                        categoryId={categoryId}
+                        categoryName={
+                          active.find((category) => category.id === categoryId)
+                            ?.name ?? 'Category'
+                        }
+                      />
+                      <p className="mt-4 rounded border border-slate-700 p-2 text-xs text-slate-400">
+                        Operational stock counts, locations, status, record
+                        identity and permissions remain mandatory or separate
+                        from this layout.
+                      </p>
+                    </div>
+                  ) : (
+                    <p role="status">
+                      Preview is unavailable until the document shape is valid.
+                    </p>
+                  )}
+                </div>
+              </details>
             </>
           )}
           {issues.length > 0 && !recovery && (

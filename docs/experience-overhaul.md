@@ -285,20 +285,51 @@ certification. The focused production-build Chromium sweep now passes all 17
 cases in `experience-overhaul.spec.ts` and `metadata-designer.spec.ts`, including
 on-screen pointer reflow/resize before release, gesture interruption on account
 switch, rendered QR/Code 128 decoding and PDF dimensions, phone layouts, persisted
-layout reload, unsaved recovery and legacy draft discard. Remaining legacy suites,
-the app-wide visual implementation and final performance comparison are outstanding.
+layout reload, unsaved recovery and legacy draft discard. The adapted legacy
+custody flow now passes 3/3 browser cases, including bounded label search.
+Remaining legacy suites, final visual acceptance and the matched performance
+comparison are outstanding.
 
 The initial PR checkpoint `78ec7dc9a46881c634c573f1401735002f1a2248` received a
-completed Codex review with no findings. Its Linux CI passed application and
-database checks but failed seven of 65 browser cases; changed Settings/site-form
-navigation and telemetry attribution require current-candidate proof. Later source
-changes require a fresh review and exact-SHA CI rather than reusing that result.
+completed Codex review with no findings; its Linux CI passed application and
+database checks but failed seven of 65 browser cases. The later pushed checkpoint
+is `5c05437`, with further visual, test and review fixes in a dirty working tree.
+Checkpoint CI reported a `designer-model.test.ts` formatting failure, corrected
+locally but not certified on a new SHA. A newer Codex P2 location-ancestry finding
+has a local fix with eight unit and one browser checks passed; its review thread
+remains unresolved and the fix is unpushed. The emitted telemetry wire field is
+`eventTarget`; the focused browser rerun passed native INP and verified a native
+CLS shift of 0.0020345 with `hadRecentInput: false`, source
+`inventory-location-results-tree-2`, and an emitted 0.002 value. None of these local corrections
+replace fresh exact-SHA CI and review.
 
-Hosted acceptance is pending: the Supabase PR22 integration reported preview
-`bhqrwxclpggeurtbzfps` removed before configuration completed, and a subsequent
-read-only project lookup returned not found. No test writes were made there or to
-the production parent. A ready Vercel deployment alone does not establish a usable
-isolated backend; verify a healthy matching child before hosted fixture work.
+Hosted acceptance is pending. The earlier Supabase PR22 child
+`bhqrwxclpggeurtbzfps` was removed before configuration completed. A replacement
+child, `hshhtmnwejpfjyzuzdej`, was observed `ACTIVE_HEALTHY` with
+`FUNCTIONS_DEPLOYED`. A user-authorized PR22 preview secret was retrieved to an
+ignored local file; the child's Vercel branch environment and exact `5c05437`
+deployment were verified ready. Three temporary staff/viewer/maintainer accounts
+are recorded in an ignored ledger, and their sign-in and membership reads passed.
+The preview-only file-validation HMAC pair is installed: its database key is active
+and TLS-verified, and the matching branch-only Vercel environment setting is added.
+The current `5c05437` deployment predates that setting. A new deployment, hosted
+workflows and supported fixture cleanup remain pending. The PR was closed
+and reopened under owner authorization;
+that workflow does not grant production access or establish preview acceptance.
+
+The representative visual/navigation slice has 14 focused component tests passing
+across inventory rows, room links and the measured static closet preview. App-wide
+visual propagation has 60 working-tree captures. Root found a four-child designer
+grid defect; its layout and wrapping corrections are in the working tree. Root
+accepted a fresh 1440px desktop designer view with the selected field readable
+across three panes; focused 1024px and 390px geometry checks passed. Telemetry has 42 focused
+unit tests passing. The restored label guards have 19 focused unit tests passing.
+These working-tree checks do not establish final rendered acceptance across all
+routes and states or full E2E behavior. A confirmed print defect produced five
+pages for one label. The corrected print flow passed the focused browser case at
+`experience-overhaul.spec.ts:852`, including rendered QR/Code 128, quiet zones and
+the direct-print guard. Poppler inspection found one page in each of four
+one-label size/paper PDFs and two pages in each of two 20-label PDFs.
 
 Completion requires evidence for every listed boundary; an implementation commit
 or a partial checkpoint alone is insufficient.
@@ -314,19 +345,26 @@ scenario with normal visual effects enabled; report median and nearest-rank p95
 Supabase HTTP fetch counts and summed parallel request durations must not be
 presented as SQL query counts or critical-path latency.
 
-| Requirement                                               | Required proof                                                                                                                                                                                                                                                                                                                   | State   |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Settings landing and five separately addressable sections | Deep links, active subnavigation, Back/Forward, focused category loading, label-default requests excluding form definitions; viewer explanations                                                                                                                                                                                 | Pending |
-| Designer workspace and sections                           | Library/canvas/inspector, phone panel switching, visible pointer-follow and live neighbor reflow, field/section cross-section moves, empty targets, resize snapping before release, edge scrolling, cancellation, one undo per gesture, keyboard/focus, nonempty section removal                                                 | Pending |
-| Protected visibility/applicability                        | DB and UI tests for Name/Category/asset tag protection, inherent type limits, hide/restore, hidden-value preservation, required reachability through ancestors, old-revision compatibility and safe active-form overlays                                                                                                         | Pending |
-| One Save changes                                          | Direct ordinary save, targeted consequential confirmation bound to edit/baseline, atomic active revision, receipts/retry, stale/ABA/actor denial, recovery/discard of old drafts, open inventory-form schema conflict                                                                                                            | Pending |
-| Permission interruption                                   | Idle/focus keeps same-user work mounted, single in-flight verification, transient retry, actual logout/revocation/account change, no cross-account recovery and direct API denial                                                                                                                                                | Pending |
-| Measured performance and telemetry                        | Repeated matched before/after warm/cold and feedback/content-ready timing, median/p95/sample counts, request/auth/payload/bundle/long-task evidence; one filtered collector and emitted-payload privacy regressions                                                                                                              | Pending |
-| Site suggestion and quantity Item code                    | Manual override/reset and collision UI; DB normalization, archived uniqueness, omission versus clear, concurrent retries, opening stock, history, create/edit/detail/form/search/scanner/labels/compatible exports                                                                                                               | Pending |
-| Automatic label preview and printing                      | Rapid queue/settings edits, generation checks, bounded revalidation, retained sheet, retry, permissions/lifecycle/identity acknowledgements, font/code readiness, actual PDF pages/70x35 and 90x50/Letter and A4, rendered QR and Code128 decoding, honest fitting                                                               | Pending |
-| Locations and Spaces                                      | Hierarchical desktop/mobile navigation, selected ancestors, scoped contents and immediate feedback, A/B/A races, slow/error/empty/pagination/history, stable mounted canvas, modeled and inventory-only spaces, invalid fallback, old links, same-location refocus and WebGL failure                                             | Pending |
-| App-wide visuals                                          | Matched desktop/phone before/after of auth/recovery/denial, shell, overview, inventory/forms/details/files, assignments/sites, location browse/management, settings/designer, scanner, labels/print, history and loading/error/empty/read-only states; real interaction recordings and reduced-motion/zoom/focus/clipping checks | Pending |
-| Compatibility and final delivery                          | Complete local app/DB/browser gates, independent new-boundary review, generated types, one migration-first PR, isolated staff/viewer/maintainer hosted proof, supported fixture cleanup, exact-SHA CI/Codex, zero actionable threads and clean local/remote parity                                                               | Pending |
+| Requirement                            | Local implementation and evidence                                                                                                                                                                                                                                                                                                                                                                                                                       | Remaining acceptance evidence                                                                                                                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Settings landing and five sections     | Addressable routes, focused loading and name-derived site-code behavior have component checks. `experience-overhaul.spec.ts` covers deep links, active navigation, Back/Forward, selected-area loading and viewer explanation in the 17-case local sweep.                                                                                                                                                                                               | Rerun on final candidate, including label defaults without form-definition fetches and read-only states; hosted role proof.                                                                                                                                           |
+| Designer workspace and sections        | The 17-case sweep covers held pointer reflow/resize, cancellation, undo, phone panels, persistence and recovery. `designer-model.test.ts` covers cross-section moves and hierarchy constraints.                                                                                                                                                                                                                                                         | Final rendered interaction recordings, edge autoscroll, keyboard reordering/focus, empty targets and nonempty section removal; recheck after the local formatting correction.                                                                                         |
+| Protected visibility/applicability     | The 481-assertion DB gate and `designer-model.test.ts` cover protected controls, type/ancestor limits and publication blockers; versioned legacy reads were included in integration validation.                                                                                                                                                                                                                                                         | Final candidate DB/UI run for hide/restore, hidden values, old revisions and safe overlays; hosted role behavior.                                                                                                                                                     |
+| One Save changes                       | DB/integration gate exercised atomic save and publication; local browser sweep covered targeted confirmation, stale edit retention, direct phone save and draft recovery/discard.                                                                                                                                                                                                                                                                       | Final candidate receipt/retry, stale/ABA/actor denial and open-form conflict evidence, plus signed-in hosted save.                                                                                                                                                    |
+| Permission interruption                | Local browser sweep covered coalesced same-user checks, transient retry, account switch during a gesture and recovery.                                                                                                                                                                                                                                                                                                                                  | Final logout/revocation and direct API-denial proof; hosted cross-account/role checks.                                                                                                                                                                                |
+| Measured performance and telemetry     | Baseline has 36 captures and five warm samples per scenario. Filtered collector and 42 unit/emitted-payload tests pass locally; route/token redaction and native CLS/INP browser evidence passed, including the `eventTarget` wire field.                                                                                                                                                                                                               | Matched final normal-motion warm/cold and feedback/content-ready runs with median/p95, requests, payload, bundle and long-task provenance.                                                                                                                            |
+| Site suggestion and quantity Item code | Local DB gate covered normalization, uniqueness and Item code contracts. Component and browser checks cover site-code suggestion, quantity form/display, label identity and scanner-safe QR; the 17-case sweep decoded rendered QR/Code 128.                                                                                                                                                                                                            | Final candidate collision/retry, omission-versus-clear, history/export and all create/edit/search/scanner paths; hosted write/read roles.                                                                                                                             |
+| Automatic label preview and printing   | `label-designer.test.tsx`, `label-sheet.test.tsx` and the 17-case browser sweep cover automatic validation, retained sheets, rapid edits, authorization, rendered code decoding and PDF dimensions. Nineteen focused label guard tests and custody 3/3 pass locally. The one-label/five-page print defect was fixed; a focused browser case passed, and Poppler confirmed four one-label PDFs at one page each and two 20-label PDFs at two pages each. | Final-source lifecycle/error/read-only states and visual print inspection across both 70x35 and 90x50 sizes on Letter and A4.                                                                                                                                         |
+| Locations and Spaces                   | `spaces.test.ts` and the local browser sweep cover fallback/old links, ancestry, A/B/A stale results, history, immediate heading, failed contents and camera restore. Separate room E2E cases exist for real WebGL and fallback. The ancestry fix passed eight unit and one browser checks locally.                                                                                                                                                     | Final full room suite for dense/empty/paginated contents, same-location refocus, modeled/inventory-only spaces, WebGL loss and phone navigation; resolve the P2 thread after final evidence.                                                                          |
+| App-wide visuals                       | Shared shell/auth/Overview and representative inventory/detail styles exist in the dirty tree; 14 focused component tests cover inventory rows, room links and the static preview. Sixty app-wide captures exist; the four-child designer grid/wrapping fixes have root-accepted 1440px selected-field readability and focused 1024px/390px geometry passes.                                                                                            | Root rendered acceptance across every named route and state; real interaction recordings, 200% zoom, focus, contrast, clipping, reduced motion and normal-motion performance.                                                                                         |
+| Compatibility and final delivery       | Earlier 481 pgTAP assertions, configured integration suites, generated types, 17 focused overhaul cases and 3 adapted custody cases passed on working-tree checkpoints. PR22's replacement child and three role sign-in/membership reads passed; preview-only HMAC database and branch environment settings are installed.                                                                                                                              | Deploy after the environment change, then complete app/DB/browser gates on final source, hosted staff/viewer/maintainer workflows with supported fixture cleanup, independent review, exact-SHA CI/Codex, zero actionable threads and clean local/remote HEAD parity. |
+
+The lead must deploy the updated branch environment and complete hosted role
+workflows, accept the rendered
+route and motion evidence, resolve
+the verified P2 review thread, and obtain a fresh review plus matching final-SHA CI.
+The browser owner must complete the remaining targeted/full runtime checks; source
+tests and preview health alone cannot close those gates.
 
 No merge or production mutation, permission grant, secret installation, setting
 change or promotion is authorized. The goal separately authorizes minimal fictional

@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { Group, MathUtils, OrthographicCamera, Vector3 } from 'three';
 import { Button } from '@/components/ui/button';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { RoomDefinition, RoomNode } from '../schema';
 import { findFocusBinding, type RoomBinding } from '../bindings';
 import { toScenePosition, toSceneSize } from '../coordinates';
@@ -41,6 +42,7 @@ import {
 } from './visible-hover-runtime';
 import { placeHoverTooltip } from './visible-hover';
 import { validCameraView, type CameraView } from './camera-view';
+import styles from '../room-visual.module.css';
 
 export type RoomSceneProps = {
   room: RoomDefinition;
@@ -556,6 +558,16 @@ type Animation = {
   started: number;
   code: string | null;
 };
+export function finishFocusAnimation(
+  camera: OrthographicCamera,
+  target: Vector3,
+  motion: Pick<Animation, 'to' | 'offset' | 'toZoom'>,
+) {
+  target.copy(motion.to);
+  camera.position.copy(motion.to).add(motion.offset);
+  camera.zoom = motion.toZoom;
+  camera.updateProjectionMatrix();
+}
 function CameraRig({
   room,
   bindings,
@@ -612,7 +624,7 @@ function CameraRig({
   useEffect(() => {
     modeValue.current = orbitMode;
   }, [orbitMode]);
-  const reduced = useRef(false);
+  const reduced = useEffectiveReducedMotion();
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
     [room],
@@ -691,14 +703,22 @@ function CameraRig({
     [emitView],
   );
   useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => {
-      reduced.current = media.matches;
-    };
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
+    const motion = animation.current;
+    if (
+      !reduced ||
+      !motion ||
+      !controls.current ||
+      !(camera instanceof OrthographicCamera)
+    )
+      return;
+    animation.current = null;
+    finishFocusAnimation(camera, controls.current.target, motion);
+    controls.current.update();
+    writeTelemetry();
+    emitView();
+    onFocusComplete(motion.code);
+    invalidate();
+  }, [reduced, camera, writeTelemetry, emitView, onFocusComplete, invalidate]);
   useEffect(() => {
     const canvas = gl.domElement;
     const lost = (event: Event) => {
@@ -840,7 +860,7 @@ function CameraRig({
         )
       : fitZoom.current;
     const offset = camera.position.clone().sub(controls.current.target);
-    if (reduced.current) {
+    if (reduced) {
       controls.current.target.copy(target);
       camera.position.copy(target).add(offset);
       camera.zoom = zoom;
@@ -873,6 +893,7 @@ function CameraRig({
     invalidate,
     writeTelemetry,
     emitView,
+    reduced,
   ]);
   useEffect(() => {
     if (
@@ -1167,11 +1188,11 @@ export default function RoomScene(props: RoomSceneProps) {
     ['tilt-down', 'Tilt down'],
   ];
   return (
-    <div className="space-y-3">
+    <div className={styles.scene}>
       <div
         role="toolbar"
         aria-label="Room camera controls"
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/70 p-2"
+        className={styles.cameraToolbar}
       >
         {(
           [
@@ -1201,7 +1222,7 @@ export default function RoomScene(props: RoomSceneProps) {
         <div
           role="group"
           aria-label="Orbit mode"
-          className="flex rounded-md border border-slate-600 p-0.5"
+          className={styles.controlGroup}
         >
           {(['guided', 'free'] as const).map((mode) => (
             <Button
@@ -1216,7 +1237,11 @@ export default function RoomScene(props: RoomSceneProps) {
             </Button>
           ))}
         </div>
-        <div role="group" aria-label="Room zoom" className="flex gap-1">
+        <div
+          role="group"
+          aria-label="Room zoom"
+          className={styles.controlGroup}
+        >
           <Button
             type="button"
             variant="outline"
@@ -1247,11 +1272,9 @@ export default function RoomScene(props: RoomSceneProps) {
         >
           Show all labels
         </Button>
-        <details className="relative">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center rounded-md border border-slate-600 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-cyan-300">
-            Pan and rotate
-          </summary>
-          <div className="absolute left-0 top-full z-30 mt-1 grid w-48 grid-cols-2 gap-1 rounded-md border border-slate-600 bg-slate-900 p-2 shadow-xl">
+        <details className={styles.moreControls}>
+          <summary className={styles.moreSummary}>Pan and rotate</summary>
+          <div className={styles.moreMenu}>
             {secondaryControls.map(([kind, label]) => (
               <Button
                 key={kind}
@@ -1266,10 +1289,7 @@ export default function RoomScene(props: RoomSceneProps) {
           </div>
         </details>
       </div>
-      <div
-        className="relative h-[440px] overflow-hidden rounded-xl border border-slate-700 bg-slate-950 sm:h-[580px]"
-        aria-label="Interactive room canvas"
-      >
+      <div className={styles.canvasFrame} aria-label="Interactive room canvas">
         <Canvas
           onFailure={props.onFailure}
           orthographic
@@ -1365,18 +1385,18 @@ export default function RoomScene(props: RoomSceneProps) {
         )}
       </div>
       {selectedLabel && (
-        <p role="status" className="text-sm text-cyan-200">
+        <p role="status" className={styles.sceneStatus}>
           Selected location: {selectedLabel}
           {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
         </p>
       )}
       {showAllLabels && suppressedLabels > 0 && (
-        <p role="status" className="text-xs text-slate-400">
+        <p role="status" className={styles.sceneNote}>
           Some room labels are hidden at this view. Zoom in or use the location
           picker.
         </p>
       )}
-      <p className="text-xs text-slate-400">
+      <p className={styles.sceneNote}>
         Drag to rotate; right-drag to pan; scroll or pinch to zoom. Double-click
         exposed floor to recenter. Guided keeps the operational view; Free Orbit
         rotates around and above or below the room. Hover an object to see its

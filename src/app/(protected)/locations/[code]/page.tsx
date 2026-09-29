@@ -30,17 +30,21 @@ export default async function LocationPage({
   const children = locations.filter((l) => l.parentId === location.id);
   return (
     <>
-      <Link className="text-cyan-300 underline" href="/locations">
+      <Link
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
+        href="/locations"
+      >
         All locations
       </Link>
-      <h1 className="mt-4 text-3xl font-semibold">{location.name}</h1>
+      <p className="experience-eyebrow mt-3">Storage / Location</p>
+      <h1 className="experience-heading mt-1 break-words">{location.name}</h1>
       <Link
         className="inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
         href={'/labels?location=' + encodeURIComponent(location.code)}
       >
         Print location label
       </Link>
-      <p className="my-3 break-words text-slate-400">
+      <p className="my-3 break-words text-sm leading-6 text-slate-300">
         {location.breadcrumb} · {location.code} ·{' '}
         {!location.active
           ? 'Inactive'
@@ -48,11 +52,11 @@ export default async function LocationPage({
             ? 'Inventory destination'
             : 'Includes child locations'}
       </p>
-      <ShowInRoom code={code} />
+      <ShowInRoom location={location} />
       {children.length > 0 && (
         <section className={panel + ' mb-5'}>
-          <h2 className="mb-3 font-semibold">Child locations</h2>
-          <ul className="space-y-3">
+          <h2 className="mb-3 text-lg font-semibold">Child locations</h2>
+          <ul className="grid gap-2 sm:grid-cols-2">
             {children.map((child) => (
               <li key={child.id}>
                 <LocationLink location={child} />
@@ -61,7 +65,10 @@ export default async function LocationPage({
           </ul>
         </section>
       )}
-      <div className="my-5 flex flex-wrap gap-5 text-sm">
+      <nav
+        aria-label="Location inventory views"
+        className="my-5 flex flex-wrap gap-x-5 gap-y-1 text-sm"
+      >
         <Link
           className="min-h-11 py-3 text-cyan-300 underline"
           href={'/locations/' + encodeURIComponent(code)}
@@ -92,7 +99,7 @@ export default async function LocationPage({
         >
           Download location inventory CSV
         </a>
-      </div>
+      </nav>
       <InventoryRows rows={result.rows} />
       <Pagination
         result={result}

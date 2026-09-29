@@ -118,6 +118,44 @@ it('shows per-definition photo and PDF counts without inventing file counts for 
     screen.queryByRole('group', { name: 'Files for Router' }),
   ).not.toBeInTheDocument();
 });
+it('keeps separate holding quantities and provides a detail path for long custom data', () => {
+  const longSummary = 'An unusually long field\n'.repeat(45);
+  render(
+    <InventoryRows
+      rows={[2, 3].map((quantity, index) => ({
+        kind: 'quantity' as const,
+        id: 'item',
+        name: 'Long identity '.repeat(12),
+        categoryName: 'Cables',
+        status: 'active',
+        location: {
+          ...location,
+          id: `location-${index}`,
+          code: `ITC-${index}`,
+        },
+        quantity,
+        assetTag: null,
+        serialNumber: null,
+        recordedTotal: 5,
+        availableQuantity: '5',
+        assignedQuantity: '0',
+        ownedQuantity: '5',
+        reorderThreshold: null,
+        stockState: 'disabled' as const,
+        customSummary: longSummary,
+      }))}
+    />,
+  );
+  expect(screen.getByText('2 units')).toBeVisible();
+  expect(screen.getByText('3 units')).toBeVisible();
+  expect(screen.getAllByRole('link', { name: 'Full details' })).toHaveLength(2);
+  expect(
+    screen.getAllByRole('link', { name: 'Full details' })[0],
+  ).toHaveAttribute('href', '/inventory/quantity/item');
+  expect(
+    screen.getAllByText((_, element) => element?.textContent === longSummary),
+  ).toHaveLength(2);
+});
 it('shows record corrections as human readable history distinct from movement', () => {
   render(
     <HistoryList

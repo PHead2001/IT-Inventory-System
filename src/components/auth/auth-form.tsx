@@ -27,7 +27,7 @@ export function AuthForm({
     password: 'Set password',
   }[mode];
   return (
-    <form action={action} className="space-y-5" aria-label={label}>
+    <form action={action} className="space-y-5 text-sm" aria-label={label}>
       {mode === 'login' && next && (
         <input type="hidden" name="next" value={next} />
       )}
@@ -63,7 +63,7 @@ export function AuthForm({
       )}
       {mode === 'password' && (
         <>
-          <p id="password-help" className="text-sm text-slate-400">
+          <p id="password-help" className="text-sm text-[#9cafc4]">
             Use at least 12 characters.
           </p>
           <div className="space-y-2">
@@ -86,12 +86,12 @@ export function AuthForm({
         </>
       )}
       {state.error && (
-        <p role="alert" className="text-sm text-red-300">
+        <p role="alert" className="experience-feedback" data-tone="error">
           {state.error}
         </p>
       )}
       {state.message && (
-        <p role="status" className="text-sm text-cyan-200">
+        <p role="status" className="experience-feedback" data-tone="success">
           {state.message}
         </p>
       )}

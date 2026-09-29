@@ -58,6 +58,16 @@ beforeEach(() => {
 });
 
 describe('terminal file cancellation cleanup', () => {
+  it('describes only supported photo formats for quantity records', () => {
+    render(<FilesPanel parentType="quantity" parentId={id} active staff />);
+    const files = screen.getByRole('region', { name: 'Inventory files' });
+    expect(files).toHaveTextContent('JPEG, PNG or still WebP');
+    expect(files).not.toHaveTextContent('PDF');
+    expect(screen.getByLabelText('Add recognition photo')).toHaveAttribute(
+      'accept',
+      'image/jpeg,image/png,image/webp',
+    );
+  });
   it('keeps a full-width metadata row and a separate wrapping action row for a ready file', async () => {
     const longName =
       'Fictional recognition photo with a readable descriptive filename';

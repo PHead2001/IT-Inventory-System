@@ -1,0 +1,719 @@
+import { expect, test, type Page } from '@playwright/test';
+import fixture from '../fixtures/auth.json' with { type: 'json' };
+
+async function signIn(page: Page) {
+  await page.goto('/login');
+  await page.getByLabel('Email', { exact: true }).fill(fixture.emails.staff);
+  await page.getByLabel('Password', { exact: true }).fill(fixture.password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Inventory workspace' }),
+  ).toBeVisible();
+}
+
+async function noHorizontalOverflow(page: Page) {
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+}
+
+test('representative shell and auth surfaces render at desktop and phone sizes with keyboard navigation and motion preference', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/login');
+  await expect(
+    page.getByRole('heading', { name: 'Welcome back' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('login-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page.goto('/access-denied');
+  await expect(
+    page.getByRole('heading', { name: 'Access is not enabled' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('access-denied-desktop-1440.png'),
+    fullPage: true,
+  });
+  await signIn(page);
+  await page.goto('/dashboard');
+  await expect(
+    page.getByRole('heading', { name: 'Low-stock overview' }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Overview' }),
+  ).toHaveAttribute('aria-current', 'page');
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('overview-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page.goto('/inventory');
+  await expect(
+    page.getByRole('form', { name: 'Search inventory' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('inventory-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page
+    .locator('a[href^="/inventory/quantity/"]:not([href$="/new"])')
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('quantity-detail-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page.getByText('Edit quantity metadata', { exact: true }).click();
+  await expect(
+    page.getByRole('form', { name: 'Edit quantity metadata' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('quantity-detail-edit-open-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page.goto('/inventory?type=asset');
+  await page
+    .locator('a[href^="/inventory/assets/"]:not([href$="/new"])')
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('asset-detail-desktop-1440.png'),
+    fullPage: true,
+  });
+  await page.getByText('Edit asset metadata', { exact: true }).click();
+  await expect(
+    page.getByRole('form', { name: 'Edit asset metadata' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('asset-detail-edit-open-desktop-1440.png'),
+    fullPage: true,
+  });
+  // Halving CSS viewport width exercises the same responsive breakpoints as
+  // 200% browser zoom on a 1440px desktop window without changing app styles.
+  await page.setViewportSize({ width: 720, height: 900 });
+  await page.goto('/inventory');
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('inventory-200pct-reflow-equivalent-720.png'),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/dashboard');
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('overview-phone-390.png'),
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: testInfo.outputPath('overview-phone-390-viewport.png'),
+  });
+  const motionToggle = page.getByRole('button', { name: 'Reduce motion' });
+  await expect(motionToggle).toBeVisible();
+  const motionBounds = await motionToggle.boundingBox();
+  const headingBounds = await page
+    .getByRole('heading', { name: 'Low-stock overview' })
+    .boundingBox();
+  expect(motionBounds).not.toBeNull();
+  expect(headingBounds).not.toBeNull();
+  expect(motionBounds!.y + motionBounds!.height).toBeLessThanOrEqual(
+    headingBounds!.y,
+  );
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  await menu.focus();
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Close menu' }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await page.screenshot({
+    path: testInfo.outputPath('navigation-menu-phone-390.png'),
+    fullPage: true,
+  });
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+  await navigation.getByRole('link', { name: 'Inventory' }).click();
+  await expect(page).toHaveURL(/\/inventory$/);
+  await expect(
+    page.locator('#experience-navigation a[href="/inventory"]'),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('button', { name: 'Menu' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('inventory-phone-390.png'),
+    fullPage: true,
+  });
+  await page
+    .locator('a[href^="/inventory/quantity/"]:not([href$="/new"])')
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('quantity-detail-phone-390.png'),
+    fullPage: true,
+  });
+  await page.getByText('Edit quantity metadata', { exact: true }).click();
+  await expect(
+    page.getByRole('form', { name: 'Edit quantity metadata' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('quantity-detail-edit-open-phone-390.png'),
+    fullPage: true,
+  });
+  await page.goto('/inventory?type=asset');
+  await page
+    .locator('a[href^="/inventory/assets/"]:not([href$="/new"])')
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('asset-detail-phone-390.png'),
+    fullPage: true,
+  });
+  await page.getByText('Edit asset metadata', { exact: true }).click();
+  await expect(
+    page.getByRole('form', { name: 'Edit asset metadata' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('asset-detail-edit-open-phone-390.png'),
+    fullPage: true,
+  });
+  const motion = page.getByRole('button', { name: 'Reduce motion' });
+  await expect(
+    page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+  ).resolves.toBe(true);
+  await motion.click();
+  await expect(
+    page.getByRole('button', { name: 'Reduce motion' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
+
+  await page.goto('/settings/forms');
+  await page.locator('main a[href^="/settings/forms/"]').first().click();
+  await expect(
+    page.getByRole('region', { name: 'Forms and fields' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('designer-phone-390.png'),
+    fullPage: true,
+  });
+
+  await page.context().clearCookies();
+  await page.goto('/forgot-password');
+  await expect(
+    page.getByRole('heading', { name: 'Reset your password' }),
+  ).toBeVisible();
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('recovery-phone-390.png'),
+    fullPage: true,
+  });
+  expect(
+    errors.filter((error) => /hydration|uncaught|error:/i.test(error)),
+  ).toEqual([]);
+});
+
+test('configuration, site custody, and location browsing remain legible at desktop and phone widths', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  for (const viewport of [
+    { width: 1440, height: 900, suffix: 'desktop-1440' },
+    { width: 390, height: 844, suffix: 'phone-390' },
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const route of [
+      { path: '/settings', heading: 'Settings', file: 'settings' },
+      {
+        path: '/settings/sites',
+        heading: 'Manage sites',
+        file: 'manage-sites',
+      },
+      {
+        path: '/settings/locations',
+        heading: 'Manage logical locations',
+        file: 'manage-locations',
+      },
+      { path: '/sites', heading: 'Properties and sites', file: 'sites' },
+    ]) {
+      await page.goto(route.path);
+      await expect(
+        page.getByRole('heading', { level: 1, name: route.heading }),
+      ).toBeVisible();
+      await noHorizontalOverflow(page);
+      await page.screenshot({
+        path: testInfo.outputPath(`${route.file}-${viewport.suffix}.png`),
+        fullPage: true,
+      });
+    }
+    const site = page.locator('a[href^="/sites/"]').first();
+    await expect(site).toBeVisible();
+    await site.click();
+    await expect(
+      page.getByRole('heading', { name: 'Assignment activity' }),
+    ).toBeVisible();
+    await expect(page.getByLabel('From (UTC)')).toBeVisible();
+    await expect(page.getByLabel('Until (UTC, exclusive)')).toBeVisible();
+    const siteLayout = await page.evaluate(() => {
+      const heading = document.querySelector('main h1')!;
+      const hero = heading.closest('header')!;
+      const management = [...document.querySelectorAll('main details')].find(
+        (element) => element.textContent?.includes('Manage site settings'),
+      )!;
+      const metrics = document
+        .querySelector('#activity-heading')!
+        .closest('section')!
+        .querySelectorAll('dl > div');
+      return {
+        heroPadding: Number.parseFloat(getComputedStyle(hero).paddingLeft),
+        managementPadding: Number.parseFloat(
+          getComputedStyle(management).paddingLeft,
+        ),
+        firstMetric: metrics[0].getBoundingClientRect().toJSON(),
+        secondMetric: metrics[1].getBoundingClientRect().toJSON(),
+      };
+    });
+    expect(siteLayout.heroPadding).toBeGreaterThanOrEqual(20);
+    expect(siteLayout.managementPadding).toBeGreaterThanOrEqual(16);
+    if (viewport.width === 390) {
+      expect(siteLayout.secondMetric.y).toBeCloseTo(
+        siteLayout.firstMetric.y,
+        0,
+      );
+      expect(siteLayout.secondMetric.x).toBeGreaterThan(
+        siteLayout.firstMetric.x,
+      );
+    }
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`site-detail-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+
+    await page.goto('/locations');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Locations' }),
+    ).toBeVisible();
+    const locationBrowser = page.getByRole('navigation', {
+      name: 'Location browser',
+    });
+    const browserPadding = await locationBrowser.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).paddingLeft),
+    );
+    expect(browserPadding).toBeGreaterThanOrEqual(12);
+    const searchHeight = await locationBrowser
+      .getByRole('searchbox', { name: 'Browse locations' })
+      .evaluate((input) => input.getBoundingClientRect().height);
+    expect(searchHeight).toBeGreaterThanOrEqual(44);
+    await locationBrowser
+      .locator('button:not([aria-label]):visible')
+      .first()
+      .click();
+    await expect(
+      page.getByRole('region', { name: 'Selected location' }),
+    ).toContainText('View contents and history');
+    const selectedPadding = await page
+      .getByRole('region', { name: 'Selected location' })
+      .evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingLeft),
+      );
+    expect(selectedPadding).toBeGreaterThanOrEqual(16);
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`locations-selected-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page.getByRole('link', { name: 'View contents and history' }).click();
+    await expect(page).toHaveURL(/\/locations\/[^/]+$/);
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`location-detail-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test('modeled Spaces, inventory-only Spaces, and manual scan surfaces render at desktop and phone widths', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  for (const viewport of [
+    { width: 1440, height: 900, suffix: 'desktop-1440' },
+    { width: 390, height: 844, suffix: 'phone-390' },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/room?space=it-closet');
+    const viewer = page.getByTestId('room-viewer');
+    await expect(viewer.locator('canvas')).toBeVisible();
+    await expect
+      .poll(() => viewer.getAttribute('data-camera-view'))
+      .not.toBe('null');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`spaces-modeled-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page.getByLabel('Space', { exact: true }).selectOption('it-office');
+    await expect(viewer).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'IT Office inventory' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`spaces-inventory-only-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page.goto('/scan');
+    await expect(
+      page.getByRole('heading', { name: 'Camera scanner' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Start camera' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`scan-idle-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page
+      .getByLabel('Paste a label URL, barcode text, or exact identifier')
+      .fill('LOC:UNKNOWN-VISUAL-CHECK');
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page.getByRole('status')).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`scan-manual-result-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test('label search, queue, and both physical preview sizes render at desktop and phone widths', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  for (const viewport of [
+    { width: 1440, height: 900, suffix: 'desktop-1440' },
+    { width: 390, height: 844, suffix: 'phone-390' },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto('/labels');
+    await expect(
+      page.getByRole('heading', { name: 'Print labels' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('form', { name: 'Search label records' }),
+    ).toBeVisible();
+    const records = page.getByRole('region', { name: 'Search result records' });
+    await expect
+      .poll(() =>
+        records.evaluate(
+          (element) => element.scrollHeight > element.clientHeight,
+        ),
+      )
+      .toBe(true);
+    const scrollGeometry = await records.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      maxHeight: Number.parseFloat(getComputedStyle(element).maxHeight),
+      overflow: getComputedStyle(element).overflowY,
+    }));
+    expect(scrollGeometry.height).toBeLessThanOrEqual(
+      scrollGeometry.maxHeight + 1,
+    );
+    expect(scrollGeometry.overflow).toBe('auto');
+    await records.focus();
+    await page.keyboard.press('End');
+    await expect
+      .poll(() => records.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await records.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await records.hover();
+    await page.mouse.wheel(0, 400);
+    await expect
+      .poll(() => records.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await expect(page.getByRole('button', { name: 'Previous' })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Next', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Label queue' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`labels-search-empty-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page.goto('/labels?location=ITC');
+    await page
+      .getByRole('combobox', { name: 'Label size' })
+      .selectOption('90x50');
+    const card = page.locator('.label-card').first();
+    await expect(card).toHaveAttribute('data-code-ready', 'true');
+    await expect(
+      page.getByRole('status').filter({
+        hasText: 'Print preview refreshed from current inventory',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /Print selected labels/ }),
+    ).toBeEnabled();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`labels-90x50-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page.emulateMedia({ media: 'print' });
+    await page
+      .locator('.label-print-root')
+      .evaluate((element) =>
+        element.setAttribute('data-print-authorized', 'true'),
+      );
+    await expect(
+      page.getByRole('form', { name: 'Search label records' }),
+    ).toBeHidden();
+    await page.screenshot({
+      path: testInfo.outputPath(`labels-print-90x50-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    await page
+      .locator('.label-print-root')
+      .evaluate((element) => element.removeAttribute('data-print-authorized'));
+    await page.emulateMedia({ media: 'screen' });
+    await page
+      .getByRole('combobox', { name: 'Label size' })
+      .selectOption('70x35');
+    await expect(card).toHaveAttribute('data-code-ready', 'true');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`labels-70x35-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test('configuration and inventory creation surfaces render at desktop and phone widths', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  for (const viewport of [
+    { width: 1440, height: 900, suffix: 'desktop-1440' },
+    { width: 390, height: 844, suffix: 'phone-390' },
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const route of [
+      {
+        path: '/settings/categories',
+        heading: 'Categories',
+        file: 'categories',
+      },
+      {
+        path: '/settings/labels',
+        heading: 'Labels & printing defaults',
+        file: 'label-defaults',
+      },
+      { path: '/history', heading: 'Inventory history', file: 'history' },
+      {
+        path: '/inventory/quantity/new',
+        heading: 'Create quantity inventory',
+        file: 'create-quantity',
+      },
+      {
+        path: '/inventory/assets/new',
+        heading: 'Create serialized asset',
+        file: 'create-asset',
+      },
+    ]) {
+      await page.goto(route.path);
+      await expect(
+        page.getByRole('heading', { level: 1, name: route.heading }),
+      ).toBeVisible();
+      await noHorizontalOverflow(page);
+      await page.screenshot({
+        path: testInfo.outputPath(`${route.file}-${viewport.suffix}.png`),
+        fullPage: true,
+      });
+    }
+    await page.goto('/settings/forms');
+    await page.locator('main a[href^="/settings/forms/"]').first().click();
+    await expect(
+      page.getByRole('region', { name: 'Forms and fields' }),
+    ).toBeVisible();
+    if (viewport.width > 390) {
+      await page
+        .getByRole('button', { name: 'Add field', exact: true })
+        .click();
+      await expect(
+        page.getByRole('complementary', { name: 'Designer inspector' }),
+      ).toBeVisible();
+      const fieldLabel = page
+        .getByRole('complementary', { name: 'Designer inspector' })
+        .getByLabel('Label', { exact: true });
+      await expect(fieldLabel).toBeVisible();
+      await fieldLabel.fill('Visual check field');
+      await expect(
+        page
+          .locator('[data-control-id]')
+          .filter({ hasText: 'Visual check field' }),
+      ).toBeVisible();
+      const panels = await page.evaluate(() => {
+        const heading = (text: string) =>
+          [...document.querySelectorAll('main h3')].find(
+            (element) => element.textContent?.trim() === text,
+          )!;
+        const libraryHeading = heading('Field library');
+        const canvasHeading = heading('Form canvas');
+        const inspectorHeading = heading('Inspector');
+        return {
+          library: libraryHeading
+            .parentElement!.getBoundingClientRect()
+            .toJSON(),
+          canvas: canvasHeading.parentElement!.getBoundingClientRect().toJSON(),
+          inspector: inspectorHeading
+            .parentElement!.getBoundingClientRect()
+            .toJSON(),
+          canvasHeadingHeight: canvasHeading.getBoundingClientRect().height,
+        };
+      });
+      expect(panels.library.x + panels.library.width).toBeLessThanOrEqual(
+        panels.canvas.x + 1,
+      );
+      expect(panels.canvas.x + panels.canvas.width).toBeLessThanOrEqual(
+        panels.inspector.x + 1,
+      );
+      expect(panels.canvas.width).toBeGreaterThan(400);
+      expect(panels.canvas.width).toBeGreaterThan(panels.library.width);
+      expect(panels.canvas.width).toBeGreaterThan(panels.inspector.width);
+      expect(
+        Math.abs(panels.canvas.y - panels.inspector.y),
+      ).toBeLessThanOrEqual(8);
+      expect(Math.abs(panels.canvas.y - panels.library.y)).toBeLessThanOrEqual(
+        8,
+      );
+      expect(panels.canvasHeadingHeight).toBeLessThan(40);
+      const labelLines = await page.evaluate(() =>
+        ['Manufacturer', 'Serial Number'].map((name) => {
+          const label = [
+            ...document.querySelectorAll('[data-control-id] span'),
+          ].find((element) => element.textContent?.trim() === name)!;
+          const node = label.firstChild!;
+          const lines = new Map<number, string>();
+          for (let index = 0; index < node.textContent!.length; index++) {
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + 1);
+            const y = Math.round(range.getBoundingClientRect().y);
+            lines.set(y, (lines.get(y) ?? '') + node.textContent![index]);
+          }
+          return {
+            name,
+            lines: [...lines.values()].map((line) => line.trim()),
+          };
+        }),
+      );
+      for (const label of labelLines)
+        expect(label.lines.at(-1)!.length, label.name).toBeGreaterThan(1);
+    }
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`designer-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+    if (viewport.width > 390) {
+      page.once('dialog', (dialog) => void dialog.accept());
+      await page.getByRole('button', { name: 'Discard unsaved edits' }).click();
+    }
+    if (viewport.width === 390) {
+      const panels = page.getByRole('navigation', { name: 'Designer panels' });
+      await panels.getByRole('button', { name: 'Library' }).click();
+      await expect(
+        page.getByRole('heading', { name: 'Hidden controls' }),
+      ).toBeVisible();
+      await noHorizontalOverflow(page);
+      await page.screenshot({
+        path: testInfo.outputPath('designer-library-phone-390.png'),
+        fullPage: true,
+      });
+      await panels.getByRole('button', { name: 'Inspector' }).click();
+      await expect(
+        page.getByRole('complementary', { name: 'Designer inspector' }),
+      ).toBeVisible();
+      await noHorizontalOverflow(page);
+      await page.screenshot({
+        path: testInfo.outputPath('designer-inspector-phone-390.png'),
+        fullPage: true,
+      });
+    }
+  }
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/settings/forms');
+  await page.locator('main a[href^="/settings/forms/"]').first().click();
+  const tabletPanels = page.getByRole('navigation', {
+    name: 'Designer panels',
+  });
+  await tabletPanels.getByRole('button', { name: 'Canvas' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Form canvas' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Field library' }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole('complementary', { name: 'Designer inspector' }),
+  ).toBeHidden();
+  const canvasLayout = await page
+    .getByRole('heading', { name: 'Form canvas' })
+    .evaluate((heading) => ({
+      panelWidth: heading.parentElement!.getBoundingClientRect().width,
+      headingHeight: heading.getBoundingClientRect().height,
+    }));
+  expect(canvasLayout.panelWidth).toBeGreaterThanOrEqual(400);
+  expect(canvasLayout.headingHeight).toBeLessThan(40);
+  await noHorizontalOverflow(page);
+  await page.screenshot({
+    path: testInfo.outputPath('designer-tablet-1024.png'),
+    fullPage: true,
+  });
+});

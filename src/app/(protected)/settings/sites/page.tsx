@@ -9,10 +9,14 @@ export default async function ManageSitesPage() {
   const sites = await getSites();
   return (
     <>
-      <Link href="/settings" className="text-cyan-300 underline">
+      <Link
+        href="/settings"
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
+      >
         Settings
       </Link>
-      <h1 className="my-4 text-3xl font-semibold">Manage sites</h1>
+      <p className="experience-eyebrow mt-3">Configuration / Sites</p>
+      <h1 className="experience-heading mb-5">Manage sites</h1>
       {member.role === 'staff' && member.can_manage_configuration ? (
         <SiteManagementForm />
       ) : (
@@ -21,16 +25,21 @@ export default async function ManageSitesPage() {
           can create or edit sites.
         </p>
       )}
-      <ul className="mt-6 space-y-2">
+      <ul className="experience-surface mt-5 divide-y divide-slate-700/70 overflow-hidden p-0">
         {sites.map((site) => (
-          <li key={site.id}>
+          <li
+            key={site.id}
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm sm:px-5"
+          >
             <Link
-              className="text-cyan-300 underline"
+              className="min-w-0 break-words font-medium text-cyan-200 underline decoration-cyan-400/50 underline-offset-2"
               href={`/settings/sites/${encodeURIComponent(site.code)}`}
             >
               {site.name} ({site.code})
-            </Link>{' '}
-            · {site.active ? 'Active' : 'Archived'}
+            </Link>
+            <span className="text-xs font-medium text-slate-300">
+              {site.active ? 'Active' : 'Archived'}
+            </span>
           </li>
         ))}
       </ul>

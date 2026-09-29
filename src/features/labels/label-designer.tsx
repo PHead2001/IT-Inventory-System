@@ -15,6 +15,7 @@ import {
   type LiveLabel,
 } from './queue.server';
 import { LabelSheet, type LabelRecord } from './label-sheet';
+import styles from './label-workspace.module.css';
 import {
   addEntry,
   defaultFilters,
@@ -196,7 +197,7 @@ export function LabelDesigner({
     try {
       const rows = await getQueueRecords([key]);
       if (epoch !== queueEpoch.current) return;
-      if (rows.length !== 1) {
+      if (rows.length !== 1 || queueIdentity(rows[0]) !== queueIdentity(key)) {
         setMessage('That record is unavailable to this account.');
         return;
       }
@@ -226,7 +227,6 @@ export function LabelDesigner({
   };
   const prepareFrom = (rows: LiveLabel[], generationKey: string) => {
     const rowMap = new Map(rows.map((row) => [queueIdentity(row), row]));
-    setLive(rows);
     const missing = entries
       .filter((entry) => !rowMap.has(queueIdentity(entry)))
       .map(queueIdentity);
@@ -240,6 +240,17 @@ export function LabelDesigner({
       );
       return;
     }
+    if (rows.length !== entries.length || rowMap.size !== entries.length) {
+      setPendingChanges([]);
+      setRefreshPending(false);
+      setRefreshFailed(true);
+      setValidatedKey('');
+      setMessage(
+        'Label refresh returned unexpected records. Printing is blocked; retry.',
+      );
+      return;
+    }
+    setLive(rows);
     const changed = entries.flatMap((entry) => {
       const row = rowMap.get(queueIdentity(entry))!;
       return entry.baselineTag !== row.tag ||
@@ -355,7 +366,12 @@ export function LabelDesigner({
             (row.state !== 'active' && !entry.lifecycleAcknowledged))
         );
       });
-      if (fresh.length !== entries.length || meaningfulChange) {
+      if (
+        fresh.length !== entries.length ||
+        rowMap.size !== entries.length ||
+        entries.some((entry) => !rowMap.has(queueIdentity(entry))) ||
+        meaningfulChange
+      ) {
         prepareFrom(fresh, selectionKey);
         return;
       }
@@ -520,247 +536,300 @@ export function LabelDesigner({
   }, [sheetKey, formatAcknowledged]);
 
   return (
-    <>
+    <div className={styles.workspace}>
       {preview && (
-        <p className="mb-5 rounded border border-amber-600 p-3 font-semibold text-amber-200">
+        <p className={styles.previewWarning}>
           Preview labels for {origin}. These are for this isolated environment
           only.
         </p>
       )}
-      <p className="mb-5 text-sm text-slate-400">
+      <p className={styles.intro}>
         Queue up to {MAX_DISTINCT} distinct records, {MAX_COPIES} copies each,
         and {MAX_LABELS} labels total. Quantity results appear once per
         definition, even with several holdings.
       </p>
-      <form
-        onSubmit={submitSearch}
-        aria-label="Search label records"
-        className="space-y-3 rounded-xl border border-slate-700 p-4"
-      >
-        <label className="block">
-          Search name, serial, tag, category, manufacturer, model, or UUID
-          <input
-            value={draft.q}
-            onChange={(event) => setDraft({ ...draft, q: event.target.value })}
-            maxLength={200}
-            className="mt-1 w-full rounded border border-slate-500 bg-slate-950 p-2"
-          />
-        </label>
-        <div className="flex flex-wrap gap-3">
-          <label className="min-w-0 max-w-full">
-            Type{' '}
-            <select
-              value={draft.type}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  type: event.target.value as LabelSearchFilters['type'],
-                })
-              }
-              className="max-w-full rounded bg-slate-800 p-2"
-            >
-              <option value="all">All</option>
-              <option value="quantity">Quantity</option>
-              <option value="asset">Asset</option>
-            </select>
-          </label>
-          <label className="min-w-0 max-w-full">
-            Status{' '}
-            <select
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  status: event.target.value as LabelSearchFilters['status'],
-                })
-              }
-              className="max-w-full rounded bg-slate-800 p-2"
-            >
-              <option value="active">Active</option>
-              <option value="historical">Archived / retired</option>
-              <option value="all">All</option>
-            </select>
-          </label>
-          <label className="w-full min-w-0">
-            Category{' '}
-            <select
-              value={draft.category}
-              onChange={(event) =>
-                setDraft({ ...draft, category: event.target.value })
-              }
-              className="mt-1 block w-full min-w-0 rounded bg-slate-800 p-2"
-            >
-              <option value="">All</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <LocationPicker
-          locations={locations}
-          mode="browse"
-          label="Location filter"
-          value={draft.location}
-          onValueChange={(value) => setDraft({ ...draft, location: value })}
-          allowAll
-        />
-        <button className="rounded bg-cyan-400 px-4 py-2 font-semibold text-slate-950">
-          Search
-        </button>
-      </form>
-      <section className="mt-5 space-y-3" aria-label="Label search results">
-        <h2 className="text-xl font-semibold">Records</h2>
-        {search?.rows.map((record) => (
-          <div
-            key={record.kind + record.key}
-            className="flex max-w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded border border-slate-700 p-3"
+      <div className={styles.searchLayout}>
+        <div className={styles.searchColumn}>
+          <form
+            onSubmit={submitSearch}
+            aria-label="Search label records"
+            className={`${styles.surface} ${styles.surfaceAccent} ${styles.searchForm}`}
           >
-            <div className="min-w-0 flex-1 basis-56 [overflow-wrap:anywhere]">
-              <Link
-                href={
-                  record.kind === 'quantity'
-                    ? '/inventory/quantity/' + record.key
-                    : '/inventory/assets/' + record.key
+            <div>
+              <p className={styles.eyebrow}>01 / Find records</p>
+              <h2 className={styles.title}>Search inventory</h2>
+              <p className={styles.subtle}>
+                Find exact assets or quantity definitions for the sheet.
+              </p>
+            </div>
+            <label className={styles.fieldLabel}>
+              Name, serial, tag, category, manufacturer, model, or exact ID
+              <input
+                value={draft.q}
+                onChange={(event) =>
+                  setDraft({ ...draft, q: event.target.value })
                 }
-                className="text-cyan-300 underline [overflow-wrap:anywhere]"
-              >
-                {record.name}
-              </Link>
-              <p className="text-sm text-slate-400 [overflow-wrap:anywhere]">
-                {record.kind} · {record.categoryName} · {record.status} ·{' '}
-                {record.key}
-              </p>
-              <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
-                {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
-                {record.holdingContext}
-              </p>
-              {(record.itemCode ||
-                record.assetTag ||
-                record.serialNumber ||
-                record.manufacturer ||
-                record.model) && (
-                <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
-                  {[
-                    record.itemCode && `Item code: ${record.itemCode}`,
-                    record.assetTag,
-                    record.serialNumber,
-                    record.manufacturer,
-                    record.model,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
+                maxLength={200}
+                className={styles.field}
+              />
+            </label>
+            <div className={styles.filters}>
+              <label className={styles.fieldLabel}>
+                Type{' '}
+                <select
+                  value={draft.type}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      type: event.target.value as LabelSearchFilters['type'],
+                    })
+                  }
+                  className={styles.field}
+                >
+                  <option value="all">All</option>
+                  <option value="quantity">Quantity</option>
+                  <option value="asset">Asset</option>
+                </select>
+              </label>
+              <label className={styles.fieldLabel}>
+                Status{' '}
+                <select
+                  value={draft.status}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      status: event.target
+                        .value as LabelSearchFilters['status'],
+                    })
+                  }
+                  className={styles.field}
+                >
+                  <option value="active">Active</option>
+                  <option value="historical">Archived / retired</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label className={styles.fieldLabel}>
+                Category{' '}
+                <select
+                  value={draft.category}
+                  onChange={(event) =>
+                    setDraft({ ...draft, category: event.target.value })
+                  }
+                  className={styles.field}
+                >
+                  <option value="">All</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <LocationPicker
+              locations={locations}
+              mode="browse"
+              label="Location filter"
+              value={draft.location}
+              onValueChange={(value) => setDraft({ ...draft, location: value })}
+              allowAll
+            />
+            <button className={styles.primaryButton}>Search</button>
+          </form>
+          <section className={styles.surface} aria-label="Label search results">
+            <p className={styles.eyebrow}>Search results</p>
+            <h2 className={styles.title}>Records</h2>
+            <p className={styles.subtle} id="label-results-scroll-hint">
+              {search
+                ? `${search.total} matching records. Scroll this list to browse the current page.`
+                : 'Loading matching records…'}
+            </p>
+            <div
+              className={styles.results}
+              role="region"
+              aria-label="Search result records"
+              aria-describedby="label-results-scroll-hint"
+              tabIndex={0}
+            >
+              {search?.rows.map((record) => (
+                <div key={record.kind + record.key} className={styles.result}>
+                  <div className={styles.resultMain}>
+                    <Link
+                      href={
+                        record.kind === 'quantity'
+                          ? '/inventory/quantity/' + record.key
+                          : '/inventory/assets/' + record.key
+                      }
+                      className={styles.resultLink}
+                    >
+                      {record.name}
+                    </Link>
+                    <p className={styles.resultMeta}>
+                      {record.kind} · {record.categoryName} · {record.status}
+                    </p>
+                    <p className={styles.resultMeta}>
+                      {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
+                      {record.holdingContext}
+                    </p>
+                    {(record.itemCode ||
+                      record.assetTag ||
+                      record.serialNumber ||
+                      record.manufacturer ||
+                      record.model) && (
+                      <p className={styles.resultMeta}>
+                        {[
+                          record.itemCode && `Item code: ${record.itemCode}`,
+                          record.assetTag,
+                          record.serialNumber,
+                          record.manufacturer,
+                          record.model,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    )}
+                    <p className={styles.resultId}>ID {record.key}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void add({ kind: record.kind, key: record.key })
+                    }
+                    className={styles.secondaryButton}
+                  >
+                    Add to queue
+                  </button>
+                </div>
+              ))}
+              {search && search.total === 0 && (
+                <p className={styles.empty}>No records match these filters.</p>
               )}
             </div>
+            {search && (
+              <div className={styles.pagination}>
+                <span>
+                  {search.total} records · page {search.page} of{' '}
+                  {Math.max(1, Math.ceil(search.total / search.pageSize))}
+                </span>
+                <button
+                  disabled={filters.page <= 1}
+                  onClick={() =>
+                    setFilters({ ...filters, page: filters.page - 1 })
+                  }
+                  className={styles.textButton}
+                >
+                  Previous
+                </button>
+                <button
+                  disabled={filters.page * search.pageSize >= search.total}
+                  onClick={() =>
+                    setFilters({ ...filters, page: filters.page + 1 })
+                  }
+                  className={styles.textButton}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+        <div className={styles.queueColumn}>
+          <section className={styles.surface}>
+            <p className={styles.eyebrow}>02 / Physical locations</p>
+            <h2 className={styles.title}>Add a location or group</h2>
+            <LocationPicker
+              locations={locations}
+              mode="browse"
+              label="Location"
+              value={locationCode}
+              onValueChange={setLocationCode}
+            />
             <button
               type="button"
-              disabled={busy}
-              onClick={() => void add({ kind: record.kind, key: record.key })}
-              className="rounded border border-cyan-500 px-3 py-2 text-cyan-200"
+              disabled={!locationCode || busy}
+              onClick={() => void add({ kind: 'location', key: locationCode })}
+              className={styles.secondaryButton}
             >
-              Add to queue
+              Add location label
             </button>
-          </div>
-        ))}
-        {search && search.total === 0 && <p>No records match these filters.</p>}
-        {search && (
-          <div className="flex items-center gap-4">
-            <span>
-              {search.total} records · page {search.page} of{' '}
-              {Math.max(1, Math.ceil(search.total / search.pageSize))}
-            </span>
-            <button
-              disabled={filters.page <= 1}
-              onClick={() => setFilters({ ...filters, page: filters.page - 1 })}
-              className="text-cyan-300 underline"
-            >
-              Previous
-            </button>
-            <button
-              disabled={filters.page * search.pageSize >= search.total}
-              onClick={() => setFilters({ ...filters, page: filters.page + 1 })}
-              className="text-cyan-300 underline"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </section>
-      <section className="mt-6 space-y-3 rounded-xl border border-slate-700 p-4">
-        <h2 className="text-xl font-semibold">Add a location or group</h2>
-        <LocationPicker
-          locations={locations}
-          mode="browse"
-          label="Location"
-          value={locationCode}
-          onValueChange={setLocationCode}
-        />
-        <button
-          type="button"
-          disabled={!locationCode || busy}
-          onClick={() => void add({ kind: 'location', key: locationCode })}
-          className="rounded border border-cyan-500 px-3 py-2 text-cyan-200"
-        >
-          Add location label
-        </button>
-      </section>
-      <section className="mt-6 space-y-3" aria-label="Label queue">
-        <h2 className="text-xl font-semibold">Label queue</h2>
-        <p>
-          {entries.length} distinct records · {totalCopies(entries)} labels
-        </p>
-        {entries.length === 0 && <p>Add a record or location to begin.</p>}
-        {entries.map((entry) => {
-          const id = queueIdentity(entry),
-            record = byId.get(id);
-          return (
-            <div
-              key={id}
-              className="flex flex-wrap items-center gap-3 rounded border border-slate-700 p-3"
-            >
-              <span className="min-w-0 flex-1 break-words">
-                {record
-                  ? `${record.name} · ${record.categoryName ?? record.context} · ${record.state}`
-                  : `${id} · unavailable`}
-              </span>
-              <label>
-                Copies{' '}
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_COPIES}
-                  disabled={busy}
-                  value={entry.copies}
-                  onChange={(event) =>
-                    setCopies(id, Number(event.target.value))
-                  }
-                  className="ml-2 w-20 rounded border border-slate-500 bg-slate-950 p-2"
-                />
-              </label>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setEntries((list) =>
-                    list.filter((item) => queueIdentity(item) !== id),
-                  );
-                  invalidate();
-                }}
-                className="text-cyan-300 underline"
-              >
-                Remove
-              </button>
+          </section>
+          <section
+            className={`${styles.surface} ${styles.surfaceAccent}`}
+            aria-label="Label queue"
+          >
+            <p className={styles.eyebrow}>03 / Selected labels</p>
+            <div className={styles.queueHeader}>
+              <h2 className={styles.title}>Label queue</h2>
+              <p className={styles.count}>
+                {entries.length} distinct records · {totalCopies(entries)}{' '}
+                labels
+              </p>
             </div>
-          );
-        })}
-      </section>
-      <section className="mt-6 space-y-4">
-        <h2 className="text-xl font-semibold">Print preview</h2>
-        <div className="flex flex-wrap gap-4 rounded-xl border border-slate-700 p-4">
-          <label>
+            {entries.length === 0 && (
+              <p className={styles.empty}>Add a record or location to begin.</p>
+            )}
+            <div className={styles.queueList}>
+              {entries.map((entry) => {
+                const id = queueIdentity(entry),
+                  record = byId.get(id);
+                return (
+                  <div key={id} className={styles.queueEntry}>
+                    <span className={styles.queueName}>
+                      {record
+                        ? `${record.name} · ${record.categoryName ?? record.context} · ${record.state}`
+                        : `${id} · unavailable`}
+                    </span>
+                    <div className={styles.queueActions}>
+                      <label className={styles.copies}>
+                        Copies{' '}
+                        <input
+                          type="number"
+                          min={1}
+                          max={MAX_COPIES}
+                          disabled={busy}
+                          value={entry.copies}
+                          onChange={(event) =>
+                            setCopies(id, Number(event.target.value))
+                          }
+                          className={styles.copiesInput}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEntries((list) =>
+                            list.filter((item) => queueIdentity(item) !== id),
+                          );
+                          invalidate();
+                        }}
+                        className={styles.textButton}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      </div>
+      <section className={styles.sheetWorkspace}>
+        <div className={styles.sheetHeading}>
+          <div className={styles.sheetHeadingText}>
+            <p className={styles.eyebrow}>04 / Prepare & print</p>
+            <h2 className={styles.title}>Print preview</h2>
+            <p className={styles.subtle}>
+              Paper and code choices update this sheet automatically. Record
+              details refresh before printing.
+            </p>
+          </div>
+        </div>
+        <div className={styles.settings}>
+          <label className={styles.settingLabel}>
             Label size{' '}
             <select
               value={job.size}
@@ -772,13 +841,13 @@ export function LabelDesigner({
                 });
                 clearPrintAuthorization.current?.();
               }}
-              className="ml-2 rounded bg-slate-800 p-2"
+              className={styles.settingSelect}
             >
               <option value="90x50">90 × 50 mm</option>
               <option value="70x35">70 × 35 mm</option>
             </select>
           </label>
-          <label>
+          <label className={styles.settingLabel}>
             Page{' '}
             <select
               value={job.page}
@@ -790,13 +859,13 @@ export function LabelDesigner({
                 });
                 clearPrintAuthorization.current?.();
               }}
-              className="ml-2 rounded bg-slate-800 p-2"
+              className={styles.settingSelect}
             >
               <option value="letter">US Letter</option>
               <option value="A4">A4</option>
             </select>
           </label>
-          <label>
+          <label className={styles.settingLabel}>
             Code{' '}
             <select
               value={job.format}
@@ -810,33 +879,33 @@ export function LabelDesigner({
                 setFormatAcknowledged(false);
                 setFallbackPending(false);
               }}
-              className="ml-2 rounded bg-slate-800 p-2"
+              className={styles.settingSelect}
             >
               <option value="qr">QR URL</option>
               <option value="code128">Code 128 when suitable</option>
             </select>
           </label>
         </div>
-        <p className="text-sm text-slate-400">
+        <p className={styles.subtle}>
           New jobs start with the shared choices in Settings. Print at actual
           size / 100%. Code 128 asset tags require reprinting if the tag
           changes.
         </p>
         {job.format === 'code128' && fallbackCount > 0 && (
-          <p className="rounded border border-amber-700 p-3 text-amber-200">
+          <p className={styles.warning}>
             {fallbackCount} queued record(s) will use stable QR links because
             quantity items have no Code 128 identity or an asset tag is
             absent/incompatible. Long barcodes that do not fit also use QR.
           </p>
         )}
         {unavailable.length > 0 && (
-          <p role="alert" className="rounded border border-red-700 p-3">
+          <p role="alert" className={styles.error}>
             Unavailable: {unavailable.join(', ')}. Remove these records before
             printing.
           </p>
         )}
         {pendingChanges.length > 0 && (
-          <div role="alert" className="rounded border border-amber-700 p-3">
+          <div role="alert" className={styles.warning}>
             <p>
               Tag or lifecycle state changed for:{' '}
               {pendingChanges
@@ -851,14 +920,14 @@ export function LabelDesigner({
               type="button"
               disabled={busy}
               onClick={acknowledge}
-              className="mt-2 rounded bg-amber-400 px-3 py-2 font-semibold text-slate-950"
+              className={styles.secondaryButton}
             >
               Acknowledge changes
             </button>
           </div>
         )}
         {fallbackPending && (
-          <div role="alert" className="rounded border border-amber-700 p-3">
+          <div role="alert" className={styles.warning}>
             <p>
               Some labels will use QR because Code 128 is unavailable or will
               not fit at readable size.
@@ -873,29 +942,29 @@ export function LabelDesigner({
                   'QR fallback acknowledged. Print again to run the final inventory check.',
                 );
               }}
-              className="mt-2 rounded bg-amber-400 px-3 py-2 font-semibold text-slate-950"
+              className={styles.secondaryButton}
             >
               Acknowledge QR fallback
             </button>
           </div>
         )}
         {message && (
-          <p role="status" className="text-cyan-200">
+          <p role="status" className={styles.notice}>
             {message}
           </p>
         )}
         {refreshPending && (
-          <p role="status">
+          <p role="status" className={styles.notice}>
             Refreshing labels; previous sheet shown until current records are
             ready.
           </p>
         )}
-        <div className="flex flex-wrap gap-3">
+        <div className={styles.printActions}>
           {refreshFailed && (
             <button
               type="button"
               onClick={() => setRetry((value) => value + 1)}
-              className="rounded border border-cyan-500 px-4 py-2 text-cyan-200"
+              className={styles.secondaryButton}
             >
               Retry label refresh
             </button>
@@ -916,22 +985,60 @@ export function LabelDesigner({
                 !formatAcknowledged)
             }
             onClick={() => void print()}
-            className="rounded bg-cyan-400 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50"
+            className={styles.primaryButton}
           >
             Print selected labels / Save as PDF
           </button>
         </div>
+        {entries.length > 0 && (
+          <div className={styles.statusLine} role="status">
+            <span
+              className={styles.statusDot}
+              data-ready={
+                !!prepared &&
+                !busy &&
+                !refreshPending &&
+                !refreshFailed &&
+                validatedKey === selectionKey &&
+                readySheetKey === sheetKey &&
+                unavailable.length === 0 &&
+                pendingChanges.length === 0 &&
+                !(
+                  job.format === 'code128' &&
+                  fallbackPending &&
+                  !formatAcknowledged
+                )
+              }
+            />
+            <span className={styles.statusText}>
+              {refreshFailed
+                ? 'Refresh failed — retry before printing'
+                : refreshPending
+                  ? 'Checking current records — printing paused'
+                  : pendingChanges.length ||
+                      unavailable.length ||
+                      fallbackPending
+                    ? 'Review required before printing'
+                    : readySheetKey === sheetKey &&
+                        validatedKey === selectionKey
+                      ? 'Sheet ready for final print check'
+                      : 'Preparing codes and layout — printing paused'}
+            </span>
+          </div>
+        )}
         {displayRows && (
-          <LabelSheet
-            records={displayRows}
-            origin={origin}
-            preview={preview}
-            size={job.size}
-            page={job.page}
-            format={job.format}
-          />
+          <div className={styles.sheetFrame}>
+            <LabelSheet
+              records={displayRows}
+              origin={origin}
+              preview={preview}
+              size={job.size}
+              page={job.page}
+              format={job.format}
+            />
+          </div>
         )}
       </section>
-    </>
+    </div>
   );
 }

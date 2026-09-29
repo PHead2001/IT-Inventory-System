@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { getEventCustomPage } from '@/features/metadata/queries.server';
 import { notFound } from 'next/navigation';
+import styles from '@/features/inventory/components/inventory-visual.module.css';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export default async function HistoryPage({
@@ -157,8 +158,9 @@ export default async function HistoryPage({
   ]);
   return (
     <>
-      <h1 className="text-3xl font-semibold">Inventory history</h1>
-      <p className="my-4 text-slate-400">
+      <p className="experience-eyebrow">Inventory · Audit trail</p>
+      <h1 className="experience-heading mt-3">Inventory history</h1>
+      <p className="experience-muted my-4 max-w-2xl text-sm">
         Append-only records of inventory changes. Physical movements and record
         corrections are shown separately.
       </p>
@@ -201,7 +203,9 @@ export default async function HistoryPage({
         )}
         <Button type="submit">Filter history</Button>
       </form>
-      <HistoryList events={result.rows} />
+      <div className={styles.history}>
+        <HistoryList events={result.rows} />
+      </div>
       <Pagination result={result} base="/history" params={params} />
     </>
   );

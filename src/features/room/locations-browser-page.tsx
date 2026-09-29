@@ -12,7 +12,7 @@ export function LocationsBrowserPage({
   const [code, setCode] = useState<string | null>(null);
   const selected = locations.find((location) => location.code === code);
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
       <LocationBrowser
         locations={locations}
         selectedCode={code}
@@ -20,15 +20,18 @@ export function LocationsBrowserPage({
       />
       <section
         aria-label="Selected location"
-        className="rounded-xl border border-slate-700 bg-slate-900/70 p-5"
+        className="experience-surface min-w-0 self-start p-4"
       >
         {selected ? (
           <>
-            <h2 className="text-xl font-semibold">{selected.name}</h2>
+            <p className="experience-eyebrow">Selected location</p>
+            <h2 className="mt-1 break-words text-xl font-semibold">
+              {selected.name}
+            </h2>
             <p className="mt-2 break-words text-sm text-slate-300">
               {selected.breadcrumb} · {selected.code}
             </p>
-            <p className="mt-2 text-sm">
+            <p className="mt-2 text-sm text-slate-200">
               {!selected.active
                 ? 'Inactive: cannot be chosen as a new inventory destination.'
                 : selected.can_hold_inventory

@@ -1,20 +1,14 @@
 import Link from 'next/link';
-import {
-  Boxes,
-  Map,
-  MapPin,
-  Building2,
-  History,
-  LayoutDashboard,
-  ScanLine,
-  Tags,
-  Settings,
-} from 'lucide-react';
+import { Boxes } from 'lucide-react';
 import { requireMember } from '@/lib/auth/session.server';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivateSpeedInsights } from '@/features/telemetry/private-speed-insights';
 import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
+import { MotionPreference } from '@/components/experience/motion-preference';
+import { Navigation } from '@/components/experience/navigation';
+
 export const dynamic = 'force-dynamic';
+
 export default async function ApplicationLayout({
   children,
 }: {
@@ -22,112 +16,44 @@ export default async function ApplicationLayout({
 }) {
   const { member } = await requireMember();
   return (
-    <div className="min-h-screen">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-slate-900 focus:p-4"
-      >
-        Skip to content
-      </a>
-      <header className="border-b border-slate-800 px-5 py-4 sm:px-8">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
-          <Link
-            href="/inventory"
-            className="flex items-center gap-3 font-semibold"
-          >
-            <span className="rounded-lg bg-cyan-400/10 p-2 text-cyan-300">
-              <Boxes size={22} />
-            </span>
-            IT Inventory
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-slate-400">
-              {member.display_name}
-              <span className="ml-2 rounded border border-slate-700 px-2 py-1 text-xs capitalize">
-                {member.role}
+    <MotionPreference>
+      <div className="experience-app">
+        <a href="#main-content" className="experience-skip-link">
+          Skip to content
+        </a>
+        <header className="experience-header">
+          <div className="experience-header-inner">
+            <Link href="/dashboard" className="experience-brand">
+              <span className="experience-brand-mark">
+                <Boxes size={19} strokeWidth={1.8} aria-hidden="true" />
               </span>
-            </span>
-            <QueueLogoutForm />
+              <span>
+                <strong>IT Inventory</strong>
+                <small>Spatial workspace</small>
+              </span>
+            </Link>
+            <div className="experience-account">
+              <span className="experience-account-name">
+                {member.display_name}
+              </span>
+              <span className="experience-role">{member.role}</span>
+              <QueueLogoutForm />
+            </div>
           </div>
+        </header>
+        <div className="experience-workspace">
+          <aside className="experience-sidebar">
+            <Navigation />
+          </aside>
+          <main id="main-content" className="experience-main" tabIndex={-1}>
+            {children}
+          </main>
         </div>
-      </header>
-      <div className="mx-auto grid max-w-7xl gap-8 px-5 py-6 md:grid-cols-[190px_1fr] sm:px-8">
-        <nav
-          aria-label="Main navigation"
-          className="flex flex-wrap gap-2 md:flex-col"
-        >
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/dashboard"
-          >
-            <LayoutDashboard size={18} />
-            Overview
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/inventory"
-          >
-            <Boxes size={18} />
-            Inventory
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/scan"
-          >
-            <ScanLine size={18} />
-            Scan
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/labels"
-          >
-            <Tags size={18} />
-            Labels
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/room"
-          >
-            <Map size={18} />
-            Spaces &amp; maps
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/locations"
-          >
-            <MapPin size={18} />
-            Locations
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/sites"
-          >
-            <Building2 size={18} />
-            Properties / sites
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/history"
-          >
-            <History size={18} />
-            History
-          </Link>
-          <Link
-            className="flex min-h-11 items-center gap-3 rounded-md border border-slate-800 px-3 text-sm hover:bg-slate-900"
-            href="/settings"
-          >
-            <Settings size={18} />
-            Settings
-          </Link>
-        </nav>
-        <main id="main-content" className="min-w-0">
-          {children}
-        </main>
+        {speedInsightsEnabled({
+          VERCEL_ENV: process.env.VERCEL_ENV,
+          SPEED_INSIGHTS_ENABLED: process.env.SPEED_INSIGHTS_ENABLED,
+        }) && <PrivateSpeedInsights />}
       </div>
-      {speedInsightsEnabled({
-        VERCEL_ENV: process.env.VERCEL_ENV,
-        SPEED_INSIGHTS_ENABLED: process.env.SPEED_INSIGHTS_ENABLED,
-      }) && <PrivateSpeedInsights />}
-    </div>
+    </MotionPreference>
   );
 }

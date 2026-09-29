@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 
@@ -24,6 +24,11 @@ type Metric = {
   href: string;
   route: string;
   attribution?: { eventTarget?: string };
+};
+type LayoutShiftObservation = {
+  value: number;
+  hadRecentInput: boolean;
+  sourceIds: string[];
 };
 
 test.use({
@@ -187,22 +192,33 @@ test('auth/token navigation and queued logout do not send vitals', async ({
 
 test('native INP and CLS attribution emits only opaque element identifiers', async ({
   page,
-}) => {
+}, testInfo) => {
   const requests = await captureTelemetry(page);
   await signIn(page);
   await waitForOfficialScript(page);
   requests.length = 0;
   await page.evaluate(() => {
-    const observed = window as Window & { __testLayoutShifts?: number };
-    observed.__testLayoutShifts = 0;
+    const observed = window as Window & {
+      __testLayoutShifts?: LayoutShiftObservation[];
+    };
+    observed.__testLayoutShifts = [];
     new PerformanceObserver((list) => {
-      observed.__testLayoutShifts! += list
-        .getEntries()
-        .filter(
-          (entry) =>
-            !(entry as PerformanceEntry & { hadRecentInput?: boolean })
-              .hadRecentInput,
-        ).length;
+      for (const entry of list.getEntries()) {
+        const shift = entry as PerformanceEntry & {
+          value: number;
+          hadRecentInput: boolean;
+          sources?: { node?: Node }[];
+        };
+        observed.__testLayoutShifts!.push({
+          value: shift.value,
+          hadRecentInput: shift.hadRecentInput,
+          sourceIds: (shift.sources ?? [])
+            .map((source) =>
+              source.node instanceof Element ? source.node.id : '',
+            )
+            .filter(Boolean),
+        });
+      }
     }).observe({ type: 'layout-shift', buffered: false });
     const main = document.querySelector('main')!;
     const interaction = document.createElement('button');
@@ -229,13 +245,18 @@ test('native INP and CLS attribution emits only opaque element identifiers', asy
   });
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
-          (window as Window & { __testLayoutShifts?: number })
-            .__testLayoutShifts,
+      page.evaluate(() =>
+        (
+          window as Window & { __testLayoutShifts?: LayoutShiftObservation[] }
+        ).__testLayoutShifts?.some(
+          (entry) =>
+            entry.value > 0 &&
+            !entry.hadRecentInput &&
+            entry.sourceIds.includes('inventory-location-results-tree-2'),
+        ),
       ),
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
   await page.locator('#inventory-location-results-tree-1').click();
   await page.waitForTimeout(200);
   // CLS registers its hidden callback asynchronously after buffered FCP,
@@ -245,9 +266,25 @@ test('native INP and CLS attribution emits only opaque element identifiers', asy
   await flush(page);
   await expect.poll(() => requests.length).toBeGreaterThan(0);
   const metrics = emittedMetrics(requests, '/inventory');
+  const nativeShifts = await page.evaluate(
+    () =>
+      (window as Window & { __testLayoutShifts?: LayoutShiftObservation[] })
+        .__testLayoutShifts ?? [],
+  );
+  const diagnostic = JSON.stringify({
+    shifts: nativeShifts,
+    cls: metrics.filter((metric) => metric.type === 'CLS'),
+  });
+  writeFileSync(testInfo.outputPath('native-layout-shifts.json'), diagnostic);
+  await testInfo.attach('native-layout-shifts', {
+    body: diagnostic,
+    contentType: 'application/json',
+  });
   expect(
     metrics.find((metric) => metric.type === 'INP')?.attribution?.eventTarget,
   ).toBe('#inventory-location-results-tree-1');
+  // The pinned official intake serializes CLS largestShiftTarget as
+  // attribution.eventTarget on the wire.
   expect(
     metrics.find((metric) => metric.type === 'CLS')?.attribution?.eventTarget,
   ).toBe('#inventory-location-results-tree-2');

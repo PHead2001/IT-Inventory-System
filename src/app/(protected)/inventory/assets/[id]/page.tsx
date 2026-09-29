@@ -21,6 +21,7 @@ import {
   LocationLink,
   panel,
 } from '@/features/inventory/components/read-ui';
+import styles from '@/features/inventory/components/inventory-visual.module.css';
 export default async function AssetPage({
   params,
 }: {
@@ -42,101 +43,131 @@ export default async function AssetPage({
   ]);
   return (
     <>
-      <Link href="/inventory" className="text-sm text-cyan-300 underline">
-        Back to inventory
-      </Link>
-      <h1 className="mt-4 break-words text-3xl font-semibold">{asset.name}</h1>
-      <Link
-        className="mt-3 inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
-        href={'/labels?asset=' + encodeURIComponent(asset.id)}
-      >
-        Print asset label
-      </Link>
-      <p className="mt-2 text-slate-400">
-        {asset.categoryName} · Serialized asset · {asset.status} · Version{' '}
-        {asset.version}
-      </p>
-      <section className={panel + ' my-5'}>
-        <h2 className="font-semibold">Asset details</h2>
-        <dl className="mt-3 space-y-2 break-words">
-          <div>
-            <dt className="text-sm text-slate-400">Asset tag</dt>
+      <section className={`experience-surface-bright ${styles.detailHero}`}>
+        <Link href="/inventory" className="text-sm text-cyan-200 underline">
+          ← Back to inventory
+        </Link>
+        <div className={`${styles.detailHead} mt-4`}>
+          <div className={styles.detailTitle}>
+            <p className="experience-eyebrow">
+              {asset.categoryName} · Serialized asset
+            </p>
+            <h1 className="experience-heading mt-2">{asset.name}</h1>
+            <p className="experience-muted mt-2 text-sm capitalize">
+              {asset.status} · Version {asset.version}
+            </p>
+          </div>
+          <div className={styles.detailActions}>
+            <Link href={'/labels?asset=' + encodeURIComponent(asset.id)}>
+              Print asset label
+            </Link>
+          </div>
+        </div>
+        <dl className={styles.facts}>
+          <div className={styles.fact}>
+            <dt>Asset tag</dt>
             <dd>{asset.assetTag || 'Not set'}</dd>
           </div>
-          <div>
-            <dt className="text-sm text-slate-400">Serial number</dt>
+          <div className={styles.fact}>
+            <dt>Serial number</dt>
             <dd>{asset.serialNumber || 'Not set'}</dd>
           </div>
-          <div>
-            <dt className="text-sm text-slate-400">Manufacturer / model</dt>
+          <div className={styles.fact}>
+            <dt>Current custody</dt>
             <dd>
-              {asset.manufacturer || 'Not set'} / {asset.model || 'Not set'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-sm text-slate-400">Description</dt>
-            <dd className="whitespace-pre-wrap">
-              {asset.description || 'No description'}
+              {site ? site.name : location ? location.breadcrumb : 'Unassigned'}
             </dd>
           </div>
         </dl>
       </section>
-      <CustomMetadataList
-        values={asset.customDisplay}
-        needsMetadata={asset.needsMetadata}
-      />
-      {duplicateSerialMatches.length > 0 && (
-        <aside className="my-5 rounded-xl border border-amber-700 p-4 text-amber-200">
-          <h2 className="font-semibold">Duplicate serial warning</h2>
-          <p className="mt-2 text-sm">
-            This serial is also recorded on the following assets. Duplicate
-            serials are allowed.
-          </p>
-          <ul className="mt-2 space-y-2">
-            {duplicateSerialMatches.map((match) => (
-              <li key={match.id}>
-                <Link
-                  className="underline"
-                  href={'/inventory/assets/' + match.id}
-                >
-                  {match.name} ({match.assetTag || 'untagged'}, {match.status})
-                </Link>
-              </li>
-            ))}
-          </ul>
+      <div className={styles.recordGrid}>
+        <div className={styles.recordMain}>
+          <section className={panel + ' my-5'}>
+            <h2 className="font-semibold">Asset details</h2>
+            <dl className="mt-3 space-y-2 break-words">
+              <div>
+                <dt className="text-sm text-slate-400">Asset tag</dt>
+                <dd>{asset.assetTag || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-slate-400">Serial number</dt>
+                <dd>{asset.serialNumber || 'Not set'}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-slate-400">Manufacturer / model</dt>
+                <dd>
+                  {asset.manufacturer || 'Not set'} / {asset.model || 'Not set'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm text-slate-400">Description</dt>
+                <dd className="whitespace-pre-wrap">
+                  {asset.description || 'No description'}
+                </dd>
+              </div>
+            </dl>
+          </section>
+          <CustomMetadataList
+            values={asset.customDisplay}
+            needsMetadata={asset.needsMetadata}
+          />
+          {duplicateSerialMatches.length > 0 && (
+            <aside className="my-5 rounded-xl border border-amber-700 p-4 text-amber-200">
+              <h2 className="font-semibold">Duplicate serial warning</h2>
+              <p className="mt-2 text-sm">
+                This serial is also recorded on the following assets. Duplicate
+                serials are allowed.
+              </p>
+              <ul className="mt-2 space-y-2">
+                {duplicateSerialMatches.map((match) => (
+                  <li key={match.id}>
+                    <Link
+                      className="underline"
+                      href={'/inventory/assets/' + match.id}
+                    >
+                      {match.name} ({match.assetTag || 'untagged'},{' '}
+                      {match.status})
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          )}
+          <section className={panel + ' mb-6'}>
+            <h2 className="mb-2 font-semibold">
+              {asset.status === 'retired'
+                ? 'Last recorded storage / custody'
+                : 'Current custody'}
+            </h2>
+            {site ? (
+              <Link
+                className="text-cyan-300 underline"
+                href={`/sites/${encodeURIComponent(site.code)}`}
+              >
+                Assigned to {site.name} ({site.code})
+              </Link>
+            ) : location ? (
+              <LocationLink location={location} />
+            ) : (
+              <span>No current storage or site assignment</span>
+            )}
+            {site && (
+              <p className="mt-2 text-sm text-slate-400">
+                This asset is at a site and is not currently in a storage
+                drawer. The site has no 3D room model.
+              </p>
+            )}
+          </section>
+        </div>
+        <aside className={styles.recordAside} aria-label="Record attachments">
+          <FilesPanel
+            parentType="asset"
+            parentId={asset.id}
+            active={asset.status === 'active'}
+            staff={member.role === 'staff'}
+          />
         </aside>
-      )}
-      <section className={panel + ' mb-6'}>
-        <h2 className="mb-2 font-semibold">
-          {asset.status === 'retired'
-            ? 'Last recorded storage / custody'
-            : 'Current custody'}
-        </h2>
-        {site ? (
-          <Link
-            className="text-cyan-300 underline"
-            href={`/sites/${encodeURIComponent(site.code)}`}
-          >
-            Assigned to {site.name} ({site.code})
-          </Link>
-        ) : location ? (
-          <LocationLink location={location} />
-        ) : (
-          <span>No current storage or site assignment</span>
-        )}
-        {site && (
-          <p className="mt-2 text-sm text-slate-400">
-            This asset is at a site and is not currently in a storage drawer.
-            The site has no 3D room model.
-          </p>
-        )}
-      </section>
-      <FilesPanel
-        parentType="asset"
-        parentId={asset.id}
-        active={asset.status === 'active'}
-        staff={member.role === 'staff'}
-      />
+      </div>
       {member.role === 'staff' && (
         <section aria-label="Asset actions" className="mb-8 space-y-3">
           <h2 className="text-xl font-semibold">Manage serialized asset</h2>
@@ -152,10 +183,11 @@ export default async function AssetPage({
                 ] as const)
           ).map((operation) =>
             operation === 'asset_update' ? (
-              <section key={operation} className={panel}>
-                <h3 className="mb-4 text-lg font-semibold">
-                  Edit asset metadata
-                </h3>
+              <details
+                key={operation}
+                className={`${panel} ${styles.editDisclosure}`}
+              >
+                <summary>Edit asset metadata</summary>
                 <MetadataForm
                   kind="asset"
                   asset={asset}
@@ -163,7 +195,7 @@ export default async function AssetPage({
                   locations={locations}
                   forms={forms}
                 />
-              </section>
+              </details>
             ) : (
               <OperationPanel
                 key={operation}
@@ -226,7 +258,9 @@ export default async function AssetPage({
         </section>
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
-      <HistoryList events={history} />
+      <div className={styles.history}>
+        <HistoryList events={history} />
+      </div>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"
         href={'/history?type=asset&entityId=' + asset.id}

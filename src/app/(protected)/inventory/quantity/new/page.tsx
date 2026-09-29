@@ -32,12 +32,13 @@ export default async function NewQuantityPage() {
   const forms = await getPublishedForms([initialCategory.id]);
   return (
     <>
-      <h1 className="mb-5 text-3xl font-semibold">Create quantity inventory</h1>
-      <p className="mb-5 text-slate-400">
+      <p className="experience-eyebrow">Inventory · New record</p>
+      <h1 className="experience-heading mt-3">Create quantity inventory</h1>
+      <p className="experience-muted mb-5 mt-3 max-w-2xl text-sm">
         Define interchangeable items with zero stock or an initial quantity at
         one location.
       </p>
-      <div className={panel}>
+      <div className={`${panel} max-w-5xl`}>
         <MetadataForm
           kind="quantity"
           categories={categories}

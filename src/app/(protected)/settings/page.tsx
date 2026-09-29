@@ -48,8 +48,9 @@ export default async function SettingsPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Settings</h1>
-        <p className="mt-2 text-slate-400">
+        <p className="experience-eyebrow">Workspace · Configuration</p>
+        <h1 className="experience-heading mt-3">Settings</h1>
+        <p className="experience-muted mt-2 text-sm">
           Choose the configuration area you need.
         </p>
       </div>
@@ -58,12 +59,12 @@ export default async function SettingsPage({
           <li key={section.href}>
             <Link
               href={section.href}
-              className="block rounded-lg border border-slate-700 p-5 hover:border-cyan-500 hover:bg-slate-900 focus-visible:outline-2 focus-visible:outline-cyan-300"
+              className="experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
             >
               <span className="block text-lg font-semibold text-cyan-200">
                 {section.title}
               </span>
-              <span className="mt-1 block text-sm text-slate-300">
+              <span className="experience-muted mt-1 block text-sm">
                 {section.description}
               </span>
             </Link>

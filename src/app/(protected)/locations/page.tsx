@@ -8,8 +8,9 @@ export default async function LocationsPage() {
   const locations = await getLocations();
   return (
     <>
-      <h1 className="text-3xl font-semibold">Locations</h1>
-      <p className="my-4 text-slate-300">
+      <p className="experience-eyebrow">Storage / Location hierarchy</p>
+      <h1 className="experience-heading mt-1">Locations</h1>
+      <p className="my-4 max-w-3xl text-sm leading-6 text-slate-300">
         Browse rooms and their logical storage locations. Selecting a group
         includes its descendants.
       </p>

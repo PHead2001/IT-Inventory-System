@@ -42,11 +42,11 @@ export default async function InventoryPage({
   if (filters.lowStock) exportParams.set('lowStock', 'true');
   return (
     <>
-      <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
+      <p className="experience-eyebrow">
         Logical storage and site custody · Inventory
       </p>
-      <h1 className="mt-3 text-3xl font-semibold">Inventory workspace</h1>
-      <p className="mt-3 text-slate-400">
+      <h1 className="experience-heading mt-3">Inventory workspace</h1>
+      <p className="experience-muted mt-3 max-w-2xl text-sm">
         Search available storage, assigned site holdings, and individually
         tracked assets.
       </p>
@@ -69,7 +69,7 @@ export default async function InventoryPage({
           locations={locations}
           sites={sites}
         />
-        <div className="mb-5 flex flex-wrap gap-4 text-sm">
+        <div className="mb-5 flex flex-wrap gap-x-5 gap-y-1 text-sm">
           <a
             className="min-h-11 py-3 text-cyan-300 underline"
             href={'/api/exports/inventory?' + exportParams}
@@ -96,6 +96,12 @@ export default async function InventoryPage({
             item-wide threshold calculation.
           </p>
         )}
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-lg font-semibold">Matching inventory</h2>
+          <p className="experience-muted text-sm tabular-nums">
+            {result.total} results
+          </p>
+        </div>
         <InventoryRows rows={result.rows} fileSummaries={fileSummaries} />
         <Pagination result={result} base="/inventory" params={params} />
       </div>

@@ -26,6 +26,8 @@ import {
   roomContentsFilter,
 } from './contents-contract';
 import type { Space } from './spaces';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
+import styles from './room-visual.module.css';
 import {
   availableSpaces,
   containingSpace,
@@ -111,6 +113,7 @@ export function SpacesWorkspace({
     code: initialCode,
     page: initialPage,
   });
+  const reducedMotion = useEffectiveReducedMotion();
   const [contents, setContents] = useState<{
     key: string;
     result?: PageResult<InventoryResult>;
@@ -303,7 +306,7 @@ export function SpacesWorkspace({
     ? Math.max(1, Math.ceil(result.total / result.pageSize))
     : 1;
   return (
-    <div className="mt-6 space-y-5">
+    <div className={styles.workspace}>
       {notice && (
         <p
           role="status"
@@ -312,13 +315,13 @@ export function SpacesWorkspace({
           {notice}
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-3">
-        <label htmlFor="space-selector" className="text-sm font-semibold">
+      <div className={styles.commandBar}>
+        <label htmlFor="space-selector" className={styles.spaceLabel}>
           Space
         </label>
         <select
           id="space-selector"
-          className="min-h-11 rounded-md border border-slate-600 bg-slate-900 px-3"
+          className={styles.spaceSelect}
           value={selection.space.id}
           onChange={(event) => {
             const next = resolveSpace(locations, event.target.value, null);
@@ -336,7 +339,7 @@ export function SpacesWorkspace({
         </select>
         {room && (
           <button
-            className="min-h-11 rounded-md border border-slate-600 px-3"
+            className={styles.commandButton}
             onClick={() => setVisible((value) => !value)}
           >
             {visible ? 'Hide room' : 'Show room'}
@@ -344,21 +347,18 @@ export function SpacesWorkspace({
         )}
         {selection.code && (
           <button
-            className="min-h-11 rounded-md border border-slate-600 px-3"
+            className={styles.commandButton}
             onClick={() => navigate({ ...selection, code: null, page: 1 })}
           >
             Clear selection
           </button>
         )}
-        <Link
-          className="min-h-11 py-3 text-cyan-300 underline"
-          href="/inventory"
-        >
+        <Link className={styles.commandLink} href="/inventory">
           Search inventory
         </Link>
       </div>
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 space-y-4">
+      <div className={styles.columns}>
+        <div className={styles.mainColumn}>
           {room && visible ? (
             <div
               data-testid="room-viewer"
@@ -366,10 +366,14 @@ export function SpacesWorkspace({
               data-camera-view={
                 viewKey ? JSON.stringify(initialView) : undefined
               }
-              className="min-w-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-950"
+              className={styles.viewer}
             >
+              <div className={styles.viewerHeading}>
+                <strong>{selection.space.name} / measured map</strong>
+                <span>Select a location in the map or browser</span>
+              </div>
               {sceneError ? (
-                <div className="p-6">
+                <div className={styles.fallback}>
                   <h2 className="font-semibold">Room view unavailable</h2>
                   <p className="mt-2 text-sm">
                     {sceneError} Browse locations and inventory below.
@@ -419,7 +423,7 @@ export function SpacesWorkspace({
               )}
             </div>
           ) : !room ? (
-            <div className="rounded-xl border border-slate-700 bg-slate-900 p-8">
+            <div className={styles.unmodeled}>
               <h2 className="text-xl font-semibold">
                 {selection.space.name} inventory
               </h2>
@@ -432,32 +436,48 @@ export function SpacesWorkspace({
           <section
             aria-label="Location inventory"
             aria-busy={loading}
-            className="min-w-0 space-y-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4"
+            className={styles.inventoryPanel}
           >
             {selected ? (
-              <>
-                <h2 className="text-xl font-semibold">
-                  {selected.name} ({selected.code})
+              <div
+                key={selection.space.id + ':' + selected.code}
+                className={reducedMotion ? undefined : styles.arrival}
+              >
+                <p className={styles.panelEyebrow}>Selected location</p>
+                <h2 className={styles.selectionTitle}>
+                  {selected.name}{' '}
+                  <span className={styles.selectionCode}>
+                    ({selected.code})
+                  </span>
                 </h2>
-                <p className="text-sm text-slate-300">
+                <p className={styles.breadcrumb}>
                   {selected.breadcrumb}
                   {!selected.can_hold_inventory
                     ? ' · Includes descendant inventory'
                     : ''}
                 </p>
                 <Link
-                  className="text-sm text-cyan-300 underline"
+                  className={styles.detailLink}
                   href={'/locations/' + encodeURIComponent(selected.code)}
                 >
                   Location details and history
                 </Link>
-              </>
+              </div>
             ) : (
-              <p>Choose a location to view its inventory.</p>
+              <div>
+                <p className={styles.panelEyebrow}>Location inventory</p>
+                <p className={styles.breadcrumb}>
+                  Choose a location to view its inventory.
+                </p>
+              </div>
             )}
-            {loading && <p role="status">Loading contents…</p>}
+            {loading && (
+              <p role="status" className={styles.contentsState}>
+                Loading contents for {selected?.name ?? 'selected location'}…
+              </p>
+            )}
             {error && (
-              <div role="alert">
+              <div role="alert" className={styles.contentsError}>
                 <p>{error}</p>
                 <button
                   className="min-h-11 text-cyan-300 underline"
@@ -468,12 +488,12 @@ export function SpacesWorkspace({
               </div>
             )}
             {result && !loading && (
-              <>
+              <div
+                key={attemptKey}
+                className={reducedMotion ? undefined : styles.arrival}
+              >
                 <InventoryRows rows={result.rows} />
-                <nav
-                  aria-label="Pagination"
-                  className="flex items-center gap-3 text-sm"
-                >
+                <nav aria-label="Pagination" className={styles.pagination}>
                   <span>
                     {result.total} results · Page {result.page} of {pages}
                   </span>
@@ -498,7 +518,7 @@ export function SpacesWorkspace({
                     </button>
                   )}
                 </nav>
-              </>
+              </div>
             )}
           </section>
         </div>

@@ -42,13 +42,11 @@ export default async function RoomPage({
         : null;
   return (
     <>
-      <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">
-        Spatial inventory
-      </p>
-      <h1 className="mt-3 text-3xl font-semibold">Spaces &amp; maps</h1>
-      <p className="mt-3 max-w-2xl text-slate-300">
-        Explore the modeled IT Closet and inventory-only IT Office by physical
-        location.
+      <p className="experience-eyebrow">Locations / Spatial inventory</p>
+      <h1 className="experience-heading mt-3">Spaces &amp; maps</h1>
+      <p className="experience-muted mt-3 max-w-2xl text-sm leading-6">
+        Find inventory by physical location. Explore the measured IT Closet map
+        or browse logical locations in spaces without a map.
       </p>
       <SpacesWorkspace
         locations={locations}

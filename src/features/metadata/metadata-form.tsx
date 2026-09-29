@@ -765,7 +765,7 @@ export function MetadataForm({
   };
   return (
     <form
-      className="space-y-5"
+      className="min-w-0 space-y-5"
       aria-label={
         preview
           ? `Preview ${kind} metadata`
@@ -903,10 +903,36 @@ export function MetadataForm({
           .filter(
             (section) =>
               section.visible !== false &&
-              (section.applies_to ?? ['quantity', 'asset']).includes(kind),
+              (section.applies_to ?? ['quantity', 'asset']).includes(kind) &&
+              section.controls.some(
+                (control) =>
+                  control.visible !== false &&
+                  (control.applies_to ?? ['quantity', 'asset']).includes(
+                    kind,
+                  ) &&
+                  (control.kind === 'help' ||
+                    (control.kind === 'field' &&
+                      applicable.some(
+                        (field) => field.id === control.field_id,
+                      )) ||
+                    (control.kind === 'builtin' &&
+                      !(
+                        (kind === 'quantity' &&
+                          ['asset_tag', 'serial_number'].includes(
+                            control.builtin ?? '',
+                          )) ||
+                        (kind === 'asset' &&
+                          ['reorder_threshold', 'item_code'].includes(
+                            control.builtin ?? '',
+                          ))
+                      ))),
+              ),
           )
           .map((section) => (
-            <section key={section.id} className="min-w-0 space-y-3">
+            <section
+              key={section.id}
+              className="min-w-0 space-y-3 border-t border-cyan-100/15 pt-4 first:border-0 first:pt-0"
+            >
               <h3 className="break-words text-lg font-semibold">
                 {section.label}
               </h3>

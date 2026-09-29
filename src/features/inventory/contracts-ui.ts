@@ -6,6 +6,8 @@ export type LocationRef = {
   active: boolean;
   can_hold_inventory: boolean;
   parentId: string | null;
+  /** Registry root derived from the authorized parent hierarchy, never from a code prefix. */
+  spaceRootCode?: string | null;
   sortOrder?: number;
 };
 export type CategoryRef = { id: string; name: string; active: boolean };

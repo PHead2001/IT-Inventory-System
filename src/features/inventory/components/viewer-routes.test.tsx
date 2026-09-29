@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import QuantityPage from '@/app/(protected)/inventory/quantity/[id]/page';
 import AssetPage from '@/app/(protected)/inventory/assets/[id]/page';
@@ -140,4 +140,28 @@ it('staff pages fetch only the initially selected category form', async () => {
   expect(fixture.forms).toHaveBeenCalledTimes(5);
   for (const [ids] of fixture.forms.mock.calls)
     expect(ids).toEqual(['category']);
+});
+it('keeps metadata edit form mounted inside a discoverable disclosure', async () => {
+  fixture.role = 'staff';
+  const page = render(
+    await QuantityPage({ params: Promise.resolve({ id: 'item' }) }),
+  );
+  const summary = screen.getByText('Edit quantity metadata', {
+    selector: 'summary',
+  });
+  expect(summary.closest('details')).not.toHaveAttribute('open');
+  fireEvent.click(summary);
+  expect(summary.closest('details')).toHaveAttribute('open');
+  expect(
+    screen.getByRole('form', { name: 'Edit quantity metadata' }),
+  ).toBeVisible();
+  page.unmount();
+  render(await AssetPage({ params: Promise.resolve({ id: 'item' }) }));
+  const assetSummary = screen.getByText('Edit asset metadata', {
+    selector: 'summary',
+  });
+  fireEvent.click(assetSummary);
+  expect(
+    screen.getByRole('form', { name: 'Edit asset metadata' }),
+  ).toBeVisible();
 });

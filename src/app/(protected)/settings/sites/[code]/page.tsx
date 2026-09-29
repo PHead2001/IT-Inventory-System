@@ -16,11 +16,17 @@ export default async function ManageSitePage({
   if (!site) notFound();
   return (
     <>
-      <Link className="text-cyan-300 underline" href="/settings/sites">
+      <Link
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
+        href="/settings/sites"
+      >
         All site settings
       </Link>
-      <h1 className="my-4 text-3xl font-semibold">Manage {site.name}</h1>
-      <p className="mb-4 text-sm text-slate-300">
+      <p className="experience-eyebrow mt-3">Configuration / Site</p>
+      <h1 className="experience-heading mb-2 break-words">
+        Manage {site.name}
+      </h1>
+      <p className="mb-5 text-sm text-slate-300">
         {site.code} · {site.active ? 'Active' : 'Archived'}
       </p>
       {member.role === 'staff' && member.can_manage_configuration ? (

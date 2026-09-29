@@ -5,7 +5,8 @@ export default async function LabelSettingsPage() {
   const { labelDefaults, canManage } = await getLabelSettings();
   return (
     <>
-      <h1 className="mb-4 text-3xl font-semibold">
+      <p className="experience-eyebrow">Settings · Print defaults</p>
+      <h1 className="experience-heading mb-4 mt-3">
         Labels & printing defaults
       </h1>
       <SettingsPanel

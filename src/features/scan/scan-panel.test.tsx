@@ -131,6 +131,17 @@ it('reports denied camera permission and leaves manual lookup usable', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Open' }));
   await waitFor(() => expect(mocks.resolve).toHaveBeenCalledWith('LOC:ITC'));
 });
+it('keeps the camera action honest after a manual lookup misses', async () => {
+  render(<ScanPanel />);
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'UNKNOWN' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  expect(await screen.findByText(/No matching location/)).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Start camera' }),
+  ).toBeInTheDocument();
+});
 it('routes explicit Item code input through exact quantity lookup without interpreting URL-like text', async () => {
   mocks.resolveItemCode.mockResolvedValue({
     status: 'found',

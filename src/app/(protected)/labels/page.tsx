@@ -35,10 +35,11 @@ export default async function LabelsPage({
   } catch {
     return (
       <>
-        <h1 className="mb-2 text-3xl font-semibold">Print labels</h1>
+        <p className="experience-eyebrow">Tools / Labels</p>
+        <h1 className="experience-heading mb-3 mt-3">Print labels</h1>
         <p
           role="alert"
-          className="rounded border border-amber-600 p-4 text-amber-200"
+          className="experience-feedback max-w-3xl text-amber-200"
         >
           Label generation needs a configured stable application origin. Set
           APP_ORIGIN to the HTTPS production origin, or configure the stable
@@ -61,10 +62,13 @@ export default async function LabelsPage({
   const initial = await getQueueRecords(selection);
   return (
     <>
-      <h1 className="mb-2 text-3xl font-semibold">Print labels</h1>
-      <p className="mb-6 text-slate-400">
-        Select exact quantity definitions, assets, and locations to print.
-        Labels open current records after sign in.
+      <p className="experience-eyebrow print:hidden">Tools / Labels</p>
+      <h1 className="experience-heading mb-3 mt-3 print:hidden">
+        Print labels
+      </h1>
+      <p className="experience-muted mb-7 max-w-3xl text-sm leading-6 print:hidden">
+        Build a sheet from quantity definitions, assets, and locations. Every
+        label opens its current record after sign in.
       </p>
       <LabelDesigner
         locations={locations}

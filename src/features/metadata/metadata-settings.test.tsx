@@ -102,6 +102,60 @@ describe('category form designer', () => {
     vi.mocked(verifyMetadataDesignerIdentity).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({ ok: true });
   });
+  it('keeps library, canvas, and inspector as three panes with hidden controls inside the library', () => {
+    const hiddenForm = structuredClone(form);
+    hiddenForm.published_definition.layout[0].controls[0].visible = false;
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[{ id: id(1), name: 'Cables', active: true }]}
+        forms={{ [id(1)]: hiddenForm }}
+      />,
+    );
+    const panes = screen.getByTestId('designer-panes');
+    const library = screen.getByTestId('designer-library');
+    const canvas = screen.getByTestId('designer-canvas');
+    const inspector = screen.getByTestId('designer-inspector');
+    expect(Array.from(panes.children)).toEqual([library, canvas, inspector]);
+    expect(panes.className).toContain('minmax(28rem,2.5fr)');
+    const nameRow = screen
+      .getAllByTestId('designer-control-name')
+      .find((node) => node.textContent === 'Name');
+    expect(nameRow).toHaveClass('block');
+    expect(nameRow?.nextElementSibling).toContainElement(
+      screen.getByRole('button', { name: 'Drag Name' }),
+    );
+    expect(nameRow?.nextElementSibling).toContainElement(
+      screen.getByRole('button', { name: 'Resize Name' }),
+    );
+    expect(within(library).getByText('Hidden controls')).toBeInTheDocument();
+    fireEvent.click(
+      within(library).getByRole('button', { name: 'Restore Name' }),
+    );
+    expect(
+      within(library).queryByRole('button', { name: 'Restore Name' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'Designer panels' }),
+    ).toContainElement(screen.getByRole('button', { name: 'Library' }));
+  });
+  it('gives selected field headings a full-width row above inspector actions', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    const heading = screen.getByRole('heading', {
+      name: 'Untitled field · Short Text',
+    });
+    expect(heading).toHaveClass('break-words');
+    expect(heading.nextElementSibling).toContainElement(
+      screen.getByRole('button', { name: 'Field up' }),
+    );
+    expect(heading.nextElementSibling).toContainElement(
+      screen.getByRole('button', { name: 'Field down' }),
+    );
+    expect(heading.nextElementSibling).toContainElement(
+      screen.getByRole('button', { name: 'Remove field' }),
+    );
+  });
   it('keeps stable IDs and prevents an invalid form from becoming active', async () => {
     mount();
     expect(screen.getByText('Shared live preview')).toBeInTheDocument();

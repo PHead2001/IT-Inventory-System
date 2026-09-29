@@ -99,6 +99,46 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  it('omits a section whose only control does not apply to an asset while keeping quantity item code', () => {
+    const current = form();
+    current.published_definition.layout.push({
+      id: '00000000-0000-4000-8000-000000000025',
+      label: 'Identification',
+      controls: [
+        {
+          id: '00000000-0000-4000-8000-000000000026',
+          kind: 'builtin',
+          builtin: 'item_code',
+          width: 12,
+        },
+      ],
+    });
+    const { unmount } = render(
+      <MetadataFormPreview
+        kind="asset"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Identification' }),
+    ).toBeNull();
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    unmount();
+    render(
+      <MetadataFormPreview
+        kind="quantity"
+        definition={current.published_definition}
+        categoryId={categoryId}
+        categoryName="Parts"
+      />,
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Identification' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Item code (SKU)')).toBeInTheDocument();
+  });
   it('previews live controls in order without submitting inventory', () => {
     const { container } = render(
       <MetadataFormPreview

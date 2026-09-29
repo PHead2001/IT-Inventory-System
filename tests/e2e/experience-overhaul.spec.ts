@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { PNG } from 'pngjs';
 import {
   BinaryBitmap,
@@ -48,6 +49,30 @@ function decodedCode(png: Buffer) {
       new Map(),
     ),
   ).getText();
+}
+
+function expectWhiteQuietZone(png: Buffer) {
+  const image = PNG.sync.read(png);
+  let firstBlack = image.width;
+  let lastBlack = -1;
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      const offset = (y * image.width + x) * 4;
+      if (
+        image.data[offset] < 90 &&
+        image.data[offset + 1] < 90 &&
+        image.data[offset + 2] < 90
+      ) {
+        firstBlack = Math.min(firstBlack, x);
+        lastBlack = Math.max(lastBlack, x);
+      }
+    }
+  }
+  expect(firstBlack, 'left white code quiet zone').toBeGreaterThan(5);
+  expect(
+    image.width - lastBlack - 1,
+    'right white code quiet zone',
+  ).toBeGreaterThan(5);
 }
 
 test('Settings deep links retain active navigation through Back and Forward and load only the selected area', async ({
@@ -122,6 +147,44 @@ test('viewer can deep link to a form but sees an explanation instead of edit con
   ).toBeVisible();
 });
 
+test('Spaces links follow location ancestry even when codes omit or spoof a root prefix', async ({
+  page,
+}) => {
+  await signIn(page);
+  const makeLocation = async (code: string, parent: string) => {
+    await page.goto('/settings/locations');
+    const form = page.locator('form').filter({
+      has: page.getByRole('heading', {
+        name: 'Add logical storage location',
+      }),
+    });
+    await form.getByLabel('Permanent code', { exact: true }).fill(code);
+    await form.getByLabel('Name', { exact: true }).fill(code);
+    await form.getByLabel('Parent location').selectOption({ label: parent });
+    await form.getByLabel('Kind').selectOption('storage_area');
+    await form.getByRole('button', { name: 'Save location' }).click();
+    await expect(form.getByRole('status')).toContainText('Location saved');
+  };
+  const suffix = randomUUID().slice(0, 8).toUpperCase();
+  const staging = `STAGING-${suffix}`;
+  await makeLocation(staging, 'IT Office (ITO)');
+  await page.goto('/locations/' + staging);
+  await expect(
+    page.getByRole('link', { name: `Show ${staging} in Spaces` }),
+  ).toHaveAttribute('href', `/room?location=${staging}`);
+  const spoof = `ITO-SPOOF-${suffix}`;
+  await makeLocation(spoof, 'IT Closet (ITC)');
+  await page.goto('/locations/' + spoof);
+  await expect(
+    page.getByRole('link', { name: `Show ${spoof} in Spaces` }),
+  ).toHaveAttribute('href', `/room?location=${spoof}`);
+  await expect(page.getByRole('link', { name: /in room/ })).toHaveCount(0);
+  await page.getByRole('link', { name: `Show ${spoof} in Spaces` }).click();
+  await expect(page.getByRole('combobox', { name: 'Space' })).toHaveValue(
+    'it-closet',
+  );
+});
+
 test('designer gestures reflow while held, resize before release, cancel, undo and expose phone panels', async ({
   page,
 }) => {
@@ -166,6 +229,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
+  await nameControl.getByText('Layout options').click();
   const width = nameControl.getByLabel('Width');
   await width.selectOption('12');
   const initialWidth = await width.inputValue();
@@ -220,6 +284,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   await expect(
     firstSection.getByRole('button', { name: 'Drag Name' }),
   ).toBeVisible();
+  await page.waitForTimeout(150);
   const crossSource = await firstSection
     .getByRole('button', { name: 'Drag Name' })
     .boundingBox();
@@ -235,6 +300,19 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
     crossTarget!.y + crossTarget!.height / 2,
     { steps: 18 },
   );
+  await expect(
+    designer.locator('[data-control-id]:has(button[aria-label="Drag Name"])'),
+  ).toHaveAttribute('data-dragging', 'true');
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (await empty.locator('[data-control-id]').count()) break;
+    const liveTarget = await empty.locator('.border-dashed').boundingBox();
+    expect(liveTarget).toBeTruthy();
+    await page.mouse.move(
+      liveTarget!.x + liveTarget!.width / 2,
+      liveTarget!.y + liveTarget!.height / 2,
+      { steps: 8 },
+    );
+  }
   await expect(empty.getByRole('button', { name: 'Drag Name' })).toBeVisible();
   await page.mouse.up();
   await expect(empty.getByRole('button', { name: 'Drag Name' })).toBeVisible();
@@ -496,6 +574,10 @@ test('account switch during a held designer gesture permanently masks the old pr
   const width = designer
     .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
     .getByLabel('Width');
+  await designer
+    .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
+    .getByText('Layout options')
+    .click();
   await width.selectOption('12');
   const beforeResize = await width.inputValue();
   const handle = designer.getByRole('button', { name: 'Resize Name' });
@@ -682,6 +764,62 @@ test('a user camera pan is restored after leaving and returning to the modeled s
       expect(restored[key][index]).toBeCloseTo(moved[key][index], 2);
 });
 
+test('local and OS reduced motion settle room focus without disabling manual camera controls', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await signIn(page);
+  await page.goto('/room?location=ITC-D01');
+  const viewer = page.getByTestId('room-viewer');
+  await expect(viewer.locator('canvas')).toBeVisible();
+  await expect(
+    viewer.getByRole('button', { name: 'Center selected' }),
+  ).toBeEnabled();
+  const view = async () => viewer.getAttribute('data-camera-view');
+  await expect.poll(view).not.toBe('null');
+  await viewer.getByText('Pan and rotate').click();
+  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  const panned = await view();
+  await viewer.getByRole('button', { name: 'Center selected' }).click();
+  await page.waitForTimeout(50);
+  expect(await view(), 'the full-motion focus is still in flight').toBe(panned);
+  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await expect.poll(view).not.toBe(panned);
+  const settled = await view();
+  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  const secondPan = await view();
+  expect(secondPan).not.toBe(settled);
+  await viewer.getByRole('button', { name: 'Center selected' }).click();
+  await expect.poll(view).toBe(settled);
+
+  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
+  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  const fullPan = await view();
+  await viewer.getByRole('button', { name: 'Center selected' }).click();
+  await page.waitForTimeout(50);
+  expect(await view()).toBe(fullPan);
+  await expect.poll(view).not.toBe(fullPan);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
+  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  const osPan = await view();
+  await viewer.getByRole('button', { name: 'Center selected' }).click();
+  await expect.poll(view).not.toBe(osPan);
+  await viewer.getByRole('button', { name: 'Free Orbit' }).click();
+  const beforeZoom = JSON.parse((await view())!).zoom as number;
+  await viewer.getByRole('button', { name: 'Zoom in' }).click();
+  const manualView = JSON.parse((await view())!) as {
+    zoom: number;
+    mode: string;
+  };
+  expect(manualView.mode).toBe('free');
+  expect(manualView.zoom).toBeGreaterThan(beforeZoom);
+});
+
 test('Spaces handles a failed contents request without dropping selection or the modeled room', async ({
   page,
 }) => {
@@ -719,20 +857,50 @@ test('automatic label sheet retains readable codes across rapid layout edits and
   await page.goto('/labels?location=ITC');
   const card = page.locator('.label-card').first();
   await expect(card).toHaveAttribute('data-code-ready', 'true');
+  const size = page.getByRole('combobox', { name: 'Label size' });
+  const paperChoice = page.getByRole('combobox', { name: 'Page' });
+  for (const labelSize of ['70x35', '90x50'] as const) {
+    for (const paper of ['A4', 'letter'] as const) {
+      await size.selectOption(labelSize);
+      await paperChoice.selectOption(paper);
+      await expect(card).toHaveAttribute('data-code-ready', 'true');
+      await page
+        .locator('.label-print-root')
+        .evaluate((element) =>
+          element.setAttribute('data-print-authorized', 'true'),
+        );
+      try {
+        const pdf = await page.pdf({
+          path: testInfo.outputPath(`one-label-${labelSize}-${paper}.pdf`),
+          preferCSSPageSize: true,
+          printBackground: true,
+        });
+        expect(
+          (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length,
+          `one ${labelSize} label on ${paper} has no trailing blank page`,
+        ).toBe(1);
+      } finally {
+        await page
+          .locator('.label-print-root')
+          .evaluate((element) =>
+            element.removeAttribute('data-print-authorized'),
+          );
+      }
+    }
+  }
   await page
     .getByRole('region', { name: 'Label queue' })
     .getByLabel('Copies')
     .fill('20');
   await expect(page.locator('.label-card')).toHaveCount(20);
   const print = page.getByRole('button', { name: /Print selected labels/ });
-  const size = page.getByRole('combobox', { name: 'Label size' });
   const format = page.getByRole('combobox', { name: 'Code' });
   for (const [labelSize, paper, code] of [
     ['70x35', 'A4', 'qr'],
     ['90x50', 'letter', 'code128'],
   ] as const) {
     await size.selectOption(labelSize);
-    await page.getByRole('combobox', { name: 'Page' }).selectOption(paper);
+    await paperChoice.selectOption(paper);
     await format.selectOption(code);
     await expect(card).toHaveAttribute('data-code-ready', 'true');
     await expect(print).toBeEnabled();
@@ -752,9 +920,11 @@ test('automatic label sheet retains readable codes across rapid layout edits and
       name: code === 'qr' ? /QR code for/ : /Code 128 LOC:ITC/,
     });
     await expect(codeImage).toBeVisible();
-    expect(decodedCode(await codeImage.screenshot())).toBe(
+    const renderedCode = await codeImage.screenshot();
+    expect(decodedCode(renderedCode)).toBe(
       code === 'qr' ? process.env.APP_ORIGIN + '/locations/ITC' : 'LOC:ITC',
     );
+    expectWhiteQuietZone(renderedCode);
     await page.emulateMedia({ media: 'print' });
     await expect(page.locator('.label-print-root')).toBeHidden();
     await page.emulateMedia({ media: 'screen' });
@@ -767,6 +937,7 @@ test('automatic label sheet retains readable codes across rapid layout edits and
     await expect(page.locator('.label-print-root')).not.toHaveAttribute(
       'data-print-authorized',
     );
+    await page.emulateMedia({ media: 'print' });
     await page
       .locator('.label-print-root')
       .evaluate((element) =>
@@ -780,7 +951,7 @@ test('automatic label sheet retains readable codes across rapid layout edits and
       });
       expect(
         (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length,
-      ).toBeGreaterThan(1);
+      ).toBe(2);
       const mediaBox = pdf
         .toString('latin1')
         .match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/);
@@ -798,6 +969,7 @@ test('automatic label sheet retains readable codes across rapid layout edits and
         .evaluate((element) =>
           element.removeAttribute('data-print-authorized'),
         );
+      await page.emulateMedia({ media: 'screen' });
     }
   }
 });

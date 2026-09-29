@@ -43,7 +43,7 @@ export function LocationBrowser({
   return (
     <nav
       aria-label="Location browser"
-      className="min-w-0 rounded-xl border border-slate-700 bg-slate-900/70 p-3"
+      className="experience-surface min-w-0 p-3"
     >
       <label
         className="block text-sm font-semibold"
@@ -57,7 +57,7 @@ export function LocationBrowser({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Search names, codes, paths"
-        className="mt-2 min-h-11 w-full rounded-md border border-slate-600 bg-slate-950 px-3 text-sm"
+        className="experience-field mt-2 min-h-11 w-full px-3"
       />
       {current && !search && (
         <button
@@ -71,22 +71,22 @@ export function LocationBrowser({
         </button>
       )}
       {selected && (
-        <p className="my-2 break-words text-xs text-slate-300">
+        <p className="my-2 break-words text-xs leading-5 text-slate-300">
           Selected path: {selected.breadcrumb}
         </p>
       )}
       <ul className="mt-2 max-h-[28rem] space-y-1 overflow-auto md:hidden">
         {mobileRows.map((row) => (
-          <li key={row.location.id} className="flex items-center gap-1">
+          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
             <button
               aria-current={
                 selectedCode === row.location.code ? 'location' : undefined
               }
-              className="min-h-11 min-w-0 flex-1 rounded px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
+              className="min-h-11 min-w-0 flex-1 break-words rounded-lg px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
               onClick={() => onSelect(row.location.code)}
             >
               {row.location.name}{' '}
-              <span className="text-xs text-slate-400">
+              <span className="break-all text-xs text-slate-300">
                 {row.location.code}
               </span>
               {!row.location.active && (
@@ -107,7 +107,7 @@ export function LocationBrowser({
       </ul>
       <ul className="mt-2 hidden max-h-[28rem] space-y-1 overflow-auto md:block">
         {matched.map((row) => (
-          <li key={row.location.id} className="flex items-center gap-1">
+          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
             {!search && row.hasChildren && (
               <button
                 aria-label={
@@ -115,7 +115,7 @@ export function LocationBrowser({
                   row.location.name
                 }
                 aria-expanded={expanded.has(row.location.id)}
-                className="min-h-9 min-w-9 rounded border border-slate-700"
+                className="min-h-10 min-w-10 rounded-lg border border-slate-600"
                 style={{ marginLeft: row.depth * 12 }}
                 onClick={() =>
                   setExpanded((current) => {
@@ -137,11 +137,11 @@ export function LocationBrowser({
                 marginLeft:
                   !search && !row.hasChildren ? row.depth * 12 + 40 : undefined,
               }}
-              className="min-h-10 min-w-0 flex-1 rounded px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
+              className="min-h-11 min-w-0 flex-1 break-words rounded-lg px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
               onClick={() => onSelect(row.location.code)}
             >
               {row.location.name}{' '}
-              <span className="text-xs text-slate-400">
+              <span className="break-all text-xs text-slate-300">
                 {row.location.code}
               </span>
               {!row.location.active && (

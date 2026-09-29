@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import RoomScene, { type RoomSceneProps } from './room-scene';
+import { OrthographicCamera, Vector3 } from 'three';
+import RoomScene, {
+  finishFocusAnimation,
+  type RoomSceneProps,
+} from './room-scene';
 
 vi.mock('./safe-canvas', () => ({
   SafeCanvas: () => <div data-testid="mock-canvas" />,
@@ -30,6 +34,20 @@ function sceneProps(overrides: Partial<RoomSceneProps> = {}): RoomSceneProps {
 beforeEach(() => window.localStorage.clear());
 
 describe('room scene controls', () => {
+  it('finishes an interrupted focus at its intended valid target and zoom', () => {
+    const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
+    const target = new Vector3(2, 3, 4);
+    const offset = new Vector3(15, 20, 25);
+    finishFocusAnimation(camera, target, {
+      to: new Vector3(30, 40, 50),
+      offset,
+      toZoom: 1.5,
+    });
+    expect(target.toArray()).toEqual([30, 40, 50]);
+    expect(camera.position.toArray()).toEqual([45, 60, 75]);
+    expect(camera.zoom).toBe(1.5);
+    expect(camera.projectionMatrix.elements.every(Number.isFinite)).toBe(true);
+  });
   it('keeps repeated Center selected requests available only for a focusable selection', async () => {
     const user = userEvent.setup();
     const onRequestFocus = vi.fn();

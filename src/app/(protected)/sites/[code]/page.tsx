@@ -2,7 +2,11 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import { getSite, getSiteDetail } from '@/features/custody/queries.server';
-import { panel, Pagination } from '@/features/inventory/components/read-ui';
+import {
+  field,
+  panel,
+  Pagination,
+} from '@/features/inventory/components/read-ui';
 import { SiteManagementForm } from '@/features/custody/management-form';
 
 export default async function SitePage({
@@ -27,27 +31,41 @@ export default async function SitePage({
   const detail = await getSiteDetail(site.id, filters);
   return (
     <>
-      <Link href="/sites" className="text-cyan-300 underline">
+      <Link
+        href="/sites"
+        className="inline-flex min-h-11 items-center text-cyan-300 underline"
+      >
         All sites
       </Link>
-      <h1 className="mt-4 text-3xl font-semibold">{site.name}</h1>
-      <p className="mt-2 text-slate-400">
-        {site.code} · {site.active ? 'Active' : 'Archived'} · No room model
-      </p>
-      {site.notes && (
-        <p className="mt-3 whitespace-pre-wrap break-words">{site.notes}</p>
-      )}
+      <header className="experience-surface-bright mt-3 p-5 sm:p-6">
+        <p className="experience-eyebrow">Site / Daily operations</p>
+        <h1 className="experience-heading mt-1 break-words">{site.name}</h1>
+        <p className="mt-2 break-words text-sm text-slate-300">
+          {site.code} · {site.active ? 'Active' : 'Archived'} · No room model
+        </p>
+        {site.notes && (
+          <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">
+            {site.notes}
+          </p>
+        )}
+      </header>
       {member.role === 'staff' && site.active && (
-        <div className="my-4 flex flex-wrap gap-4 text-cyan-300 underline">
-          <Link href={`/sites/${encodeURIComponent(code)}/open/quantity`}>
+        <div className="my-4 flex flex-wrap gap-2">
+          <Link
+            className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/20"
+            href={`/sites/${encodeURIComponent(code)}/open/quantity`}
+          >
             Record existing quantity holding
           </Link>
-          <Link href={`/sites/${encodeURIComponent(code)}/open/asset`}>
+          <Link
+            className="inline-flex min-h-11 items-center rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-100 hover:border-cyan-400/50"
+            href={`/sites/${encodeURIComponent(code)}/open/asset`}
+          >
             Record existing serialized asset
           </Link>
         </div>
       )}
-      <div className="my-3 flex flex-wrap gap-4 text-sm text-cyan-300 underline">
+      <div className="my-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-cyan-300 underline">
         <Link href={`/inventory?site=${site.id}`}>
           View site holdings in inventory
         </Link>
@@ -57,14 +75,18 @@ export default async function SitePage({
       </div>
       <dl className="my-5 grid gap-3 sm:grid-cols-2">
         <div className={panel}>
-          <dt>Current assigned quantity units</dt>
-          <dd className="text-2xl font-semibold">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-300">
+            Current assigned quantity units
+          </dt>
+          <dd className="mt-2 text-2xl font-semibold tabular-nums">
             {detail.summary.current_quantity_units}
           </dd>
         </div>
         <div className={panel}>
-          <dt>Current serialized assets</dt>
-          <dd className="text-2xl font-semibold">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-300">
+            Current serialized assets
+          </dt>
+          <dd className="mt-2 text-2xl font-semibold tabular-nums">
             {detail.summary.current_serialized_assets}
           </dd>
         </div>
@@ -74,17 +96,17 @@ export default async function SitePage({
           By category, product, and model
         </h2>
         {detail.groups.rows.length ? (
-          <ul className="space-y-2">
+          <ul className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
             {detail.groups.rows.map((group) => (
               <li
-                className={panel}
+                className="px-4 py-3 text-sm sm:px-5"
                 key={`${group.inventory_kind}:${group.category_name}:${group.name}:${group.model ?? ''}`}
               >
-                <strong>
+                <strong className="break-words">
                   {group.category_name} · {group.name}
                 </strong>{' '}
                 · {group.model || 'Model not set'}
-                <p className="text-sm text-slate-400">
+                <p className="mt-1 text-sm text-slate-300 tabular-nums">
                   {group.inventory_kind === 'quantity'
                     ? `${group.quantity_units} quantity units`
                     : `${group.serialized_devices} distinct serialized devices`}
@@ -113,7 +135,7 @@ export default async function SitePage({
               name="q"
               defaultValue={filters.q ?? ''}
               maxLength={100}
-              className="min-h-11 w-full rounded border border-slate-700 bg-slate-950 px-3"
+              className={field}
             />
           </label>
           <label className="space-y-2">
@@ -121,7 +143,7 @@ export default async function SitePage({
             <select
               name="searchField"
               defaultValue={filters.searchField ?? 'name'}
-              className="min-h-11 w-full rounded border border-slate-700 bg-slate-950 px-3"
+              className={field}
             >
               <option value="name">Product name</option>
               <option value="model">Model</option>
@@ -133,35 +155,38 @@ export default async function SitePage({
             <select
               name="kind"
               defaultValue={filters.kind ?? ''}
-              className="min-h-11 w-full rounded border border-slate-700 bg-slate-950 px-3"
+              className={field}
             >
               <option value="">All</option>
               <option value="quantity">Quantity</option>
               <option value="asset">Serialized</option>
             </select>
           </label>
-          <button className="min-h-11 self-end rounded bg-cyan-700 px-4">
+          <button className="min-h-11 self-end rounded-lg bg-cyan-600 px-4 font-medium text-slate-950 hover:bg-cyan-500">
             Filter holdings
           </button>
         </form>
         {detail.holdings.length ? (
-          <ul className="space-y-3">
+          <ul className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
             {detail.holdings.map((row) => (
-              <li key={row.inventory_kind + row.entity_id} className={panel}>
+              <li
+                key={row.inventory_kind + row.entity_id}
+                className="px-4 py-3 sm:px-5"
+              >
                 <Link
                   href={`/inventory/${row.inventory_kind === 'asset' ? 'assets' : 'quantity'}/${row.entity_id}`}
-                  className="font-semibold text-cyan-300 underline"
+                  className="break-words font-semibold text-cyan-200 underline"
                 >
                   {row.name}
                 </Link>
-                <p className="mt-1 text-sm text-slate-400">
+                <p className="mt-1 break-words text-sm text-slate-300 tabular-nums">
                   {row.category_name} · {row.model || 'Model not set'} ·{' '}
                   {row.inventory_kind === 'quantity'
                     ? `${row.quantity} units`
                     : '1 serialized asset'}
                 </p>
                 {row.inventory_kind === 'asset' && (
-                  <p className="mt-1 text-sm">
+                  <p className="mt-1 break-all text-sm text-slate-300">
                     {row.asset_tag || 'Untagged'} ·{' '}
                     {row.serial_number || 'No serial'}
                   </p>
@@ -187,7 +212,7 @@ export default async function SitePage({
         <h2 id="activity-heading" className="text-xl font-semibold">
           Assignment activity
         </h2>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-300">
           Event metrics use the selected UTC date range; current holdings above
           do not.
         </p>
@@ -198,7 +223,7 @@ export default async function SitePage({
               name="from"
               type="datetime-local"
               defaultValue={filters.from?.slice(0, 16)}
-              className="min-h-11 rounded border border-slate-700 bg-slate-950 px-3"
+              className={field}
             />
           </label>
           <label className="space-y-2">
@@ -207,14 +232,14 @@ export default async function SitePage({
               name="until"
               type="datetime-local"
               defaultValue={filters.until?.slice(0, 16)}
-              className="min-h-11 rounded border border-slate-700 bg-slate-950 px-3"
+              className={field}
             />
           </label>
-          <button className="min-h-11 rounded bg-cyan-700 px-4">
+          <button className="min-h-11 rounded-lg bg-cyan-600 px-4 font-medium text-slate-950 hover:bg-cyan-500">
             Filter activity
           </button>
         </form>
-        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <dl className="grid gap-2 min-[360px]:grid-cols-2 xl:grid-cols-3 [&_dd]:mt-1 [&_dd]:font-semibold [&_dd]:tabular-nums [&_dt]:text-sm [&_dt]:text-slate-300">
           <div className={panel}>
             <dt>Storage-issued quantity units</dt>
             <dd className="text-xl font-semibold">
@@ -273,13 +298,13 @@ export default async function SitePage({
           </div>
         </dl>
         {detail.events.length ? (
-          <ol className="space-y-3">
+          <ol className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
             {detail.events.map((event) => (
-              <li key={event.id} className={panel}>
+              <li key={event.id} className="break-words px-4 py-3 sm:px-5">
                 <p className="font-semibold capitalize">
                   {event.kind.replaceAll('_', ' ')}
                 </p>
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-slate-300">
                   <time dateTime={event.created_at}>
                     {new Date(event.created_at).toLocaleString('en-US', {
                       timeZone: 'UTC',
@@ -299,7 +324,9 @@ export default async function SitePage({
                   </p>
                 )}
                 {event.reference && (
-                  <p className="mt-1 text-sm">Reference: {event.reference}</p>
+                  <p className="mt-1 break-all text-sm">
+                    Reference: {event.reference}
+                  </p>
                 )}
                 <Link
                   className="text-sm text-cyan-300 underline"
@@ -320,9 +347,17 @@ export default async function SitePage({
         )}
       </section>
       {member.role === 'staff' && member.can_manage_configuration && (
-        <section className="my-8">
-          <SiteManagementForm key={`${site.id}:${site.version}`} site={site} />
-        </section>
+        <details className="experience-surface my-8 p-4">
+          <summary className="min-h-11 cursor-pointer py-2 font-medium text-cyan-200">
+            Manage site settings
+          </summary>
+          <div className="mt-4">
+            <SiteManagementForm
+              key={`${site.id}:${site.version}`}
+              site={site}
+            />
+          </div>
+        </details>
       )}
     </>
   );

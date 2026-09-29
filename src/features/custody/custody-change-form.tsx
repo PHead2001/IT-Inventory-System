@@ -129,10 +129,10 @@ export function CustodyChangeForm({
     siteHoldings.filter((row) => row.quantity > 0).map((row) => row.site_id),
   );
   return (
-    <form className={panel + ' space-y-4'} onSubmit={submit}>
+    <form className={panel + ' max-w-4xl space-y-4'} onSubmit={submit}>
       <h3 className="text-lg font-semibold">{titles[action]}</h3>
       {action === 'opening' && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-300">
           Opening holdings describe equipment already at a site. No past closet
           issue or date is invented.
         </p>
@@ -265,7 +265,8 @@ export function CustodyChangeForm({
       {state && (
         <p
           role="status"
-          className={state.ok ? 'text-emerald-200' : 'text-amber-200'}
+          className="experience-feedback"
+          data-tone={state.ok ? 'success' : 'error'}
         >
           {state.ok
             ? 'Custody saved. Current holdings and history will refresh.'

@@ -44,15 +44,33 @@ const definition = (): MetadataDefinition => ({
 
 describe('form designer model', () => {
   it('rejects protected and required controls hidden through their section', () => {
-    const draft=definition();
-    draft.layout[0].controls.push({id:id(20),kind:'builtin',builtin:'asset_tag',width:'Auto',applies_to:['asset']});
-    expect(designerIssues(draft)).not.toContain('Asset tag must stay visible on asset forms.');
-    draft.layout[0].controls.find((control)=>control.builtin==='asset_tag')!.visible=false;
-    expect(designerIssues(draft)).toContain('Asset tag must stay visible on asset forms.');
-    draft.layout[0].controls.find((control)=>control.builtin==='asset_tag')!.visible=true;
-    draft.layout[0].visible=false;
-    expect(designerIssues(draft)).toContain('Location type must be visible on asset forms.');
-    expect(designerIssues(draft)).toContain('Name must stay visible on quantity forms.');
+    const draft = definition();
+    draft.layout[0].controls.push({
+      id: id(20),
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 'Auto',
+      applies_to: ['asset'],
+    });
+    expect(designerIssues(draft)).not.toContain(
+      'Asset tag must stay visible on asset forms.',
+    );
+    draft.layout[0].controls.find(
+      (control) => control.builtin === 'asset_tag',
+    )!.visible = false;
+    expect(designerIssues(draft)).toContain(
+      'Asset tag must stay visible on asset forms.',
+    );
+    draft.layout[0].controls.find(
+      (control) => control.builtin === 'asset_tag',
+    )!.visible = true;
+    draft.layout[0].visible = false;
+    expect(designerIssues(draft)).toContain(
+      'Location type must be visible on asset forms.',
+    );
+    expect(designerIssues(draft)).toContain(
+      'Name must stay visible on quantity forms.',
+    );
   });
   it('moves controls across sections in document order without losing identities', () => {
     const before = definition();

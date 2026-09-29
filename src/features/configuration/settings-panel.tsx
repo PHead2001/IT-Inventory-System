@@ -108,12 +108,9 @@ export function SettingsPanel({
     });
   };
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {!canManage && (
-        <p
-          role="note"
-          className="rounded border border-slate-700 p-4 text-sm text-slate-300"
-        >
+        <p role="note" className="experience-feedback text-sm text-slate-200">
           Settings are read-only for your account. You can view{' '}
           {mode === 'categories'
             ? 'categories'
@@ -126,7 +123,7 @@ export function SettingsPanel({
         </p>
       )}
       {message && (
-        <p role="status" className="rounded border border-cyan-700 p-3 text-sm">
+        <p role="status" className="experience-feedback text-sm">
           {message}
         </p>
       )}
@@ -147,14 +144,14 @@ export function SettingsPanel({
               before staff can add inventory.
             </p>
           )}
-          <ul className="space-y-3">
+          <ul className="experience-surface divide-y divide-cyan-100/10 overflow-hidden">
             {(categories ?? []).map((category) => (
               <li
                 key={category.id}
-                className="rounded-lg border border-slate-700 p-4"
+                className="min-w-0 p-4 transition-colors hover:bg-cyan-100/5"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0 break-words">
                     <strong>{category.name}</strong>
                     <span className="ml-3 text-sm text-slate-400">
                       {category.code}
@@ -384,7 +381,7 @@ export function SettingsPanel({
           </ul>
           {canManage && (
             <form
-              className="space-y-3 rounded-lg border border-slate-700 p-4"
+              className="experience-surface max-w-3xl space-y-3 p-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit(
@@ -434,7 +431,7 @@ export function SettingsPanel({
       {mode !== 'categories' && labelDefaults && (
         <section
           aria-labelledby="labels-heading"
-          className="space-y-3 rounded-lg border border-slate-700 p-4"
+          className="experience-surface max-w-4xl space-y-3 p-4"
         >
           <h2 id="labels-heading" className="text-xl font-semibold">
             Shared label defaults
@@ -447,7 +444,7 @@ export function SettingsPanel({
             <label className="space-y-1 text-sm">
               Size
               <select
-                className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-3"
+                className="experience-field min-h-11 w-full px-3"
                 value={size}
                 disabled={!canManage || pending}
                 onChange={(event) =>
@@ -461,7 +458,7 @@ export function SettingsPanel({
             <label className="space-y-1 text-sm">
               Page
               <select
-                className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-3"
+                className="experience-field min-h-11 w-full px-3"
                 value={page}
                 disabled={!canManage || pending}
                 onChange={(event) =>
@@ -475,7 +472,7 @@ export function SettingsPanel({
             <label className="space-y-1 text-sm">
               Format
               <select
-                className="min-h-11 w-full rounded border border-slate-600 bg-slate-950 px-3"
+                className="experience-field min-h-11 w-full px-3"
                 value={format}
                 disabled={!canManage || pending}
                 onChange={(event) =>

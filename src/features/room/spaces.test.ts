@@ -44,10 +44,30 @@ const locations: LocationRef[] = [
     can_hold_inventory: true,
     parentId: '3',
   },
+  {
+    id: '5',
+    code: 'STAGING',
+    name: 'Staging',
+    breadcrumb: 'IT Office / Staging',
+    active: true,
+    can_hold_inventory: true,
+    parentId: '3',
+  },
+  {
+    id: '6',
+    code: 'ITO-SPOOF',
+    name: 'Spoof',
+    breadcrumb: 'Unregistered / Spoof',
+    active: true,
+    can_hold_inventory: true,
+    parentId: null,
+  },
 ];
 describe('space registry', () => {
   it('resolves old deep links to their containing space and keeps office inventory-only', () => {
     expect(containingSpace(locations, 'ITO-GENERAL')?.id).toBe('it-office');
+    expect(containingSpace(locations, 'STAGING')?.id).toBe('it-office');
+    expect(containingSpace(locations, 'ITO-SPOOF')).toBeNull();
     expect(resolveSpace(locations, null, 'ITO-GENERAL')?.id).toBe('it-office');
     expect(spaceRoom(resolveSpace(locations, 'it-office', null)!)).toBeNull();
     expect(
@@ -55,7 +75,7 @@ describe('space registry', () => {
         locations,
         resolveSpace(locations, 'it-office', null)!,
       ).map((location) => location.code),
-    ).toEqual(['ITO', 'ITO-GENERAL']);
+    ).toEqual(['ITO', 'ITO-GENERAL', 'STAGING']);
   });
   it('falls back from invalid or inactive choices to the configured default', () => {
     expect(resolveSpace(locations, 'missing', null)?.id).toBe('it-closet');

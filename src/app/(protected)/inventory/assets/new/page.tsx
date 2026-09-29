@@ -32,12 +32,13 @@ export default async function NewAssetPage() {
   const forms = await getPublishedForms([initialCategory.id]);
   return (
     <>
-      <h1 className="mb-5 text-3xl font-semibold">Create serialized asset</h1>
-      <p className="mb-5 text-slate-400">
+      <p className="experience-eyebrow">Inventory · New record</p>
+      <h1 className="experience-heading mt-3">Create serialized asset</h1>
+      <p className="experience-muted mb-5 mt-3 max-w-2xl text-sm">
         Record one physical asset at its current location. Tags and serial
         numbers are optional.
       </p>
-      <div className={panel}>
+      <div className={`${panel} max-w-5xl`}>
         <MetadataForm
           kind="asset"
           categories={categories}

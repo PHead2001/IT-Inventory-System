@@ -29,7 +29,7 @@ const row: InventoryResult = {
 };
 
 it('links by stable code with an accessible location-specific name', () => {
-  render(<ShowInRoom code="ITC-D12" />);
+  render(<ShowInRoom location={{ code: 'ITC-D12' }} />);
   const link = screen.getByRole('link', { name: 'Show ITC-D12 in room' });
   expect(link).toHaveAttribute('href', '/room?location=ITC-D12');
   expect(link).toHaveTextContent('Show in room');
@@ -60,8 +60,32 @@ it('preserves unlocated definitions without fabricating a room link', () => {
 });
 
 it('routes unmodeled office inventory into its own Spaces view', () => {
-  render(<ShowInRoom code="ITO-GENERAL" />);
+  render(
+    <ShowInRoom location={{ code: 'ITO-GENERAL', spaceRootCode: 'ITO' }} />,
+  );
   expect(
     screen.getByRole('link', { name: 'Show ITO-GENERAL in Spaces' }),
   ).toHaveAttribute('href', '/room?location=ITO-GENERAL');
+});
+
+it('uses derived ancestry for arbitrary office codes and ignores spoofed prefixes', () => {
+  const { rerender } = render(
+    <ShowInRoom location={{ code: 'STAGING', spaceRootCode: 'ITO' }} />,
+  );
+  expect(
+    screen.getByRole('link', { name: 'Show STAGING in Spaces' }),
+  ).toHaveAttribute('href', '/room?location=STAGING');
+  rerender(
+    <ShowInRoom location={{ code: 'ITO-SPOOF', spaceRootCode: null }} />,
+  );
+  expect(screen.getByText('No room model for this location')).toBeVisible();
+  expect(screen.queryByRole('link', { name: /in Spaces/i })).toBeNull();
+});
+
+it('opens an unmodeled descendant of a modeled space without claiming a room binding', () => {
+  render(<ShowInRoom location={{ code: 'ITO-SPOOF', spaceRootCode: 'ITC' }} />);
+  expect(
+    screen.getByRole('link', { name: 'Show ITO-SPOOF in Spaces' }),
+  ).toHaveAttribute('href', '/room?location=ITO-SPOOF');
+  expect(screen.queryByRole('link', { name: /in room/i })).toBeNull();
 });

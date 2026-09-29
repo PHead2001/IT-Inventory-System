@@ -82,11 +82,16 @@ test('phone designer edits publish with one save and render in quantity and asse
   ).toBeVisible();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Specifications');
-  await designer
+  const connectorControl = designer
     .locator('[data-control-id]')
-    .filter({ has: page.getByRole('button', { name: 'Drag Connector type' }) })
+    .filter({ has: page.getByRole('button', { name: 'Drag Connector type' }) });
+  await connectorControl.getByText('Layout options').click();
+  await connectorControl
     .getByLabel('Section')
     .selectOption({ label: 'Specifications' });
+  await designer
+    .getByText('Live preview · open quantity or asset form')
+    .click();
   const preview = designer.getByRole('form', {
     name: 'Preview quantity metadata',
   });
@@ -116,6 +121,7 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await expect(page.getByText('USB-C', { exact: true })).toBeVisible();
   const quantityUrl = page.url();
+  await page.getByText('Edit quantity metadata', { exact: true }).click();
   const edit = page.getByRole('form', { name: 'Edit quantity metadata' });
   await edit.getByLabel('Connector type').fill('USB-A');
   await edit.getByRole('button', { name: 'Review metadata' }).click();
@@ -141,6 +147,7 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   await expect(page.getByText('DisplayPort', { exact: true })).toBeVisible();
   const assetUrl = page.url();
+  await page.getByText('Edit asset metadata', { exact: true }).click();
   const editAsset = page.getByRole('form', { name: 'Edit asset metadata' });
   await editAsset.getByLabel('Connector type').fill('HDMI');
   await editAsset.getByRole('button', { name: 'Review metadata' }).click();
@@ -167,6 +174,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
+  await nameControl.getByText('Layout options').click();
   for (const control of [
     nameControl.getByRole('button', { name: 'Drag Name' }),
     nameControl.getByRole('button', { name: 'Resize Name' }),
@@ -189,7 +197,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
       .first()
       .locator('[data-control-id] button[aria-label^="Drag "]')
       .first(),
-  ).toHaveAttribute('aria-label', 'Drag Category Id');
+  ).toHaveAttribute('aria-label', 'Drag Category');
   await designer.getByRole('button', { name: 'Undo edit' }).click();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Phone checks');
@@ -203,13 +211,17 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     await designer.getByRole('button', { name: 'Add field' }).click();
     await designer.getByLabel('Label', { exact: true }).fill(fieldName);
     await panels.getByRole('button', { name: 'Canvas' }).click();
-    await designer
-      .locator(`[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`)
-      .getByLabel('Section')
-      .selectOption({ label: 'Phone checks' });
+    const control = designer.locator(
+      `[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`,
+    );
+    await control.getByText('Layout options').click();
+    await control.getByLabel('Section').selectOption({ label: 'Phone checks' });
   };
   for (const name of ['Flag one', 'Flag two', 'Flag three'])
     await addField('boolean', name);
+  await designer
+    .getByText('Live preview · open quantity or asset form')
+    .click();
   await designer.getByRole('button', { name: 'Phone width' }).click();
   const preview = designer.getByRole('form', {
     name: 'Preview quantity metadata',
@@ -286,6 +298,7 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
+  await nameControl.getByText('Layout options').click();
   await nameControl.getByLabel('Width').selectOption('6');
   await nameControl.getByRole('button', { name: 'Move down' }).focus();
   await page.keyboard.press('Enter');
@@ -297,6 +310,10 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
   await expect(designer.getByLabel('Section heading').last()).toHaveValue(
     'Persisted section',
   );
+  await designer
+    .locator('[data-control-id]:has(button[aria-label="Drag Name"])')
+    .getByText('Layout options')
+    .click();
   await expect(
     designer
       .locator('[data-control-id]:has(button[aria-label="Drag Name"])')
@@ -308,7 +325,7 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
       .first()
       .locator('[data-control-id] button[aria-label^="Drag "]')
       .first(),
-  ).toHaveAttribute('aria-label', 'Drag Category Id');
+  ).toHaveAttribute('aria-label', 'Drag Category');
   await designer
     .getByLabel('Section heading')
     .last()

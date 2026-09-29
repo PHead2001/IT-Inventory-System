@@ -54,7 +54,7 @@ export function SiteManagementForm({ site }: { site?: Site }) {
   };
   return (
     <form
-      className={panel + ' space-y-4'}
+      className={panel + ' max-w-4xl space-y-4'}
       onSubmit={(event) => {
         event.preventDefault();
         if (site && !values.active && !confirmArchive) return;
@@ -76,7 +76,7 @@ export function SiteManagementForm({ site }: { site?: Site }) {
         );
       }}
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="break-words text-lg font-semibold">
         {site ? `Manage ${site.name}` : 'Add property / site'}
       </h2>
       <label className="block space-y-2">
@@ -101,7 +101,7 @@ export function SiteManagementForm({ site }: { site?: Site }) {
               onChange={(e) => update('code', e.target.value.toUpperCase())}
             />
           </label>
-          <p id="site-code-guidance" className="text-sm text-slate-400">
+          <p id="site-code-guidance" className="text-sm text-slate-300">
             Suggested from the name when possible; edit to override or enter a
             code manually if no suggestion appears.
           </p>
@@ -144,7 +144,8 @@ export function SiteManagementForm({ site }: { site?: Site }) {
       {state && (
         <p
           role="status"
-          className={state.ok ? 'text-emerald-200' : 'text-amber-200'}
+          className="experience-feedback"
+          data-tone={state.ok ? 'success' : 'error'}
         >
           {state.ok
             ? 'Site saved. Code and history remain unchanged.'
@@ -155,7 +156,7 @@ export function SiteManagementForm({ site }: { site?: Site }) {
         {pending ? 'Saving…' : 'Save site'}
       </Button>
       {site && (
-        <p className="text-xs text-slate-400">
+        <p className="break-words text-xs text-slate-300">
           Permanent code: {site.code}. Concurrent edits require a fresh review
           before retry.
         </p>
@@ -217,7 +218,7 @@ export function LocationManagementForm({
   }
   return (
     <form
-      className={panel + ' space-y-4'}
+      className={panel + ' max-w-4xl space-y-4'}
       onSubmit={(event) => {
         event.preventDefault();
         if (location && !values.active && !confirmDeactivate) return;
@@ -241,7 +242,7 @@ export function LocationManagementForm({
         );
       }}
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="break-words text-lg font-semibold">
         {location ? `Manage ${location.name}` : 'Add logical storage location'}
       </h2>
       {!location && (
@@ -358,7 +359,7 @@ export function LocationManagementForm({
         </label>
       )}
       {modeled && (
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-300">
           This closet location is bound to Git room geometry. Its parent, kind,
           active state, and destination capability are fixed here; its name and
           order can be edited.
@@ -367,7 +368,8 @@ export function LocationManagementForm({
       {state && (
         <p
           role="status"
-          className={state.ok ? 'text-emerald-200' : 'text-amber-200'}
+          className="experience-feedback"
+          data-tone={state.ok ? 'success' : 'error'}
         >
           {state.ok
             ? 'Location saved. Inventory history and permanent code remain intact.'
@@ -378,7 +380,7 @@ export function LocationManagementForm({
         {pending ? 'Saving…' : 'Save location'}
       </Button>
       {location && (
-        <p className="text-xs text-slate-400">
+        <p className="break-words text-xs text-slate-300">
           Permanent code: {location.code}. Refresh and review after a stale
           edit.
         </p>

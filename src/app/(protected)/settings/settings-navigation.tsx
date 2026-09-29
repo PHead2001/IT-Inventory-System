@@ -15,12 +15,12 @@ export function SettingsNavigation() {
   return (
     <nav
       aria-label="Settings sections"
-      className="mb-6 flex flex-wrap gap-2 border-b border-slate-700 pb-4"
+      className="mb-6 flex flex-wrap gap-2 border-b border-cyan-100/15 pb-4"
     >
       <Link
         href="/settings"
         aria-current={pathname === '/settings' ? 'page' : undefined}
-        className="rounded px-3 py-2 text-sm text-cyan-200 hover:bg-slate-800 aria-[current=page]:bg-cyan-950 aria-[current=page]:text-white"
+        className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-white"
       >
         All settings
       </Link>
@@ -33,7 +33,7 @@ export function SettingsNavigation() {
               ? 'page'
               : undefined
           }
-          className="rounded px-3 py-2 text-sm text-cyan-200 hover:bg-slate-800 aria-[current=page]:bg-cyan-950 aria-[current=page]:text-white"
+          className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-sm text-cyan-100 hover:bg-slate-800 aria-[current=page]:bg-cyan-900/40 aria-[current=page]:text-white"
         >
           {label}
         </Link>

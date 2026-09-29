@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { queueStorageKey } from './queue-model';
 import type { LiveLabel } from './queue.server';
 
 const mocks = vi.hoisted(() => ({
@@ -155,6 +156,73 @@ it('consumes one beforeprint lease even when afterprint never fires', async () =
   );
 });
 
+it('revokes print authorization when the print dialog throws', async () => {
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      window.dispatchEvent(new Event('beforeprint'));
+      expect(document.querySelector('.label-print-root')).toHaveAttribute(
+        'data-print-authorized',
+        'true',
+      );
+      throw new Error('Print dialog failed');
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+  await waitFor(() => expect(printButton()).toBeDisabled());
+});
+
+it('expires print authorization when the browser emits no print events', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+});
+
+it.each(['archived', 'retired'])(
+  'requires initial %s lifecycle acknowledgement before printing',
+  async (state) => {
+    const historical = { ...asset, state };
+    mocks.getQueueRecords.mockResolvedValue([quantity, historical]);
+    render(<LabelDesigner {...props} initial={[quantity, historical]} />);
+    expect(
+      await screen.findByRole('button', { name: 'Acknowledge changes' }),
+    ).toBeVisible();
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Acknowledge changes' }),
+    );
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(window.print).not.toHaveBeenCalled();
+  },
+);
+
+it('rejects a same-count final response with different selected identities', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const otherAsset = { ...asset, key: '8d05f5f0-f737-47c0-b28b-c703c60bed74' };
+  mocks.getQueueRecords.mockResolvedValueOnce([quantity, otherAsset]);
+  fireEvent.click(printButton());
+  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
 it('reflows copies and paper locally without another inventory read', async () => {
   render(<LabelDesigner {...props} />);
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -180,6 +248,134 @@ it('reflows copies and paper locally without another inventory read', async () =
   );
   expect(printButton()).toBeEnabled();
   expect(mocks.getQueueRecords).toHaveBeenCalledTimes(1);
+});
+
+it('starts from shared job defaults and restores local choices for the same member', async () => {
+  const defaults = { size: '70x35', page: 'A4', format: 'qr' } as const;
+  const view = render(<LabelDesigner {...props} defaults={defaults} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '70x35',
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
+    target: { value: '90x50' },
+  });
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).job.size,
+    ).toBe('90x50'),
+  );
+  view.unmount();
+  render(<LabelDesigner {...props} defaults={defaults} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
+    '90x50',
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+});
+
+it('locks print and job settings while adding a record asynchronously', async () => {
+  const nextId = '8d05f5f0-f737-47c0-b28b-c703c60bed74';
+  const next = { ...quantity, key: nextId, name: 'Cables' };
+  mocks.searchLabelRecords.mockResolvedValueOnce({
+    rows: [
+      {
+        kind: 'quantity',
+        key: nextId,
+        name: 'Cables',
+        categoryName: 'Cables',
+        status: 'active',
+        holdingContext: 'Shelf 1A',
+        itemCode: null,
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const add = await screen.findByRole('button', { name: 'Add to queue' });
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(add);
+  expect(printButton()).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Page' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Code' })).toBeDisabled();
+  mocks.getQueueRecords.mockResolvedValueOnce([quantity, asset, next]);
+  finish([next]);
+  await waitFor(() =>
+    expect(document.querySelectorAll('.label-card')).toHaveLength(3),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('rejects an Add response for a different identity without queueing it', async () => {
+  const requestedId = '8d05f5f0-f737-47c0-b28b-c703c60bed74';
+  const wrongId = '482b9fd0-2464-45d6-b57d-3dbe61956971';
+  mocks.searchLabelRecords.mockResolvedValueOnce({
+    rows: [
+      {
+        kind: 'quantity',
+        key: requestedId,
+        name: 'Requested cables',
+        categoryName: 'Cables',
+        status: 'active',
+        holdingContext: 'Shelf 1A',
+        itemCode: null,
+        assetTag: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    { ...quantity, key: wrongId, name: 'Wrong cables' },
+  ]);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  expect(
+    await screen.findByText('That record is unavailable to this account.'),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('region', { name: 'Label queue' }),
+  ).not.toHaveTextContent(wrongId);
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '2 distinct records',
+  );
+  expect(document.querySelectorAll('.label-card')).toHaveLength(2);
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('blocks refresh when the response contains every selected row plus an extra identity', async () => {
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    quantity,
+    asset,
+    { ...quantity, key: '8d05f5f0-f737-47c0-b28b-c703c60bed74' },
+  ]);
+  render(<LabelDesigner {...props} />);
+  expect(await screen.findByText(/unexpected.*record/i)).toBeVisible();
+  expect(printButton()).toBeDisabled();
+  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
+  expect(window.print).not.toHaveBeenCalled();
 });
 
 it('retains the old sheet but denies printing during a new selection validation', async () => {
