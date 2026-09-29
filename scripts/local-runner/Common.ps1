@@ -102,6 +102,62 @@ function Test-PilotJobResult($Result, [string] $RunnerName, [long] $RunnerId) {
         $Result.runner_name -ceq $RunnerName -and $Result.runner_id -eq $RunnerId
 }
 
+function Get-PilotLabel([string] $Sha) {
+    if ($Sha -cnotmatch '^[0-9a-f]{40}$') { throw 'Pilot requires the intended full lowercase 40-character commit SHA.' }
+    return "it-inventory-pilot-$Sha"
+}
+
+function Assert-PilotConfig($Config) {
+    foreach ($field in @('pilotExpectedSha', 'pilotWorkflowPath', 'pilotLabel')) {
+        if ($Config.PSObject.Properties.Name -notcontains $field) { throw 'Pilot workflow/SHA binding is missing; pickup refused.' }
+    }
+    $label = Get-PilotLabel $Config.pilotExpectedSha
+    if ($Config.pilotWorkflowPath -cne '.github/workflows/local-runner-pilot.yml' -or $Config.pilotLabel -cne $label) {
+        throw 'Pilot workflow/SHA label binding is invalid; pickup refused.'
+    }
+}
+
+function Test-PilotEvidence($Config, $Run, $Workflow, $Job, $Binding = $null) {
+    Assert-PilotConfig $Config
+    if ($null -eq $Run -or $null -eq $Workflow -or $null -eq $Job) { return $false }
+    foreach ($field in @('id', 'workflow_id', 'head_sha', 'run_attempt')) {
+        if ($Run.PSObject.Properties.Name -notcontains $field) { return $false }
+    }
+    foreach ($field in @('id', 'path')) { if ($Workflow.PSObject.Properties.Name -notcontains $field) { return $false } }
+    foreach ($field in @('id', 'run_id', 'head_sha', 'labels')) { if ($Job.PSObject.Properties.Name -notcontains $field) { return $false } }
+    if ($Run.id -le 0 -or $Run.workflow_id -le 0 -or $Run.run_attempt -lt 1 -or $Job.id -le 0 -or
+        $Workflow.id -ne $Run.workflow_id -or $Workflow.path -cne $Config.pilotWorkflowPath -or
+        $Run.head_sha -cne $Config.pilotExpectedSha -or $Job.head_sha -cne $Config.pilotExpectedSha -or
+        $Job.run_id -ne $Run.id -or $Job.labels -notcontains $Config.pilotLabel -or $Job.labels -notcontains 'self-hosted') {
+        return $false
+    }
+    if ($null -ne $Binding) {
+        foreach ($field in @('jobId', 'runId', 'workflowId', 'workflowPath', 'headSha', 'runAttempt', 'pilotLabel')) {
+            if ($Binding.PSObject.Properties.Name -notcontains $field) { return $false }
+        }
+        if ($Binding.jobId -ne $Job.id -or $Binding.runId -ne $Run.id -or $Binding.workflowId -ne $Workflow.id -or
+            $Binding.workflowPath -cne $Workflow.path -or $Binding.headSha -cne $Run.head_sha -or
+            $Binding.runAttempt -ne $Run.run_attempt -or $Binding.pilotLabel -cne $Config.pilotLabel) { return $false }
+    }
+    return $true
+}
+
+function Get-RunnerJitLabels($Config) {
+    $label = $Config.label
+    if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
+    # The JIT API accepts explicit platform/default labels. Never advertise the
+    # active generic label during a SHA-bound pilot.
+    return @('self-hosted', 'Linux', 'X64', $label)
+}
+
+function Assert-RunnerJitLabels($Config, $Runner) {
+    $expected = @(Get-RunnerJitLabels $Config | Sort-Object)
+    $actual = @($Runner.labels | Select-Object -ExpandProperty name | Sort-Object)
+    if ($actual.Count -ne $expected.Count -or (Compare-Object $expected $actual)) {
+        throw 'GitHub JIT runner labels differ from the exact requested assignment boundary.'
+    }
+}
+
 function ConvertTo-RunnerLocalPath([string] $Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Runner path is empty.' }
     if ($Path.StartsWith('\\?\', [StringComparison]::Ordinal)) {
@@ -404,10 +460,14 @@ function Remove-RunnerInstance($State) {
             [void](Assert-OwnedPath $entry.Path)
         }
         $vmPath = [IO.Path]::GetFullPath($vm.Path)
-        $ownedVmPath = [IO.Path]::GetFullPath($State.instancePath).TrimEnd('\')
-        $normalOwner = $vm.Notes -eq $script:RunnerTag -and
-            ($vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase) -or
-                $vmPath.StartsWith($ownedVmPath + '\', [StringComparison]::OrdinalIgnoreCase))
+        # New-VM appends its name to -Path. Legacy state has the same deterministic layout.
+        $ownedVmPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        if ($State.PSObject.Properties.Name -contains 'expectedVmPath' -and
+            -not [string]::Equals([IO.Path]::GetFullPath($State.expectedVmPath), $ownedVmPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Recorded VM configuration path differs from the exact creation layout; refusing deletion.'
+        }
+        $normalOwner = $vm.Name -ceq $State.vmName -and $vm.Notes -eq $script:RunnerTag -and
+            $vmPath.Equals($ownedVmPath, [StringComparison]::OrdinalIgnoreCase)
         $provisionalOwner = $false
         if ([string]::IsNullOrEmpty($vm.Notes) -and $State.PSObject.Properties.Name -contains 'phase' -and $State.phase -eq 'creating') {
             $expectedBootDisk = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')

@@ -7,6 +7,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Setup.Download.ps1')
 if ($EnableHyperV) {
     Assert-Administrator
     $result = Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
@@ -101,13 +102,7 @@ try {
         @{ path = $wslPath; url = "https://releases.ubuntu.com/24.04/$wslName"; hash = $wslHash },
         @{ path = $imagePath; url = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/$imageName"; hash = $imageHash }
     )) {
-        [void](Assert-OwnedPath $item.path)
-        if (-not (Test-Path -LiteralPath $item.path)) {
-            Invoke-WebRequest -Uri $item.url -OutFile $item.path -UseBasicParsing -TimeoutSec 1800
-        }
-        if ((Get-FileHash -LiteralPath $item.path -Algorithm SHA256).Hash -ine $item.hash) {
-            throw "Downloaded Ubuntu artifact checksum mismatch: $([IO.Path]::GetFileName($item.path))"
-        }
+        Get-SetupUbuntuArtifact $item.path $item.url $item.hash
     }
 
     # WSL is a trusted setup tool with host integration, not a security sandbox.

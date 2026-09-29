@@ -39,7 +39,8 @@ while ($true) {
     Write-Host '6. Enable active pickup and start (requires successful recorded pilot proof)'
     Write-Host '7. Exit'
     Write-Host '8. Diagnose recorded converter (read-only; no install)'
-    $choice = Read-Host 'Choose 1-8'
+    Write-Host '9. Maintainer retry (archives failed pilot evidence; requires investigation and new SHA)'
+    $choice = Read-Host 'Choose 1-9'
     try {
         switch ($choice) {
             '1' { & (Join-Path $PSScriptRoot 'Setup.ps1') -EnableHyperV }
@@ -54,7 +55,8 @@ while ($true) {
             }
             '4' { & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Status }
             '5' {
-                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action EnablePilot
+                $pilotSha = Read-Host 'Reviewed pilot head SHA (full 40-character lowercase SHA)'
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action EnablePilot -ExpectedPilotSha $pilotSha
                 & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action Start
             }
             '6' {
@@ -66,7 +68,12 @@ while ($true) {
                 . (Join-Path $PSScriptRoot 'Common.ps1')
                 Invoke-ConverterDiagnostics
             }
-            default { Write-Host 'Choose a number from 1 to 8.' }
+            '9' {
+                $pilotSha = Read-Host 'New reviewed pilot head SHA (full 40-character lowercase SHA)'
+                $reason = Read-Host 'Investigation reason for retry (nonsecret, one line)'
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action RetryPilot -ExpectedPilotSha $pilotSha -RetryReason $reason
+            }
+            default { Write-Host 'Choose a number from 1 to 9.' }
         }
     } catch {
         Write-Host "Setup stopped safely: $($_.Exception.Message)" -ForegroundColor Yellow

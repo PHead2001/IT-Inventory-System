@@ -13,6 +13,10 @@ foreach ($file in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1')) {
 # assemblies imported by these contract checks or an interactive owner shell.
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Dpapi.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell DPAPI regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup.Download.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell image download regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Pilot.Binding.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell pilot binding regression failed.' }
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
@@ -348,8 +352,9 @@ public class ArgvSink {
     Set-Item -Path Function:\Assert-SessionAlive -Value $realSessionAlive
     Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
     Remove-Item -Path Function:\Start-Sleep
+    $expectedVmPath = Join-Path $validInstance $validName
     $script:fakeVm = [pscustomobject]@{
-        Name = $validName; Notes = ''; Path = $validInstance; State = 'Off'
+        Name = $validName; Notes = ''; Path = $expectedVmPath; State = 'Off'
         AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff'
     }
     $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'guest.vhdx' })
@@ -369,18 +374,22 @@ public class ArgvSink {
     }
     $creating = [pscustomobject]@{
         tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance
-        phase = 'creating'; expectedBootDisk = $script:fakeDisks[0].Path
+        phase = 'creating'; expectedBootDisk = $script:fakeDisks[0].Path; expectedVmPath = $expectedVmPath
     }
     Remove-RunnerInstance $creating
     if ($script:deletions -ne 1) { throw 'Crash after New-VM left the exact provisional VM undeletable.' }
-    foreach ($case in @('running', 'wrong-note', 'wrong-path', 'extra-disk', 'wrong-disk', 'owned-phase', 'wrong-name')) {
-        $script:fakeVm.State = 'Off'; $script:fakeVm.Notes = ''; $script:fakeVm.Path = $validInstance
+    foreach ($case in @('running', 'wrong-note', 'wrong-path', 'instance-root', 'descendant', 'wrong-recorded-path', 'extra-disk', 'wrong-disk', 'owned-phase', 'wrong-name')) {
+        $script:fakeVm.State = 'Off'; $script:fakeVm.Notes = ''; $script:fakeVm.Path = $expectedVmPath
+        $creating.expectedVmPath = $expectedVmPath
         $script:fakeVm.Name = $validName; $creating.phase = 'creating'
         $script:fakeDisks = @([pscustomobject]@{ Path = $creating.expectedBootDisk })
         switch ($case) {
             'running' { $script:fakeVm.State = 'Running' }
             'wrong-note' { $script:fakeVm.Notes = 'unrelated' }
             'wrong-path' { $script:fakeVm.Path = Join-Path $validInstance 'another-vm' }
+            'instance-root' { $script:fakeVm.Path = $validInstance }
+            'descendant' { $script:fakeVm.Path = Join-Path $expectedVmPath 'another-vm' }
+            'wrong-recorded-path' { $creating.expectedVmPath = Join-Path $validInstance 'another-vm' }
             'extra-disk' { $script:fakeDisks += [pscustomobject]@{ Path = Join-Path $validInstance 'cidata.vhdx' } }
             'wrong-disk' { $script:fakeDisks[0].Path = Join-Path $validInstance 'other.vhdx' }
             'owned-phase' { $creating.phase = 'owned' }
@@ -393,6 +402,16 @@ public class ArgvSink {
     $script:fakeVm.Name = $validName; $script:fakeVm.Notes = $script:RunnerTag
     Remove-RunnerInstance $creating
     if ($script:deletions -ne 2) { throw 'Crash after tagging rejected normal owned cleanup.' }
+    $creating.PSObject.Properties.Remove('expectedVmPath')
+    Remove-RunnerInstance $creating
+    if ($script:deletions -ne 3) { throw 'Legacy state rejected the exact known New-VM nested layout.' }
+    foreach ($badVmPath in @($validInstance, (Join-Path $expectedVmPath 'descendant'), (Join-Path $validInstance 'another-vm'))) {
+        $script:fakeVm.Path = $badVmPath
+        $rejected = $false
+        try { Remove-RunnerInstance $creating } catch { $rejected = $true }
+        if (-not $rejected -or $script:deletions -ne 3) { throw 'Tagged cleanup adopted an unexpected path.' }
+    }
+    $script:fakeVm.Path = $expectedVmPath
 
     # Route/address drift is fatal even during work blocked in another process.
     $script:fakeAddresses = @(
@@ -403,14 +422,16 @@ public class ArgvSink {
         [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/0'; NextHop = '192.0.2.2'; InterfaceIndex = 7 },
         [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/24'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
         [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '128.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 }
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '128.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
+        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/24'; NextHop = '10.20.0.2'; InterfaceIndex = 9 }
     )
     $script:inspectionFailure = $false
-    function Get-NetIPAddress { if ($script:inspectionFailure) { throw 'synthetic inspection failure' }; return $script:fakeAddresses }
-    function Get-NetRoute { return $script:fakeRoutes }
+    function Get-NetIPAddress { param($AddressFamily) if ($script:inspectionFailure) { throw 'synthetic inspection failure' }; return @($script:fakeAddresses | Where-Object { -not $AddressFamily -or $_.AddressFamily -eq $AddressFamily }) }
+    function Get-NetRoute { param($AddressFamily) return @($script:fakeRoutes | Where-Object { -not $AddressFamily -or $_.AddressFamily -eq $AddressFamily }) }
     $script:aclRules = @()
     function Add-VMNetworkAdapterExtendedAcl {
         param($VMName, $Action, $Direction, $Weight, [switch]$Passthru, $RemoteIPAddress = '', $RemotePort = '', $Protocol = '', $Stateful = '', $LocalPort = '')
+        if (@($script:aclRules | Where-Object { $_.Weight -eq $Weight }).Count -gt 0) { throw 'Synthetic Hyper-V duplicate weight rejection.' }
         $rule = [pscustomobject]@{
             Action = $Action; Direction = $Direction; Weight = $Weight; RemoteIPAddress = $RemoteIPAddress
             RemotePort = $RemotePort; Protocol = $Protocol; Stateful = $Stateful; LocalPort = $LocalPort; LocalIPAddress = ''
@@ -421,7 +442,7 @@ public class ArgvSink {
     function Get-VMNetworkAdapterExtendedAcl { param($VMName) return $script:aclRules }
     [void](Set-IsolatedAdapter $validName)
     foreach ($port in @(80, 443, 5432)) {
-        if (@($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Outbound' -and $_.Protocol -eq 'TCP' -and $_.RemotePort -eq $port -and $_.Weight -eq 100 }).Count -ne 1) {
+        if (@($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Outbound' -and $_.Protocol -eq 'TCP' -and $_.RemotePort -eq $port -and $_.Weight -ge 100 -and $_.Weight -le 102 }).Count -ne 1) {
             throw "Expected public TCP $port rule is missing."
         }
     }
@@ -439,6 +460,33 @@ public class ArgvSink {
         @($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Inbound' -and $_.RemoteIPAddress -eq '172.30.240.1' -and $_.LocalPort -eq 22 -and $_.Stateful -eq $true }).Count -ne 1) {
         throw 'Route isolation changed the default Internet route or required stateful host SSH rule.'
     }
+    $privateMaximum = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '224.0.0.0/4' }).Weight
+    $routeWeights = @($script:aclRules | Where-Object { $_.RemoteIPAddress -in @('203.0.113.0/24', '0.0.0.0/1', '128.0.0.0/1') } | Select-Object -ExpandProperty Weight)
+    $hostWeight = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '192.0.2.1/32' }).Weight
+    $ipv6Weight = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '::/0' }).Weight
+    if (@($routeWeights | Where-Object { $_ -le $privateMaximum -or $_ -ge $hostWeight }).Count -ne 0 -or $hostWeight -ge $ipv6Weight) {
+        throw 'Distinct ACL weights changed the private/route/host/IPv6 deny priority order.'
+    }
+    $savedRoutes = $script:fakeRoutes; $savedAddresses = $script:fakeAddresses; $savedRules = $script:aclRules
+    $script:fakeRoutes = @($savedRoutes)
+    [Array]::Reverse($script:fakeRoutes)
+    $script:aclRules = @()
+    [void](Set-IsolatedAdapter $validName)
+    if (Compare-Object @($savedRules | ForEach-Object { Get-RuleFingerprint $_ }) @($script:aclRules | ForEach-Object { Get-RuleFingerprint $_ })) {
+        throw 'ACL weight assignment depends on route enumeration order.'
+    }
+    foreach ($case in @('capacity', 'invalid-route', 'invalid-address')) {
+        $script:fakeRoutes = $savedRoutes; $script:fakeAddresses = $savedAddresses; $script:aclRules = @()
+        switch ($case) {
+            'capacity' { $script:fakeRoutes = @(0..4096 | ForEach-Object { [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = "10.$([int][Math]::Floor($_ / 256)).$($_ % 256).0/24" } }) }
+            'invalid-route' { $script:fakeRoutes = @([pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/33' }) }
+            'invalid-address' { $script:fakeAddresses = @([pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = '999.0.0.1' }) }
+        }
+        $rejected = $false
+        try { [void](Set-IsolatedAdapter $validName) } catch { $rejected = $true }
+        if (-not $rejected -or $script:aclRules.Count -ne 0) { throw "ACL $case did not fail closed before modification." }
+    }
+    $script:fakeRoutes = $savedRoutes; $script:fakeAddresses = $savedAddresses; $script:aclRules = $savedRules
     $fingerprint = Get-HostNetworkFingerprint
     [Array]::Reverse($script:fakeAddresses)
     if ((Get-HostNetworkFingerprint) -cne $fingerprint) { throw 'Network fingerprint depends on enumeration order.' }
@@ -534,12 +582,13 @@ public class ArgvSink {
     [void][IO.Directory]::CreateDirectory($bin)
     $controlSink = Join-Path $bin 'Runner.ps1'
     [IO.File]::WriteAllText($controlSink, @'
-param([string] $Action)
+param([string] $Action, [string] $ExpectedPilotSha)
 [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'actions.txt'), $Action + "`n")
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic activation failure' }
 '@)
     $menuAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'SetupMenu.ps1'), [ref]$null, [ref]$null)
     $menuSwitch = $menuAst.Find({ param($node) $node -is [Management.Automation.Language.SwitchStatementAst] }, $true)
+    function Read-Host { return ('a' * 40) }
     foreach ($choice in @('5', '6')) {
         $clause = @($menuSwitch.Clauses | Where-Object { $_.Item1.Value -eq $choice })[0].Item2
         $control = [scriptblock]::Create($clause.Extent.Text.Substring(1, $clause.Extent.Text.Length - 2))
@@ -555,14 +604,17 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
         if (-not $rejected -or ($calls -join ',') -cne $expectedAction) { throw 'Setup menu started after activation failed.' }
         Remove-Item -LiteralPath (Join-Path $bin 'actions.txt'), (Join-Path $bin 'fail') -Force
     }
+    Remove-Item -Path Function:\Read-Host
 
     $realSupervisorLoop = (Get-Command Invoke-SupervisorLoop).ScriptBlock
     Write-RunnerJson $script:RunnerConfigPath ([ordered]@{
         schema = 1; tag = $script:RunnerTag; repo = 'example/runner-test'; maxMinutes = 120; activation = 'pilot'
+        pilotExpectedSha = ('a' * 40); pilotWorkflowPath = '.github/workflows/local-runner-pilot.yml'; pilotLabel = 'it-inventory-pilot-' + ('a' * 40)
     })
     Remove-Item -LiteralPath (Join-Path $testRoot 'last-error.json') -Force
     function Get-OwnerToken { return 'SENTINEL_SECRET' }
-    function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123 } }
+    function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123; pilotBinding = [pscustomobject]@{ runId = 456; workflowId = 789; workflowPath = '.github/workflows/local-runner-pilot.yml'; headSha = ('a' * 40); runAttempt = 1; pilotLabel = 'it-inventory-pilot-' + ('a' * 40) } } }
+    function Get-PilotEvidence { param($Config, $Binding, $Token) return [pscustomobject]@{ job = [pscustomobject]@{ status = 'queued'; labels = @('self-hosted', ('it-inventory-pilot-' + ('a' * 40))); runner_id = 0 } } }
     function Invoke-RunnerSession {
         param($Config)
         $script:RunnerOperationStage = 'key-generation'; $script:RunnerSessionName = $validName

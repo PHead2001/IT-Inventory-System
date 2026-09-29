@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'EnableActive')]
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'RetryPilot', 'EnableActive')]
     [string] $Action,
-    [ValidatePattern('^ITIR-[0-9a-f]{32}$')][string] $SessionName
+    [ValidatePattern('^ITIR-[0-9a-f]{32}$')][string] $SessionName,
+    [ValidatePattern('^[0-9a-f]{40}$')][string] $ExpectedPilotSha,
+    [string] $RetryReason
 )
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
@@ -120,32 +122,60 @@ ethernets:
 }
 
 function Set-IsolatedAdapter([string] $VmName) {
-    # Host-switch rules precede boot. Higher weights win. IPv6 and private routes are always denied.
-    $installed = @()
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Inbound -Weight 1 -Passthru
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -Weight 1 -Passthru
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress '::/0' -Weight 300 -Passthru
-    foreach ($prefix in @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $prefix -Weight 200 -Passthru
-    }
-    foreach ($ip in @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Select-Object -ExpandProperty IPAddress -Unique)) {
-        if ($ip -match '^\d{1,3}(\.\d{1,3}){3}$') {
-            $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress "$ip/32" -Weight 250 -Passthru
-        }
-    }
+    # Collect and bound the entire deny policy before modifying the switch.
+    $privatePrefixes = @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')
+    $hostIps = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Select-Object -ExpandProperty IPAddress |
+        Sort-Object -Unique)
     # Corporate/VPN destinations can have public prefixes behind a gateway.
     # Deny every non-default route, including split-default VPN /1 prefixes.
-    foreach ($route in @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.DestinationPrefix -ne '0.0.0.0/0' })) {
-        if ($route.DestinationPrefix -match '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$') {
-            $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $route.DestinationPrefix -Weight 220 -Passthru
+    $routePrefixes = @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Select-Object -ExpandProperty DestinationPrefix |
+        Where-Object { $_ -ne '0.0.0.0/0' } | Sort-Object -Unique)
+    foreach ($ip in $hostIps) {
+        $parsed = $null
+        if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or -not [Net.IPAddress]::TryParse($ip, [ref]$parsed) -or
+            $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+            throw 'Host IPv4 address inspection returned an invalid address; ACL installation refused.'
         }
     }
-    foreach ($port in @(80, 443, 5432)) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -Protocol TCP -RemotePort $port -Weight 100 -Stateful $true -Passthru
+    foreach ($prefix in $routePrefixes) {
+        $parsed = $null
+        if ($prefix -notmatch '^(\d{1,3}(\.\d{1,3}){3})/(\d{1,2})$' -or [int]$Matches[3] -gt 32 -or
+            -not [Net.IPAddress]::TryParse($Matches[1], [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+            throw 'Host IPv4 route inspection returned an invalid prefix; ACL installation refused.'
+        }
     }
+    if (($privatePrefixes.Count + $routePrefixes.Count + $hostIps.Count + 1) -gt 4096) {
+        throw 'Host network deny policy exceeds the 4096-rule capacity; ACL installation refused.'
+    }
+    # Higher weights win. Each weight is distinct, including across directions.
+    # Preserve private < route < host < IPv6 priority without fixed-size tier overlap.
+    $installed = @()
+    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Inbound -Weight 1 -Passthru
+    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -Weight 2 -Passthru
+    $denyWeight = 200
+    foreach ($prefix in $privatePrefixes) {
+        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $prefix -Weight $denyWeight -Passthru
+        $denyWeight++
+    }
+    foreach ($prefix in $routePrefixes) {
+        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $prefix -Weight $denyWeight -Passthru
+        $denyWeight++
+    }
+    foreach ($ip in $hostIps) {
+        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress "$ip/32" -Weight $denyWeight -Passthru
+        $denyWeight++
+    }
+    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress '::/0' -Weight $denyWeight -Passthru
+    $allowWeight = 100
+    foreach ($port in @(80, 443, 5432)) {
+        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -Protocol TCP -RemotePort $port -Weight $allowWeight -Stateful $true -Passthru
+        $allowWeight++
+    }
+    $dnsWeight = 110
     foreach ($dns in @('1.1.1.1', '8.8.8.8')) {
         foreach ($protocol in @('UDP', 'TCP')) {
-            $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -RemoteIPAddress $dns -RemotePort 53 -Protocol $protocol -Weight 110 -Stateful $true -Passthru
+            $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -RemoteIPAddress $dns -RemotePort 53 -Protocol $protocol -Weight $dnsWeight -Stateful $true -Passthru
+            $dnsWeight++
         }
     }
     $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Inbound -RemoteIPAddress '172.30.240.1' -LocalPort 22 -Protocol TCP -Weight 150 -Stateful $true -Passthru
@@ -331,6 +361,7 @@ function Invoke-RunnerSession($Config) {
             if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
             $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
             $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
+            $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
             Write-RunnerJson $script:RunnerStatePath $current
             $vm = New-VM -Name $name -Generation 2 -VHDPath $disk -Path $instance -MemoryStartupBytes 8GB -SwitchName $script:RunnerSwitch
             Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
@@ -382,9 +413,14 @@ function Invoke-RunnerSession($Config) {
         $token = Get-OwnerToken
         $parts = $Config.repo.Split('/')
         $script:RunnerOperationStage = 'jit-registration'
+        if ($Config.activation -eq 'pilot') {
+            $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
+            $evidence = Get-PilotEvidence $Config $attempt $token
+            if (-not (Test-QueuedRunnerJob $evidence.job $Config.pilotLabel)) { throw 'Bound pilot job is no longer queued before registration.' }
+        }
         Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
-            name = $name; runner_group_id = $Config.runnerGroupId; labels = @($Config.label); work_folder = '_work'
+            name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config); work_folder = '_work'
         } $token
         $token = $null
         if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$' -or $jit.runner.name -ne $name -or
@@ -392,6 +428,7 @@ function Invoke-RunnerSession($Config) {
             throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
         }
         $runnerId = [long]$jit.runner.id
+        Assert-RunnerJitLabels $Config $jit.runner
         Assert-SessionAlive $state
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
         # A JIT runner exits after one job. No guest output or secret-bearing config is logged on the host.
@@ -412,17 +449,50 @@ function Invoke-RunnerSession($Config) {
     }
 }
 
+function Get-PilotEvidence($Config, $Binding, [string] $Token) {
+    Assert-PilotConfig $Config
+    if ($null -eq $Binding) { throw 'Pilot receipt binding is missing.' }
+    foreach ($field in @('jobId', 'runId', 'workflowId')) {
+        if ($Binding.PSObject.Properties.Name -notcontains $field -or [string]$Binding.$field -notmatch '^[1-9][0-9]*$') {
+            throw 'Pilot receipt API identity is invalid.'
+        }
+    }
+    $base = "https://api.github.com/repos/$($Config.repo)/actions"
+    $run = Invoke-GitHub "$base/runs/$($Binding.runId)" 'GET' $null $Token
+    $workflow = Invoke-GitHub "$base/workflows/$($Binding.workflowId)" 'GET' $null $Token
+    $job = Invoke-GitHub "$base/jobs/$($Binding.jobId)" 'GET' $null $Token
+    if (-not (Test-PilotEvidence $Config $run $workflow $job $Binding)) { throw 'Fresh GitHub pilot workflow/run/SHA/job metadata does not match the recorded binding.' }
+    return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
+}
+
 function Get-QueuedRunnerJob($Config, [string] $Token) {
+    $label = $Config.label
+    if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
     $parts = $Config.repo.Split('/')
     $base = "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions"
     foreach ($runStatus in @('queued', 'in_progress')) {
         $runs = Invoke-GitHub "$base/runs?status=$runStatus&per_page=100" 'GET' $null $Token
         if ($runs.total_count -gt 100) { throw 'Workflow run queue exceeds the bounded API view.' }
         foreach ($run in @($runs.workflow_runs)) {
+            $workflow = $null
+            if ($Config.activation -eq 'pilot') {
+                if ($run.head_sha -cne $Config.pilotExpectedSha) { continue }
+                $workflow = Invoke-GitHub "$base/workflows/$($run.workflow_id)" 'GET' $null $Token
+                if ($workflow.path -cne $Config.pilotWorkflowPath) { continue }
+            }
             $jobs = Invoke-GitHub "$base/runs/$($run.id)/jobs?filter=latest&per_page=100" 'GET' $null $Token
             if ($jobs.total_count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
             foreach ($job in @($jobs.jobs)) {
-                if (Test-QueuedRunnerJob $job $Config.label) {
+                if (Test-QueuedRunnerJob $job $label) {
+                    if ($Config.activation -eq 'pilot') {
+                        if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
+                        $job | Add-Member -NotePropertyName pilotBinding -NotePropertyValue ([pscustomobject]@{
+                            jobId = $job.id; runId = $run.id; workflowId = $workflow.id; workflowPath = $workflow.path
+                            headSha = $run.head_sha; runAttempt = $run.run_attempt; pilotLabel = $Config.pilotLabel
+                        }) -Force
+                        $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token
+                        if (-not (Test-QueuedRunnerJob $fresh.job $label)) { continue }
+                    }
                     return $job
                 }
             }
@@ -461,15 +531,20 @@ function Invoke-SupervisorLoop {
             $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token
-            $token = $null
             if ($null -ne $job) {
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-consumption'
+                    $fresh = Get-PilotEvidence $config $job.pilotBinding $token
+                    if (-not (Test-QueuedRunnerJob $fresh.job $config.pilotLabel)) { throw 'Bound pilot job changed before consumption.' }
                     Write-RunnerJson $pilotAttemptPath ([ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id
+                        runId = $job.pilotBinding.runId; workflowId = $job.pilotBinding.workflowId
+                        workflowPath = $job.pilotBinding.workflowPath; headSha = $job.pilotBinding.headSha
+                        runAttempt = $job.pilotBinding.runAttempt; pilotLabel = $job.pilotBinding.pilotLabel
                         consumedUtc = [DateTime]::UtcNow.ToString('o')
                     })
                 }
+                $token = $null
                 $allocatedRunner = Invoke-RunnerSession $config
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-verification'
@@ -478,13 +553,17 @@ function Invoke-SupervisorLoop {
                     $result = $null
                     $limit = [DateTime]::UtcNow.AddSeconds(60)
                     do {
-                        $result = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/jobs/$($job.id)" 'GET' $null $token
+                        $fresh = Get-PilotEvidence $config $job.pilotBinding $token
+                        $result = $fresh.job
                         if ($result.status -eq 'completed') { break }
                         Start-Sleep -Seconds 5
                     } while ([DateTime]::UtcNow -lt $limit)
                     $token = $null
                     Write-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json') ([ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id; status = $result.status
+                        runId = $job.pilotBinding.runId; workflowId = $job.pilotBinding.workflowId
+                        workflowPath = $job.pilotBinding.workflowPath; headSha = $job.pilotBinding.headSha
+                        runAttempt = $job.pilotBinding.runAttempt; pilotLabel = $job.pilotBinding.pilotLabel
                         conclusion = $result.conclusion; runnerName = $result.runner_name
                         runnerId = $result.runner_id; allocatedRunnerName = $allocatedRunner.name
                         allocatedRunnerId = $allocatedRunner.id
@@ -501,7 +580,7 @@ function Invoke-SupervisorLoop {
                 Write-RunnerFailure $script:RunnerOperationStage 'STAGE_FAILED' $script:RunnerSessionName
             }
             Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner stage failed: $script:RunnerOperationStage" -ErrorAction SilentlyContinue
-        }
+        } finally { $token = $null }
         Start-Sleep -Seconds 30
     }
 }
@@ -522,6 +601,95 @@ function Stop-Supervisor {
     $mutex = Enter-RunnerLock
     try { $state = Get-RunnerState; if ($null -ne $state) { Remove-RunnerInstance $state } }
     finally { Exit-RunnerLock $mutex }
+}
+
+function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retry) {
+    Assert-Administrator
+    Assert-SecureRoot
+    $label = Get-PilotLabel $Sha
+    if ($Retry -and ([string]::IsNullOrWhiteSpace($Reason) -or $Reason.Length -gt 256 -or $Reason -match '[\x00-\x1f\x7f]')) {
+        throw 'Maintainer retry requires a short nonsecret investigation reason (1-256 characters, one line).'
+    }
+    # The same lifetime lock excludes both manual and boot supervisor startup.
+    $supervisorLock = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
+    try {
+        $mutex = Enter-RunnerLock
+        try {
+            $config = Get-RunnerConfig
+            [void](Get-OwnerToken)
+            if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -eq 'Running' -or
+                (Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+                throw 'Pilot activation/retry requires a stopped supervisor and no session or owned-prefix VM.'
+            }
+            $attemptPath = Join-Path $script:RunnerRoot 'pilot-attempt.json'
+            $resultPath = Join-Path $script:RunnerRoot 'pilot-result.json'
+            $attempt = Read-RunnerJson $attemptPath
+            $result = Read-RunnerJson $resultPath
+            if ($Retry) {
+                if ($config.activation -ne 'pilot' -or $null -eq $attempt -or $attempt.tag -ne $script:RunnerTag -or
+                    $attempt.jobId -le 0 -or ($null -ne $result -and $result.verified -eq $true)) {
+                    throw 'Maintainer retry requires a consumed unsuccessful pilot; successful proof cannot be reset.'
+                }
+                if ($config.PSObject.Properties.Name -contains 'pilotExpectedSha' -and $config.pilotExpectedSha -ceq $Sha) {
+                    throw 'Maintainer retry must target a new reviewed SHA.'
+                }
+                $history = Assert-OwnedPath (Join-Path $script:RunnerRoot 'pilot-history')
+                [void][IO.Directory]::CreateDirectory($history)
+                $archivePath = Join-Path $history ($([guid]::NewGuid().ToString('N')) + '.json')
+                Write-RunnerJson $archivePath ([ordered]@{
+                    tag = $script:RunnerTag; archivedUtc = [DateTime]::UtcNow.ToString('o'); reason = $Reason
+                    nextSha = $Sha; previousConfig = $config; attempt = $attempt; result = $result
+                    failure = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
+                })
+                $archive = Read-RunnerJson $archivePath
+                if ($archive.tag -ne $script:RunnerTag -or $archive.attempt.jobId -ne $attempt.jobId -or $archive.nextSha -cne $Sha) {
+                    throw 'Pilot evidence archive readback failed; current receipt preserved.'
+                }
+                # Crash before/after removal leaves pickup disabled; the archive is retained.
+                $config.activation = 'disabled'
+                Write-RunnerJson $script:RunnerConfigPath $config
+                Remove-Item -LiteralPath $attemptPath -ErrorAction Stop
+                if (Test-Path -LiteralPath $resultPath) { Remove-Item -LiteralPath $resultPath -ErrorAction Stop }
+                Write-Host "Previous pilot evidence retained in $archivePath"
+            } elseif ($config.activation -ne 'disabled' -or $null -ne $attempt -or $null -ne $result) {
+                throw 'Initial pilot requires disabled activation and no previous receipt; use a reviewed maintainer retry after investigation.'
+            }
+            $config | Add-Member -NotePropertyName pilotExpectedSha -NotePropertyValue $Sha -Force
+            $config | Add-Member -NotePropertyName pilotWorkflowPath -NotePropertyValue '.github/workflows/local-runner-pilot.yml' -Force
+            $config | Add-Member -NotePropertyName pilotLabel -NotePropertyValue $label -Force
+            $config.activation = 'pilot'
+            Write-RunnerJson $script:RunnerConfigPath $config
+            Write-Host "One-job pilot enabled for SHA $Sha; label $label. Start remains an explicit action."
+        } finally { Exit-RunnerLock $mutex }
+    } finally { Exit-RunnerLock $supervisorLock }
+}
+
+function Enable-RunnerActive {
+    Assert-Administrator
+    Assert-SecureRoot
+    $mutex = Enter-RunnerLock
+    try {
+        $config = Get-RunnerConfig
+        Assert-PilotConfig $config
+        $result = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
+        $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
+        if ($config.activation -ne 'pilot' -or $null -eq $attempt -or $attempt.tag -ne $script:RunnerTag -or
+            $null -eq $result -or $result.tag -ne $script:RunnerTag -or $result.jobId -ne $attempt.jobId -or
+            $result.verified -ne $true -or $result.status -ne 'completed' -or $result.conclusion -ne 'success' -or
+            $result.runnerName -cne $result.allocatedRunnerName -or $result.runnerId -ne $result.allocatedRunnerId) {
+            throw 'A successful bound pilot job is required before persistent pickup.'
+        }
+        $token = Get-OwnerToken
+        $evidence = Get-PilotEvidence $config $attempt $token
+        $token = $null
+        if (-not (Test-PilotEvidence $config $evidence.run $evidence.workflow $evidence.job $result) -or
+            -not (Test-PilotJobResult $evidence.job $result.allocatedRunnerName $result.allocatedRunnerId)) {
+            throw 'Fresh GitHub pilot proof differs from recorded successful workflow/SHA/runner evidence.'
+        }
+        $config.activation = 'active'
+        Write-RunnerJson $script:RunnerConfigPath $config
+        Write-Host 'Persistent job pickup enabled. Start the supervisor shortcut.'
+    } finally { Exit-RunnerLock $mutex }
 }
 
 function Invoke-Watchdog {
@@ -599,6 +767,7 @@ switch ($Action) {
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
+        if ($config.PSObject.Properties.Name -contains 'pilotExpectedSha') { Write-Host "Pilot binding: workflow=$($config.pilotWorkflowPath); SHA=$($config.pilotExpectedSha); label=$($config.pilotLabel)." }
         if ($null -ne $recentError) { Write-Host "Last supervisor failure ($($recentError.atUtc)): stage=$($recentError.stage); code=$($recentError.code)." }
         $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
         if ($null -ne $attempt) { Write-Host "Pilot consumed for job $($attempt.jobId). Failure or uncertainty requires maintainer investigation; it cannot take another pilot job." }
@@ -614,33 +783,8 @@ switch ($Action) {
     }
     'Supervise' { Invoke-Supervisor }
     'EnablePilot' {
-        Assert-Administrator
-        Assert-SecureRoot
-        $config = Get-RunnerConfig
-        [void](Get-OwnerToken)
-        if ($config.activation -ne 'disabled') { throw 'Pilot can only be enabled from disabled state.' }
-        if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json')) {
-            throw 'A previous pilot attempt exists; do not silently reset one-job proof.'
-        }
-        $config.activation = 'pilot'
-        Write-RunnerJson $script:RunnerConfigPath $config
-        Write-Host 'One-job pilot enabled. Supervisor will stop after its first matching job.'
+        Enable-RunnerPilot $ExpectedPilotSha
     }
-    'EnableActive' {
-        Assert-Administrator
-        Assert-SecureRoot
-        $config = Get-RunnerConfig
-        $result = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
-        $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
-        if ($config.activation -ne 'pilot' -or $null -eq $attempt -or $attempt.tag -ne $script:RunnerTag -or
-            $null -eq $result -or $result.tag -ne $script:RunnerTag -or $result.jobId -ne $attempt.jobId -or
-            $result.verified -ne $true -or $result.status -ne 'completed' -or
-            $result.conclusion -ne 'success' -or $result.runnerName -cne $result.allocatedRunnerName -or
-            $result.runnerId -ne $result.allocatedRunnerId) {
-            throw 'A successful recorded pilot job is required before persistent pickup.'
-        }
-        $config.activation = 'active'
-        Write-RunnerJson $script:RunnerConfigPath $config
-        Write-Host 'Persistent job pickup enabled. Start the supervisor shortcut.'
-    }
+    'RetryPilot' { Enable-RunnerPilot $ExpectedPilotSha $RetryReason -Retry }
+    'EnableActive' { Enable-RunnerActive }
 }
