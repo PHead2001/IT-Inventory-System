@@ -57,6 +57,15 @@ async function openLayout(control: Locator) {
   await control.getByText('Layout options', { exact: true }).click();
 }
 
+async function chooseControlSection(control: Locator, name: string) {
+  const section = control.getByLabel('Section');
+  const option = section.locator('option').filter({ hasText: `${name} ·` });
+  await expect(option).toHaveCount(1);
+  const id = await option.getAttribute('value');
+  expect(id).toBeTruthy();
+  await section.selectOption(id!);
+}
+
 test('held section drag autoscrolls at the viewport edge', async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 640 });
@@ -100,6 +109,13 @@ test('keyboard width editing retains focus and survives reload', async ({
   let designer = await openDesigner(page, category);
   const control = fieldControl(designer, 'Name');
   await openLayout(control);
+  const details = control.locator('details').first();
+  await expect(details).toHaveAttribute('open', '');
+  const summary = details.locator('summary');
+  await summary.press('Enter');
+  await expect(details).not.toHaveAttribute('open', '');
+  await summary.press('Space');
+  await expect(details).toHaveAttribute('open', '');
   const width = control.getByLabel('Width');
   const initial = await width.inputValue();
   await width.focus();
@@ -141,9 +157,7 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await designer.getByLabel('Section heading').last().fill('Retirable fields');
   let control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control
-    .getByLabel('Section')
-    .selectOption({ label: 'Retirable fields' });
+  await chooseControlSection(control, 'Retirable fields');
   await saveDesigner(designer);
 
   await page.goto('/inventory/quantity/new');
@@ -280,9 +294,7 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
     .fill('Temporary placement');
   control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control
-    .getByLabel('Section')
-    .selectOption({ label: 'Temporary placement' });
+  await chooseControlSection(control, 'Temporary placement');
   section = designer.locator('[data-section-id]').last();
   await fieldControl(designer, fieldName).click();
   await expect(
@@ -344,9 +356,7 @@ test('hidden sections and preview exclusions remain distinct through save and re
   const control = fieldControl(designer, 'Quantity note');
   await openLayout(control);
   await control.getByLabel('Applies to Quantity note').selectOption('quantity');
-  await control
-    .getByLabel('Section')
-    .selectOption({ label: 'Quantity details' });
+  await chooseControlSection(control, 'Quantity details');
   await section.getByText('Section options').click();
   await section
     .getByLabel('Applies to Quantity details')
@@ -384,6 +394,11 @@ test('hidden sections and preview exclusions remain distinct through save and re
   await expect(reloadedLibrary.getByText('Hidden sections (0)')).toBeVisible();
   await saveDesigner(designer);
   designer = await openDesigner(page, category);
+  await designer
+    .locator('[data-section-id]')
+    .last()
+    .getByText('Section options')
+    .click();
   await expect(
     designer.locator('[data-section-id]').last().getByRole('checkbox', {
       name: 'Show section',

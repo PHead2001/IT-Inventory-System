@@ -135,7 +135,7 @@ export function LabelSheet({
             <motion.div
               key={JSON.stringify([identity, ordinal])}
               className="label-preview-item"
-              layout={!reducedMotion}
+              layout={reducedMotion ? false : 'position'}
               initial={reducedMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reducedMotion ? 0 : 0.2 }}

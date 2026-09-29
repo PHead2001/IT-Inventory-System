@@ -751,9 +751,11 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   await page.getByRole('link', { name: 'View filtered inventory' }).click();
   await expect(page).toHaveURL(/lowStock=true/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+  await page.locator('details.experience-export-menu > summary').click();
   const download = page.waitForEvent('download');
   await page
-    .getByRole('link', { name: 'Download filtered inventory CSV' })
+    .getByRole('group', { name: 'CSV export options' })
+    .getByRole('link', { name: 'Filtered inventory' })
     .click();
   const file = await download;
   expect(file.suggestedFilename()).toMatch(

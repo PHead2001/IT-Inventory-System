@@ -52,8 +52,13 @@ test('records navigation, a held designer drag and resize, and the saved form', 
       nodes.map((node) => node.getAttribute('data-control-id')),
     );
   const before = await order();
+  await designer
+    .locator('[data-control-id]:has(button[aria-label="Drag Category"])')
+    .hover();
   const source = designer.getByRole('button', { name: 'Drag Category' });
-  const target = designer.getByRole('button', { name: 'Drag Name' });
+  const target = designer.locator(
+    '[data-control-id]:has(button[aria-label="Drag Name"])',
+  );
   await source.scrollIntoViewIfNeeded();
   const from = await source.boundingBox();
   const to = await target.boundingBox();

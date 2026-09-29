@@ -1,3 +1,4 @@
+import { render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getLocations: vi.fn(),
   getSites: vi.fn(),
   getFileListSummaries: vi.fn(),
+  searchForm: vi.fn(),
 }));
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: mocks.requireMember,
@@ -24,7 +26,7 @@ vi.mock('@/features/files/list.server', () => ({
   getFileListSummaries: mocks.getFileListSummaries,
 }));
 vi.mock('@/features/inventory/components/search-form', () => ({
-  SearchForm: () => null,
+  SearchForm: mocks.searchForm,
 }));
 
 import InventoryPage from './page';
@@ -93,4 +95,18 @@ it('propagates the original inventory error without reading file summaries', asy
     InventoryPage({ searchParams: Promise.resolve({}) }),
   ).rejects.toBe(original);
   expect(mocks.getFileListSummaries).not.toHaveBeenCalled();
+});
+
+it('passes only the nonproduction diagnostic gate to the search client island', async () => {
+  const preview = render(
+    await InventoryPage({ searchParams: Promise.resolve({}) }),
+  );
+  expect(mocks.searchForm.mock.calls.at(-1)?.[0].diagnosticsEnabled).toBe(true);
+  preview.unmount();
+
+  vi.stubEnv('VERCEL_ENV', 'production');
+  render(await InventoryPage({ searchParams: Promise.resolve({}) }));
+  expect(mocks.searchForm.mock.calls.at(-1)?.[0].diagnosticsEnabled).toBe(
+    false,
+  );
 });

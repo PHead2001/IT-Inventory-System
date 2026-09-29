@@ -16,6 +16,7 @@ import { getSites } from '@/features/custody/queries.server';
 import { getFileListSummaries } from '@/features/files/list.server';
 import { Download } from 'lucide-react';
 import {
+  authDiagnosticsEnabled,
   createAuthDiagnostic,
   observeAuthStage,
 } from '@/lib/auth/diagnostic.server';
@@ -94,6 +95,7 @@ export default async function InventoryPage({
           categories={categories}
           locations={locations}
           sites={sites}
+          diagnosticsEnabled={authDiagnosticsEnabled()}
         />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,13 +30,24 @@ export function SearchForm({
   locations,
   sites,
   action = '/inventory',
+  diagnosticsEnabled = false,
 }: {
   params: Record<string, string | undefined>;
   categories: CategoryRef[];
   locations: LocationRef[];
   sites: Site[];
   action?: string;
+  diagnosticsEnabled?: boolean;
 }) {
+  useEffect(() => {
+    if (!diagnosticsEnabled) return;
+    try {
+      // This marks this client island's effect, not hydration of the whole page.
+      performance.mark('itinv:auth:search-island-effect');
+    } catch {
+      // Optional measurement must not affect inventory search.
+    }
+  }, [diagnosticsEnabled]);
   const filters = readFilters(params);
   const [expanded, setExpanded] = useState(() =>
     Boolean(

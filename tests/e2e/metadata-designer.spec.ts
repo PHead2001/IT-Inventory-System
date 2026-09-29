@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
@@ -22,6 +22,15 @@ async function chooseDesigner(page: Page, name: string) {
     designer.getByRole('button', { name: 'Save changes' }),
   ).toBeVisible();
   return designer;
+}
+
+async function chooseControlSection(control: Locator, name: string) {
+  const section = control.getByLabel('Section');
+  const option = section.locator('option').filter({ hasText: `${name} ·` });
+  await expect(option).toHaveCount(1);
+  const id = await option.getAttribute('value');
+  expect(id).toBeTruthy();
+  await section.selectOption(id!);
 }
 
 test('an account switch in another tab masks the old designer on focus', async ({
@@ -77,18 +86,17 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(panels.getByRole('button', { name: 'Inspector' })).toBeVisible();
   await designer.getByLabel('Label', { exact: true }).fill('Connector type');
   await panels.getByRole('button', { name: 'Canvas' }).click();
+  const connectorControl = designer.locator(
+    '[data-control-id]:has(button[aria-label="Drag Connector type"])',
+  );
+  await connectorControl.press('Enter');
   await expect(
     designer.getByRole('button', { name: 'Drag Connector type' }),
   ).toBeVisible();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Specifications');
-  const connectorControl = designer
-    .locator('[data-control-id]')
-    .filter({ has: page.getByRole('button', { name: 'Drag Connector type' }) });
   await connectorControl.getByText('Layout options').click();
-  await connectorControl
-    .getByLabel('Section')
-    .selectOption({ label: 'Specifications' });
+  await chooseControlSection(connectorControl, 'Specifications');
   await designer
     .getByText('Live preview · open quantity or asset form')
     .click();
@@ -215,7 +223,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
       `[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`,
     );
     await control.getByText('Layout options').click();
-    await control.getByLabel('Section').selectOption({ label: 'Phone checks' });
+    await chooseControlSection(control, 'Phone checks');
   };
   for (const name of ['Flag one', 'Flag two', 'Flag three'])
     await addField('boolean', name);

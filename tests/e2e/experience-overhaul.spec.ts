@@ -997,13 +997,91 @@ test('automatic label sheet retains readable codes across rapid layout edits and
     .getByLabel('Copies')
     .fill('20');
   await expect(page.locator('.label-card')).toHaveCount(20);
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   const print = page.getByRole('button', { name: /Print selected labels/ });
   const format = page.getByRole('combobox', { name: 'Code' });
+  let measuredReflows = 0;
   for (const [labelSize, paper, code] of [
     ['70x35', 'A4', 'qr'],
     ['90x50', 'letter', 'code128'],
   ] as const) {
+    const changingSize = (await size.inputValue()) !== labelSize;
+    if (changingSize) {
+      await card.evaluate((element, targetSize) => {
+        const [width, height] = targetSize.split('x');
+        const samples: Array<{ width: number; height: number }> = [];
+        const promise = new Promise<typeof samples>((resolve) => {
+          let started = false;
+          let timeout = 0;
+          const finish = () => {
+            observer.disconnect();
+            window.clearTimeout(timeout);
+            resolve(samples);
+          };
+          const observer = new MutationObserver(() => {
+            if (
+              started ||
+              element.style.width !== `${width}mm` ||
+              element.style.height !== `${height}mm`
+            )
+              return;
+            started = true;
+            observer.disconnect();
+            const start = performance.now();
+            const measure = () => {
+              const box = element.getBoundingClientRect();
+              samples.push({ width: box.width, height: box.height });
+              if (performance.now() - start < 280)
+                requestAnimationFrame(measure);
+              else finish();
+            };
+            measure();
+          });
+          observer.observe(element, {
+            attributes: true,
+            attributeFilter: ['style'],
+          });
+          timeout = window.setTimeout(finish, 1500);
+        });
+        (
+          window as Window & { __physicalLabelFrames?: typeof promise }
+        ).__physicalLabelFrames = promise;
+      }, labelSize);
+    }
     await size.selectOption(labelSize);
+    await expect(card).toHaveAttribute(
+      'style',
+      new RegExp(
+        `width: ${labelSize.split('x')[0]}mm; height: ${labelSize.split('x')[1]}mm`,
+      ),
+    );
+    const frames = changingSize
+      ? await page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __physicalLabelFrames?: Promise<
+                  Array<{ width: number; height: number }>
+                >;
+              }
+            ).__physicalLabelFrames ?? [],
+        )
+      : [];
+    const [physicalWidth, physicalHeight] = labelSize.split('x').map(Number);
+    if (changingSize) {
+      measuredReflows++;
+      expect(frames.length).toBeGreaterThan(2);
+    }
+    for (const [index, frame] of frames.entries()) {
+      expect(frame.width, `${labelSize} frame ${index} width`).toBeCloseTo(
+        (physicalWidth * 96) / 25.4,
+        0,
+      );
+      expect(frame.height, `${labelSize} frame ${index} height`).toBeCloseTo(
+        (physicalHeight * 96) / 25.4,
+        0,
+      );
+    }
     await paperChoice.selectOption(paper);
     await format.selectOption(code);
     await expect(card).toHaveAttribute('data-code-ready', 'true');
@@ -1076,4 +1154,5 @@ test('automatic label sheet retains readable codes across rapid layout edits and
       await page.emulateMedia({ media: 'screen' });
     }
   }
+  expect(measuredReflows).toBeGreaterThan(0);
 });

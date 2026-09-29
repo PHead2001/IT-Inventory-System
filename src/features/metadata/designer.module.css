@@ -22,12 +22,14 @@
 }
 
 .controlAction {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
 }
 
 .control[data-selected='true'] .controlAction,
+.control:hover .controlAction,
 .control:focus-within .controlAction {
-  display: inline-flex;
+  visibility: visible;
 }
 
 .dropArea[data-drop-target='true'] {

@@ -249,6 +249,10 @@ test('quantity core persists multi-location receives, partial and all transfers,
   ).toHaveCount(2);
   const filter = page.getByRole('form', { name: 'Search inventory' });
   const unfilteredUrl = page.url();
+  await filter.getByRole('button', { name: 'More filters' }).click();
+  await expect(
+    filter.getByRole('button', { name: 'Fewer filters' }),
+  ).toHaveAttribute('aria-expanded', 'true');
   await chooseLocation(filter, 'Location', 'ITC-L');
   expect(page.url()).toBe(unfilteredUrl);
   await filter.getByRole('button', { name: 'Search', exact: true }).click();
