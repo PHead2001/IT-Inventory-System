@@ -96,14 +96,34 @@ function Test-PilotJobResult($Result, [string] $RunnerName, [long] $RunnerId) {
         $Result.runner_name -ceq $RunnerName -and $Result.runner_id -eq $RunnerId
 }
 
+function ConvertTo-RunnerLocalPath([string] $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Runner path is empty.' }
+    if ($Path.StartsWith('\\?\', [StringComparison]::Ordinal)) {
+        # WSL stores local BasePath using extended DOS syntax. Only remove this
+        # prefix for an unambiguous drive-qualified path, never UNC/device paths.
+        $Path = $Path.Substring(4)
+        if ($Path.Contains('/') -or $Path -match '(^|\\)\.{1,2}(\\|$)|[ .](\\|$)') {
+            throw 'Extended runner path has ambiguous components.'
+        }
+    }
+    if ($Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':')) {
+        throw 'Runner path must be a fully qualified local DOS path.'
+    }
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\')
+}
+
 function Assert-ConverterOwnership($Stage, $Registration, [string] $HelperRoot) {
     if ($Stage.helperName -notmatch '^ITInventoryImageConverter-[0-9a-f]{32}$') {
         throw 'Setup stage has no valid dedicated image-converter identity.'
     }
-    [void](Assert-OwnedPath $HelperRoot)
-    if ($null -eq $Registration -or $Registration.DistributionName -cne $Stage.helperName -or
-        -not [string]::Equals([IO.Path]::GetFullPath([string]$Registration.BasePath).TrimEnd('\'),
-            [IO.Path]::GetFullPath($HelperRoot).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+    $expectedPath = ConvertTo-RunnerLocalPath $HelperRoot
+    [void](Assert-OwnedPath $expectedPath)
+    if ($null -eq $Registration -or $Registration.DistributionName -cne $Stage.helperName) {
+        throw 'Existing WSL image converter does not match the protected setup stage and owned base path.'
+    }
+    $registeredPath = ConvertTo-RunnerLocalPath ([string]$Registration.BasePath)
+    [void](Assert-OwnedPath $registeredPath)
+    if (-not [string]::Equals($registeredPath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Existing WSL image converter does not match the protected setup stage and owned base path.'
     }
 }

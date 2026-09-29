@@ -81,6 +81,28 @@ try {
     $stage = [pscustomobject]@{ helperName = 'ITInventoryImageConverter-' + ('a' * 32) }
     $registration = [pscustomobject]@{ DistributionName = $stage.helperName; BasePath = $helperRoot }
     Assert-ConverterOwnership $stage $registration $helperRoot
+    $registration.BasePath = '\\?\' + $helperRoot
+    Assert-ConverterOwnership $stage $registration $helperRoot
+    $registration.BasePath = '\\?\' + $helperRoot.ToLowerInvariant() + '\'
+    Assert-ConverterOwnership $stage $registration $helperRoot
+    $badPaths = @(
+        ('\\?\' + (Join-Path $testRoot 'different-converter')),
+        ('\\?\UNC\localhost\C$\' + $helperRoot.Substring(3)),
+        ('\\.\' + $helperRoot),
+        ('\\?\' + $helperRoot + '\..\image-converter'),
+        ('\\?\' + $helperRoot + '.'),
+        ('\\?\' + $helperRoot + ' '),
+        'C:image-converter',
+        '\image-converter'
+    )
+    if ($badPaths.Count -ne 8) { throw 'Converter rejection cases did not produce eight distinct paths.' }
+    foreach ($badPath in $badPaths) {
+        $registration.BasePath = $badPath
+        $rejected = $false
+        try { Assert-ConverterOwnership $stage $registration $helperRoot } catch { $rejected = $true }
+        if (-not $rejected) { throw 'Unowned or ambiguous converter path was accepted after normalization.' }
+    }
+    $registration.BasePath = $helperRoot
     $registration.BasePath = Join-Path ([IO.Path]::GetTempPath()) 'unowned-converter'
     $unownedRejected = $false
     try { Assert-ConverterOwnership $stage $registration $helperRoot } catch { $unownedRejected = $true }
@@ -391,7 +413,7 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
     $rejected = $false
     try { Remove-OwnedConverter $stage $helperRoot } catch { $rejected = $true }
     if (-not $rejected -or $script:converterCalls.Count -ne 0) { throw 'Unowned converter was terminated or unregistered.' }
-    $script:converterRegistration.BasePath = $helperRoot
+    $script:converterRegistration.BasePath = '\\?\' + $helperRoot
     $script:converterFailure = '--terminate'
     $rejected = $false
     try { Remove-OwnedConverter $stage $helperRoot } catch { $rejected = $true }
