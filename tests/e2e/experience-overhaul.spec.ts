@@ -268,6 +268,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   expect(original.length).toBeGreaterThanOrEqual(2);
   const source = handles.nth(1);
   const destination = handles.first();
+  await source.locator('xpath=ancestor::*[@data-control-id]').press('Enter');
   await source.scrollIntoViewIfNeeded();
   const from = await source.boundingBox();
   const to = await destination.boundingBox();
@@ -288,8 +289,8 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
-  await nameControl.getByText('Layout options').click();
-  const width = nameControl.getByLabel('Width');
+  await nameControl.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const initialWidth = await width.inputValue();
   const resize = nameControl.getByRole('button', { name: 'Resize Name' });
@@ -315,6 +316,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   await page.setViewportSize({ width: 1280, height: 6000 });
   const empty = designer.locator('[data-section-id]').last();
   await expect(empty.locator('[data-control-id]')).toHaveCount(0);
+  await nameControl.press('Enter');
   const nameDrag = designer.getByRole('button', { name: 'Drag Name' });
   await nameDrag.evaluate((element) =>
     element.scrollIntoView({ block: 'start' }),
@@ -626,13 +628,11 @@ test('account switch during a held designer gesture permanently masks the old pr
   await designer.getByRole('button', { name: 'Add section' }).click();
   const privateName = `Private unsaved ${crypto.randomUUID()}`;
   await designer.getByLabel('Section heading').last().fill(privateName);
-  const width = designer
-    .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
-    .getByLabel('Width');
-  await designer
-    .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
-    .getByText('Layout options')
-    .click();
+  const nameControl = designer.locator(
+    '[data-control-id]:has(button[aria-label="Resize Name"])',
+  );
+  await nameControl.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const beforeResize = await width.inputValue();
   const handle = designer.getByRole('button', { name: 'Resize Name' });

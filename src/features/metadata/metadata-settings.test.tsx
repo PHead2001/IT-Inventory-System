@@ -122,10 +122,10 @@ describe('category form designer', () => {
       .getAllByTestId('designer-control-name')
       .find((node) => node.textContent?.startsWith('Name'));
     expect(nameRow).toHaveClass('block');
-    expect(nameRow?.nextElementSibling).toContainElement(
+    expect(nameRow?.closest('[data-control-id]')).toContainElement(
       screen.getByRole('button', { name: 'Drag Name' }),
     );
-    expect(nameRow?.nextElementSibling).toContainElement(
+    expect(nameRow?.closest('[data-control-id]')).toContainElement(
       screen.getByRole('button', { name: 'Resize Name' }),
     );
     fireEvent.click(within(library).getByText(/Hidden & unplaced/));
@@ -141,6 +141,73 @@ describe('category form designer', () => {
     expect(
       screen.getByRole('navigation', { name: 'Designer panels' }),
     ).toContainElement(screen.getByRole('button', { name: 'Library' }));
+  });
+  it('keeps canvas previews inert and selects stable controls into the Inspector by focus or keyboard', () => {
+    mount();
+    const canvas = screen.getByTestId('designer-canvas');
+    const inspector = screen.getByTestId('designer-inspector');
+    const name = canvas.querySelector<HTMLElement>(
+      `[data-control-id="${id(4)}"]`,
+    )!;
+    const category = canvas.querySelector<HTMLElement>(
+      `[data-control-id="${id(5)}"]`,
+    )!;
+    expect(
+      within(canvas).queryByText('Layout options'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(name).getByTestId('designer-control-preview'),
+    ).toHaveAttribute('aria-hidden', 'true');
+    expect(name.querySelector('input, select, textarea')).toBeNull();
+    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    fireEvent.focus(name);
+    expect(name).toHaveAttribute('data-selected', 'true');
+    expect(
+      within(inspector).getByRole('region', { name: 'Name layout properties' }),
+    ).toBeInTheDocument();
+    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+    fireEvent.change(within(inspector).getByLabelText('Width'), {
+      target: { value: '6' },
+    });
+    expect(canvas.querySelector(`[data-control-id="${id(4)}"]`)).toBe(name);
+    fireEvent.keyDown(category, { key: 'Enter' });
+    expect(category).toHaveAttribute('data-selected', 'true');
+    expect(
+      within(inspector).queryByRole('region', {
+        name: 'Name layout properties',
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(inspector).getByRole('region', {
+        name: 'Category layout properties',
+      }),
+    ).toBeInTheDocument();
+    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+  });
+  it('clears the previous field Inspector when inspecting or creating a section', () => {
+    mount();
+    const inspector = screen.getByTestId('designer-inspector');
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'Connector' },
+    });
+    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect section' }));
+    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    expect(within(inspector).getByText(/Section Details/)).toBeInTheDocument();
+    fireEvent.click(
+      screen
+        .getByRole('button', { name: 'Drag Connector' })
+        .closest('[data-control-id]')!,
+    );
+    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    expect(
+      within(inspector).getByText(/Section New section/),
+    ).toBeInTheDocument();
   });
   it('counts a hidden section once, then exposes its separately hidden child for restore', () => {
     const hiddenForm = structuredClone(form);
@@ -253,7 +320,16 @@ describe('category form designer', () => {
     expect(screen.getByTestId('preview-fields')).toHaveTextContent(
       'Connector family',
     );
-    fireEvent.click(screen.getAllByRole('button', { name: 'Move down' })[0]);
+    fireEvent.click(
+      screen
+        .getByRole('button', { name: 'Drag Name' })
+        .closest('[data-control-id]')!,
+    );
+    fireEvent.click(
+      within(screen.getByTestId('designer-inspector')).getByRole('button', {
+        name: 'Move down',
+      }),
+    );
     expect(screen.getByTestId('preview-order')).toHaveTextContent(
       'category_id,name,asset_tag',
     );
@@ -302,9 +378,16 @@ describe('category form designer', () => {
     expect(screen.getByRole('button', { name: 'Resize Name' })).toHaveClass(
       'min-h-11',
     );
-    expect(screen.getAllByRole('button', { name: 'Move down' })[0]).toHaveClass(
-      'min-h-11',
+    fireEvent.focus(
+      screen
+        .getByRole('button', { name: 'Drag Name' })
+        .closest('[data-control-id]')!,
     );
+    expect(
+      within(screen.getByTestId('designer-inspector')).getByRole('button', {
+        name: 'Move down',
+      }),
+    ).toHaveClass('min-h-11');
     fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
     expect(screen.getByRole('button', { name: 'Field down' })).toHaveClass(
       'min-h-11',
@@ -338,8 +421,11 @@ describe('category form designer', () => {
     const assetControl = screen
       .getByRole('button', { name: 'Drag Asset Tag' })
       .closest('[data-control-id]')!;
+    fireEvent.click(assetControl);
     fireEvent.change(
-      within(assetControl as HTMLElement).getByLabelText('Section'),
+      within(screen.getByTestId('designer-inspector')).getByLabelText(
+        'Section',
+      ),
       { target: { value: targetId } },
     );
     expect(empty.querySelector('[data-control-id]')).toHaveTextContent(
@@ -382,7 +468,10 @@ describe('category form designer', () => {
     const control = screen
       .getByRole('button', { name: 'Drag Serial Number' })
       .closest('[data-control-id]') as HTMLElement;
-    const destinations = within(control).getByLabelText('Section');
+    fireEvent.click(control);
+    const destinations = within(
+      screen.getByTestId('designer-inspector'),
+    ).getByLabelText('Section');
     expect(
       within(destinations).getByRole('option', { name: /Serialized only/ }),
     ).not.toBeDisabled();
@@ -452,9 +541,10 @@ describe('category form designer', () => {
     const itemCode = screen
       .getByRole('button', { name: 'Drag Item Code' })
       .closest('[data-control-id]') as HTMLElement;
-    const itemDestinations = within(itemCode).getByLabelText(
-      'Section',
-    ) as HTMLSelectElement;
+    fireEvent.click(itemCode);
+    const itemDestinations = within(
+      screen.getByTestId('designer-inspector'),
+    ).getByLabelText('Section') as HTMLSelectElement;
     expect(
       within(itemDestinations).getByRole('option', { name: /Quantity only/ }),
     ).not.toBeDisabled();
@@ -467,9 +557,10 @@ describe('category form designer', () => {
     const assetTag = screen
       .getByRole('button', { name: 'Drag Asset Tag' })
       .closest('[data-control-id]') as HTMLElement;
-    const assetDestinations = within(assetTag).getByLabelText(
-      'Section',
-    ) as HTMLSelectElement;
+    fireEvent.click(assetTag);
+    const assetDestinations = within(
+      screen.getByTestId('designer-inspector'),
+    ).getByLabelText('Section') as HTMLSelectElement;
     expect(
       within(assetDestinations).getByRole('option', {
         name: /Serialized only/,

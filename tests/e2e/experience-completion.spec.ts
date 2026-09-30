@@ -371,12 +371,10 @@ test('designer hide and restore retain false, zero and empty values while an uns
   for (const field of fields) {
     const control = fieldControl(designer, field.name);
     await control.click();
-    const options = control
-      .locator('details')
-      .filter({ hasText: 'Layout options' });
-    if (!(await options.evaluate((node) => node.hasAttribute('open'))))
-      await options.locator('summary').click();
-    await control.getByRole('checkbox', { name: 'Show control' }).uncheck();
+    await designer
+      .getByTestId('designer-inspector')
+      .getByRole('checkbox', { name: 'Show control' })
+      .uncheck();
   }
   await saveDesigner(designer);
   expect(await readValues()).toEqual(original);

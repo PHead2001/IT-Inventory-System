@@ -54,11 +54,27 @@ function fieldControl(designer: Locator, name: string) {
 }
 
 async function openLayout(control: Locator) {
-  await control.getByText('Layout options', { exact: true }).click();
+  await inspectControl(control);
+}
+
+function inspectorFor(control: Locator) {
+  return control
+    .locator('xpath=ancestor::*[@data-testid="designer-panes"]')
+    .getByTestId('designer-inspector');
+}
+
+async function inspectControl(control: Locator) {
+  await control.press('Enter');
+  const designer = control.locator(
+    'xpath=ancestor::section[@aria-labelledby="metadata-settings-heading"]',
+  );
+  const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
+  if (await tab.isVisible()) await tab.click();
+  await expect(inspectorFor(control).getByLabel('Width')).toBeVisible();
 }
 
 async function chooseControlSection(control: Locator, name: string) {
-  const section = control.getByLabel('Section');
+  const section = inspectorFor(control).getByLabel('Section');
   const option = section.locator('option').filter({ hasText: `${name} ·` });
   await expect(option).toHaveCount(1);
   const id = await option.getAttribute('value');
@@ -74,7 +90,7 @@ test('a serialized control excluded by its section can recover through a compati
   const designer = await openDesigner(page, category);
   // New categories inherit the canonical baseline's placed Serial Number.
   const control = fieldControl(designer, 'Serial Number');
-  await control.hover();
+  await control.press('Enter');
   await expect(
     designer.getByRole('button', { name: 'Drag Serial Number' }),
   ).toBeVisible();
@@ -97,7 +113,7 @@ test('a serialized control excluded by its section can recover through a compati
     .selectOption('asset');
   await openLayout(control);
   await chooseControlSection(control, 'Serialized recovery');
-  await control.hover();
+  await control.press('Enter');
   await expect(
     destination.getByRole('button', { name: 'Drag Serial Number' }),
   ).toBeVisible();
@@ -155,14 +171,13 @@ test('keyboard width editing retains focus and survives reload', async ({
   let designer = await openDesigner(page, category);
   const control = fieldControl(designer, 'Name');
   await openLayout(control);
-  const details = control.locator('details').first();
-  await expect(details).toHaveAttribute('open', '');
-  const summary = details.locator('summary');
-  await summary.press('Enter');
-  await expect(details).not.toHaveAttribute('open', '');
-  await summary.press('Space');
-  await expect(details).toHaveAttribute('open', '');
-  const width = control.getByLabel('Width');
+  await expect(control).toHaveAttribute('data-selected', 'true');
+  await expect(
+    inspectorFor(control).getByRole('region', {
+      name: 'Name layout properties',
+    }),
+  ).toBeVisible();
+  const width = inspectorFor(control).getByLabel('Width');
   const initial = await width.inputValue();
   await width.focus();
   await page.keyboard.press('End');
@@ -181,7 +196,7 @@ test('keyboard width editing retains focus and survives reload', async ({
   designer = await openDesigner(page, category);
   const reloaded = fieldControl(designer, 'Name');
   await openLayout(reloaded);
-  await expect(reloaded.getByLabel('Width')).toHaveValue(chosen);
+  await expect(inspectorFor(reloaded).getByLabel('Width')).toHaveValue(chosen);
 });
 
 test('advanced JSON action stays clickable below sticky Save at a constrained viewport', async ({
@@ -346,7 +361,9 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   designer = await openDesigner(page, category);
   control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control.getByRole('checkbox', { name: 'Show control' }).uncheck();
+  await inspectorFor(control)
+    .getByRole('checkbox', { name: 'Show control' })
+    .uncheck();
   await saveDesigner(designer);
   await retainedValue();
   await page.goto(`/inventory/quantity/${itemId}`);
@@ -443,7 +460,9 @@ test('hidden sections and preview exclusions remain distinct through save and re
   await section.getByLabel('Section heading').fill('Quantity details');
   const control = fieldControl(designer, 'Quantity note');
   await openLayout(control);
-  await control.getByLabel('Applies to Quantity note').selectOption('quantity');
+  await inspectorFor(control)
+    .getByLabel('Applies to Quantity note')
+    .selectOption('quantity');
   await chooseControlSection(control, 'Quantity details');
   await section.getByText('Section options').click();
   await section

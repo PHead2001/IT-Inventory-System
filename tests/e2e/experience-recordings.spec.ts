@@ -54,7 +54,7 @@ test('records navigation, a held designer drag and resize, and the saved form', 
   const before = await order();
   await designer
     .locator('[data-control-id]:has(button[aria-label="Drag Category"])')
-    .hover();
+    .press('Enter');
   const source = designer.getByRole('button', { name: 'Drag Category' });
   const target = designer.locator(
     '[data-control-id]:has(button[aria-label="Drag Name"])',
@@ -76,8 +76,8 @@ test('records navigation, a held designer drag and resize, and the saved form', 
   const name = designer.locator(
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
-  await name.getByText('Layout options').click();
-  const width = name.getByLabel('Width');
+  await name.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const handle = name.getByRole('button', { name: 'Resize Name' });
   await handle.scrollIntoViewIfNeeded();
