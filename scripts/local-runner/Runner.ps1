@@ -410,6 +410,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
         $expectedRules = Set-IsolatedAdapter $name
         Start-SessionGuardian $state
         Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
+        $script:RunnerOperationStage = 'vm-boot'
         Start-GuardedVm $state
         Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         $script:RunnerOperationStage = 'guest-readiness'
@@ -536,6 +537,21 @@ function Invoke-Supervisor {
     } finally { Exit-RunnerLock $supervisorMutex }
 }
 
+function Get-RunnerMemoryAdmission {
+    # CIM reports KiB. Reject missing, ambiguous or inconsistent inspection data.
+    try { $systems = @(Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 10 -ErrorAction Stop) }
+    catch { throw 'Available physical memory inspection failed.' }
+    if ($systems.Count -ne 1) { throw 'Available physical memory inspection is invalid.' }
+    $free = [uint64]0; $total = [uint64]0
+    $names = @($systems[0].PSObject.Properties.Name)
+    if ($names -notcontains 'FreePhysicalMemory' -or $names -notcontains 'TotalVisibleMemorySize' -or
+        -not [uint64]::TryParse([string]$systems[0].FreePhysicalMemory, [ref]$free) -or
+        -not [uint64]::TryParse([string]$systems[0].TotalVisibleMemorySize, [ref]$total) -or
+        $total -eq 0 -or $free -gt $total) { throw 'Available physical memory inspection is invalid.' }
+    $requiredBytes = 10GB # Fixed 8 GiB guest plus 2 GiB host headroom; not a reservation.
+    return [pscustomobject]@{ ready = ([decimal]$free * 1024 -ge $requiredBytes); requiredBytes = $requiredBytes }
+}
+
 function Invoke-SupervisorLoop {
     while (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
         Assert-RunnerTransitionClear
@@ -552,12 +568,22 @@ function Invoke-SupervisorLoop {
         }
         try {
             $script:RunnerSessionName = $null
+            $script:RunnerOperationStage = 'memory-admission'
+            if (-not (Get-RunnerMemoryAdmission).ready) {
+                Start-Sleep -Seconds 30
+                continue
+            }
             $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token
             if ($null -ne $job) {
                 if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
                 Assert-RunnerTransitionClear
+                $script:RunnerOperationStage = 'memory-admission'
+                if (-not (Get-RunnerMemoryAdmission).ready) {
+                    Start-Sleep -Seconds 30
+                    continue
+                }
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-consumption'
                     $fresh = Get-PilotEvidence $config $job.pilotBinding $token
@@ -902,6 +928,11 @@ try { switch ($Action) {
             Assert-StateIdentity $state
             $vm = Get-VM -Name $state.vmName -ErrorAction SilentlyContinue
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
+        }
+        if ($null -eq $state -and $config.activation -in @('pilot', 'active')) {
+            try {
+                if (-not (Get-RunnerMemoryAdmission).ready) { Write-Host 'Capacity: below 10 GiB available physical memory; pickup waits for 8 GiB guest plus 2 GiB host headroom.' }
+            } catch { Write-Host 'Capacity: physical memory inspection unavailable; pickup refuses work.' }
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
         if ($config.PSObject.Properties.Name -contains 'pilotExpectedSha') { Write-Host "Pilot binding: workflow=$($config.pilotWorkflowPath); SHA=$($config.pilotExpectedSha); label=$($config.pilotLabel)." }
