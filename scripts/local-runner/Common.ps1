@@ -192,15 +192,20 @@ function Get-RunnerJobProfile($Config, $Job) {
 
 function Get-RunnerJitLabels($Config, [string] $ProfileLabel = '') {
     $profile = Get-RunnerSessionProfile $Config $ProfileLabel
-    # Exactly one custom label; smaller guests never advertise the generic label.
-    return @('self-hosted', 'Linux', 'X64', $profile.label)
+    # Normal capacity is downward compatible. Pilot/legacy routing stays isolated.
+    $custom = switch -CaseSensitive ($profile.label) {
+        'it-inventory-heavy' { @('it-inventory-heavy', 'it-inventory-mid', 'it-inventory-light'); break }
+        'it-inventory-mid' { @('it-inventory-mid', 'it-inventory-light'); break }
+        default { @($profile.label) }
+    }
+    return @('self-hosted', 'Linux', 'X64') + @($custom)
 }
 
 function Assert-RunnerJitLabels($Config, $Runner, [string] $ProfileLabel = '') {
     $expected = @(Get-RunnerJitLabels $Config $ProfileLabel | Sort-Object)
     $actual = @($Runner.labels | Select-Object -ExpandProperty name | Sort-Object)
     if ($actual.Count -ne $expected.Count -or (Compare-Object -CaseSensitive $expected $actual)) {
-        throw 'GitHub JIT runner labels differ from the exact requested assignment boundary.'
+        throw 'GitHub JIT runner labels differ from the fixed capacity routing allowlist.'
     }
 }
 

@@ -52,12 +52,28 @@ bundle and exact-SHA job evidence must establish that cutover separately.
 | `it-inventory-pilot-<headSha>` | 8 GiB        | 10 GiB                         | Exact-SHA diagnostic pilot                                          |
 
 The mapping is fixed in host code, including 2 GiB host headroom. Workflow/config
-values cannot set arbitrary guest memory. Each JIT advertises only `self-hosted`,
-`Linux`, `X64` and **one** custom label; smaller guests never advertise the legacy
-label. Unsupported or mixed resource/platform labels are ineligible for pickup.
+values cannot set arbitrary guest memory. Each JIT advertises `self-hosted`,
+`Linux`, `X64` and the fixed capacity labels: heavy advertises heavy/mid/light,
+mid advertises mid/light, and light advertises light. Legacy and exact-SHA pilot
+sessions each retain their single custom label; normal guests never advertise the
+legacy label. Unsupported or mixed resource/platform requests are ineligible for
+provisioning. This request filter is not an assignment security boundary: a job
+requiring only default labels or a subset of advertised labels can still be assigned.
 Labels route compatible jobs and do not authorize hostile code. Active selection
 chooses capacity, not an exclusive GitHub job claim: GitHub may assign another job
-with compatible labels to the one-job runner. The pilot retains its exact binding.
+with compatible labels to the one-job runner. Immediately before JIT registration,
+a fresh bounded queue traversal checks for any demand compatible with the allocated
+capacity, skipping incompatible jobs. It does not recheck host free memory after
+allocation. If demand was canceled or taken and no compatible job remains, the
+session returns `demand-withdrawn` and performs normal owned cleanup without creating
+an idle JIT runner. API uncertainty or queue overflow fails closed with cleanup.
+The pilot retains its exact binding and fresh exact-job registration check.
+
+Demand can still disappear after the final check, leaving a JIT runner waiting.
+An idle light runner cannot accept a later heavy job. Its hard deadline still
+bounds that wait; an earlier operator Restart requires fresh evidence that the
+exact owned runner is idle and no job is using it. Never terminate a guest merely
+because the host heartbeat is old: the blocking one-job wait does not refresh it.
 
 Active pickup checks Windows available physical memory against the light minimum
 before its bounded queue traversal, skips nonfitting larger jobs, and rechecks the

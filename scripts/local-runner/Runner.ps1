@@ -452,6 +452,11 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
             $evidence = Get-PilotEvidence $Config $attempt $token
             if (-not (Test-QueuedRunnerJob $evidence.job $Config.pilotLabel)) { throw 'Bound pilot job is no longer queued before registration.' }
+        } elseif ($null -eq (Get-QueuedRunnerJob $Config $token -SessionProfileLabel $profile.label)) {
+            # Capacity was selected before boot. Demand may have been canceled or
+            # taken meanwhile; do not create an idle JIT for incompatible demand.
+            $token = $null
+            return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
         }
         Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
@@ -500,7 +505,9 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token) {
     return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
 }
 
-function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue) {
+function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
+    $compatibleLabels = @()
+    if ($SessionProfileLabel) { $compatibleLabels = @(Get-RunnerJitLabels $Config $SessionProfileLabel) }
     $label = $Config.label
     if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
     $parts = $Config.repo.Split('/')
@@ -520,6 +527,7 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
             foreach ($job in @($jobs.jobs)) {
                 $profile = Get-RunnerJobProfile $Config $job
                 if ($null -eq $profile -or $AvailableBytes -lt $profile.requiredBytes) { continue }
+                if ($SessionProfileLabel -and $compatibleLabels -cnotcontains $profile.label) { continue }
                 if (Test-QueuedRunnerJob $job $profile.label) {
                     if ($Config.activation -eq 'pilot') {
                         if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }

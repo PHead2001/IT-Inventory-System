@@ -44,7 +44,12 @@ foreach ($case in @(
     Assert-Rejected { Assert-RunnerVmResources 'fixture' $case.label } 'dynamic VM memory'
     $script:dynamic = $false
     $labels = @(Get-RunnerJitLabels $cfg $case.label)
-    if (($labels -join ',') -cne "self-hosted,Linux,X64,$($case.label)") { throw 'JIT advertised extra or mismatched custom labels.' }
+    $expectedCustom = switch ($case.label) {
+        'it-inventory-heavy' { 'it-inventory-heavy,it-inventory-mid,it-inventory-light' }
+        'it-inventory-mid' { 'it-inventory-mid,it-inventory-light' }
+        default { $case.label }
+    }
+    if (($labels -join ',') -cne "self-hosted,Linux,X64,$expectedCustom") { throw 'JIT advertised extra or mismatched custom labels.' }
     $runner = [pscustomobject]@{ labels = @($labels | ForEach-Object { [pscustomobject]@{ name = $_ } }) }
     Assert-RunnerJitLabels $cfg $runner $case.label
     $runner.labels += [pscustomobject]@{ name = 'it-inventory-ephemeral' }
