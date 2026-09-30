@@ -8,7 +8,7 @@ const preview = readWorkflow('preview-access.yml');
 const pilot = readWorkflow('local-runner-pilot.yml');
 
 describe('disposable local runner workflow contracts', () => {
-  it('routes all six normal jobs to the generic ephemeral runner without a hosted fallback or Actions cache', () => {
+  it('routes all six normal jobs to their fixed resource profiles without a hosted fallback or Actions cache', () => {
     const workflows = readdirSync('.github/workflows').filter((name) =>
       /\.ya?ml$/.test(name),
     );
@@ -17,22 +17,34 @@ describe('disposable local runner workflow contracts', () => {
       'local-runner-pilot.yml',
       'preview-access.yml',
     ]);
+    const profiles = {
+      app: 'mid',
+      database: 'heavy',
+      required: 'light',
+      production_database: 'light',
+      discover: 'light',
+      provision: 'light',
+    };
     let jobs = 0;
     for (const name of workflows) {
       const workflow = readWorkflow(name);
       expect(workflow, name).not.toMatch(/\bcache:\s*npm|actions\/cache@/);
       if (name === 'local-runner-pilot.yml') continue;
-      const jobDefinitions = workflow
-        .split(/\r?\njobs:\r?\n/)[1]
-        .match(/^  [\w-]+:\s*$/gm);
-      const runnerDefinitions = workflow.match(/^    runs-on:.*$/gm);
-      expect(runnerDefinitions, name).toHaveLength(jobDefinitions.length);
-      for (const runner of runnerDefinitions) {
-        expect(runner.trim(), name).toBe(
-          'runs-on: [self-hosted, it-inventory-ephemeral]',
-        );
+      const jobSource = workflow.split(/\r?\njobs:\r?\n/)[1];
+      const definitions = [
+        ...jobSource.matchAll(
+          /^  ([\w-]+):\s*\r?\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/gm,
+        ),
+      ];
+      expect(definitions.length, name).toBeGreaterThan(0);
+      for (const [, job, body] of definitions) {
+        expect(profiles[job], `${name}:${job}`).toBeDefined();
+        expect(body.match(/^    runs-on:.*$/gm), `${name}:${job}`).toEqual([
+          `    runs-on: [self-hosted, it-inventory-${profiles[job]}]`,
+        ]);
       }
-      jobs += jobDefinitions.length;
+      expect(workflow, name).not.toContain('it-inventory-ephemeral');
+      jobs += definitions.length;
     }
     expect(jobs).toBe(6);
   });

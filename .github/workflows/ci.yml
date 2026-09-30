@@ -12,7 +12,7 @@ env:
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
   app:
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-mid]
     timeout-minutes: 15
     env:
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
@@ -32,7 +32,7 @@ jobs:
       - run: git rev-parse HEAD
       - run: npm run validate:app
   database:
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-heavy]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,7 +72,7 @@ jobs:
   required:
     if: always()
     needs: [app, database]
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-light]
     steps:
       - name: Require all foundation gates
         env:
@@ -86,7 +86,7 @@ jobs:
     name: ${{ github.event_name == 'push' && 'Production database ready' || 'Production database inactive (PR)' }}
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [required]
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-light]
     timeout-minutes: 15
     environment: production-database
     steps:

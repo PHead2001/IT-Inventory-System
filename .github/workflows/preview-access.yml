@@ -15,7 +15,7 @@ permissions:
 jobs:
   discover:
     if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-light]
     timeout-minutes: 2
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
@@ -35,7 +35,7 @@ jobs:
   provision:
     needs: discover
     if: github.ref == 'refs/heads/main' && needs.discover.outputs.count != '0'
-    runs-on: [self-hosted, it-inventory-ephemeral]
+    runs-on: [self-hosted, it-inventory-light]
     timeout-minutes: 5
     environment: preview-access
     strategy:
