@@ -29,6 +29,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Memory.Admission.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell memory admission regression failed.' }
 
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Resource.Profiles.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell resource profile regression failed.' }
+
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
@@ -666,9 +669,9 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
         pilotExpectedSha = ('a' * 40); pilotWorkflowPath = '.github/workflows/local-runner-pilot.yml'; pilotLabel = 'it-inventory-pilot-' + ('a' * 40)
     })
     Remove-Item -LiteralPath (Join-Path $testRoot 'last-error.json') -Force
-    function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true } }
+    function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 32GB } }
     function Get-OwnerToken { return 'SENTINEL_SECRET' }
-    function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123; pilotBinding = [pscustomobject]@{ runId = 456; workflowId = 789; workflowPath = '.github/workflows/local-runner-pilot.yml'; headSha = ('a' * 40); runAttempt = 1; pilotLabel = 'it-inventory-pilot-' + ('a' * 40) } } }
+    function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123; labels = @('self-hosted', $Config.pilotLabel); pilotBinding = [pscustomobject]@{ runId = 456; workflowId = 789; workflowPath = '.github/workflows/local-runner-pilot.yml'; headSha = ('a' * 40); runAttempt = 1; pilotLabel = 'it-inventory-pilot-' + ('a' * 40) } } }
     function Get-PilotEvidence { param($Config, $Binding, $Token) return [pscustomobject]@{ job = [pscustomobject]@{ status = 'queued'; labels = @('self-hosted', ('it-inventory-pilot-' + ('a' * 40))); runner_id = 0 } } }
     function Invoke-RunnerSession {
         param($Config, $PilotAttempt)

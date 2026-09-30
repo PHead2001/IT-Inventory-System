@@ -327,7 +327,19 @@ function Get-RunnerArchive($State) {
     return $path
 }
 
-function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
+function New-RunnerProfileVm([string] $Name, [string] $Disk, [string] $Instance, [string] $ProfileLabel) {
+    $profile = Get-RunnerResourceProfile $ProfileLabel
+    return New-VM -Name $Name -Generation 2 -VHDPath $Disk -Path $Instance -MemoryStartupBytes $profile.memoryBytes -SwitchName $script:RunnerSwitch
+}
+
+function Assert-RunnerVmResources([string] $Name, [string] $ProfileLabel) {
+    $profile = Get-RunnerResourceProfile $ProfileLabel
+    $memory = Get-VMMemory -VMName $Name -ErrorAction Stop
+    if ($memory.Startup -ne $profile.memoryBytes -or $memory.DynamicMemoryEnabled -ne $false) { throw 'VM resource readback differs from the fixed selected profile.' }
+}
+
+function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '') {
+    $profile = Get-RunnerSessionProfile $Config $ProfileLabel
     $script:RunnerOperationStage = 'preflight'
     Assert-InstalledHost $Config
     [void](Get-OwnerToken) # Check owner binding before changing the host or contacting GitHub.
@@ -336,7 +348,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
     $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
     $state = [ordered]@{
         tag = $script:RunnerTag; vmName = $name; instancePath = $instance
-        claimMode = $Config.activation
+        claimMode = $Config.activation; resourceLabel = $profile.label
         createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
         deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
         supervisorPid = $PID
@@ -374,7 +386,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
             $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
             $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
             Write-RunnerJson $script:RunnerStatePath $current
-            $vm = New-VM -Name $name -Generation 2 -VHDPath $disk -Path $instance -MemoryStartupBytes 8GB -SwitchName $script:RunnerSwitch
+            $vm = New-RunnerProfileVm $name $disk $instance $profile.label
             Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
             Assert-RunnerVmLifecycle $name
             if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
@@ -384,6 +396,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
         $script:RunnerOperationStage = 'vm-configuration'
         Set-VMProcessor -VMName $name -Count 4
         Set-VMMemory -VMName $name -DynamicMemoryEnabled $false
+        Assert-RunnerVmResources $name $profile.label
         Set-VMFirmware -VMName $name -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
         foreach ($service in @(Get-VMIntegrationService -VMName $name | Where-Object Name -Match 'Guest Service')) {
             Disable-VMIntegrationService -VMName $name -Name $service.Name
@@ -442,7 +455,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
         }
         Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
-            name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config); work_folder = '_work'
+            name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
         } $token
         $token = $null
         if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$' -or $jit.runner.name -ne $name -or
@@ -450,7 +463,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
             throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
         }
         $runnerId = [long]$jit.runner.id
-        Assert-RunnerJitLabels $Config $jit.runner
+        Assert-RunnerJitLabels $Config $jit.runner $profile.label
         Assert-SessionAlive $state
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
         # A JIT runner exits after one job. No guest output or secret-bearing config is logged on the host.
@@ -487,7 +500,7 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token) {
     return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
 }
 
-function Get-QueuedRunnerJob($Config, [string] $Token) {
+function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue) {
     $label = $Config.label
     if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
     $parts = $Config.repo.Split('/')
@@ -505,7 +518,9 @@ function Get-QueuedRunnerJob($Config, [string] $Token) {
             $jobs = Invoke-GitHub "$base/runs/$($run.id)/jobs?filter=latest&per_page=100" 'GET' $null $Token
             if ($jobs.total_count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
             foreach ($job in @($jobs.jobs)) {
-                if (Test-QueuedRunnerJob $job $label) {
+                $profile = Get-RunnerJobProfile $Config $job
+                if ($null -eq $profile -or $AvailableBytes -lt $profile.requiredBytes) { continue }
+                if (Test-QueuedRunnerJob $job $profile.label) {
                     if ($Config.activation -eq 'pilot') {
                         if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
                         $job | Add-Member -NotePropertyName pilotBinding -NotePropertyValue ([pscustomobject]@{
@@ -515,6 +530,7 @@ function Get-QueuedRunnerJob($Config, [string] $Token) {
                         $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token
                         if (-not (Test-QueuedRunnerJob $fresh.job $label)) { continue }
                     }
+                    $job | Add-Member -NotePropertyName resourceLabel -NotePropertyValue $profile.label -Force
                     return $job
                 }
             }
@@ -537,7 +553,7 @@ function Invoke-Supervisor {
     } finally { Exit-RunnerLock $supervisorMutex }
 }
 
-function Get-RunnerMemoryAdmission {
+function Get-RunnerMemoryAdmission([string] $ProfileLabel = 'it-inventory-ephemeral') {
     # CIM reports KiB. Reject missing, ambiguous or inconsistent inspection data.
     try { $systems = @(Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 10 -ErrorAction Stop) }
     catch { throw 'Available physical memory inspection failed.' }
@@ -548,8 +564,9 @@ function Get-RunnerMemoryAdmission {
         -not [uint64]::TryParse([string]$systems[0].FreePhysicalMemory, [ref]$free) -or
         -not [uint64]::TryParse([string]$systems[0].TotalVisibleMemorySize, [ref]$total) -or
         $total -eq 0 -or $free -gt $total) { throw 'Available physical memory inspection is invalid.' }
-    $requiredBytes = 10GB # Fixed 8 GiB guest plus 2 GiB host headroom; not a reservation.
-    return [pscustomobject]@{ ready = ([decimal]$free * 1024 -ge $requiredBytes); requiredBytes = $requiredBytes }
+    $profile = Get-RunnerResourceProfile $ProfileLabel
+    $availableBytes = [decimal]$free * 1024
+    return [pscustomobject]@{ ready = ($availableBytes -ge $profile.requiredBytes); requiredBytes = $profile.requiredBytes; availableBytes = $availableBytes }
 }
 
 function Invoke-SupervisorLoop {
@@ -569,18 +586,22 @@ function Invoke-SupervisorLoop {
         try {
             $script:RunnerSessionName = $null
             $script:RunnerOperationStage = 'memory-admission'
-            if (-not (Get-RunnerMemoryAdmission).ready) {
+            $initialLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
+            $admission = Get-RunnerMemoryAdmission $initialLabel
+            if (-not $admission.ready) {
                 Start-Sleep -Seconds 30
                 continue
             }
             $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
-            $job = Get-QueuedRunnerJob $config $token
+            $job = Get-QueuedRunnerJob $config $token $admission.availableBytes
             if ($null -ne $job) {
                 if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
                 Assert-RunnerTransitionClear
                 $script:RunnerOperationStage = 'memory-admission'
-                if (-not (Get-RunnerMemoryAdmission).ready) {
+                $profile = Get-RunnerJobProfile $config $job
+                if ($null -eq $profile) { throw 'Selected runner job has unsupported resource labels.' }
+                if (-not (Get-RunnerMemoryAdmission $profile.label).ready) {
                     Start-Sleep -Seconds 30
                     continue
                 }
@@ -597,7 +618,7 @@ function Invoke-SupervisorLoop {
                     }
                 } else { $pilotAttempt = $null }
                 $token = $null
-                $allocatedRunner = Invoke-RunnerSession $config $pilotAttempt
+                $allocatedRunner = Invoke-RunnerSession $config $pilotAttempt $profile.label
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-verification'
                     $token = Get-OwnerToken
@@ -931,7 +952,9 @@ try { switch ($Action) {
         }
         if ($null -eq $state -and $config.activation -in @('pilot', 'active')) {
             try {
-                if (-not (Get-RunnerMemoryAdmission).ready) { Write-Host 'Capacity: below 10 GiB available physical memory; pickup waits for 8 GiB guest plus 2 GiB host headroom.' }
+                $minimumLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
+                $admission = Get-RunnerMemoryAdmission $minimumLabel
+                if (-not $admission.ready) { Write-Host "Capacity: below $($admission.requiredBytes / 1GB) GiB available physical memory; pickup waits for the minimum eligible profile plus 2 GiB host headroom." }
             } catch { Write-Host 'Capacity: physical memory inspection unavailable; pickup refuses work.' }
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')

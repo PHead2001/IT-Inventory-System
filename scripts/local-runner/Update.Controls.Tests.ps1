@@ -12,7 +12,7 @@ $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
 $script:lockPrefix = 'Local\ITIR-update-controls-' + [guid]::NewGuid().ToString('N')
 function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) { & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast }
 # Capacity behavior has its own mocked-CIM suite; claim races must not depend on host load.
-function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true } }
+function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 32GB } }
 function Assert-Administrator {}
 function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path); if ($script:badAcl -and $Path.EndsWith($script:badAcl)) { throw 'Unexpected ACL fixture.' } }
@@ -190,7 +190,7 @@ if ($Action -ne 'RetryPilot') { throw 'Unexpected installed menu action.' }
     Invoke-SupervisorLoop
     if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json')) { throw 'Queue inspection race consumed pilot.' }
     Remove-Item -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')
-    function Get-QueuedRunnerJob { param($Config, $Token) [pscustomobject]@{ id = 56; pilotBinding = [pscustomobject]@{ runId = 1 } } }
+    function Get-QueuedRunnerJob { param($Config, $Token) [pscustomobject]@{ id = 56; labels = @('self-hosted', $Config.pilotLabel); pilotBinding = [pscustomobject]@{ runId = 1 } } }
     function Get-PilotEvidence { param($Config, $Binding, $Token) [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'stop.requested'), 'stop'); [pscustomobject]@{ job = [pscustomobject]@{ status = 'queued'; labels = @('self-hosted', $Config.pilotLabel); runner_id = 0 } } }
     function Write-EventLog {}
     function Start-Sleep {}

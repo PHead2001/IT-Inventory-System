@@ -101,8 +101,11 @@ function Invoke-RunnerControl([scriptblock] $Work) {
 }
 
 function Test-QueuedRunnerJob($Job, [string] $Label) {
-    return $Job.status -eq 'queued' -and $Job.labels -contains 'self-hosted' -and
-        $Job.labels -contains $Label -and ($null -eq $Job.runner_id -or $Job.runner_id -eq 0)
+    $labels = @($Job.labels)
+    if ($labels -cnotcontains 'self-hosted' -or $labels -cnotcontains $Label -or
+        $labels.Count -ne @($labels | Select-Object -Unique).Count -or
+        @($labels | Where-Object { $_ -cnotin @('self-hosted', 'Linux', 'X64', $Label) }).Count -ne 0) { return $false }
+    return $Job.status -eq 'queued' -and ($null -eq $Job.runner_id -or $Job.runner_id -eq 0)
 }
 
 function Test-PilotJobResult($Result, [string] $RunnerName, [long] $RunnerId) {
@@ -139,6 +142,7 @@ function Test-PilotEvidence($Config, $Run, $Workflow, $Job, $Binding = $null) {
         $Job.run_id -ne $Run.id -or $Job.labels -notcontains $Config.pilotLabel -or $Job.labels -notcontains 'self-hosted') {
         return $false
     }
+    if ($null -eq (Get-RunnerJobProfile $Config $Job)) { return $false }
     if ($null -ne $Binding) {
         foreach ($field in @('jobId', 'runId', 'workflowId', 'workflowPath', 'headSha', 'runAttempt', 'pilotLabel')) {
             if ($Binding.PSObject.Properties.Name -notcontains $field) { return $false }
@@ -150,18 +154,52 @@ function Test-PilotEvidence($Config, $Run, $Workflow, $Job, $Binding = $null) {
     return $true
 }
 
-function Get-RunnerJitLabels($Config) {
-    $label = $Config.label
-    if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
-    # The JIT API accepts explicit platform/default labels. Never advertise the
-    # active generic label during a SHA-bound pilot.
-    return @('self-hosted', 'Linux', 'X64', $label)
+# Resource requirements are a fixed host-code allowlist, never workflow/config memory values.
+function Get-RunnerResourceProfile([string] $Label) {
+    $memory = switch -CaseSensitive ($Label) {
+        'it-inventory-light' { 2GB; break }
+        'it-inventory-mid' { 4GB; break }
+        'it-inventory-heavy' { 8GB; break }
+        'it-inventory-ephemeral' { 8GB; break }
+        default {
+            if ($Label -cmatch '^it-inventory-pilot-[0-9a-f]{40}$') { 8GB }
+            else { throw 'Unsupported runner resource label.' }
+        }
+    }
+    return [pscustomobject]@{ label = $Label; memoryBytes = $memory; requiredBytes = ($memory + 2GB) }
 }
 
-function Assert-RunnerJitLabels($Config, $Runner) {
-    $expected = @(Get-RunnerJitLabels $Config | Sort-Object)
+function Get-RunnerSessionProfile($Config, [string] $ProfileLabel = '') {
+    if ($Config.activation -eq 'pilot') {
+        Assert-PilotConfig $Config
+        if ($ProfileLabel -and $ProfileLabel -cne $Config.pilotLabel) { throw 'Pilot resource label differs from its exact SHA binding.' }
+        return Get-RunnerResourceProfile $Config.pilotLabel
+    }
+    if (-not $ProfileLabel) { $ProfileLabel = $Config.label } # Older direct callers retain the legacy 8 GiB profile.
+    if ($ProfileLabel -cmatch '^it-inventory-pilot-') { throw 'Active pickup cannot advertise a pilot label.' }
+    return Get-RunnerResourceProfile $ProfileLabel
+}
+
+function Get-RunnerJobProfile($Config, $Job) {
+    if ($null -eq $Job -or $Job.PSObject.Properties.Name -notcontains 'labels') { return $null }
+    $labels = @($Job.labels)
+    if ($labels -cnotcontains 'self-hosted' -or $labels.Count -ne @($labels | Select-Object -Unique).Count) { return $null }
+    $custom = @($labels | Where-Object { $_ -cnotin @('self-hosted', 'Linux', 'X64') })
+    if ($custom.Count -ne 1) { return $null }
+    try { return Get-RunnerSessionProfile $Config ([string]$custom[0]) }
+    catch { return $null } # Unsupported/mixed requests are ineligible, not a queue-wide failure.
+}
+
+function Get-RunnerJitLabels($Config, [string] $ProfileLabel = '') {
+    $profile = Get-RunnerSessionProfile $Config $ProfileLabel
+    # Exactly one custom label; smaller guests never advertise the generic label.
+    return @('self-hosted', 'Linux', 'X64', $profile.label)
+}
+
+function Assert-RunnerJitLabels($Config, $Runner, [string] $ProfileLabel = '') {
+    $expected = @(Get-RunnerJitLabels $Config $ProfileLabel | Sort-Object)
     $actual = @($Runner.labels | Select-Object -ExpandProperty name | Sort-Object)
-    if ($actual.Count -ne $expected.Count -or (Compare-Object $expected $actual)) {
+    if ($actual.Count -ne $expected.Count -or (Compare-Object -CaseSensitive $expected $actual)) {
         throw 'GitHub JIT runner labels differ from the exact requested assignment boundary.'
     }
 }
@@ -558,6 +596,7 @@ function Complete-RunnerPilotClaim($State) {
         $attempt.jobId -le 0 -or $attempt.runId -le 0 -or $attempt.workflowId -le 0 -or $attempt.runAttempt -le 0 -or
         $attempt.workflowPath -cne '.github/workflows/local-runner-pilot.yml' -or
         $attempt.pilotLabel -cne (Get-PilotLabel $attempt.headSha)) { throw 'Recorded pilot claim identity is invalid; state must be retained.' }
+    if ($State.PSObject.Properties.Name -contains 'resourceLabel' -and $State.resourceLabel -cne $attempt.pilotLabel) { throw 'Pilot state resource label differs from its committed receipt.' }
     $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'pilot-attempt.json')
     if (Test-Path -LiteralPath $path) {
         if (-not (Test-RunnerEvidence $path $State.pilotClaim)) { throw 'Pilot receipt differs from committed session claim; state must be retained.' }
@@ -567,6 +606,11 @@ function Complete-RunnerPilotClaim($State) {
 function Assert-StateIdentity($State) {
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'
+    }
+    if ($State.PSObject.Properties.Name -contains 'resourceLabel') {
+        [void](Get-RunnerResourceProfile $State.resourceLabel)
+        if ($State.PSObject.Properties.Name -contains 'claimMode' -and $State.claimMode -ceq 'active' -and
+            $State.resourceLabel -cmatch '^it-inventory-pilot-') { throw 'Active state has a pilot resource label.' }
     }
     [void](Assert-OwnedPath $State.instancePath)
     if (-not $State.instancePath.EndsWith($State.vmName, [StringComparison]::OrdinalIgnoreCase)) {

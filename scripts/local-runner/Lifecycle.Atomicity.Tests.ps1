@@ -13,7 +13,7 @@ function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [
     & $script:realEnter ('Local\' + [IO.Path]::GetFileName($script:RunnerRoot) + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast
 }
 # Capacity behavior has its own mocked-CIM suite; claim races must not depend on host load.
-function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true } }
+function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 32GB } }
 function Assert-Administrator {}
 function Assert-SecureRoot {}
 function Assert-InstalledHost { param($Config) }

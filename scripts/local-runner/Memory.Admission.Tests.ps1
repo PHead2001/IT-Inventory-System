@@ -52,7 +52,7 @@ try {
 
     function Assert-RunnerTransitionClear {}
     function Get-RunnerState { return $null }
-    function Get-RunnerConfig { return [pscustomobject]@{ activation = $script:mode } }
+    function Get-RunnerConfig { return [pscustomobject]@{ activation = $script:mode; label = 'it-inventory-ephemeral'; pilotExpectedSha = ('a' * 40); pilotWorkflowPath = '.github/workflows/local-runner-pilot.yml'; pilotLabel = ('it-inventory-pilot-' + ('a' * 40)) } }
     function Get-OwnerToken { throw 'Capacity refusal reached credential/queue work.' }
     function Get-QueuedRunnerJob { throw 'Capacity refusal inspected queued jobs.' }
     function Get-PilotEvidence { throw 'Capacity refusal inspected pilot evidence.' }
@@ -66,7 +66,7 @@ try {
     }
     foreach ($script:mode in @('pilot', 'active')) {
         foreach ($script:probeFails in @($false, $true)) {
-            $script:probeResult = [pscustomobject]@{ FreePhysicalMemory = [uint64](9GB / 1KB); TotalVisibleMemorySize = [uint64](32GB / 1KB) }
+            $script:probeResult = [pscustomobject]@{ FreePhysicalMemory = [uint64](3GB / 1KB); TotalVisibleMemorySize = [uint64](32GB / 1KB) }
             $script:sleeps = 0
             Invoke-SupervisorLoop
             if ($script:sleeps -ne 1) { throw 'Capacity refusal did not wait exactly once.' }
@@ -85,7 +85,7 @@ try {
     # Queue pickup becomes eligible at the exact boundary and above it, including
     # after one low-capacity wait. No real credentials or jobs are involved.
     $script:probeFails = $false
-    $script:mode = 'active'
+    $script:mode = 'pilot'
     function Get-OwnerToken { $script:queueCalls++; return 'dummy' }
     function Get-QueuedRunnerJob { return $null }
     function Start-Sleep {
@@ -114,7 +114,7 @@ try {
     $script:sleeps = 0; $script:queueCalls = 0
     function Get-QueuedRunnerJob {
         $script:probeResult.FreePhysicalMemory = [uint64](9GB / 1KB)
-        return [pscustomobject]@{ id = 42 }
+        return [pscustomobject]@{ id = 42; labels = @('self-hosted', ('it-inventory-pilot-' + ('a' * 40))) }
     }
     Invoke-SupervisorLoop
     if ($script:queueCalls -ne 1 -or $script:sleeps -ne 1) { throw 'Post-queue capacity loss did not defer pickup.' }
