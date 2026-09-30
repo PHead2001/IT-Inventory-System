@@ -13,10 +13,23 @@ const fail = (code) => {
 };
 export const fingerprint = (secret) =>
   createHash('sha256').update(secret).digest('hex');
-export const intentFor = (child, generation, sha, backend) =>
-  `inventory-preview-files:v1:${child}:${generation}:${sha}:${backend}`;
+export const intentFor = (child, generation, sha, backend, attempt = 1) =>
+  `inventory-preview-files:v2:${child}:${generation}:${sha}:${backend}:${attempt}`;
 const intentPattern =
-  /^inventory-preview-files:v1:([a-z0-9]{20}):([a-f0-9]{64}):([a-f0-9]{40}):([a-f0-9]{64})$/;
+  /^inventory-preview-files:v([12]):([a-z0-9]{20}):([a-f0-9]{64}):([a-f0-9]{40}):([a-f0-9]{64})(?::([1-3]))?$/;
+
+export function parseIntent(value) {
+  const match = intentPattern.exec(value ?? '');
+  if (!match || (match[1] === '1') === Boolean(match[6])) return null;
+  return {
+    version: Number(match[1]),
+    child: match[2],
+    generation: match[3],
+    sha: match[4],
+    backend: match[5],
+    attempt: Number(match[6] ?? 1),
+  };
+}
 
 export function assertProject(project, pins, pr, repository) {
   const [org, repo] = repository.split('/');
@@ -64,7 +77,7 @@ export function selectFileEnv(response, branch) {
   if (rows.length > 1) fail('FILE_ENV_AMBIGUOUS');
   if (!rows.length) return null;
   const row = rows[0];
-  const marker = intentPattern.exec(row.comment ?? '');
+  const marker = parseIntent(row.comment);
   if (
     typeof row.id !== 'string' ||
     !row.id ||
@@ -123,6 +136,7 @@ export function assertDeployment(row, context) {
     !Number.isSafeInteger(context.intentUpdatedAt) ||
     context.intentUpdatedAt < 0 ||
     typeof row?.id !== 'string' ||
+    !row.id ||
     row.projectId !== context.projectId ||
     row.target != null ||
     row.customEnvironment != null ||
@@ -161,26 +175,30 @@ export async function provisionPreviewFiles(options) {
     child = branch.project_ref;
     assertReady(branch, await github.checks(pr.head.sha), pr.head.sha);
     assertProject(await vercel.project(), pins, pr, repository);
-    const currentBackend = await vercel.assertBackend(pr.head.ref, child);
+    const keys = await management.keys(child);
+    const current = await vercel.assertBackend(pr.head.ref, child, keys);
     if (
-      !Number.isSafeInteger(currentBackend?.updatedAt) ||
-      currentBackend.updatedAt < 0 ||
-      !/^[a-f0-9]{64}$/.test(currentBackend.fingerprint ?? '')
+      !Number.isSafeInteger(current?.updatedAt) ||
+      current.updatedAt < 0 ||
+      !/^[a-f0-9]{64}$/.test(current.fingerprint ?? '') ||
+      !Number.isSafeInteger(current.legacyUpdatedAt) ||
+      current.legacyUpdatedAt < 0 ||
+      !/^[a-f0-9]{64}$/.test(current.legacyFingerprint ?? '')
     )
       fail('FILE_BACKEND_REVISION');
-    if (backend && backend.fingerprint !== currentBackend.fingerprint)
+    if (backend && backend.fingerprint !== current.fingerprint)
       fail('FILE_BACKEND_CHANGED');
-    backend = currentBackend;
+    backend = current;
     await database.schema(child);
   };
   await guard();
-  // Freeze a manually dispatched run to its first observed SHA as well.
   options = { ...options, expectedSha: pr.head.sha };
   const id = `pvf${child}`;
   selectFileEnv(await vercel.envs(), pr.head.ref);
   let key = assertKey(await database.read(child, id), id);
   if (!key) {
     await guard();
+    selectFileEnv(await vercel.envs(), pr.head.ref);
     try {
       await database.stage(
         child,
@@ -188,87 +206,101 @@ export async function provisionPreviewFiles(options) {
         (options.random ?? randomBytes)(32).toString('hex'),
       );
     } catch {
-      // An insert can have committed despite a lost HTTP response. Read it back;
-      // never replace a persisted secret, including on subsequent invocations.
+      // A lost stage response cannot authorize replacing a persisted secret.
     }
     key = assertKey(await database.read(child, id), id);
     if (!key) fail('FILE_STAGE_UNCERTAIN');
   }
   const generation = fingerprint(key.secret);
-  const intent = intentFor(child, generation, pr.head.sha, backend.fingerprint);
-  const context = {
+  const base = {
     projectId: pins.projectId,
     repoId: pr.head.repo.id,
     branch: pr.head.ref,
     sha: pr.head.sha,
     child,
-    intent,
-    backendUpdatedAt: backend.updatedAt,
   };
-  let env = selectFileEnv(
-    await vercel.envs(),
-    context.branch,
-    child,
-    generation,
-  );
-  context.intentUpdatedAt = env?.comment === intent ? env.updatedAt : 0;
-  let deployment = selectDeployment(await vercel.deployments(context), context);
-  const priorMarker = env && intentPattern.exec(env.comment);
+  let env = selectFileEnv(await vercel.envs(), base.branch);
+  const marker = parseIntent(env?.comment);
+  const sameGeneration =
+    marker?.child === child && marker.generation === generation;
   if (
-    priorMarker &&
-    priorMarker[1] === child &&
-    priorMarker[2] === generation &&
-    priorMarker[4] !== backend.fingerprint
+    sameGeneration &&
+    marker.version === 1 &&
+    marker.backend !== backend.legacyFingerprint
   )
     fail('FILE_BACKEND_CHANGED');
-  const previousIntent = env?.comment === intent;
-  // An existing intent without a matching deployment is an external ambiguity:
-  // a pre-POST crash and a lost POST response cannot safely be distinguished.
-  if (previousIntent && !deployment) fail('FILE_DEPLOYMENT_UNCERTAIN');
-  await guard();
-  const fresh = selectFileEnv(
-    await vercel.envs(),
-    context.branch,
-    child,
-    generation,
-  );
-  if (fresh?.id !== env?.id || fresh?.comment !== env?.comment)
-    fail('FILE_ENV_CHANGED');
-  const body = {
-    key: FILE_ENV,
-    value: JSON.stringify({ [id]: key.secret }),
-    type: 'sensitive',
-    visibility: 'secret',
-    target: ['preview'],
-    gitBranch: context.branch,
-    comment: intent,
+  const sameOperation = sameGeneration && marker.sha === base.sha;
+  if (
+    sameGeneration &&
+    marker.version === 2 &&
+    marker.backend !== backend.fingerprint
+  )
+    fail('FILE_BACKEND_CHANGED');
+  let context = {
+    ...base,
+    intent: sameOperation
+      ? env.comment
+      : intentFor(child, generation, base.sha, backend.fingerprint),
+    backendUpdatedAt:
+      sameOperation && marker.version === 1
+        ? backend.legacyUpdatedAt
+        : backend.updatedAt,
+    intentUpdatedAt: sameOperation ? env.updatedAt : 0,
   };
-  if (deployment) {
-    if (!previousIntent) fail('FILE_DEPLOYMENT_UNCERTAIN');
-    context.intentUpdatedAt = env.updatedAt;
-    assertDeployment(deployment, context);
-  } else {
-    // A comment alone is never proof of the secret value. Write the persisted
-    // database generation before recording a new deployment operation.
-    try {
-      await vercel.writeEnv(env?.id, body);
-    } catch {
-      fail('FILE_ENV_WRITE_UNCERTAIN');
-    }
-    env = selectFileEnv(await vercel.envs(), context.branch);
-    if (!env || env.comment !== intent || !Number.isSafeInteger(env.updatedAt))
-      fail('FILE_ENV_WRITE_UNCERTAIN');
-    context.intentUpdatedAt = env.updatedAt;
-  }
-  if (!deployment) {
-    await guard();
-    const beforePost = selectFileEnv(await vercel.envs(), context.branch);
+  let deployment = selectDeployment(await vercel.deployments(context), context);
+  if (sameOperation && !deployment) fail('FILE_DEPLOYMENT_UNCERTAIN');
+  if (!sameOperation && deployment) fail('FILE_DEPLOYMENT_UNCERTAIN');
+
+  const exactEnv = async () => {
+    const fresh = selectFileEnv(await vercel.envs(), base.branch);
     if (
-      beforePost?.id !== env.id ||
-      beforePost.comment !== intent ||
-      beforePost.updatedAt !== env.updatedAt
+      fresh?.id !== env?.id ||
+      fresh?.comment !== env?.comment ||
+      fresh?.updatedAt !== env?.updatedAt
     )
       fail('FILE_ENV_CHANGED');
+  };
+  const exactKey = async () => {
+    const fresh = assertKey(await database.read(child, id), id);
+    if (!fresh || fresh.secret !== key.secret) fail('FILE_KEY_CHANGED');
+    return fresh;
+  };
+  const freshGuards = async () => {
+    await guard();
+    await exactKey();
+    await exactEnv();
+  };
+  let posted = false;
+  const installAndPost = async () => {
+    // Advance the persisted marker only after fresh source/backend/key/env proof.
+    await freshGuards();
+    const body = {
+      key: FILE_ENV,
+      value: JSON.stringify({ [id]: key.secret }),
+      type: 'sensitive',
+      visibility: 'secret',
+      target: ['preview'],
+      gitBranch: base.branch,
+      comment: context.intent,
+    };
+    const previousId = env?.id;
+    try {
+      await vercel.writeEnv(previousId, body);
+    } catch {
+      // A committed marker without a deployment remains uncertain on rerun.
+      fail('FILE_ENV_WRITE_UNCERTAIN');
+    }
+    env = selectFileEnv(await vercel.envs(), base.branch);
+    if (
+      !env ||
+      (previousId && env.id !== previousId) ||
+      env.comment !== context.intent
+    )
+      fail('FILE_ENV_WRITE_UNCERTAIN');
+    context.intentUpdatedAt = env.updatedAt;
+    await freshGuards();
+    if (posted) fail('FILE_DEPLOYMENT_UNCERTAIN');
+    posted = true;
     try {
       const created = await vercel.createDeployment(context);
       assertDeployment(created, context);
@@ -277,42 +309,75 @@ export async function provisionPreviewFiles(options) {
       deployment = selectDeployment(await vercel.deployments(context), context);
       if (!deployment) fail('FILE_DEPLOYMENT_UNCERTAIN');
     }
-  }
+  };
   const now = options.now ?? Date.now;
   const deadline = now() + 8 * 60 * 1000;
-  const attempts = options.attempts ?? 100;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    if (now() >= deadline) fail('FILE_DEPLOYMENT_PENDING');
-    deployment = await vercel.deployment(deployment.id);
-    assertDeployment(deployment, context);
-    if (deployment.readyState === 'READY') break;
-    if (['ERROR', 'CANCELED'].includes(deployment.readyState))
-      fail('FILE_DEPLOYMENT_FAILED');
-    if (attempt === attempts - 1) fail('FILE_DEPLOYMENT_PENDING');
-    await options.pause();
+  const hydrate = async () => {
+    const id = deployment.id;
+    const fresh = await vercel.deployment(id);
+    assertDeployment(fresh, context);
+    if (fresh.id !== id) fail('FILE_DEPLOYMENT_DENIED');
+    deployment = fresh;
+  };
+  const wait = async () => {
+    const reads = options.attempts ?? 100;
+    for (let read = 0; read < reads; read++) {
+      if (now() >= deadline) fail('FILE_DEPLOYMENT_PENDING');
+      await hydrate();
+      if (['READY', 'ERROR', 'CANCELED'].includes(deployment.readyState))
+        return deployment.readyState;
+      if (
+        !['QUEUED', 'INITIALIZING', 'BUILDING'].includes(deployment.readyState)
+      )
+        fail('FILE_DEPLOYMENT_UNCERTAIN');
+      if (read === reads - 1) fail('FILE_DEPLOYMENT_PENDING');
+      await options.pause();
+    }
+    fail('FILE_DEPLOYMENT_PENDING');
+  };
+  if (!deployment) await installAndPost();
+  let status = await wait();
+  const persisted = parseIntent(context.intent);
+  const migrateLegacy = persisted.version === 1;
+  if (migrateLegacy || status !== 'READY') {
+    if (posted) fail('FILE_DEPLOYMENT_FAILED');
+    if (persisted.attempt >= 3) fail('FILE_DEPLOYMENT_LIMIT');
+    await freshGuards();
+    // Hydrate again after the guard before allowing a persisted successor.
+    await hydrate();
+    status = deployment.readyState;
+    if (
+      !['READY', 'ERROR', 'CANCELED'].includes(status) ||
+      (!migrateLegacy && status === 'READY')
+    )
+      fail('FILE_DEPLOYMENT_UNCERTAIN');
+    context = {
+      ...base,
+      intent: intentFor(
+        child,
+        generation,
+        base.sha,
+        backend.fingerprint,
+        persisted.attempt + 1,
+      ),
+      backendUpdatedAt: backend.updatedAt,
+      intentUpdatedAt: 0,
+    };
+    // A pre-existing successor without its matching persisted env is ambiguous.
+    if (selectDeployment(await vercel.deployments(context), context))
+      fail('FILE_DEPLOYMENT_UNCERTAIN');
+    await installAndPost();
+    status = await wait();
+    if (status !== 'READY') fail('FILE_DEPLOYMENT_FAILED');
   }
-  await guard();
-  const finalEnv = selectFileEnv(
-    await vercel.envs(),
-    context.branch,
-    child,
-    generation,
-  );
-  if (
-    finalEnv?.id !== env.id ||
-    finalEnv.comment !== intent ||
-    finalEnv.updatedAt !== env.updatedAt
-  )
-    fail('FILE_ENV_CHANGED');
-  const finalKey = assertKey(await database.read(child, id), id);
-  if (!finalKey || finalKey.secret !== key.secret) fail('FILE_KEY_CHANGED');
+  await freshGuards();
+  const finalKey = await exactKey();
   if (!finalKey.accepts_new) {
-    await guard();
+    await freshGuards();
     try {
       await database.activate(child, id, key.secret);
     } catch {
-      // A committed activation may have lost its HTTP response. Only the fresh
-      // exact-state readback below can establish success.
+      // Only an exact fresh readback proves a lost activation response succeeded.
     }
     const active = assertKey(await database.read(child, id), id);
     if (!active?.accepts_new || active.secret !== key.secret)
@@ -321,7 +386,7 @@ export async function provisionPreviewFiles(options) {
   return {
     branch: child,
     pr: number,
-    sha: context.sha,
+    sha: base.sha,
     deployment: deployment.id,
   };
 }

@@ -7,6 +7,7 @@ import {
   intentFor,
   selectFileEnv,
   selectDeployment,
+  parseIntent,
 } from '../scripts/preview-file-keys.mjs';
 import {
   fileProviders,
@@ -19,7 +20,16 @@ const repository = 'PHead2001/IT-Inventory-System';
 const sha = 'a'.repeat(40);
 const child = 'b'.repeat(20);
 const secret = 'c'.repeat(64); // Synthetic, never a provider credential.
-const backend = { fingerprint: 'd'.repeat(64), updatedAt: 10 };
+const backend = {
+  fingerprint: 'd'.repeat(64),
+  updatedAt: 10,
+  legacyFingerprint: '1'.repeat(64),
+  legacyUpdatedAt: 5,
+};
+const publicKey = 'synthetic-child-publishable';
+const publicKeys = [
+  { type: 'publishable', name: 'default', api_key: publicKey },
+];
 const keyId = `pvf${child}`;
 const marker = intentFor(child, fingerprint(secret), sha, backend.fingerprint);
 
@@ -83,7 +93,13 @@ function fixture() {
         ],
       }),
     },
-    management: { branches: async () => [structuredClone(state.branch)] },
+    management: {
+      branches: async () => [structuredClone(state.branch)],
+      keys: async (ref) => {
+        assert.equal(ref, child);
+        return structuredClone(publicKeys);
+      },
+    },
     database: {
       schema: async () => {},
       read: async () => ({
@@ -122,7 +138,11 @@ function fixture() {
       }),
       writeEnv: async (_id, body) => {
         writes.push('env');
-        state.env = { ...body, id: 'env_test', updatedAt: 20 };
+        state.env = {
+          ...body,
+          id: 'env_test',
+          updatedAt: (state.env?.updatedAt ?? 19) + 1,
+        };
       },
       deployments: async () => ({
         deployments: structuredClone(state.deployments),
@@ -130,10 +150,10 @@ function fixture() {
       createDeployment: async (context) => {
         writes.push('deploy');
         const row = {
-          id: 'dpl_test',
+          id: `dpl_test_${state.deployments.length}`,
           projectId: 'prj_test',
           target: null,
-          createdAt: 30,
+          createdAt: state.env.updatedAt + 10,
           readyState: 'READY',
           gitSource: {
             type: 'github',
@@ -168,6 +188,65 @@ const ownedEnv = (comment = marker) => ({
   comment,
   updatedAt: 20,
 });
+
+function backendFixture() {
+  const state = {
+    rows: [
+      {
+        id: 'url',
+        key: 'NEXT_PUBLIC_SUPABASE_URL',
+        target: ['preview'],
+        gitBranch: 'feature',
+        updatedAt: 5,
+      },
+      {
+        id: 'public',
+        key: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+        target: ['preview'],
+        gitBranch: 'feature',
+        updatedAt: 10,
+      },
+    ],
+    values: { url: `https://${child}.supabase.co`, public: publicKey },
+    keys: structuredClone(publicKeys),
+    pagination: undefined,
+  };
+  const providers = fileProviders({
+    pins: { projectId: 'prj_test', teamId: 'team_test' },
+    request: async (url) =>
+      url.includes('/env?')
+        ? { envs: structuredClone(state.rows), pagination: state.pagination }
+        : { value: state.values[new URL(url).pathname.split('/').at(-1)] },
+  });
+  return {
+    state,
+    check: () => providers.vercel.assertBackend('feature', child, state.keys),
+    providers,
+  };
+}
+
+function existingDeployment(
+  f,
+  readyState = 'ERROR',
+  { legacy = false, attempt = 1 } = {},
+) {
+  const intent = legacy
+    ? `inventory-preview-files:v1:${child}:${fingerprint(secret)}:${sha}:${backend.legacyFingerprint}`
+    : intentFor(child, fingerprint(secret), sha, backend.fingerprint, attempt);
+  f.state.key = staged();
+  f.state.env = ownedEnv(intent);
+  f.state.deployments = [
+    {
+      id: 'dpl_old',
+      projectId: 'prj_test',
+      target: null,
+      createdAt: 30,
+      readyState,
+      gitSource: { type: 'github', repoId: 123, ref: 'feature', sha },
+      meta: { inventoryPreviewFiles: intent },
+    },
+  ];
+}
 
 test('file key stages once, deploys branch with current generation, then activates; exact proof rerun has no writes', async () => {
   const f = fixture();
@@ -440,29 +519,12 @@ test('provider adapter sends parameterized single guarded statements and fresh b
 });
 
 test('provider backend checks reject contradictory wider preview URL and track ID/revision', async () => {
-  const rows = [
-    {
-      id: 'url',
-      key: 'NEXT_PUBLIC_SUPABASE_URL',
-      target: ['preview'],
-      gitBranch: 'feature',
-      updatedAt: 5,
-    },
-  ];
-  let urlValue = `https://${child}.supabase.co`;
-  const providers = fileProviders({
-    pins: { projectId: 'prj_test', teamId: 'team_test' },
-    request: async (url) =>
-      url.includes('/env?') ? { envs: rows } : { value: urlValue },
-  });
-  const first = await providers.vercel.assertBackend('feature', child);
-  rows[0].updatedAt = 6;
-  assert.notEqual(
-    (await providers.vercel.assertBackend('feature', child)).fingerprint,
-    first.fingerprint,
-  );
-  urlValue = `https://${PARENT_REF}.supabase.co`;
-  await assert.rejects(providers.vercel.assertBackend('feature', child), {
+  const f = backendFixture();
+  const first = await f.check();
+  f.state.rows[0].updatedAt = 6;
+  assert.notEqual((await f.check()).fingerprint, first.fingerprint);
+  f.state.values.url = `https://${PARENT_REF}.supabase.co`;
+  await assert.rejects(f.check(), {
     code: 'FILE_BACKEND_DENIED',
   });
 });
@@ -709,4 +771,480 @@ test('an exact-branch production-only file key never blocks or mutates preview s
   });
   await provisionPreviewFiles(f.options);
   assert.equal(f.state.env.target[0], 'preview');
+});
+
+test('v2 marker parser bounds persisted attempts and retains strict v1 compatibility', () => {
+  assert.equal(parseIntent(marker).attempt, 1);
+  assert.equal(parseIntent(marker).version, 2);
+  assert.equal(
+    parseIntent(
+      `inventory-preview-files:v1:${child}:${fingerprint(secret)}:${sha}:${backend.legacyFingerprint}`,
+    ).attempt,
+    1,
+  );
+  for (const invalid of [
+    marker.replace(/:1$/, ':0'),
+    marker.replace(/:1$/, ':4'),
+    marker.replace(/:1$/, ''),
+    marker.replace(':v2:', ':v1:'),
+    marker + ':1',
+  ])
+    assert.equal(parseIntent(invalid), null);
+});
+
+test('authoritative child key classification accepts modern publishable and legacy anon without decoding', async () => {
+  for (const key of [
+    { type: 'publishable', name: 'custom', api_key: publicKey },
+    {
+      type: 'legacy',
+      name: 'anon',
+      api_key: 'opaque-authoritative-legacy-key',
+    },
+  ]) {
+    const f = backendFixture();
+    f.state.keys = [
+      key,
+      { type: 'secret', name: 'default', api_key: 'synthetic-private-key' },
+    ];
+    f.state.values.public = key.api_key;
+    const result = await f.check();
+    assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(result).includes(key.api_key), false);
+  }
+});
+
+test('wrong-child, secret/service-role, missing and malformed public keys fail closed', async () => {
+  for (const change of [
+    (f) => {
+      f.state.values.public = 'some-other-child-public-key';
+    },
+    (f) => {
+      f.state.keys = [{ type: 'secret', name: 'default', api_key: publicKey }];
+    },
+    (f) => {
+      f.state.keys = [
+        { type: 'legacy', name: 'service_role', api_key: publicKey },
+      ];
+    },
+    (f) => {
+      f.state.keys = [];
+    },
+    (f) => {
+      f.state.keys = { api_key: publicKey };
+    },
+    (f) => {
+      f.state.keys = [{ type: 'publishable', api_key: '' }];
+    },
+    (f) => {
+      f.state.keys = [
+        { type: 'publishable', api_key: publicKey },
+        { type: 'secret', api_key: publicKey },
+      ];
+    },
+    (f) => {
+      f.state.keys = Array.from({ length: 101 }, (_, i) => ({
+        type: 'publishable',
+        api_key: String(i),
+      }));
+    },
+    (f) => {
+      f.state.rows = f.state.rows.filter((row) => row.id !== 'public');
+    },
+  ]) {
+    const f = backendFixture();
+    change(f);
+    await assert.rejects(f.check(), (error) =>
+      ['FILE_BACKEND_DENIED', 'FILE_PUBLIC_KEYS_DENIED'].includes(error.code),
+    );
+  }
+});
+
+test('backend fingerprint binds public key revisions, IDs, scopes and value digests; legacy fingerprint stays URL-only', async () => {
+  for (const change of [
+    (f) => {
+      f.state.rows[1].updatedAt++;
+    },
+    (f) => {
+      f.state.rows[1].target = ['preview', 'production'];
+    },
+    (f) => {
+      f.state.rows[1].gitBranch = null;
+    },
+    (f) => {
+      f.state.rows[1].id = 'changed';
+      f.state.values.changed = publicKey;
+    },
+    (f) => {
+      f.state.keys.push({ type: 'publishable', api_key: 'rotated-public' });
+      f.state.values.public = 'rotated-public';
+    },
+  ]) {
+    const f = backendFixture();
+    const first = await f.check();
+    change(f);
+    const next = await f.check();
+    assert.notEqual(next.fingerprint, first.fingerprint);
+    assert.equal(next.legacyFingerprint, first.legacyFingerprint);
+  }
+});
+
+test('broader contradictory key, duplicate scopes, malformed scopes and bounded listings are denied', async () => {
+  for (const change of [
+    (f) => {
+      f.state.rows.push({ ...f.state.rows[1], id: 'broader', gitBranch: null });
+      f.state.values.broader = 'foreign-key';
+    },
+    (f) => {
+      f.state.rows.push({ ...f.state.rows[1], id: 'duplicate' });
+      f.state.values.duplicate = publicKey;
+    },
+    (f) => {
+      f.state.rows[1].customEnvironmentIds = ['custom'];
+    },
+    (f) => {
+      f.state.rows[1].target = 'preview';
+    },
+    (f) => {
+      f.state.rows[1].target = ['preview', 'unknown'];
+    },
+    (f) => {
+      f.state.rows[1].updatedAt = -1;
+    },
+    (f) => {
+      f.state.pagination = { next: 1 };
+    },
+  ]) {
+    const f = backendFixture();
+    change(f);
+    await assert.rejects(f.check());
+  }
+  const f = backendFixture();
+  f.state.rows.push({
+    ...f.state.rows[1],
+    id: 'production-only',
+    target: ['production'],
+  });
+  assert.match((await f.check()).fingerprint, /^[a-f0-9]{64}$/);
+});
+
+test('guard queries child keys every time and refuses a key-only revision change during build', async () => {
+  const f = fixture(),
+    b = backendFixture();
+  let keyReads = 0;
+  f.options.management.keys = async (ref) => {
+    assert.equal(ref, child);
+    keyReads++;
+    return b.state.keys;
+  };
+  f.options.vercel.assertBackend = b.providers.vercel.assertBackend;
+  const hydrate = f.options.vercel.deployment;
+  f.options.vercel.deployment = async (id) => {
+    const row = await hydrate(id);
+    b.state.rows[1].updatedAt++;
+    return row;
+  };
+  await assert.rejects(provisionPreviewFiles(f.options), {
+    code: 'FILE_BACKEND_CHANGED',
+  });
+  assert.ok(keyReads >= 4);
+  assert.equal(f.writes.includes('activate'), false);
+});
+
+test('wrong configured child public key refuses staging before any database or provider write', async () => {
+  const f = fixture(),
+    b = backendFixture();
+  b.state.values.public = 'other-child-key';
+  f.options.vercel.assertBackend = b.providers.vercel.assertBackend;
+  await assert.rejects(provisionPreviewFiles(f.options), {
+    code: 'FILE_BACKEND_DENIED',
+  });
+  assert.deepEqual(f.writes, []);
+});
+
+test('authoritative public-key revocation before retry prevents successor writes', async () => {
+  const f = fixture(),
+    b = backendFixture();
+  const current = await b.check();
+  existingDeployment(f);
+  const intent = intentFor(
+    child,
+    fingerprint(secret),
+    sha,
+    current.fingerprint,
+  );
+  f.state.env.comment = intent;
+  f.state.deployments[0].meta.inventoryPreviewFiles = intent;
+  f.options.management.keys = async () => b.state.keys;
+  f.options.vercel.assertBackend = b.providers.vercel.assertBackend;
+  const hydrate = f.options.vercel.deployment;
+  f.options.vercel.deployment = async (id) => {
+    const row = await hydrate(id);
+    b.state.keys = [];
+    return row;
+  };
+  await assert.rejects(provisionPreviewFiles(f.options), {
+    code: 'FILE_PUBLIC_KEYS_DENIED',
+  });
+  assert.deepEqual(f.writes, []);
+});
+
+test('conclusive failed/canceled attempt advances once, preserves secret and recovers READY without writes', async () => {
+  for (const state of ['ERROR', 'CANCELED']) {
+    const f = fixture();
+    existingDeployment(f, state);
+    await provisionPreviewFiles(f.options);
+    assert.deepEqual(f.writes, ['env', 'deploy', 'activate']);
+    assert.equal(parseIntent(f.state.env.comment).attempt, 2);
+    assert.equal(f.state.key.secret, secret);
+    f.writes.length = 0;
+    await provisionPreviewFiles(f.options);
+    assert.deepEqual(f.writes, []);
+  }
+});
+
+test('three attempts persist across invocations and each invocation issues at most one deployment POST', async () => {
+  const f = fixture();
+  const create = f.options.vercel.createDeployment;
+  f.options.vercel.createDeployment = async (context) => {
+    const row = await create(context);
+    f.state.deployments.find((d) => d.id === row.id).readyState = 'ERROR';
+    return { ...row, readyState: 'ERROR' };
+  };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const previous = f.writes.filter((w) => w === 'deploy').length;
+    await assert.rejects(provisionPreviewFiles(f.options), {
+      code: 'FILE_DEPLOYMENT_FAILED',
+    });
+    assert.equal(f.writes.filter((w) => w === 'deploy').length, previous + 1);
+    assert.equal(parseIntent(f.state.env.comment).attempt, attempt);
+  }
+  const writes = [...f.writes];
+  await assert.rejects(provisionPreviewFiles(f.options), {
+    code: 'FILE_DEPLOYMENT_LIMIT',
+  });
+  assert.deepEqual(f.writes, writes);
+  assert.equal(f.state.key.secret, secret);
+  assert.equal(f.state.key.accepts_new, false);
+});
+
+test('pending, unknown, missing, duplicate and inaccessible attempts never advance', async () => {
+  for (const state of ['BUILDING', 'UNKNOWN', undefined]) {
+    const f = fixture();
+    existingDeployment(f, state);
+    // Explicit undefined cannot use the helper's default.
+    f.state.deployments[0].readyState = state;
+    await assert.rejects(provisionPreviewFiles(f.options), (error) =>
+      ['FILE_DEPLOYMENT_PENDING', 'FILE_DEPLOYMENT_UNCERTAIN'].includes(
+        error.code,
+      ),
+    );
+    assert.deepEqual(f.writes, []);
+  }
+  for (const change of [
+    (f) => {
+      f.state.deployments = [];
+    },
+    (f) => {
+      f.state.deployments.push(structuredClone(f.state.deployments[0]));
+    },
+    (f) => {
+      f.options.vercel.deployment = async () => {
+        throw new Error('unavailable');
+      };
+    },
+    (f) => {
+      const hydrate = f.options.vercel.deployment;
+      f.options.vercel.deployment = async (id) => ({
+        ...(await hydrate(id)),
+        id: 'dpl_foreign',
+      });
+    },
+  ]) {
+    const f = fixture();
+    existingDeployment(f);
+    change(f);
+    await assert.rejects(provisionPreviewFiles(f.options));
+    assert.deepEqual(f.writes, []);
+  }
+});
+
+test('adapter hydration refuses a response for a different deployment ID', async () => {
+  const providers = fileProviders({
+    pins: { projectId: 'prj_test', teamId: 'team_test' },
+    request: async () => ({ id: 'dpl_foreign' }),
+  });
+  await assert.rejects(providers.vercel.deployment('dpl_expected'), {
+    code: 'FILE_DEPLOYMENT_DENIED',
+  });
+});
+
+test('pending same marker waits for readiness and reuses its exact deployment', async () => {
+  const f = fixture();
+  existingDeployment(f, 'BUILDING');
+  f.options.pause = async () => {
+    f.state.deployments[0].readyState = 'READY';
+  };
+  await provisionPreviewFiles(f.options);
+  assert.deepEqual(f.writes, ['activate']);
+  assert.equal(parseIntent(f.state.env.comment).attempt, 1);
+});
+
+test('lost successor POST recovers only its exact marker; lost marker response remains uncertain', async () => {
+  const f = fixture();
+  existingDeployment(f);
+  const create = f.options.vercel.createDeployment;
+  f.options.vercel.createDeployment = async (context) => {
+    await create(context);
+    throw new Error('response lost');
+  };
+  await provisionPreviewFiles(f.options);
+  assert.equal(f.writes.filter((w) => w === 'deploy').length, 1);
+  assert.equal(parseIntent(f.state.env.comment).attempt, 2);
+  const missing = fixture();
+  existingDeployment(missing);
+  missing.options.vercel.createDeployment = async () => {
+    missing.writes.push('deploy');
+    throw new Error('response lost');
+  };
+  await assert.rejects(provisionPreviewFiles(missing.options), {
+    code: 'FILE_DEPLOYMENT_UNCERTAIN',
+  });
+  await assert.rejects(provisionPreviewFiles(missing.options), {
+    code: 'FILE_DEPLOYMENT_UNCERTAIN',
+  });
+  assert.equal(missing.writes.filter((w) => w === 'deploy').length, 1);
+  const lostMarker = fixture();
+  existingDeployment(lostMarker);
+  const write = lostMarker.options.vercel.writeEnv;
+  lostMarker.options.vercel.writeEnv = async (...args) => {
+    await write(...args);
+    throw new Error('response lost');
+  };
+  await assert.rejects(provisionPreviewFiles(lostMarker.options), {
+    code: 'FILE_ENV_WRITE_UNCERTAIN',
+  });
+  await assert.rejects(provisionPreviewFiles(lostMarker.options), {
+    code: 'FILE_DEPLOYMENT_UNCERTAIN',
+  });
+  assert.equal(parseIntent(lostMarker.state.env.comment).attempt, 2);
+  assert.equal(lostMarker.writes.includes('deploy'), false);
+});
+
+test('v1 READY and failed deployments migrate with the same secret to v2 attempt2 and a fresh deployment', async () => {
+  for (const state of ['READY', 'ERROR', 'CANCELED']) {
+    for (const active of [false, true]) {
+      const f = fixture();
+      existingDeployment(f, state, { legacy: true });
+      if (active)
+        Object.assign(f.state.key, {
+          accepts_new: true,
+          verify_until: 'infinity',
+        });
+      await provisionPreviewFiles(f.options);
+      assert.deepEqual(
+        f.writes,
+        active ? ['env', 'deploy'] : ['env', 'deploy', 'activate'],
+      );
+      assert.equal(parseIntent(f.state.env.comment).version, 2);
+      assert.equal(parseIntent(f.state.env.comment).attempt, 2);
+      assert.equal(f.state.key.secret, secret);
+    }
+  }
+});
+
+test('v1 nonterminal waits; missing or mismatched legacy provenance is never adopted', async () => {
+  const pending = fixture();
+  existingDeployment(pending, 'BUILDING', { legacy: true });
+  await assert.rejects(provisionPreviewFiles(pending.options), {
+    code: 'FILE_DEPLOYMENT_PENDING',
+  });
+  assert.deepEqual(pending.writes, []);
+  for (const change of [
+    (f) => {
+      f.state.backend.legacyFingerprint = '2'.repeat(64);
+    },
+    (f) => {
+      f.state.deployments = [];
+    },
+    (f) => {
+      f.state.deployments[0].gitSource.sha = 'f'.repeat(40);
+    },
+    (f) => {
+      f.state.deployments[0].createdAt = 19;
+    },
+  ]) {
+    const f = fixture();
+    existingDeployment(f, 'READY', { legacy: true });
+    change(f);
+    await assert.rejects(provisionPreviewFiles(f.options));
+    assert.deepEqual(f.writes, []);
+  }
+});
+
+test('legacy same-generation URL mismatch also refuses a different SHA rather than overwriting provenance', async () => {
+  const f = fixture();
+  existingDeployment(f, 'READY', { legacy: true });
+  f.state.pr.head.sha = 'e'.repeat(40);
+  f.options.expectedSha = f.state.pr.head.sha;
+  f.state.backend.legacyFingerprint = '2'.repeat(64);
+  await assert.rejects(provisionPreviewFiles(f.options), {
+    code: 'FILE_BACKEND_CHANGED',
+  });
+  assert.deepEqual(f.writes, []);
+});
+
+test('v2 same-generation backend drift refuses a new SHA while unchanged binding starts attempt1', async () => {
+  for (const changed of [false, true]) {
+    const f = fixture();
+    existingDeployment(f);
+    f.state.pr.head.sha = 'e'.repeat(40);
+    f.options.expectedSha = f.state.pr.head.sha;
+    if (changed) f.state.backend.fingerprint = '2'.repeat(64);
+    if (changed) {
+      await assert.rejects(provisionPreviewFiles(f.options), {
+        code: 'FILE_BACKEND_CHANGED',
+      });
+      assert.deepEqual(f.writes, []);
+    } else {
+      await provisionPreviewFiles(f.options);
+      assert.equal(parseIntent(f.state.env.comment).attempt, 1);
+      assert.equal(parseIntent(f.state.env.comment).sha, f.state.pr.head.sha);
+      assert.equal(f.state.key.secret, secret);
+      assert.equal(f.writes.filter((w) => w === 'deploy').length, 1);
+    }
+  }
+});
+
+test('fresh source, backend, env revision and key retirement/revocation guards deny successor writes', async () => {
+  for (const change of [
+    (f) => {
+      f.state.pr.head.sha = 'e'.repeat(40);
+    },
+    (f) => {
+      f.state.backend.fingerprint = '2'.repeat(64);
+    },
+    (f) => {
+      f.state.env.updatedAt++;
+    },
+    (f) => {
+      f.state.key.verify_until = '2026-01-01';
+    },
+    (f) => {
+      f.state.foreignActive = 1;
+    },
+    (f) => {
+      f.state.key.secret = 'f'.repeat(64);
+    },
+  ]) {
+    const f = fixture();
+    existingDeployment(f);
+    const hydrate = f.options.vercel.deployment;
+    f.options.vercel.deployment = async (id) => {
+      const row = await hydrate(id);
+      change(f);
+      return row;
+    };
+    await assert.rejects(provisionPreviewFiles(f.options));
+    assert.deepEqual(f.writes, []);
+  }
 });

@@ -119,10 +119,43 @@ export function fileProviders({
     );
   const projectPath = encodeURIComponent(pins.projectId);
   const envs = () => api(`/v10/projects/${projectPath}/env?decrypt=false`);
+  const hydrate = async (id) => {
+    if (typeof id !== 'string' || !id) refuse('FILE_DEPLOYMENT_DENIED');
+    const row = await api(`/v13/deployments/${encodeURIComponent(id)}`);
+    if (row?.id !== id) refuse('FILE_DEPLOYMENT_DENIED');
+    return row;
+  };
   const vercel = {
     project: () => api(`/v9/projects/${projectPath}`),
     envs,
-    assertBackend: async (branch, child) => {
+    assertBackend: async (branch, child, keys) => {
+      // Classification comes from the verified child's Management API, never
+      // from decoding an opaque key or trusting a browser-side prefix.
+      if (
+        !Array.isArray(keys) ||
+        !keys.length ||
+        keys.length > 100 ||
+        keys.some(
+          (key) =>
+            !key ||
+            typeof key.type !== 'string' ||
+            typeof key.api_key !== 'string' ||
+            !key.api_key ||
+            key.api_key.length > 16384,
+        ) ||
+        new Set(keys.map((key) => key.api_key)).size !== keys.length
+      )
+        refuse('FILE_PUBLIC_KEYS_DENIED');
+      const publicKeys = new Set(
+        keys
+          .filter(
+            (key) =>
+              key.type === 'publishable' ||
+              (key.type === 'legacy' && key.name === 'anon'),
+          )
+          .map((key) => key.api_key),
+      );
+      if (!publicKeys.size) refuse('FILE_PUBLIC_KEYS_DENIED');
       const listing = await envs();
       if (
         !Array.isArray(listing?.envs) ||
@@ -130,48 +163,97 @@ export function fileProviders({
         listing.pagination?.next != null
       )
         refuse('FILE_ENV_BOUNDS');
-      // The canonical Supabase configuration has no server URL override. Reject
-      // contradictory preview URL rows, even if a branch-specific row wins.
+      const names = [
+        'NEXT_PUBLIC_SUPABASE_URL',
+        'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+      ];
+      // The canonical app uses this URL/key pair for server and browser clients.
+      // Contradictory wider preview values are refused even when a branch wins.
       const rows = listing.envs.filter(
         (row) =>
-          row.key === 'NEXT_PUBLIC_SUPABASE_URL' &&
+          names.includes(row.key) &&
           (row.gitBranch == null || row.gitBranch === branch) &&
-          row.target?.includes('preview'),
+          (!Array.isArray(row.target) || row.target.includes('preview')),
       );
       if (
-        !rows.length ||
-        rows.length > 2 ||
-        rows.some((row) => row.customEnvironmentIds?.length)
+        names.some((name) => !rows.some((row) => row.key === name)) ||
+        rows.length > 4 ||
+        rows.some(
+          (row) =>
+            row.customEnvironmentIds?.length ||
+            !Array.isArray(row.target) ||
+            !row.target.includes('preview') ||
+            row.target.some(
+              (target) =>
+                !['preview', 'production', 'development'].includes(target),
+            ) ||
+            new Set(row.target).size !== row.target.length,
+        ) ||
+        new Set(rows.map((row) => row.id)).size !== rows.length
       )
         refuse('FILE_BACKEND_DENIED');
       const snapshots = [];
+      const legacyUrlSnapshots = [];
       for (const row of rows) {
-        if (typeof row.id !== 'string' || !Number.isSafeInteger(row.updatedAt))
+        if (
+          typeof row.id !== 'string' ||
+          !row.id ||
+          !Number.isSafeInteger(row.updatedAt) ||
+          row.updatedAt < 0
+        )
           refuse('FILE_BACKEND_REVISION');
-        // Only this public configuration value is read, never signing secrets.
         const value = await api(
           `/v1/projects/${projectPath}/env/${encodeURIComponent(row.id)}`,
         );
-        if (value?.value !== `https://${child}.supabase.co`)
+        if (
+          row.key === names[0]
+            ? value?.value !== `https://${child}.supabase.co`
+            : !publicKeys.has(value?.value)
+        )
           refuse('FILE_BACKEND_DENIED');
         snapshots.push([
+          row.key,
           row.id,
           row.updatedAt,
           row.gitBranch ?? null,
-          value.value,
+          [...row.target].sort(),
+          [], // Custom environment scopes are forbidden above.
+          createHash('sha256').update(value.value).digest('hex'),
         ]);
+        if (row.key === names[0])
+          legacyUrlSnapshots.push([
+            row.id,
+            row.updatedAt,
+            row.gitBranch ?? null,
+            value.value,
+          ]);
       }
       if (
-        rows.filter((row) => row.gitBranch === branch).length > 1 ||
-        rows.filter((row) => row.gitBranch == null).length > 1
+        names.some(
+          (name) =>
+            rows.filter((row) => row.key === name && row.gitBranch === branch)
+              .length > 1 ||
+            rows.filter((row) => row.key === name && row.gitBranch == null)
+              .length > 1,
+        )
       )
         refuse('FILE_BACKEND_DENIED');
-      snapshots.sort((a, b) => a[0].localeCompare(b[0]));
+      snapshots.sort((a, b) => a[1].localeCompare(b[1]));
+      legacyUrlSnapshots.sort((a, b) => a[0].localeCompare(b[0]));
       return {
         fingerprint: createHash('sha256')
           .update(JSON.stringify(snapshots))
           .digest('hex'),
         updatedAt: Math.max(...rows.map((row) => row.updatedAt)),
+        // Kept only to verify ownership/provenance before migrating a v1 intent.
+        legacyFingerprint: createHash('sha256')
+          .update(JSON.stringify(legacyUrlSnapshots))
+          .digest('hex'),
+        legacyUpdatedAt: Math.max(
+          ...rows
+            .filter((row) => row.key === names[0])
+            .map((row) => row.updatedAt),
+        ),
       };
     },
     writeEnv: async (id, body) => {
@@ -204,9 +286,7 @@ export function fileProviders({
           matches.map((row) => {
             if (typeof row.uid !== 'string' && typeof row.id !== 'string')
               refuse('FILE_DEPLOYMENT_DENIED');
-            return api(
-              `/v13/deployments/${encodeURIComponent(row.uid ?? row.id)}`,
-            );
+            return hydrate(row.uid ?? row.id);
           }),
         ),
       };
@@ -223,7 +303,7 @@ export function fileProviders({
         },
         meta: { inventoryPreviewFiles: context.intent },
       }),
-    deployment: (id) => api(`/v13/deployments/${encodeURIComponent(id)}`),
+    deployment: hydrate,
   };
   return { database, vercel };
 }
