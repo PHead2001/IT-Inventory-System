@@ -6,6 +6,7 @@ import { PrivateSpeedInsights } from '@/features/telemetry/private-speed-insight
 import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
 import { MotionPreference } from '@/components/experience/motion-preference';
 import { Navigation } from '@/components/experience/navigation';
+import { PageArrival } from '@/components/experience/page-arrival';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export default async function ApplicationLayout({
             <Navigation />
           </aside>
           <main id="main-content" className="experience-main" tabIndex={-1}>
-            {children}
+            <PageArrival>{children}</PageArrival>
           </main>
         </div>
         {speedInsightsEnabled({

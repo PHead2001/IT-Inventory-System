@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "tag": "it-inventory-local-runner-v1",
+  "version": "2026-09-30.5",
+  "files": [
+    {
+      "name": "Common.ps1",
+      "hash": "0113DFFEE669189CD2DED87FAE430064FB9C98F5D3083BBEA484CAEC042FC01C"
+    },
+    {
+      "name": "Runner.ps1",
+      "hash": "61CCB12BDE85E43E2B9884683308D3C8395A420AFB9FEA3B79D36B9B60EBB1CF"
+    },
+    {
+      "name": "Guest.Network.ps1",
+      "hash": "7D658C3A337904535E430C8286AB3A77AF1F24C1A3DEFE8BF1BB27D52A0E7FE7"
+    },
+    {
+      "name": "SetupMenu.ps1",
+      "hash": "693BE818F9907D50B7335AB68C301F58073D93B6FFB94C17584383559322EB1F"
+    },
+    {
+      "name": "Setup.ps1",
+      "hash": "0E8412A84C908179A2AE02CEB11861AD1C7DA24208C18DA5FCF92E3CC30524FC"
+    },
+    {
+      "name": "Setup.Download.ps1",
+      "hash": "A564A80DBD3CC426DFD03DBBC11B9B9D8B149F247563E36595C7B05F192DFA64"
+    },
+    {
+      "name": "Update.ps1",
+      "hash": "10E7A4829588A1CD5E89573C270516CCEE3A03DD14F7AFE412777A55C63C7822"
+    },
+    {
+      "name": "Setup.cmd",
+      "hash": "AAB51276730415DBB71FCF58555581363770AC0C214D43285EEE0A5EB88FECD1"
+    },
+    {
+      "name": "Start.cmd",
+      "hash": "D3313E2043B452F9044A72AE14061B2D2CB1ECDC459D37AA74186ACC9CCF2782"
+    },
+    {
+      "name": "Restart.cmd",
+      "hash": "0E6E2E748608FBAC9F1A5C7ABE68669320E13DDA26B25EE4E4CE6C09282ABE42"
+    },
+    {
+      "name": "Stop.cmd",
+      "hash": "BB7CC71446E3A3D429FB1B97A65BDF809FE871F9A30637A6434E7A835D024902"
+    },
+    {
+      "name": "Status.cmd",
+      "hash": "8A954F027932810239DED8EBA2692CD25801570EC24C53C33A8EF83EC11319F8"
+    }
+  ]
+}

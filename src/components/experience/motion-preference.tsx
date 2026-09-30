@@ -45,13 +45,18 @@ function systemSnapshot() {
 }
 
 export function useEffectiveReducedMotion() {
+  const { local, system } = useMotionState();
+  return local || system;
+}
+
+export function useMotionState() {
   const local = useSyncExternalStore(subscribe, snapshot, () => true);
   const system = useSyncExternalStore(
     subscribeSystem,
     systemSnapshot,
     () => true,
   );
-  return local || system;
+  return { local, system, reduced: local || system };
 }
 
 export function MotionPreference({ children }: { children: React.ReactNode }) {
@@ -69,10 +74,10 @@ export function MotionPreference({ children }: { children: React.ReactNode }) {
 }
 
 export function MotionToggle() {
-  const localReduced = useSyncExternalStore(subscribe, snapshot, () => false);
+  const { local, system } = useMotionState();
 
   function toggle() {
-    const next = !localReduced;
+    const next = !local;
     volatilePreference = next;
     try {
       window.localStorage.setItem(storageKey, String(next));
@@ -87,10 +92,23 @@ export function MotionToggle() {
       type="button"
       onClick={toggle}
       className="experience-motion-toggle"
-      aria-pressed={localReduced}
-      aria-label="Reduce motion"
+      aria-pressed={local}
+      aria-label={local ? 'Use system motion setting' : 'Reduce motion locally'}
     >
-      {localReduced ? 'Motion reduced' : 'Reduce motion'}
+      <span>
+        {local
+          ? 'Reduced locally'
+          : system
+            ? 'Reduced by system'
+            : 'Full motion'}
+      </span>
+      <small>
+        {local
+          ? 'Use system setting'
+          : system
+            ? 'System setting active · reduce locally'
+            : 'Reduce motion'}
+      </small>
     </button>
   );
 }

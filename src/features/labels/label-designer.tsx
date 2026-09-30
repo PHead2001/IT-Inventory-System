@@ -45,24 +45,42 @@ function entryFor(record: LiveLabel): QueueEntry {
     lifecycleAcknowledged: record.state === 'active',
   };
 }
-function signature(
-  record: LabelRecord & { tag?: string | null; categoryName?: string | null },
-): string {
+function signature(record: LabelRecord): string {
   return JSON.stringify([
     record.kind,
     record.key,
     record.name,
-    record.context,
-    record.state,
-    record.tag,
+    record.path,
+    record.barcode,
     record.humanId,
     record.categoryName,
+    record.manufacturer,
+    record.model,
+    record.serialNumber,
+    record.locationHierarchy,
   ]);
+}
+function printableRecord(record: LiveLabel): LabelRecord {
+  return {
+    kind: record.kind,
+    key: record.key,
+    name: record.name,
+    path: record.path,
+    barcode: record.barcode,
+    humanId: record.humanId,
+    categoryName: record.categoryName,
+    manufacturer: record.manufacturer,
+    model: record.model,
+    serialNumber: record.serialNumber,
+    locationHierarchy: record.locationHierarchy,
+  };
 }
 function expandLabels(entries: QueueEntry[], rows: LiveLabel[]): LabelRecord[] {
   const byId = new Map(rows.map((record) => [queueIdentity(record), record]));
   return entries.flatMap((entry) =>
-    Array.from({ length: entry.copies }, () => byId.get(queueIdentity(entry))!),
+    Array.from({ length: entry.copies }, () =>
+      printableRecord(byId.get(queueIdentity(entry))!),
+    ),
   );
 }
 const emptyInitial: LiveLabel[] = [];
@@ -407,6 +425,10 @@ export function LabelDesigner({
           setPrintRows(refreshedRows);
           setMessage('Label information refreshed from current inventory.');
         });
+      } else {
+        // Holdings can change without changing permanent print content.
+        setLive(fresh);
+        setPrepared(fresh);
       }
       const sheet = document.querySelector<HTMLElement>('.label-print-root');
       if (!sheet) {
@@ -811,7 +833,7 @@ export function LabelDesigner({
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.categoryName ?? record.context} · ${record.state}`
+                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
                         : `${id} · unavailable`}
                     </span>
                     <div className={styles.queueActions}>
@@ -924,12 +946,34 @@ export function LabelDesigner({
           size / 100%. Code 128 asset tags require reprinting if the tag
           changes.
         </p>
-        {job.format === 'code128' && fallbackCount > 0 && (
-          <p className={styles.warning}>
-            {fallbackCount} queued record(s) will use stable QR links because
-            quantity items have no Code 128 identity or an asset tag is
-            absent/incompatible. Long barcodes that do not fit also use QR.
-          </p>
+        {job.format === 'code128' && (fallbackCount > 0 || fallbackPending) && (
+          <div
+            role={fallbackPending ? 'alert' : undefined}
+            className={styles.warning}
+          >
+            <p>
+              {fallbackCount > 0
+                ? `${fallbackCount} queued record(s) will use stable QR links because quantity items have no Code 128 identity or an asset tag is absent/incompatible. `
+                : 'Some labels will use stable QR links because Code 128 is unavailable. '}
+              Long barcodes that do not fit at a readable size also use QR.
+            </p>
+            {fallbackPending && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setFormatAcknowledged(true);
+                  setFallbackPending(false);
+                  setMessage(
+                    'QR fallback acknowledged. Print again to run the final inventory check.',
+                  );
+                }}
+                className={styles.secondaryButton}
+              >
+                Acknowledge QR fallback
+              </button>
+            )}
+          </div>
         )}
         {unavailable.length > 0 && (
           <p role="alert" className={styles.error}>
@@ -956,28 +1000,6 @@ export function LabelDesigner({
               className={styles.secondaryButton}
             >
               Acknowledge changes
-            </button>
-          </div>
-        )}
-        {fallbackPending && (
-          <div role="alert" className={styles.warning}>
-            <p>
-              Some labels will use QR because Code 128 is unavailable or will
-              not fit at readable size.
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setFormatAcknowledged(true);
-                setFallbackPending(false);
-                setMessage(
-                  'QR fallback acknowledged. Print again to run the final inventory check.',
-                );
-              }}
-              className={styles.secondaryButton}
-            >
-              Acknowledge QR fallback
             </button>
           </div>
         )}

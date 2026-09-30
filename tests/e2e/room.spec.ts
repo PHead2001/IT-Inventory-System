@@ -88,7 +88,7 @@ async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace', exact: true }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -1326,13 +1326,22 @@ test('location browser has keyboard drill-down, aggregate selection, and full se
   const openRoot = browser.getByRole('button', { name: 'Open IT Closet' });
   await openRoot.focus();
   await openRoot.press('Enter');
+  await expect(browser).toBeFocused();
+  await expect(browser.getByRole('status')).toHaveText('Browsing IT Closet');
   const left = browser.getByRole('button', { name: /Left Storage ITC-L$/ });
   await expect(left).toBeVisible();
   await browser.getByRole('button', { name: 'Open Left Storage' }).click();
+  await expect(browser).toBeFocused();
+  await expect(browser.getByRole('status')).toHaveText(
+    'Browsing IT Closet / Left Storage',
+  );
   await expect(
     browser.getByRole('button', { name: /Shelf 1 ITC-S1$/ }),
   ).toBeVisible();
   await browser.getByRole('button', { name: 'Back to IT Closet' }).click();
+  await expect(browser).toBeFocused();
+  await expect(browser).toBeVisible();
+  await expect(browser.getByRole('status')).toHaveText('Browsing IT Closet');
   await left.click();
   await selected(page, 'ITC-L');
   const search = browser.getByRole('searchbox', { name: 'Browse locations' });

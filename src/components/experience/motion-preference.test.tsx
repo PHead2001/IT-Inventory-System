@@ -105,13 +105,16 @@ it('combines OS and local choices and responds to either changing', async () => 
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion' });
+  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('false');
+  expect(toggle).toHaveTextContent('Full motion');
   act(() => setSystem(true));
+  expect(toggle).toHaveTextContent('Reduced by system');
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   await user.click(toggle);
   expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveTextContent('Reduced locally');
   act(() => setSystem(false));
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   await user.click(toggle);
@@ -152,7 +155,7 @@ it('keeps the local reduced-motion choice across mounts', async () => {
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion' });
+  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
   await user.click(toggle);
   expect(toggle).toHaveAttribute('aria-pressed', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
@@ -164,10 +167,9 @@ it('keeps the local reduced-motion choice across mounts', async () => {
       <MotionToggle />
     </MotionPreference>,
   );
-  expect(screen.getByRole('button', { name: 'Reduce motion' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  expect(
+    screen.getByRole('button', { name: 'Use system motion setting' }),
+  ).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('renders and toggles when browser storage rejects reads and writes', async () => {
@@ -187,7 +189,7 @@ it('renders and toggles when browser storage rejects reads and writes', async ()
     </MotionPreference>,
   );
   expect(screen.getByText('Workspace')).toBeInTheDocument();
-  const toggle = screen.getByRole('button', { name: 'Reduce motion' });
+  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
   await user.click(toggle);
   expect(toggle).toHaveAttribute('aria-pressed', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');

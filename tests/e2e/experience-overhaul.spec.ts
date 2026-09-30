@@ -65,7 +65,7 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -268,6 +268,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   expect(original.length).toBeGreaterThanOrEqual(2);
   const source = handles.nth(1);
   const destination = handles.first();
+  await source.locator('xpath=ancestor::*[@data-control-id]').press('Enter');
   await source.scrollIntoViewIfNeeded();
   const from = await source.boundingBox();
   const to = await destination.boundingBox();
@@ -288,8 +289,8 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
-  await nameControl.getByText('Layout options').click();
-  const width = nameControl.getByLabel('Width');
+  await nameControl.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const initialWidth = await width.inputValue();
   const resize = nameControl.getByRole('button', { name: 'Resize Name' });
@@ -315,6 +316,7 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
   await page.setViewportSize({ width: 1280, height: 6000 });
   const empty = designer.locator('[data-section-id]').last();
   await expect(empty.locator('[data-control-id]')).toHaveCount(0);
+  await nameControl.press('Enter');
   const nameDrag = designer.getByRole('button', { name: 'Drag Name' });
   await nameDrag.evaluate((element) =>
     element.scrollIntoView({ block: 'start' }),
@@ -626,13 +628,11 @@ test('account switch during a held designer gesture permanently masks the old pr
   await designer.getByRole('button', { name: 'Add section' }).click();
   const privateName = `Private unsaved ${crypto.randomUUID()}`;
   await designer.getByLabel('Section heading').last().fill(privateName);
-  const width = designer
-    .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
-    .getByLabel('Width');
-  await designer
-    .locator('[data-control-id]:has(button[aria-label="Resize Name"])')
-    .getByText('Layout options')
-    .click();
+  const nameControl = designer.locator(
+    '[data-control-id]:has(button[aria-label="Resize Name"])',
+  );
+  await nameControl.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const beforeResize = await width.inputValue();
   const handle = designer.getByRole('button', { name: 'Resize Name' });
@@ -657,7 +657,7 @@ test('account switch during a held designer gesture permanently masks the old pr
     await other.getByLabel('Password', { exact: true }).fill(fixture.password);
     await other.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(
-      other.getByRole('heading', { name: 'Inventory workspace' }),
+      other.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -851,7 +851,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
     await viewer.getAttribute('data-focus-count'),
   );
   await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await page.getByRole('button', { name: 'Reduce motion locally' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await expect
     .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
@@ -864,7 +864,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).toBe(settled);
 
-  await page.getByRole('button', { name: 'Reduce motion' }).click();
+  await page.getByRole('button', { name: 'Use system motion setting' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();
@@ -997,13 +997,91 @@ test('automatic label sheet retains readable codes across rapid layout edits and
     .getByLabel('Copies')
     .fill('20');
   await expect(page.locator('.label-card')).toHaveCount(20);
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   const print = page.getByRole('button', { name: /Print selected labels/ });
   const format = page.getByRole('combobox', { name: 'Code' });
+  let measuredReflows = 0;
   for (const [labelSize, paper, code] of [
     ['70x35', 'A4', 'qr'],
     ['90x50', 'letter', 'code128'],
   ] as const) {
+    const changingSize = (await size.inputValue()) !== labelSize;
+    if (changingSize) {
+      await card.evaluate((element, targetSize) => {
+        const [width, height] = targetSize.split('x');
+        const samples: Array<{ width: number; height: number }> = [];
+        const promise = new Promise<typeof samples>((resolve) => {
+          let started = false;
+          let timeout = 0;
+          const finish = () => {
+            observer.disconnect();
+            window.clearTimeout(timeout);
+            resolve(samples);
+          };
+          const observer = new MutationObserver(() => {
+            if (
+              started ||
+              element.style.width !== `${width}mm` ||
+              element.style.height !== `${height}mm`
+            )
+              return;
+            started = true;
+            observer.disconnect();
+            const start = performance.now();
+            const measure = () => {
+              const box = element.getBoundingClientRect();
+              samples.push({ width: box.width, height: box.height });
+              if (performance.now() - start < 280)
+                requestAnimationFrame(measure);
+              else finish();
+            };
+            measure();
+          });
+          observer.observe(element, {
+            attributes: true,
+            attributeFilter: ['style'],
+          });
+          timeout = window.setTimeout(finish, 1500);
+        });
+        (
+          window as Window & { __physicalLabelFrames?: typeof promise }
+        ).__physicalLabelFrames = promise;
+      }, labelSize);
+    }
     await size.selectOption(labelSize);
+    await expect(card).toHaveAttribute(
+      'style',
+      new RegExp(
+        `width: ${labelSize.split('x')[0]}mm; height: ${labelSize.split('x')[1]}mm`,
+      ),
+    );
+    const frames = changingSize
+      ? await page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __physicalLabelFrames?: Promise<
+                  Array<{ width: number; height: number }>
+                >;
+              }
+            ).__physicalLabelFrames ?? [],
+        )
+      : [];
+    const [physicalWidth, physicalHeight] = labelSize.split('x').map(Number);
+    if (changingSize) {
+      measuredReflows++;
+      expect(frames.length).toBeGreaterThan(2);
+    }
+    for (const [index, frame] of frames.entries()) {
+      expect(frame.width, `${labelSize} frame ${index} width`).toBeCloseTo(
+        (physicalWidth * 96) / 25.4,
+        0,
+      );
+      expect(frame.height, `${labelSize} frame ${index} height`).toBeCloseTo(
+        (physicalHeight * 96) / 25.4,
+        0,
+      );
+    }
     await paperChoice.selectOption(paper);
     await format.selectOption(code);
     await expect(card).toHaveAttribute('data-code-ready', 'true');
@@ -1076,4 +1154,5 @@ test('automatic label sheet retains readable codes across rapid layout edits and
       await page.emulateMedia({ media: 'screen' });
     }
   }
+  expect(measuredReflows).toBeGreaterThan(0);
 });

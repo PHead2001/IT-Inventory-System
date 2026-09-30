@@ -6,6 +6,14 @@ these changes; existing inventory, custody, private-file, history and release
 invariants remain in force. This document records decisions and coverage, not a
 claim that unfinished work is implemented.
 
+Historical status (2026-09-29): this document preserves the PR 22/23 overhaul
+contract and its then-current evidence and open-work notes. Those PRs subsequently
+landed on main at `b08906a634a338171f3926f8aa3689a1f590409d`, including the
+previous drag and camera corrections. The separate, still-in-progress completion
+milestone and its current acceptance evidence are tracked in
+[Experience completion](experience-completion.md); the historical pending items
+below are not a claim about that newer branch or its final readiness.
+
 ## Delivery and visual direction
 
 Use `feat/inventory-experience-overhaul`, with one PR targeting main. Functional,
@@ -259,7 +267,17 @@ receives independent code review. Every checkpoint stays in this branch.
 
 ## Requirement-to-evidence matrix
 
-### Working checkpoint
+### Historical checkpoints and current evidence requirements
+
+The checkpoint narrative and matrix below describe the original overhaul work,
+not current failure counts or current host status. The completion milestone has
+since recorded a fresh complete local gate at `03233c3`; the then-held workflow
+bytes were committed at `e08996b` unchanged. Keep the full command results, counts,
+workflow provenance and exact-SHA remote CI/review status in the completion PR.
+A local pass is separate from normal Linux CI certification. Current-source visual
+and print artifacts are still being refreshed and require rendered acceptance;
+physical-printer, real-phone and real reboot proof remain explicit limitations.
+No production certification follows from local gates, runner activation or a pilot.
 
 The baseline at `299aef4` is recorded in `experience-baseline.md`. It includes
 36 desktop/phone screenshots and five warm samples per scenario. Both the old
@@ -274,11 +292,11 @@ denial-then-large-upload browser regression and a same-agent recovery probe. The
 baseline's 49 category-form fetches and two designer identity checks remain
 historical measurements, not matched final-source performance proof.
 
-The pushed checkpoint `3d32be39dea752d09c0bcd62589e32497a896164` passed 626
+The historical pushed checkpoint `3d32be39dea752d09c0bcd62589e32497a896164` passed 626
 application tests, 481 pgTAP assertions, all configured database integration suites
 and generated-type comparison locally. Its full production-build E2E run passed 56
-of 87 browser cases and failed 31; adaptation and triage continue. Focused browser
-checks have covered designer pointer reflow/resize and interruption, mobile panels,
+of 87 browser cases and failed 31; adaptation and triage were incomplete then. Focused browser
+checks at that checkpoint covered designer pointer reflow/resize and interruption, mobile panels,
 save/recovery, native CLS/INP attribution, rendered label codes and corrected print
 pagination. Focused successes do not turn the 87-case run green. Exact-checkpoint
 CI run `36502707682` passed its application job, while the database job was cancelled
@@ -287,31 +305,31 @@ itself prove a database regression, nor does the local database pass replace CI.
 
 The earlier checkpoint `78ec7dc9a46881c634c573f1401735002f1a2248` had a
 finding-free Codex review but seven of 65 browser cases failed. A location-ancestry
-P2 and a newer P2 from the `3d32be3` review have local corrections; their review
-threads still need green replies. The current dirty tree also includes first-paint
+P2 and a newer P2 from the `3d32be3` review had local corrections; their review
+threads still needed green replies then. That checkpoint dirty tree also included first-paint
 reduced-motion, sticky navigation, RoomDefinition identity and camera focus after
 restore corrections. Focused browser/unit checks and independent review support
-those corrections, but broad local/browser reruns and exact-final-SHA review/CI are
-pending. The emitted telemetry field is `eventTarget`; a focused browser check
+those corrections, but broad local/browser reruns and exact-final-SHA review/CI were
+pending at that checkpoint. The emitted telemetry field is `eventTarget`; a focused browser check
 observed a native CLS shift of 0.0020345 with `hadRecentInput: false`, source
 `inventory-location-results-tree-2`, and an emitted 0.002 value.
 
-Hosted evidence exists on the isolated PR22 preview, but final-SHA hosted acceptance
-is pending. The replacement Supabase child `hshhtmnwejpfjyzuzdej` is active and
-healthy with functions deployed, and the preview-only file-validation HMAC pair is
+Historical hosted evidence exists on the isolated PR22 preview; final-SHA hosted acceptance
+was pending at that checkpoint. The replacement Supabase child `hshhtmnwejpfjyzuzdej` was reported active and
+healthy with functions deployed, and the preview-only file-validation HMAC pair was
 configured on that child and its Vercel branch environment. The exact `3d32be3`
 preview deployment passed ten signed-in stages across staff/viewer/maintainer roles,
 items, files and forms, plus seven direct negative API checks. Supported cleanup
 confirmed two temporary files and four storage objects removed. Temporary actors
-and fictional inventory remain intentionally in the isolated preview for final-SHA
-checks and supported cleanup. Neither preview health nor these stages establish
+and fictional inventory were retained in the isolated preview for final-SHA
+checks and supported cleanup; current fixture state requires separate verification. Neither preview health nor these stages establish
 final-source hosted acceptance. PR22 was closed and reopened under owner
 authorization; no production access follows from that action.
 
 The visual propagation has rich desktop/phone captures and two real interaction
 recordings. Root accepted representative Overview, inventory and designer direction,
 including a corrected three-pane desktop designer and narrower panel modes, but
-final visual acceptance across routes and states is pending. Focused print evidence
+final visual acceptance across routes and states was pending at that checkpoint. Focused print evidence
 corrected a one-label/five-page defect: a browser case decoded QR/Code 128 and
 checked the direct-print guard; Poppler found one page in each of four one-label
 size/paper PDFs and two pages in each of two 20-label PDFs. Physical print and
@@ -320,7 +338,7 @@ hardware-specific behavior remain separate acceptance work.
 Completion requires evidence for every listed boundary; an implementation commit
 or a partial checkpoint alone is insufficient.
 
-Final performance comparison will use a new deterministic fictional dataset shared
+The performance acceptance contract requires a deterministic fictional dataset shared
 by separate production builds of the baseline commit and final candidate. The
 original pre-reset database was not snapshotted, so its 49-category timings remain
 historical observations, not directly matched final comparison samples. Pin the
@@ -330,6 +348,19 @@ scenario with normal visual effects enabled; report median and nearest-rank p95
 (the maximum at this sample count). Fresh-context single samples remain descriptive.
 Supabase HTTP fetch counts and summed parallel request durations must not be
 presented as SQL query counts or critical-path latency.
+
+Later auth timing evidence is recorded in the ignored
+`.local-tools/auth-latency/PROVENANCE-eb8bd83.md` and its SHA-specific captures.
+The before/after summary files support removal of a redundant lookup and a local
+improvement, with mixed hosted results; they do not establish an overall speedup.
+Five-sample browser medians, nested server spans and fresh browser contexts against
+a warm server/database must retain their provenance. The provenance also records
+the overwritten older hosted raw browser JSON and the absence of a complete local
+server-stage log; retained summaries cannot reconstruct missing raw evidence.
+
+The following matrix preserves historical coverage and the acceptance still required
+at that checkpoint. Use the completion PR and [Experience completion](experience-completion.md)
+for newer results rather than carrying these old counts or review states forward.
 
 | Requirement                            | Local implementation and evidence                                                                                                                                                                                                                                                         | Remaining acceptance evidence                                                                                                                                                                                                                  |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -345,10 +376,10 @@ presented as SQL query counts or critical-path latency.
 | App-wide visuals                       | Shared shell/auth/Overview and route-level propagation have rich captures and two real recordings. Root accepted representative direction and selected-field readability in the designer; reduced-motion first paint and sticky navigation fixes are dirty-tree focused work.             | Root acceptance of every named route/state, 200% zoom, keyboard focus, contrast, clipping, phone, print and reduced-motion behavior; hardware limits stated explicitly.                                                                        |
 | Compatibility and final delivery       | Pushed `3d32be3` passed 626 app tests and local 481 pgTAP/all configured integrations/types. Hosted matching deployment passed ten signed-in stages and seven negative API checks; preview HMAC is configured. Two files/four objects were cleaned up.                                    | Resolve 31 of 87 browser failures and rerun the full gate; repair/certify CI database timeout; repeat local, hosted and performance checks on final SHA; resolve both P2 threads, fresh review, zero actionable threads and clean HEAD parity. |
 
-The lead must accept the final rendered route and motion evidence, arrange matched
-performance checks and explicit hardware limitations, obtain final-SHA local/hosted/CI gates,
-and resolve both P2 review threads with fresh review. The browser owner must finish
-E2E adaptation and rerun the complete suite; 56/87 is a checkpoint, not acceptance.
+Final acceptance requires rendered route and motion evidence, matched
+performance checks with explicit hardware limitations, final-SHA local/hosted/CI gates,
+and fresh review with zero unresolved actionable findings. The historical 56/87
+run and two P2 thread states are checkpoint evidence, not current outstanding counts.
 Temporary preview actors and fictional inventory need supported cleanup only after
 the final-SHA hosted run no longer needs them.
 

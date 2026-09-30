@@ -29,6 +29,7 @@ import type {
   StoredCustomValues,
 } from './contracts';
 import { controlLayoutStyle } from './control-layout';
+import { controlVisible } from './effective-controls';
 
 type Kind = 'quantity' | 'asset';
 type Props = {
@@ -93,22 +94,15 @@ export function buildCustomPatch(
   const unset: string[] = [];
   const touchedIds = new Set(touched);
   const visibleFields = new Set(
-    definition.layout
-      .filter(
-        (section) =>
-          section.visible !== false &&
-          (section.applies_to ?? ['quantity', 'asset']).includes(kind),
-      )
-      .flatMap((section) =>
-        section.controls
-          .filter(
-            (control) =>
-              control.visible !== false &&
-              (control.applies_to ?? ['quantity', 'asset']).includes(kind) &&
-              control.kind === 'field',
-          )
-          .map((control) => control.field_id),
-      ),
+    definition.layout.flatMap((section) =>
+      section.controls
+        .filter(
+          (control) =>
+            control.kind === 'field' &&
+            controlVisible(definition, section, control, kind),
+        )
+        .map((control) => control.field_id),
+    ),
   );
   for (const field of definition.fields.filter(
     (value) => value.applies_to.includes(kind) && visibleFields.has(value.id),
@@ -572,11 +566,6 @@ export function MetadataForm({
     );
   };
   const builtin = (name: string) => {
-    if (
-      (kind === 'quantity' && ['asset_tag', 'serial_number'].includes(name)) ||
-      (kind === 'asset' && ['reorder_threshold', 'item_code'].includes(name))
-    )
-      return null;
     if (name === 'category_id')
       return (
         <div className="space-y-2" key={name}>
@@ -900,33 +889,10 @@ export function MetadataForm({
         className="min-w-0 w-full max-w-full space-y-5"
       >
         {definition?.layout
-          .filter(
-            (section) =>
-              section.visible !== false &&
-              (section.applies_to ?? ['quantity', 'asset']).includes(kind) &&
-              section.controls.some(
-                (control) =>
-                  control.visible !== false &&
-                  (control.applies_to ?? ['quantity', 'asset']).includes(
-                    kind,
-                  ) &&
-                  (control.kind === 'help' ||
-                    (control.kind === 'field' &&
-                      applicable.some(
-                        (field) => field.id === control.field_id,
-                      )) ||
-                    (control.kind === 'builtin' &&
-                      !(
-                        (kind === 'quantity' &&
-                          ['asset_tag', 'serial_number'].includes(
-                            control.builtin ?? '',
-                          )) ||
-                        (kind === 'asset' &&
-                          ['reorder_threshold', 'item_code'].includes(
-                            control.builtin ?? '',
-                          ))
-                      ))),
-              ),
+          .filter((section) =>
+            section.controls.some((control) =>
+              controlVisible(definition, section, control, kind),
+            ),
           )
           .map((section) => (
             <section
@@ -938,12 +904,8 @@ export function MetadataForm({
               </h3>
               <div className="flex flex-wrap gap-3">
                 {section.controls
-                  .filter(
-                    (control) =>
-                      control.visible !== false &&
-                      (control.applies_to ?? ['quantity', 'asset']).includes(
-                        kind,
-                      ),
+                  .filter((control) =>
+                    controlVisible(definition, section, control, kind),
                   )
                   .map((control) => {
                     const content =

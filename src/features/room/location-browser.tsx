@@ -1,5 +1,7 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
 import {
   locationAncestorIds,
@@ -17,6 +19,9 @@ export function LocationBrowser({
   onSelect: (code: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const navigationRef = useRef<HTMLElement>(null);
+  const statusId = useId();
+  const reducedMotion = useEffectiveReducedMotion();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [level, setLevel] = useState<string | null | undefined>(undefined);
   const rows = useMemo(() => pickerTree(locations, 'browse'), [locations]);
@@ -42,7 +47,10 @@ export function LocationBrowser({
   const current = locations.find((location) => location.id === visibleLevel);
   return (
     <nav
+      ref={navigationRef}
+      tabIndex={-1}
       aria-label="Location browser"
+      aria-describedby={statusId}
       className="experience-surface min-w-0 p-3"
     >
       <label
@@ -62,7 +70,10 @@ export function LocationBrowser({
       {current && !search && (
         <button
           className="mt-2 min-h-11 text-sm text-cyan-300 underline md:hidden"
-          onClick={() => setLevel(current.parentId)}
+          onClick={() => {
+            setLevel(current.parentId);
+            navigationRef.current?.focus();
+          }}
         >
           Back to{' '}
           {current.parentId
@@ -70,6 +81,9 @@ export function LocationBrowser({
             : 'spaces'}
         </button>
       )}
+      <p id={statusId} role="status" className="sr-only">
+        Browsing {search ? 'search results' : (current?.breadcrumb ?? 'spaces')}
+      </p>
       {selected && (
         <p className="my-2 break-words text-xs leading-5 text-slate-300">
           Selected path: {selected.breadcrumb}
@@ -77,7 +91,11 @@ export function LocationBrowser({
       )}
       <ul className="mt-2 max-h-[28rem] space-y-1 overflow-auto md:hidden">
         {mobileRows.map((row) => (
-          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
+          <motion.li
+            key={row.location.id}
+            layout={!reducedMotion}
+            className="flex min-w-0 items-center gap-1"
+          >
             <button
               aria-current={
                 selectedCode === row.location.code ? 'location' : undefined
@@ -97,17 +115,27 @@ export function LocationBrowser({
               <button
                 aria-label={'Open ' + row.location.name}
                 className="min-h-11 min-w-11 rounded border border-slate-700"
-                onClick={() => setLevel(row.location.id)}
+                onClick={() => {
+                  setLevel(row.location.id);
+                  navigationRef.current?.focus();
+                }}
               >
                 ›
               </button>
             )}
-          </li>
+          </motion.li>
         ))}
       </ul>
       <ul className="mt-2 hidden max-h-[28rem] space-y-1 overflow-auto md:block">
         {matched.map((row) => (
-          <li key={row.location.id} className="flex min-w-0 items-center gap-1">
+          <motion.li
+            key={row.location.id}
+            layout={!reducedMotion}
+            initial={reducedMotion ? false : { opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18 }}
+            className="flex min-w-0 items-center gap-1"
+          >
             {!search && row.hasChildren && (
               <button
                 aria-label={
@@ -148,7 +176,7 @@ export function LocationBrowser({
                 <span className="ml-2 text-amber-200">Inactive</span>
               )}
             </button>
-          </li>
+          </motion.li>
         ))}
       </ul>
       {!matched.length && (

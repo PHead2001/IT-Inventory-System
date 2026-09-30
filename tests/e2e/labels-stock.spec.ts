@@ -20,7 +20,7 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -126,6 +126,63 @@ async function verifiedPreviewPdf(page: Page, destination: string) {
       .evaluate((node) => node.removeAttribute('data-print-authorized'));
   }
 }
+
+test('larger labels retry normal text fitting while preserving the QR and print barrier', async ({
+  page,
+}, testInfo) => {
+  await signIn(page);
+  // The wide-letter name crosses the small label's text-height budget.
+  const name = 'W'.repeat(80);
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  await form.getByLabel('Name', { exact: true }).fill(name);
+  await form.getByLabel('Initial quantity').fill('1');
+  await chooseLocation(form, 'Initial location', 'ITC-S1A');
+  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const id = page.url().split('/').at(-1)!;
+  await page.goto('/labels?quantity=' + id);
+  await readyPreview(page, 1);
+  const size = page.getByRole('combobox', { name: 'Label size', exact: true });
+  await size.selectOption('70x35');
+  const card = page.locator('.label-card').first();
+  const title = card.locator('strong[data-fit-text]');
+  await testInfo.attach('small-label-fitting', {
+    body: JSON.stringify(
+      await title.evaluate((element) => ({
+        text: element.textContent,
+        font: getComputedStyle(element).fontSize,
+        width: element.clientWidth,
+        height: element.clientHeight,
+        scrollWidth: element.scrollWidth,
+        scrollHeight: element.scrollHeight,
+        card: (element.closest('.label-card') as HTMLElement)?.style.cssText,
+      })),
+    ),
+    contentType: 'application/json',
+  });
+  await expect
+    .poll(() => title.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe('10.6667px');
+  const originalQr = await card.getByRole('img').elementHandle();
+  await size.selectOption('90x50');
+  await expect
+    .poll(() => title.evaluate((element) => getComputedStyle(element).fontSize))
+    .toBe('12px');
+  await expect(card).toHaveAttribute('data-text-overflow', 'false');
+  await expect(card).toHaveAttribute('data-text-measured', 'true');
+  await expect(card).toHaveAttribute('data-code-ready', 'true');
+  expect(
+    await card
+      .getByRole('img')
+      .evaluate((element, previous) => element === previous, originalQr),
+  ).toBe(true);
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('.label-print-root')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  await card.screenshot({ path: testInfo.outputPath('refitted-label.png') });
+});
 
 test('printed QR and Code 128 decode from rendered label cards with physical size and page breaks', async ({
   page,
@@ -751,9 +808,11 @@ test('staff threshold persists into dashboard, inventory filter, and real CSV do
   await page.getByRole('link', { name: 'View filtered inventory' }).click();
   await expect(page).toHaveURL(/lowStock=true/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+  await page.locator('details.experience-export-menu > summary').click();
   const download = page.waitForEvent('download');
   await page
-    .getByRole('link', { name: 'Download filtered inventory CSV' })
+    .getByRole('group', { name: 'CSV export options' })
+    .getByRole('link', { name: 'Filtered inventory' })
     .click();
   const file = await download;
   expect(file.suggestedFilename()).toMatch(

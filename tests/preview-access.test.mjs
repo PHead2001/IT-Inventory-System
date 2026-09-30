@@ -1,3 +1,4 @@
+import './preview-file-keys.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -486,7 +487,7 @@ test('schedule discovery emits separate jobs for an early slow PR and a later re
     );
     assert.match(
       workflow,
-      /timeout-minutes: 5[\s\S]*environment: preview-access/,
+      /timeout-minutes: 15[\s\S]*environment: preview-access/,
     );
     assert.match(workflow, /fail-fast: false/);
     assert.doesNotMatch(workflow.split('\njobs:')[0], /\bconcurrency:/);

@@ -9,7 +9,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -54,8 +54,79 @@ function fieldControl(designer: Locator, name: string) {
 }
 
 async function openLayout(control: Locator) {
-  await control.getByText('Layout options', { exact: true }).click();
+  await inspectControl(control);
 }
+
+function inspectorFor(control: Locator) {
+  return control
+    .locator('xpath=ancestor::*[@data-testid="designer-panes"]')
+    .getByTestId('designer-inspector');
+}
+
+async function inspectControl(control: Locator) {
+  await control.press('Enter');
+  const designer = control.locator(
+    'xpath=ancestor::section[@aria-labelledby="metadata-settings-heading"]',
+  );
+  const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
+  if (await tab.isVisible()) await tab.click();
+  await expect(inspectorFor(control).getByLabel('Width')).toBeVisible();
+}
+
+async function chooseControlSection(control: Locator, name: string) {
+  const section = inspectorFor(control).getByLabel('Section');
+  const option = section.locator('option').filter({ hasText: `${name} ·` });
+  await expect(option).toHaveCount(1);
+  const id = await option.getAttribute('value');
+  expect(id).toBeTruthy();
+  await section.selectOption(id!);
+}
+
+test('a serialized control excluded by its section can recover through a compatible destination', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  const designer = await openDesigner(page, category);
+  // New categories inherit the canonical baseline's placed Serial Number.
+  const control = fieldControl(designer, 'Serial Number');
+  await control.press('Enter');
+  await expect(
+    designer.getByRole('button', { name: 'Drag Serial Number' }),
+  ).toBeVisible();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const source = designer.locator('[data-section-id]').last();
+  await source.getByLabel('Section heading').fill('Quantity only');
+  await openLayout(control);
+  await chooseControlSection(control, 'Quantity only');
+  await source.getByText('Section options').click();
+  await source.getByLabel('Applies to Quantity only').selectOption('quantity');
+  await expect(control.getByTitle('Form types using this control')).toHaveText(
+    'No form type',
+  );
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const destination = designer.locator('[data-section-id]').last();
+  await destination.getByLabel('Section heading').fill('Serialized recovery');
+  await destination.getByText('Section options').click();
+  await destination
+    .getByLabel('Applies to Serialized recovery')
+    .selectOption('asset');
+  await openLayout(control);
+  await chooseControlSection(control, 'Serialized recovery');
+  await control.press('Enter');
+  await expect(
+    destination.getByRole('button', { name: 'Drag Serial Number' }),
+  ).toBeVisible();
+  await expect(control.getByTitle('Form types using this control')).toHaveText(
+    'Serialized',
+  );
+  await saveDesigner(designer);
+  await openDesigner(page, category);
+  const restored = fieldControl(designer, 'Serial Number');
+  await expect(restored.getByTitle('Form types using this control')).toHaveText(
+    'Serialized',
+  );
+});
 
 test('held section drag autoscrolls at the viewport edge', async ({ page }) => {
   test.setTimeout(90_000);
@@ -100,7 +171,13 @@ test('keyboard width editing retains focus and survives reload', async ({
   let designer = await openDesigner(page, category);
   const control = fieldControl(designer, 'Name');
   await openLayout(control);
-  const width = control.getByLabel('Width');
+  await expect(control).toHaveAttribute('data-selected', 'true');
+  await expect(
+    inspectorFor(control).getByRole('region', {
+      name: 'Name layout properties',
+    }),
+  ).toBeVisible();
+  const width = inspectorFor(control).getByLabel('Width');
   const initial = await width.inputValue();
   await width.focus();
   await page.keyboard.press('End');
@@ -119,7 +196,49 @@ test('keyboard width editing retains focus and survives reload', async ({
   designer = await openDesigner(page, category);
   const reloaded = fieldControl(designer, 'Name');
   await openLayout(reloaded);
-  await expect(reloaded.getByLabel('Width')).toHaveValue(chosen);
+  await expect(inspectorFor(reloaded).getByLabel('Width')).toHaveValue(chosen);
+});
+
+test('advanced JSON action stays clickable below sticky Save at a constrained viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 450 });
+  await signIn(page);
+  const designer = await openDesigner(page, 'Cables');
+  await designer.getByText('Advanced JSON recovery', { exact: true }).click();
+  await designer
+    .getByRole('button', { name: 'Load current document JSON' })
+    .click();
+  await designer
+    .getByRole('navigation', { name: 'Designer panels' })
+    .getByRole('button', { name: 'Inspector' })
+    .click();
+  await expect(
+    designer.getByRole('heading', { name: 'Inspector' }),
+  ).toBeVisible();
+  const apply = designer.getByRole('button', {
+    name: 'Apply JSON to visual editor',
+  });
+  await expect(apply).toBeEnabled();
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  const save = designer.getByRole('button', { name: 'Save changes' });
+  await expect(save).toBeInViewport();
+  expect(
+    await apply.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return hit === button || button.contains(hit);
+    }),
+  ).toBe(true);
+  await apply.click();
+  await expect(designer.getByRole('status')).toContainText(
+    'JSON applied to the local editor',
+  );
 });
 
 test('nonempty section removal moves or unplaces a populated custom field, and hide/restore keeps its value', async ({
@@ -137,17 +256,11 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   const initialSectionCount = await designer
     .locator('[data-section-id]')
     .count();
-  const firstHeading = await designer
-    .getByLabel('Section heading')
-    .first()
-    .inputValue();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Retirable fields');
   let control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control
-    .getByLabel('Section')
-    .selectOption({ label: 'Retirable fields' });
+  await chooseControlSection(control, 'Retirable fields');
   await saveDesigner(designer);
 
   await page.goto('/inventory/quantity/new');
@@ -223,15 +336,16 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
 
   designer = await openDesigner(page, category);
   let section = designer.locator('[data-section-id]').last();
+  await fieldControl(designer, fieldName).click();
   await expect(
     section.getByRole('button', { name: `Drag ${fieldName}` }),
   ).toBeVisible();
   await section.getByText('Section options').click();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('Move 1 controls');
-    await dialog.accept(firstHeading);
-  });
   await section.getByRole('button', { name: 'Remove section' }).click();
+  let removal = designer.getByRole('dialog', {
+    name: 'Remove Retirable fields?',
+  });
+  await removal.getByRole('button', { name: 'Remove section' }).click();
   await expect(designer.locator('[data-section-id]')).toHaveCount(
     initialSectionCount,
   );
@@ -239,15 +353,17 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
     designer
       .locator('[data-section-id]')
       .first()
-      .getByRole('button', { name: `Drag ${fieldName}` }),
-  ).toBeVisible();
+      .locator(`[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`),
+  ).toHaveCount(1);
   await saveDesigner(designer);
   await retainedValue();
 
   designer = await openDesigner(page, category);
   control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control.getByRole('checkbox', { name: 'Show control' }).uncheck();
+  await inspectorFor(control)
+    .getByRole('checkbox', { name: 'Show control' })
+    .uncheck();
   await saveDesigner(designer);
   await retainedValue();
   await page.goto(`/inventory/quantity/${itemId}`);
@@ -260,6 +376,7 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await expect(edit.getByLabel(fieldName)).toHaveCount(0);
 
   designer = await openDesigner(page, category);
+  await designer.getByText(/Hidden & unplaced/).click();
   await designer.getByRole('button', { name: `Restore ${fieldName}` }).click();
   await saveDesigner(designer);
   await retainedValue();
@@ -282,19 +399,19 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
     .fill('Temporary placement');
   control = fieldControl(designer, fieldName);
   await openLayout(control);
-  await control
-    .getByLabel('Section')
-    .selectOption({ label: 'Temporary placement' });
+  await chooseControlSection(control, 'Temporary placement');
   section = designer.locator('[data-section-id]').last();
+  await fieldControl(designer, fieldName).click();
   await expect(
     section.getByRole('button', { name: `Drag ${fieldName}` }),
   ).toBeVisible();
   await section.getByText('Section options').click();
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toContain('remove custom field placements');
-    await dialog.accept('');
-  });
   await section.getByRole('button', { name: 'Remove section' }).click();
+  removal = designer.getByRole('dialog', {
+    name: 'Remove Temporary placement?',
+  });
+  await removal.getByLabel('Destination').selectOption('');
+  await removal.getByRole('button', { name: 'Remove section' }).click();
   await expect(designer.locator('[data-section-id]')).toHaveCount(
     initialSectionCount,
   );
@@ -304,4 +421,140 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   ).toBeVisible();
   await saveDesigner(designer);
   await retainedValue();
+
+  designer = await openDesigner(page, category);
+  const library = designer.getByTestId('designer-library');
+  await library.getByText(/Hidden & unplaced/).click();
+  await expect(
+    library.getByRole('heading', {
+      name: /Unplaced fields and standard controls \([1-9]/,
+    }),
+  ).toBeVisible();
+  await library.getByRole('button', { name: `Place ${fieldName}` }).click();
+  await expect(fieldControl(designer, fieldName)).toHaveCount(1);
+  await saveDesigner(designer);
+  await retainedValue();
+  designer = await openDesigner(page, category);
+  await expect(fieldControl(designer, fieldName)).toHaveCount(1);
+  await page.goto(`/inventory/quantity/${itemId}`);
+  const placedEdit = page.getByRole('form', { name: 'Edit quantity metadata' });
+  if (!(await placedEdit.isVisible()))
+    await page
+      .locator('summary')
+      .filter({ hasText: 'Edit quantity metadata' })
+      .click();
+  await expect(placedEdit.getByLabel(fieldName)).toHaveValue(value);
+});
+
+test('hidden sections and preview exclusions remain distinct through save and reload', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  let designer = await openDesigner(page, category);
+  await designer.getByLabel('New field type').selectOption('short_text');
+  await designer.getByRole('button', { name: 'Add field' }).click();
+  await designer.getByLabel('Label', { exact: true }).fill('Quantity note');
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const section = designer.locator('[data-section-id]').last();
+  await section.getByLabel('Section heading').fill('Quantity details');
+  const control = fieldControl(designer, 'Quantity note');
+  await openLayout(control);
+  await inspectorFor(control)
+    .getByLabel('Applies to Quantity note')
+    .selectOption('quantity');
+  await chooseControlSection(control, 'Quantity details');
+  await section.getByText('Section options').click();
+  await section
+    .getByLabel('Applies to Quantity details')
+    .selectOption('quantity');
+  await designer
+    .getByText(/Live preview · open quantity or asset form/)
+    .click();
+  await designer.getByRole('button', { name: 'Asset', exact: true }).click();
+  const library = designer.getByTestId('designer-library');
+  await library.getByText(/Hidden & unplaced/).click();
+  await expect(
+    library.getByRole('heading', {
+      name: /Excluded from Serialized preview \([1-9]/,
+    }),
+  ).toBeVisible();
+  await expect(
+    library.getByText(/Quantity note in Quantity details/),
+  ).toBeVisible();
+  await expect(library.getByText('Hidden sections (0)')).toBeVisible();
+  await section.getByRole('checkbox', { name: 'Show section' }).uncheck();
+  await expect(library.getByText('Hidden sections (1)')).toBeVisible();
+  await expect(library.getByText('Hidden controls (0)')).toBeVisible();
+  await expect(
+    library.getByText(/Quantity note in Quantity details/),
+  ).toHaveCount(0);
+  await saveDesigner(designer);
+
+  designer = await openDesigner(page, category);
+  const reloadedLibrary = designer.getByTestId('designer-library');
+  await reloadedLibrary.getByText(/Hidden & unplaced/).click();
+  await expect(reloadedLibrary.getByText('Hidden sections (1)')).toBeVisible();
+  await reloadedLibrary
+    .getByRole('button', { name: 'Restore section Quantity details' })
+    .click();
+  await expect(reloadedLibrary.getByText('Hidden sections (0)')).toBeVisible();
+  await saveDesigner(designer);
+  designer = await openDesigner(page, category);
+  await designer
+    .locator('[data-section-id]')
+    .last()
+    .getByText('Section options')
+    .click();
+  await expect(
+    designer.locator('[data-section-id]').last().getByRole('checkbox', {
+      name: 'Show section',
+    }),
+  ).toBeChecked();
+});
+
+test('duplicate section names use distinct UUID destinations and removal can be undone', async ({
+  page,
+}) => {
+  await signIn(page);
+  const category = await createCategory(page);
+  const designer = await openDesigner(page, category);
+  const initialSectionCount = await designer
+    .locator('[data-section-id]')
+    .count();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  await designer.getByRole('button', { name: 'Add section' }).click();
+  const sections = designer.locator('[data-section-id]');
+  const first = sections.nth(initialSectionCount);
+  const second = sections.nth(initialSectionCount + 1);
+  await first.getByLabel('Section heading').fill('Duplicate details');
+  await second.getByLabel('Section heading').fill('Duplicate details');
+  const firstId = await first.getAttribute('data-section-id');
+  const secondId = await second.getAttribute('data-section-id');
+  expect(firstId).toBeTruthy();
+  expect(secondId).toBeTruthy();
+  expect(firstId).not.toBe(secondId);
+  await first.getByText('Section options').click();
+  await first.getByRole('button', { name: 'Remove section' }).click();
+  let dialog = designer.getByRole('dialog', {
+    name: 'Remove Duplicate details?',
+  });
+  await expect(
+    dialog.getByRole('option', {
+      name: `Duplicate details · ${secondId!.slice(-8)}`,
+    }),
+  ).toHaveAttribute('value', secondId!);
+  await dialog.getByLabel('Destination').selectOption(secondId!);
+  await expect(dialog.getByLabel('Destination')).toHaveValue(secondId!);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 2);
+  await first.getByRole('button', { name: 'Remove section' }).click();
+  dialog = designer.getByRole('dialog', { name: 'Remove Duplicate details?' });
+  await dialog.getByLabel('Destination').selectOption(secondId!);
+  await dialog.getByRole('button', { name: 'Remove section' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 1);
+  await designer.getByRole('button', { name: 'Undo edit' }).click();
+  await expect(sections).toHaveCount(initialSectionCount + 2);
+  await expect(first).toHaveAttribute('data-section-id', firstId!);
+  await expect(second).toHaveAttribute('data-section-id', secondId!);
 });

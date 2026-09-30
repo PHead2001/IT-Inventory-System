@@ -1,3 +1,5 @@
+import { provisionPreviewFiles } from './preview-file-keys.mjs';
+import { fileProviders } from './preview-file-providers.mjs';
 import { readFile } from 'node:fs/promises';
 import {
   provisionPreview,
@@ -221,6 +223,31 @@ async function main() {
   });
   process.stdout.write(
     `Preview staff ready for PR #${result.pr} at ${result.sha.slice(0, 12)}\n`,
+  );
+  const vercelToken = process.env.PREVIEW_VERCEL_TOKEN;
+  const pins = {
+    projectId: process.env.PREVIEW_VERCEL_PROJECT_ID,
+    teamId: process.env.PREVIEW_VERCEL_TEAM_ID,
+  };
+  if (!vercelToken || !pins.projectId || !pins.teamId) {
+    process.stdout.write(
+      'Preview files: configuration missing; staff provisioning succeeded\n',
+    );
+    return;
+  }
+  const providers = fileProviders({ managementToken, vercelToken, pins });
+  await provisionPreviewFiles({
+    repository,
+    number: result.pr,
+    expectedSha: result.sha,
+    github,
+    management,
+    pins,
+    ...providers,
+    pause: () => new Promise((resolve) => setTimeout(resolve, 5000)),
+  });
+  process.stdout.write(
+    `Preview files ready for PR #${result.pr} at ${result.sha.slice(0, 12)}\n`,
   );
 }
 await main().catch((error) => {

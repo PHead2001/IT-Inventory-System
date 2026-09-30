@@ -76,6 +76,11 @@ it('resolves exact mixed IDs in one caller-scoped request and maps stable QR rou
         state: 'active',
         tag: null,
         category_name: null,
+        manufacturer: null,
+        model: null,
+        serial_number: null,
+        location_hierarchy: 'Renamed room',
+        holding_context: 'Renamed room',
       },
       {
         kind: 'quantity',
@@ -86,6 +91,11 @@ it('resolves exact mixed IDs in one caller-scoped request and maps stable QR rou
         tag: null,
         item_code: '0001-A/B',
         category_name: 'Adapters',
+        manufacturer: 'Acme',
+        model: '3FT 10Gbps',
+        serial_number: null,
+        location_hierarchy: null,
+        holding_context: 'ITC-S1A: 8',
       },
     ],
     error: null,
@@ -104,6 +114,13 @@ it('resolves exact mixed IDs in one caller-scoped request and maps stable QR rou
   ]);
   expect(result[1].state).toBe('archived');
   expect(result[1].humanId).toBe('0001-A/B');
+  expect(result[1].holdingContext).toBe('ITC-S1A: 8');
+  expect(result[1]).toMatchObject({
+    categoryName: 'Adapters',
+    manufacturer: 'Acme',
+    model: '3FT 10Gbps',
+    locationHierarchy: null,
+  });
 });
 
 it('rejects duplicate/oversized input before the RPC and propagates read failure', async () => {

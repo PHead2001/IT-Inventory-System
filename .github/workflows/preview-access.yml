@@ -15,7 +15,7 @@ permissions:
 jobs:
   discover:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, it-inventory-light]
     timeout-minutes: 2
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
@@ -35,8 +35,8 @@ jobs:
   provision:
     needs: discover
     if: github.ref == 'refs/heads/main' && needs.discover.outputs.count != '0'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 15
     environment: preview-access
     strategy:
       fail-fast: false
@@ -61,4 +61,7 @@ jobs:
           PREVIEW_SUPABASE_MANAGEMENT_TOKEN: ${{ secrets.PREVIEW_SUPABASE_MANAGEMENT_TOKEN }}
           PREVIEW_STAFF_PASSWORD: ${{ secrets.PREVIEW_STAFF_PASSWORD }}
           PREVIEW_ALLOW_SIX_DIGIT_MINIMUM: ${{ vars.PREVIEW_ALLOW_SIX_DIGIT_MINIMUM }}
+          PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+          PREVIEW_VERCEL_PROJECT_ID: ${{ vars.PREVIEW_VERCEL_PROJECT_ID }}
+          PREVIEW_VERCEL_TEAM_ID: ${{ vars.PREVIEW_VERCEL_TEAM_ID }}
           PREVIEW_TARGET_PR: ${{ matrix.pr }}

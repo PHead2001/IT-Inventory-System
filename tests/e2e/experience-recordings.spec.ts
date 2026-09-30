@@ -21,7 +21,7 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -52,8 +52,13 @@ test('records navigation, a held designer drag and resize, and the saved form', 
       nodes.map((node) => node.getAttribute('data-control-id')),
     );
   const before = await order();
+  await designer
+    .locator('[data-control-id]:has(button[aria-label="Drag Category"])')
+    .press('Enter');
   const source = designer.getByRole('button', { name: 'Drag Category' });
-  const target = designer.getByRole('button', { name: 'Drag Name' });
+  const target = designer.locator(
+    '[data-control-id]:has(button[aria-label="Drag Name"])',
+  );
   await source.scrollIntoViewIfNeeded();
   const from = await source.boundingBox();
   const to = await target.boundingBox();
@@ -71,8 +76,8 @@ test('records navigation, a held designer drag and resize, and the saved form', 
   const name = designer.locator(
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
-  await name.getByText('Layout options').click();
-  const width = name.getByLabel('Width');
+  await name.press('Enter');
+  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
   await width.selectOption('12');
   const handle = name.getByRole('button', { name: 'Resize Name' });
   await handle.scrollIntoViewIfNeeded();

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { motion } from 'motion/react';
 import { DragDropProvider, DragOverlay, useDroppable } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
@@ -26,6 +27,9 @@ import {
   verifyMetadataDesignerIdentity,
 } from './actions';
 import { MetadataFormPreview } from './metadata-form';
+import { RecoveryLibrary } from './recovery-library';
+import { controlKinds, kindLabel } from './effective-controls';
+import styles from './designer.module.css';
 import { controlLayoutStyle } from './control-layout';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 import {
@@ -36,6 +40,7 @@ import {
 } from './designer-recovery';
 import {
   builtins,
+  controlMoveBlockReason,
   designerIssues,
   initialDefinition,
   moveControl,
@@ -344,16 +349,297 @@ function FieldPanel({
   );
 }
 
+function ControlShape({
+  control,
+  field,
+  categoryName,
+}: {
+  control: Control;
+  field?: Field;
+  categoryName: string;
+}) {
+  const type = field?.type;
+  if (control.kind === 'help')
+    return (
+      <p
+        data-testid="designer-control-preview"
+        className="min-h-10 text-sm text-slate-400"
+      >
+        {control.help || 'Add helpful instructions…'}
+      </p>
+    );
+  const multiline = type === 'long_text' || control.builtin === 'description';
+  const choice =
+    (type && selectTypes.includes(type)) || control.builtin === 'category_id';
+  return (
+    <div
+      data-testid="designer-control-preview"
+      aria-hidden="true"
+      className={`${styles.fieldShape} ${multiline ? styles.multilineShape : ''} ${type === 'boolean' ? styles.booleanShape : ''}`}
+    >
+      {type === 'boolean' ? (
+        <>
+          <span className={styles.checkboxShape} />
+          Yes / No
+        </>
+      ) : (
+        <>
+          <span className="truncate">
+            {control.builtin === 'category_id'
+              ? categoryName
+              : choice
+                ? 'Choose an option…'
+                : type === 'date'
+                  ? 'mm / dd / yyyy'
+                  : type === 'datetime'
+                    ? 'Date and time'
+                    : type === 'integer' ||
+                        type === 'decimal' ||
+                        type === 'currency' ||
+                        control.builtin === 'reorder_threshold'
+                      ? '0'
+                      : 'Enter a value…'}
+          </span>
+          {choice && <span>⌄</span>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ControlProperties({
+  definition,
+  section,
+  control,
+  updateControl,
+  move,
+  edit,
+}: {
+  definition: MetadataDefinition;
+  section: MetadataDefinition['layout'][number];
+  control: Control;
+  updateControl: (id: string, patch: Partial<Control>) => void;
+  move: (id: string, sectionId: string, index: number) => void;
+  edit: (next: MetadataDefinition) => void;
+}) {
+  const index = section.controls.indexOf(control);
+  const field = definition.fields.find((item) => item.id === control.field_id);
+  const name =
+    control.kind === 'field'
+      ? field?.label || 'Missing field'
+      : control.kind === 'builtin'
+        ? builtinLabel(control.builtin ?? '')
+        : 'Help text';
+  return (
+    <section
+      aria-label={`${name} layout properties`}
+      className="rounded-lg border border-slate-700 bg-slate-900/60 p-3"
+    >
+      <h4 className="font-medium">{name}</h4>
+      <p className="mt-1 text-xs text-slate-400">
+        {kindLabel(controlKinds(definition, section, control))} · Layout
+        properties
+      </p>
+      {section.visible === false && (
+        <p className="mt-2 text-xs text-amber-200">
+          Hidden by its section. Restore the section in Hidden &amp; unplaced to
+          show this control.
+        </p>
+      )}
+      <div className="space-y-2 pb-2 pt-1">
+        {control.kind === 'help' && (
+          <label className="block">
+            Help text
+            <textarea
+              className={input}
+              rows={2}
+              value={control.help ?? ''}
+              onChange={(event) =>
+                updateControl(control.id, {
+                  help: event.target.value,
+                })
+              }
+            />
+          </label>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-xs">
+            <input
+              type="checkbox"
+              checked={control.visible !== false}
+              disabled={
+                control.kind === 'builtin' &&
+                ['name', 'category_id', 'asset_tag'].includes(
+                  control.builtin ?? '',
+                )
+              }
+              onChange={(event) =>
+                updateControl(control.id, {
+                  visible: event.target.checked,
+                })
+              }
+            />{' '}
+            Show control
+          </label>
+          <select
+            aria-label={`Applies to ${name}`}
+            className={input}
+            value={controlKinds(definition, section, control).join(',')}
+            disabled={
+              control.kind === 'builtin' &&
+              ['name', 'category_id', 'asset_tag'].includes(
+                control.builtin ?? '',
+              )
+            }
+            onChange={(event) =>
+              updateControl(control.id, {
+                applies_to: event.target.value.split(',') as (
+                  'quantity' | 'asset'
+                )[],
+              })
+            }
+          >
+            {controlKinds(definition, section, control).length === 0 && (
+              <option value="" disabled>
+                No form type
+              </option>
+            )}
+            {controlKinds(definition, section, {
+              ...control,
+              applies_to: ['quantity', 'asset'],
+            }).length === 2 && <option value="quantity,asset">Both</option>}
+            {controlKinds(definition, section, {
+              ...control,
+              applies_to: ['quantity', 'asset'],
+            }).includes('quantity') && (
+              <option value="quantity">Quantity</option>
+            )}
+            {controlKinds(definition, section, {
+              ...control,
+              applies_to: ['quantity', 'asset'],
+            }).includes('asset') && <option value="asset">Serialized</option>}
+          </select>
+          <p className="col-span-2 text-xs text-slate-400">
+            Effective form types also follow this section, the field definition,
+            and standard control restrictions.
+          </p>
+          <label className="text-xs">
+            Section
+            <select
+              className={input}
+              value={section.id}
+              onChange={(event) =>
+                move(
+                  control.id,
+                  event.target.value,
+                  definition.layout.find(
+                    (item) => item.id === event.target.value,
+                  )?.controls.length ?? 0,
+                )
+              }
+            >
+              {definition.layout.map((item) => {
+                const reason = controlMoveBlockReason(
+                  definition,
+                  control.id,
+                  item.id,
+                );
+                return (
+                  <option
+                    key={item.id}
+                    value={item.id}
+                    disabled={Boolean(reason)}
+                  >
+                    {item.label || 'Untitled'} · {item.id.slice(-8)}
+                    {reason ? ` — unavailable: ${reason}` : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          {definition.layout.some((item) =>
+            controlMoveBlockReason(definition, control.id, item.id),
+          ) && (
+            <p className="col-span-2 text-xs text-amber-200">
+              Unavailable sections are hidden, exclude this control’s form
+              types, or cannot preserve its scope.
+            </p>
+          )}
+          <label className="text-xs">
+            Width
+            <select
+              className={input}
+              value={control.width}
+              onChange={(event) =>
+                updateControl(control.id, {
+                  width:
+                    event.target.value === 'Auto'
+                      ? 'Auto'
+                      : (Number(event.target.value) as Control['width']),
+                })
+              }
+            >
+              {widths.map((width) => (
+                <option key={width} value={width}>
+                  {width === 'Auto' ? 'Auto' : `${width}/12`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <button
+            type="button"
+            className="min-h-11 px-2 underline"
+            disabled={index === 0}
+            onClick={() => move(control.id, section.id, index - 1)}
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            className="min-h-11 px-2 underline"
+            disabled={index === section.controls.length - 1}
+            onClick={() => move(control.id, section.id, index + 2)}
+          >
+            Move down
+          </button>
+          <button
+            type="button"
+            className="min-h-11 px-2 text-rose-300 underline"
+            disabled={control.kind === 'builtin'}
+            onClick={() =>
+              edit({
+                ...definition,
+                layout: definition.layout.map((item) => ({
+                  ...item,
+                  controls: item.controls.filter(
+                    (candidate) => candidate.id !== control.id,
+                  ),
+                })),
+              })
+            }
+          >
+            Remove control
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type HandleRef = (element: Element | null) => void;
 function SortableSection({
   id,
   index,
   selected,
+  hidden,
   children,
 }: {
   id: string;
   index: number;
   selected: boolean;
+  hidden: boolean;
   children: (handleRef: HandleRef) => ReactNode;
 }) {
   const { ref, handleRef, isDragging } = useSortable({
@@ -367,7 +653,8 @@ function SortableSection({
     <div
       ref={ref}
       data-section-id={id}
-      className={`min-w-0 space-y-3 rounded border p-3 ${selected ? 'border-cyan-400' : 'border-slate-700'} ${isDragging ? 'opacity-40' : ''}`}
+      data-hidden={hidden}
+      className={`min-w-0 space-y-3 rounded border p-3 ${hidden ? 'border-dashed border-amber-600/70 bg-amber-500/5' : selected ? 'border-cyan-400' : 'border-slate-700'} ${isDragging ? 'opacity-40' : ''}`}
     >
       {children(handleRef)}
     </div>
@@ -375,36 +662,58 @@ function SortableSection({
 }
 function SortableControl({
   id,
+  name,
   index,
   sectionId,
   style,
   selected,
+  hidden,
   children,
   onClick,
+  canReceive,
 }: {
   id: string;
   index: number;
+  name: string;
   sectionId: string;
   style: React.CSSProperties;
   selected: boolean;
+  hidden: boolean;
   children: (handleRef: HandleRef) => ReactNode;
   onClick: () => void;
+  canReceive: (controlId: string) => boolean;
 }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: `control:${id}`,
     index,
     group: sectionId,
     type: 'control',
-    accept: 'control',
+    accept: (source) =>
+      String(source.id).startsWith('control:') &&
+      canReceive(String(source.id).slice(8)),
   });
   return (
     <div
       ref={ref}
       data-control-id={id}
       data-dragging={isDragging}
+      data-selected={selected}
+      data-hidden={hidden}
+      tabIndex={0}
       style={style}
       onClick={onClick}
-      className={`min-w-0 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-slate-600'} ${isDragging ? 'opacity-40' : ''}`}
+      onFocus={onClick}
+      aria-label={`Select ${name} control`}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          ['Enter', ' '].includes(event.key)
+        ) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      className={`${styles.control} relative min-w-0 rounded border p-2 text-sm ${selected ? 'border-cyan-400' : 'border-transparent'} ${isDragging ? 'opacity-40' : ''}`}
     >
       <div
         className={`min-w-0 space-y-2 rounded ${selected ? 'bg-cyan-400/[0.04] shadow-[0_8px_22px_-12px_rgba(34,211,238,0.9)]' : ''}`}
@@ -416,22 +725,34 @@ function SortableControl({
 }
 function SectionDropArea({
   id,
+  definition,
+  draggingControlId,
   children,
 }: {
   id: string;
+  definition: MetadataDefinition;
+  draggingControlId: string | null;
   children: ReactNode;
 }) {
+  const blockReason = draggingControlId
+    ? controlMoveBlockReason(definition, draggingControlId, id)
+    : null;
   const { ref, isDropTarget } = useDroppable({
     id: `empty:${id}`,
     type: 'control',
-    accept: 'control',
+    accept: (source) =>
+      String(source.id).startsWith('control:') &&
+      controlMoveBlockReason(definition, String(source.id).slice(8), id) ===
+        null,
     data: { sectionId: id },
   });
   return (
     <div
       ref={ref}
       data-drop-target={isDropTarget}
-      className={`flex min-h-20 flex-wrap gap-3 rounded border border-dashed p-2 ${isDropTarget ? 'border-cyan-400 bg-cyan-400/10' : 'border-slate-700'}`}
+      data-drop-compatible={draggingControlId ? !blockReason : undefined}
+      title={blockReason ?? undefined}
+      className={`${styles.dropArea} flex min-h-20 flex-wrap gap-3 rounded border border-dashed p-2 ${blockReason ? 'border-amber-700/60 bg-amber-500/5' : isDropTarget ? 'border-cyan-400 bg-cyan-400/10' : 'border-slate-700'}`}
     >
       {children}
     </div>
@@ -448,6 +769,7 @@ export function MetadataSettings({
   memberId: string;
 }) {
   const router = useRouter();
+  const reducedMotion = useEffectiveReducedMotion();
   const active = categories.filter((category) => category.active);
   const [categoryId, setCategoryId] = useState(active[0]?.id ?? '');
   const selected = forms[categoryId];
@@ -513,10 +835,16 @@ export function MetadataSettings({
   const [selectedControlId, setSelectedControlId] = useState<string | null>(
     null,
   );
+  const [removeSectionId, setRemoveSectionId] = useState<string | null>(null);
+  const [removeDestinationId, setRemoveDestinationId] = useState('');
+  const removeDialogRef = useRef<HTMLDialogElement>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(
     selected?.published_definition.fields[0]?.id ?? null,
   );
   const dndBaseline = useRef<MetadataDefinition | null>(null);
+  const [draggingControlId, setDraggingControlId] = useState<string | null>(
+    null,
+  );
   const gesture = useRef<{
     kind: 'resize';
     id: string;
@@ -533,6 +861,7 @@ export function MetadataSettings({
     identityCheck.current += 1;
     gesture.current = null;
     dndBaseline.current = null;
+    setDraggingControlId(null);
     definitionRef.current = null;
     editEpoch.current += 1;
     setDefinition(null);
@@ -545,12 +874,25 @@ export function MetadataSettings({
     setSelectedFieldId(null);
     setSelectedControlId(null);
     setSelectedSectionId(null);
+    setRemoveSectionId(null);
     clearDesignerRecovery(memberId, categoryId);
     setIdentityStatus('blocked');
   }, [memberId, categoryId]);
   useEffect(() => {
     definitionRef.current = definition;
   }, [definition]);
+  useEffect(() => {
+    const dialog = removeDialogRef.current;
+    if (!dialog) return;
+    if (removeSectionId && !dialog.open) {
+      if (dialog.showModal) dialog.showModal();
+      else dialog.setAttribute('open', ''); // jsdom lacks native dialog methods.
+    }
+    if (!removeSectionId && dialog.open) {
+      if (dialog.close) dialog.close();
+      else dialog.removeAttribute('open');
+    }
+  }, [removeSectionId]);
   const [previewVersion, setPreviewVersion] = useState(0);
   const refreshRequested = useRef(false);
   const dirty = definition !== null && JSON.stringify(definition) !== saved;
@@ -712,6 +1054,7 @@ export function MetadataSettings({
     setHistory([]);
     setAdvancedJson('');
     setAdvancedError('');
+    setRemoveSectionId(null);
     setMessage('');
   };
   useEffect(() => {
@@ -920,6 +1263,7 @@ export function MetadataSettings({
     const first =
       definition.layout.find((section) => section.id === selectedSectionId) ??
       definition.layout[0];
+    const controlId = newId();
     edit({
       fields: [...definition.fields, field],
       layout: first
@@ -930,7 +1274,7 @@ export function MetadataSettings({
                   controls: [
                     ...section.controls,
                     {
-                      id: newId(),
+                      id: controlId,
                       kind: 'field',
                       field_id: field.id,
                       width: 'Auto',
@@ -945,7 +1289,7 @@ export function MetadataSettings({
               label: 'Details',
               controls: [
                 {
-                  id: newId(),
+                  id: controlId,
                   kind: 'field',
                   field_id: field.id,
                   width: 'Auto',
@@ -954,6 +1298,7 @@ export function MetadataSettings({
             },
           ],
     });
+    setSelectedControlId(controlId);
     setSelectedFieldId(field.id);
     setSelectedSectionId(first?.id ?? null);
     setMobilePanel('inspector');
@@ -1075,6 +1420,7 @@ export function MetadataSettings({
     };
   });
   const finishDnd = (canceled: boolean) => {
+    setDraggingControlId(null);
     const baseline = dndBaseline.current;
     dndBaseline.current = null;
     if (terminalDenied.current || !baseline) return;
@@ -1096,6 +1442,26 @@ export function MetadataSettings({
   );
   const selectedFieldIndex =
     selectedField && definition ? definition.fields.indexOf(selectedField) : -1;
+  const selectedControlSection = definition?.layout.find((section) =>
+    section.controls.some((control) => control.id === selectedControlId),
+  );
+  const selectedControl = selectedControlSection?.controls.find(
+    (control) => control.id === selectedControlId,
+  );
+  const confirmSectionRemoval = () => {
+    if (!definition || !removeSectionId) return;
+    const next = removeSection(
+      definition,
+      removeSectionId,
+      removeDestinationId || null,
+    );
+    if (next === definition) return;
+    edit(next);
+    setSelectedSectionId(removeDestinationId || null);
+    setSelectedControlId(null);
+    setSelectedFieldId(null);
+    setRemoveSectionId(null);
+  };
   return (
     <section
       className="min-w-0 space-y-5 rounded-lg border border-slate-700 p-3 sm:p-4"
@@ -1163,6 +1529,29 @@ export function MetadataSettings({
             {draftVersion !== '0' ? ' · Legacy draft available' : ''}
             {dirty ? ' · Unsaved changes' : ' · Saved'}
           </p>
+          {!recovery && (
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-500/30 bg-slate-950/95 p-2 shadow-lg backdrop-blur-sm xl:top-20">
+              <Button
+                type="button"
+                disabled={
+                  operationPending ||
+                  pending ||
+                  !definition ||
+                  issues.length > 0 ||
+                  identityStatus !== 'verified' ||
+                  (!dirty && draftVersion === '0')
+                }
+                onClick={() => saveChanges()}
+              >
+                {operationPending ? 'Saving…' : 'Save changes'}
+              </Button>
+              <span role="status" className="text-sm text-slate-300">
+                {operationPending
+                  ? 'Saving the form…'
+                  : message || (dirty ? 'Ready to save' : 'All changes saved')}
+              </span>
+            </div>
+          )}
           {recovery && (
             <div
               role="region"
@@ -1382,8 +1771,12 @@ export function MetadataSettings({
                 ))}
               </nav>
               <DragDropProvider
-                onDragStart={() => {
+                onDragStart={(event) => {
                   if (terminalDenied.current) return;
+                  const sourceId = String(event.operation.source?.id ?? '');
+                  setDraggingControlId(
+                    sourceId.startsWith('control:') ? sourceId.slice(8) : null,
+                  );
                   if (definitionRef.current)
                     dndBaseline.current = copy(definitionRef.current);
                 }}
@@ -1520,31 +1913,11 @@ export function MetadataSettings({
                         </button>
                       ))}
                     </div>
-                    <div className="rounded-lg border border-slate-700 p-3 text-sm">
-                      <h4 className="font-semibold">Hidden controls</h4>
-                      {definition.layout
-                        .flatMap((section) => section.controls)
-                        .filter((control) => control.visible === false)
-                        .map((control) => (
-                          <button
-                            className="block min-h-10 break-words text-left text-cyan-200 underline"
-                            type="button"
-                            key={control.id}
-                            onClick={() =>
-                              updateControl(control.id, { visible: true })
-                            }
-                          >
-                            Restore{' '}
-                            {control.kind === 'builtin'
-                              ? builtinLabel(control.builtin ?? '')
-                              : control.kind === 'field'
-                                ? definition.fields.find(
-                                    (field) => field.id === control.field_id,
-                                  )?.label
-                                : 'help text'}
-                          </button>
-                        ))}
-                    </div>
+                    <RecoveryLibrary
+                      definition={definition}
+                      previewKind={previewKind}
+                      change={edit}
+                    />
                   </div>
                   <div
                     data-testid="designer-canvas"
@@ -1564,6 +1937,8 @@ export function MetadataSettings({
                           ],
                         });
                         setSelectedSectionId(id);
+                        setSelectedControlId(null);
+                        setSelectedFieldId(null);
                         requestAnimationFrame(() =>
                           document
                             .querySelector<HTMLElement>(
@@ -1581,6 +1956,7 @@ export function MetadataSettings({
                         id={section.id}
                         index={sectionIndex}
                         selected={selectedSectionId === section.id}
+                        hidden={section.visible === false}
                       >
                         {(sectionHandleRef) => (
                           <>
@@ -1599,6 +1975,7 @@ export function MetadataSettings({
                                 onClick={() => {
                                   setSelectedSectionId(section.id);
                                   setSelectedControlId(null);
+                                  setSelectedFieldId(null);
                                   setMobilePanel('inspector');
                                 }}
                               >
@@ -1606,7 +1983,9 @@ export function MetadataSettings({
                               </Button>
                               <label className="min-w-40 flex-1 text-sm">
                                 Section heading
+                                {section.visible === false ? ' · Hidden' : ''}
                                 <input
+                                  aria-label="Section heading"
                                   className={input}
                                   value={section.label}
                                   onChange={(event) =>
@@ -1729,55 +2108,19 @@ export function MetadataSettings({
                                   <Button
                                     type="button"
                                     variant="outline"
-                                    disabled={
-                                      sectionHasProtectedControls(section) ||
-                                      section.id ===
-                                        selected?.published_definition.layout[0]
-                                          ?.id ||
-                                      definition.layout.length === 1
-                                    }
+                                    disabled={definition.layout.length === 1}
                                     onClick={() => {
-                                      const destinations =
-                                        definition.layout.filter(
-                                          (item) => item.id !== section.id,
-                                        );
-                                      const destination = section.controls
-                                        .length
-                                        ? window.prompt(
-                                            `Move ${section.controls.length} controls to which section? Enter a section name, or leave blank to remove custom field placements. Definitions and stored values remain.`,
-                                            destinations[0]?.label ?? '',
-                                          )
-                                        : '';
-                                      if (destination === null) return;
-                                      const target = destination.trim()
-                                        ? destinations.find(
-                                            (item) =>
-                                              item.label.toLowerCase() ===
-                                              destination.trim().toLowerCase(),
-                                          )
-                                        : null;
-                                      if (destination.trim() && !target) {
-                                        setMessage(
-                                          'Choose an existing section name.',
-                                        );
-                                        return;
-                                      }
-                                      const next = removeSection(
-                                        definition,
-                                        section.id,
-                                        target?.id ?? null,
-                                      );
-                                      if (next === definition) {
-                                        setMessage(
-                                          'This section contains protected or standard controls. Move or show those controls before removing it.',
-                                        );
-                                        return;
-                                      }
-                                      edit(next);
-                                      setSelectedSectionId(
-                                        target?.id ??
-                                          destinations[0]?.id ??
-                                          null,
+                                      setRemoveSectionId(section.id);
+                                      setRemoveDestinationId(
+                                        definition.layout.find(
+                                          (item) =>
+                                            item.id !== section.id &&
+                                            removeSection(
+                                              definition,
+                                              section.id,
+                                              item.id,
+                                            ) !== definition,
+                                        )?.id ?? '',
                                       );
                                     }}
                                   >
@@ -1786,7 +2129,11 @@ export function MetadataSettings({
                                 </div>
                               </details>
                             </div>
-                            <SectionDropArea id={section.id}>
+                            <SectionDropArea
+                              id={section.id}
+                              definition={definition}
+                              draggingControlId={draggingControlId}
+                            >
                               {section.controls.map((control, index) => {
                                 const field = definition.fields.find(
                                   (item) => item.id === control.field_id,
@@ -1801,9 +2148,14 @@ export function MetadataSettings({
                                   <SortableControl
                                     key={control.id}
                                     id={control.id}
+                                    name={name}
                                     index={index}
                                     sectionId={section.id}
                                     selected={selectedControlId === control.id}
+                                    hidden={
+                                      section.visible === false ||
+                                      control.visible === false
+                                    }
                                     onClick={() => {
                                       setSelectedControlId(control.id);
                                       setSelectedSectionId(section.id);
@@ -1815,48 +2167,74 @@ export function MetadataSettings({
                                       control.width,
                                       field?.type === 'boolean',
                                     )}
+                                    canReceive={(sourceId) =>
+                                      controlMoveBlockReason(
+                                        definition,
+                                        sourceId,
+                                        section.id,
+                                      ) === null
+                                    }
                                   >
                                     {(controlHandleRef) => (
                                       <>
                                         <div className="min-w-0 space-y-2">
-                                          <span
-                                            data-testid="designer-control-name"
-                                            className="block min-w-0 break-words font-medium [overflow-wrap:anywhere]"
+                                          <div className="flex min-w-0 items-start justify-between gap-2">
+                                            <span
+                                              data-testid="designer-control-name"
+                                              className="block min-w-0 break-words font-medium [overflow-wrap:anywhere]"
+                                            >
+                                              {name}
+                                              {field?.required ||
+                                              ['name', 'category_id'].includes(
+                                                control.builtin ?? '',
+                                              )
+                                                ? ' *'
+                                                : ''}
+                                              {section.visible === false ||
+                                              control.visible === false
+                                                ? ' · Hidden'
+                                                : ''}
+                                            </span>
+                                            <span
+                                              title="Form types using this control"
+                                              className="shrink-0 text-[10px] text-slate-400"
+                                            >
+                                              {kindLabel(
+                                                controlKinds(
+                                                  definition,
+                                                  section,
+                                                  control,
+                                                ),
+                                              )}
+                                            </span>
+                                          </div>
+                                          <ControlShape
+                                            control={control}
+                                            field={field}
+                                            categoryName={
+                                              categories.find(
+                                                (item) =>
+                                                  item.id === categoryId,
+                                              )?.name ?? 'Choose category'
+                                            }
+                                          />
+                                          <div
+                                            className={styles.controlActions}
                                           >
-                                            {name}
-                                          </span>
-                                          <div className="flex flex-wrap items-center gap-2">
                                             <button
                                               type="button"
                                               aria-label={`Drag ${name}`}
                                               ref={controlHandleRef}
                                               title="Drag to reorder"
-                                              className="min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1"
+                                              className={`${styles.controlAction} min-h-11 min-w-11 cursor-grab touch-none select-none rounded border px-2 py-1`}
                                             >
                                               ⋮⋮
                                             </button>
-                                            <span className="shrink-0 rounded-full border border-slate-600 px-2 py-1 text-[10px] text-slate-300">
-                                              {control.width === 'Auto'
-                                                ? 'Auto'
-                                                : `${control.width}/12`}
-                                            </span>
-                                            <span
-                                              title="Form types using this control"
-                                              className="shrink-0 rounded-full border border-slate-600 px-2 py-1 text-[10px] text-slate-300"
-                                            >
-                                              {(control.applies_to?.length ??
-                                                2) > 1
-                                                ? 'Q + A'
-                                                : control.applies_to?.[0] ===
-                                                    'quantity'
-                                                  ? 'Q'
-                                                  : 'A'}
-                                            </span>
                                             <button
                                               type="button"
                                               aria-label={`Resize ${name}`}
                                               title="Drag to snap width; width selector is also available"
-                                              className="min-h-11 min-w-11 cursor-ew-resize touch-none select-none rounded border border-slate-600 px-2 text-xs text-cyan-200"
+                                              className={`${styles.controlAction} min-h-11 min-w-11 cursor-ew-resize touch-none select-none rounded border border-slate-600 px-2 text-xs text-cyan-200`}
                                               onPointerDown={(event) =>
                                                 beginResize(
                                                   control.id,
@@ -1884,215 +2262,6 @@ export function MetadataSettings({
                                             </button>
                                           </div>
                                         </div>
-                                        <details className="rounded border border-slate-700/70 px-2 py-1">
-                                          <summary className="min-h-9 cursor-pointer py-2 text-xs font-medium text-cyan-200">
-                                            Layout options
-                                          </summary>
-                                          <div className="space-y-2 pb-2 pt-1">
-                                            {control.kind === 'help' && (
-                                              <label className="block">
-                                                Help text
-                                                <textarea
-                                                  className={input}
-                                                  rows={2}
-                                                  value={control.help ?? ''}
-                                                  onChange={(event) =>
-                                                    updateControl(control.id, {
-                                                      help: event.target.value,
-                                                    })
-                                                  }
-                                                />
-                                              </label>
-                                            )}
-                                            <div className="grid grid-cols-2 gap-2">
-                                              <label className="text-xs">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={
-                                                    control.visible !== false
-                                                  }
-                                                  disabled={
-                                                    control.kind ===
-                                                      'builtin' &&
-                                                    [
-                                                      'name',
-                                                      'category_id',
-                                                      'asset_tag',
-                                                    ].includes(
-                                                      control.builtin ?? '',
-                                                    )
-                                                  }
-                                                  onChange={(event) =>
-                                                    updateControl(control.id, {
-                                                      visible:
-                                                        event.target.checked,
-                                                    })
-                                                  }
-                                                />{' '}
-                                                Show control
-                                              </label>
-                                              <select
-                                                aria-label={`Applies to ${name}`}
-                                                className={input}
-                                                value={(
-                                                  control.applies_to ?? [
-                                                    'quantity',
-                                                    'asset',
-                                                  ]
-                                                ).join(',')}
-                                                disabled={
-                                                  control.kind === 'builtin' &&
-                                                  [
-                                                    'name',
-                                                    'category_id',
-                                                    'asset_tag',
-                                                  ].includes(
-                                                    control.builtin ?? '',
-                                                  )
-                                                }
-                                                onChange={(event) =>
-                                                  updateControl(control.id, {
-                                                    applies_to:
-                                                      event.target.value.split(
-                                                        ',',
-                                                      ) as (
-                                                        'quantity' | 'asset'
-                                                      )[],
-                                                  })
-                                                }
-                                              >
-                                                <option value="quantity,asset">
-                                                  Both
-                                                </option>
-                                                <option value="quantity">
-                                                  Quantity
-                                                </option>
-                                                <option value="asset">
-                                                  Serialized
-                                                </option>
-                                              </select>
-                                              <label className="text-xs">
-                                                Section
-                                                <select
-                                                  className={input}
-                                                  value={section.id}
-                                                  onChange={(event) =>
-                                                    move(
-                                                      control.id,
-                                                      event.target.value,
-                                                      definition.layout.find(
-                                                        (item) =>
-                                                          item.id ===
-                                                          event.target.value,
-                                                      )?.controls.length ?? 0,
-                                                    )
-                                                  }
-                                                >
-                                                  {definition.layout.map(
-                                                    (item) => (
-                                                      <option
-                                                        key={item.id}
-                                                        value={item.id}
-                                                      >
-                                                        {item.label ||
-                                                          'Untitled'}
-                                                      </option>
-                                                    ),
-                                                  )}
-                                                </select>
-                                              </label>
-                                              <label className="text-xs">
-                                                Width
-                                                <select
-                                                  className={input}
-                                                  value={control.width}
-                                                  onChange={(event) =>
-                                                    updateControl(control.id, {
-                                                      width:
-                                                        event.target.value ===
-                                                        'Auto'
-                                                          ? 'Auto'
-                                                          : (Number(
-                                                              event.target
-                                                                .value,
-                                                            ) as Control['width']),
-                                                    })
-                                                  }
-                                                >
-                                                  {widths.map((width) => (
-                                                    <option
-                                                      key={width}
-                                                      value={width}
-                                                    >
-                                                      {width === 'Auto'
-                                                        ? 'Auto'
-                                                        : `${width}/12`}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </label>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2 text-xs">
-                                              <button
-                                                type="button"
-                                                className="min-h-11 px-2 underline"
-                                                disabled={index === 0}
-                                                onClick={() =>
-                                                  move(
-                                                    control.id,
-                                                    section.id,
-                                                    index - 1,
-                                                  )
-                                                }
-                                              >
-                                                Move up
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="min-h-11 px-2 underline"
-                                                disabled={
-                                                  index ===
-                                                  section.controls.length - 1
-                                                }
-                                                onClick={() =>
-                                                  move(
-                                                    control.id,
-                                                    section.id,
-                                                    index + 2,
-                                                  )
-                                                }
-                                              >
-                                                Move down
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="min-h-11 px-2 text-rose-300 underline"
-                                                disabled={
-                                                  control.kind === 'builtin'
-                                                }
-                                                onClick={() =>
-                                                  edit({
-                                                    ...definition,
-                                                    layout:
-                                                      definition.layout.map(
-                                                        (item) => ({
-                                                          ...item,
-                                                          controls:
-                                                            item.controls.filter(
-                                                              (candidate) =>
-                                                                candidate.id !==
-                                                                control.id,
-                                                            ),
-                                                        }),
-                                                      ),
-                                                  })
-                                                }
-                                              >
-                                                Remove control
-                                              </button>
-                                            </div>
-                                          </div>
-                                        </details>
                                       </>
                                     )}
                                   </SortableControl>
@@ -2191,6 +2360,16 @@ export function MetadataSettings({
                     aria-label="Designer inspector"
                   >
                     <h3 className="font-semibold">Inspector</h3>
+                    {selectedControl && selectedControlSection && (
+                      <ControlProperties
+                        definition={definition}
+                        section={selectedControlSection}
+                        control={selectedControl}
+                        updateControl={updateControl}
+                        move={move}
+                        edit={edit}
+                      />
+                    )}
                     {selectedField ? (
                       <FieldPanel
                         key={selectedField.id}
@@ -2239,7 +2418,7 @@ export function MetadataSettings({
                           edit({ ...definition, fields });
                         }}
                       />
-                    ) : selectedSectionId ? (
+                    ) : selectedControl ? null : selectedSectionId ? (
                       <p className="text-sm text-slate-400">
                         Section{' '}
                         {
@@ -2259,8 +2438,11 @@ export function MetadataSettings({
                 <DragOverlay dropAnimation={null}>
                   {(source) => (
                     <motion.div
-                      initial={false}
+                      initial={
+                        reducedMotion ? false : { opacity: 0.88, scale: 0.96 }
+                      }
                       animate={{ opacity: 1, scale: 1 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.14 }}
                       className="rounded-lg border border-cyan-400 bg-slate-900 px-4 py-3 text-sm font-semibold shadow-2xl"
                     >
                       {String(source.id).startsWith('section:')
@@ -2286,6 +2468,111 @@ export function MetadataSettings({
                   )}
                 </DragOverlay>
               </DragDropProvider>
+              <dialog
+                ref={removeDialogRef}
+                aria-labelledby="remove-section-title"
+                onCancel={() => setRemoveSectionId(null)}
+                className="w-[min(92vw,34rem)] rounded-xl border border-cyan-500/40 bg-slate-950 p-5 text-slate-100 shadow-2xl backdrop:bg-slate-950/80"
+              >
+                {removeSectionId &&
+                  (() => {
+                    const section = definition.layout.find(
+                      (item) => item.id === removeSectionId,
+                    );
+                    if (!section) return null;
+                    const destinations = definition.layout.filter(
+                      (item) => item.id !== section.id,
+                    );
+                    const valid = destinations.filter(
+                      (item) =>
+                        removeSection(definition, section.id, item.id) !==
+                        definition,
+                    );
+                    const canUnplace =
+                      removeSection(definition, section.id, null) !==
+                      definition;
+                    return (
+                      <div className="space-y-4">
+                        <h3
+                          id="remove-section-title"
+                          className="text-lg font-semibold"
+                        >
+                          Remove {section.label || 'Untitled section'}?
+                        </h3>
+                        <p className="text-sm text-slate-300">
+                          Choose where its {section.controls.length} controls
+                          go. Duplicate section names are distinguished by ID.
+                          Definitions and stored values stay intact. You can
+                          undo this edit.
+                        </p>
+                        {section.controls.some(
+                          (control) =>
+                            control.kind === 'builtin' &&
+                            ['name', 'category_id', 'asset_tag'].includes(
+                              control.builtin ?? '',
+                            ),
+                        ) && (
+                          <p className="text-sm text-amber-200">
+                            Protected controls must move to a visible section
+                            that keeps them available to the correct form type.
+                          </p>
+                        )}
+                        <label className="block space-y-2 text-sm">
+                          Destination
+                          <select
+                            className={input}
+                            value={removeDestinationId}
+                            onChange={(event) =>
+                              setRemoveDestinationId(event.target.value)
+                            }
+                          >
+                            {valid.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.label || 'Untitled section'} ·{' '}
+                                {item.id.slice(-8)}
+                              </option>
+                            ))}
+                            {canUnplace && (
+                              <option value="">
+                                Unplace controls; keep definitions and values
+                              </option>
+                            )}
+                          </select>
+                        </label>
+                        {!valid.length && !canUnplace && (
+                          <p role="alert" className="text-sm text-amber-200">
+                            No valid destination preserves required and
+                            protected controls. Add or restore a compatible
+                            section first.
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            disabled={
+                              !(
+                                valid.some(
+                                  (item) => item.id === removeDestinationId,
+                                ) ||
+                                (canUnplace && removeDestinationId === '')
+                              )
+                            }
+                            onClick={confirmSectionRemoval}
+                          >
+                            Remove section
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setRemoveSectionId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+              </dialog>
               <details className="rounded-xl border border-slate-700 bg-slate-950/30">
                 <summary className="min-h-11 cursor-pointer px-3 py-2 font-semibold text-cyan-100">
                   Live preview · open quantity or asset form
@@ -2364,20 +2651,6 @@ export function MetadataSettings({
           )}
           {!recovery && (
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                disabled={
-                  operationPending ||
-                  pending ||
-                  !definition ||
-                  issues.length > 0 ||
-                  identityStatus !== 'verified' ||
-                  (!dirty && draftVersion === '0')
-                }
-                onClick={() => saveChanges()}
-              >
-                {operationPending ? 'Saving…' : 'Save changes'}
-              </Button>
               {draftVersion !== '0' && (
                 <>
                   <Button
@@ -2464,14 +2737,6 @@ export function MetadataSettings({
                 Cancel
               </Button>
             </div>
-          )}
-          {message && (
-            <p
-              role="status"
-              className="break-words rounded border border-cyan-700 p-3 text-sm"
-            >
-              {message}
-            </p>
           )}
         </>
       )}

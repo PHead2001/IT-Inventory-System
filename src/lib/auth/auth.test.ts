@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 import { confirmationSchema, passwordSchema } from './schemas';
 import { isActiveMember, mayMutateInventory } from './membership';
 const mocks = vi.hoisted(() => ({
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
   member: vi.fn(),
   from: vi.fn(),
+  eq: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: vi.fn(async () => ({
@@ -33,7 +35,13 @@ beforeEach(() => {
   vi.stubEnv('APP_ORIGIN', 'http://localhost:3000');
   vi.stubEnv('VERCEL_BRANCH_URL', undefined);
   vi.stubEnv('VERCEL_URL', undefined);
-  mocks.signInWithPassword.mockResolvedValue({ error: null });
+  mocks.signInWithPassword.mockResolvedValue({
+    data: {
+      user: { id: 'user' },
+      session: { access_token: 'test-access', refresh_token: 'test-refresh' },
+    },
+    error: null,
+  });
   mocks.signOut.mockResolvedValue({ error: null });
   mocks.verifyOtp.mockResolvedValue({ error: null });
   mocks.updateUser.mockResolvedValue({ error: null });
@@ -51,11 +59,13 @@ beforeEach(() => {
     },
     error: null,
   });
-  mocks.from.mockReturnValue({
-    select: () => ({ eq: () => ({ maybeSingle: mocks.member }) }),
-  });
+  mocks.eq.mockReturnValue({ maybeSingle: mocks.member });
+  mocks.from.mockReturnValue({ select: () => ({ eq: mocks.eq }) });
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 describe('auth boundaries', () => {
   it.each([
     [
@@ -143,6 +153,55 @@ describe('auth boundaries', () => {
         }),
       ),
     ).rejects.toThrow('REDIRECT:/inventory');
+    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
+  });
+  it('emits only fixed login spans and preserves the authorized redirect when enabled', async () => {
+    vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await expect(
+      login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).rejects.toThrow('REDIRECT:/inventory');
+    const events = info.mock.calls.map(([line]) =>
+      JSON.parse(String(line).slice('AUTH_DIAGNOSTIC '.length)),
+    );
+    expect(events.map((event) => event.stage)).toEqual([
+      'login.client',
+      'login.credentials',
+      'login.membership',
+      'login.total',
+    ]);
+    expect(new Set(events.map((event) => event.correlation)).size).toBe(1);
+    expect(info.mock.calls.flat().join(' ')).not.toContain(
+      'staff@example.test',
+    );
+  });
+  it('does not let a diagnostic logging failure change denial or credential errors', async () => {
+    vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('observer failed');
+    });
+    mocks.member.mockResolvedValue({ data: null, error: null });
+    await expect(
+      login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).rejects.toThrow('REDIRECT:/access-denied');
+    mocks.signInWithPassword.mockResolvedValue({
+      error: { message: 'secret internal detail' },
+    });
+    expect(
+      await login(
+        {},
+        form({ email: 'staff@example.test', password: 'Password123456' }),
+      ),
+    ).toEqual({ error: 'Unable to sign in. Check your email and password.' });
   });
   it('returns to a validated label only after checking current membership', async () => {
     await expect(
@@ -176,6 +235,36 @@ describe('auth boundaries', () => {
       ),
     ).rejects.toThrow('REDIRECT:/access-denied');
   });
+  it.each([
+    ['missing data', undefined],
+    ['missing user', { session: { access_token: 'a', refresh_token: 'r' } }],
+    [
+      'missing user ID',
+      { user: {}, session: { access_token: 'a', refresh_token: 'r' } },
+    ],
+    ['missing session', { user: { id: 'user' } }],
+    [
+      'missing access token',
+      { user: { id: 'user' }, session: { refresh_token: 'r' } },
+    ],
+    [
+      'missing refresh token',
+      { user: { id: 'user' }, session: { access_token: 'a' } },
+    ],
+  ])(
+    'rejects a %s sign-in response before membership',
+    async (_label, data) => {
+      mocks.signInWithPassword.mockResolvedValue({ data, error: null });
+      expect(
+        await login(
+          {},
+          form({ email: 'staff@example.test', password: 'Password123456' }),
+        ),
+      ).toEqual({ error: 'Unable to verify this account. Please try again.' });
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.getUser).not.toHaveBeenCalled();
+    },
+  );
   it('returns safe invalid-credential errors', async () => {
     mocks.signInWithPassword.mockResolvedValue({
       error: { message: 'internal details' },

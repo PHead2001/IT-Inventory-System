@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   maybeSingle: vi.fn(),
@@ -42,6 +42,29 @@ beforeEach(() => {
   mocks.from.mockReturnValue({
     select: () => ({ eq: () => ({ maybeSingle: mocks.maybeSingle }) }),
   });
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+it('logs the protected request decision without changing the fresh getUser and membership denial', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '1');
+  vi.stubEnv('VERCEL_ENV', 'preview');
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+  mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
+  await expect(requireMember()).rejects.toThrow('REDIRECT:/access-denied');
+  expect(mocks.getUser).toHaveBeenCalledTimes(1);
+  expect(mocks.maybeSingle).toHaveBeenCalledTimes(1);
+  const events = info.mock.calls.map(([line]) =>
+    JSON.parse(String(line).slice('AUTH_DIAGNOSTIC '.length)),
+  );
+  expect(events.map((event) => event.stage)).toEqual([
+    'member.client',
+    'member.getUser',
+    'member.membership',
+    'member.total',
+  ]);
+  expect(new Set(events.map((event) => event.correlation)).size).toBe(1);
 });
 it('rejects anonymous/invalid sessions before querying membership', async () => {
   mocks.getUser.mockResolvedValue({

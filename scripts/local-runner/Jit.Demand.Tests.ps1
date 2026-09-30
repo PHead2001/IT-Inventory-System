@@ -1,0 +1,90 @@
+# Offline actual-session regression: all host/API operations are fixture stubs.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Common.ps1')
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
+foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
+$base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-demand-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($base)
+$script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
+$config = [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral'; repo = 'example/fixture'; maxMinutes = 120; baseVhdx = 'fixture'; guestIp = 'fixture'; runnerGroupId = 1 }
+function Assert-Rejected([scriptblock] $Work) { $rejected = $false; try { & $Work } catch { $rejected = $true }; if (-not $rejected) { throw 'Demand fixture unexpectedly accepted unsafe input.' } }
+# Stub every host touch while retaining the actual session control flow/finally.
+foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-RunnerTransitionCheckpoint', 'Copy-Item', 'Assert-SessionAlive', 'Set-VM', 'Assert-RunnerVmLifecycle', 'Set-VMProcessor', 'Set-VMMemory', 'Assert-RunnerVmResources', 'Set-VMFirmware', 'Disable-VMIntegrationService', 'New-SeedDisk', 'Add-VMHardDiskDrive', 'Start-SessionGuardian', 'Assert-RunnerGuestMac', 'Start-GuardedVm', 'Wait-Guest', 'Assert-AdapterRules', 'Test-GuestIsolation')) { Set-Item -Path "Function:$name" -Value {} }
+function Enter-RunnerLock { return $null }
+function Exit-RunnerLock {}
+function Get-OwnerToken { return 'fixture' }
+function Wait-Guest {
+    # Withdraw the originally selected heavy demand during guest startup.
+    if ($script:case -eq 'cancelled') { $script:jobs[0].status = 'completed' }
+    elseif ($script:case -eq 'incompatible') { $script:jobs = @((New-Job 1 'it-inventory-ephemeral')) }
+}
+function Get-CimInstance { throw 'Postallocation capacity must not be inspected.' }
+function New-RunnerSshKey($Path) { [IO.File]::WriteAllText(($Path + '.pub'), 'fixture-public') }
+function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{} }
+function Get-VM { return [pscustomobject]@{ Notes = $script:RunnerTag } }
+function Get-VMIntegrationService { return @() }
+function Set-RunnerGuestMac { return [pscustomobject]@{ rawMac = 'fixture'; seedMac = 'fixture' } }
+function Get-HostNetworkFingerprint { return 'fixture' }
+function Set-IsolatedAdapter { return @() }
+function Get-RunnerArchive { return 'fixture' }
+function Get-SshArgs { return @() }
+function Invoke-RunnerNative { $script:nativeCalls++; return 0 }
+function Remove-RunnerInstance($State) { $script:cleanups++; Remove-Item -LiteralPath $script:RunnerStatePath }
+function New-Job([int] $Id, [string] $Label, [string] $Status = 'queued') { return [pscustomobject]@{ id = $Id; status = $Status; runner_id = 0; labels = @('self-hosted', $Label) } }
+function Invoke-GitHub($Uri, $Method, $Body, $Token) {
+    if ($Uri -match '/runs\?') { return [pscustomobject]@{ total_count = $script:runCount; workflow_runs = @([pscustomobject]@{ id = 12 }) } }
+    if ($Uri -match '/runs/12/jobs\?') { return [pscustomobject]@{ total_count = $script:jobCount; jobs = $script:jobs } }
+    if ($Uri -match '/generate-jitconfig$') {
+        $script:jits++
+        if (($Body.labels -join ',') -cne 'self-hosted,Linux,X64,it-inventory-heavy,it-inventory-mid,it-inventory-light') { throw 'Session lost downward compatibility at JIT submission.' }
+        $labels = @($Body.labels)
+        if ($script:badReadback) { $labels += 'it-inventory-ephemeral' }
+        return [pscustomobject]@{ encoded_jit_config = 'ZmFrZQ=='; runner = [pscustomobject]@{ name = $Body.name; id = 42; labels = @($labels | ForEach-Object { [pscustomobject]@{ name = $_ } }) } }
+    }
+    throw 'Unexpected API fixture operation.'
+}
+try {
+    $script:runCount = 1; $script:jobCount = 2; $script:badReadback = $false
+    foreach ($capacity in @('light', 'mid', 'heavy')) {
+        foreach ($demand in @('light', 'mid', 'heavy', 'ephemeral')) {
+            $script:jobs = @((New-Job 1 "it-inventory-$demand"))
+            $script:jobCount = 1
+            $selected = Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel "it-inventory-$capacity"
+            $expected = @('light', 'mid', 'heavy').IndexOf($demand) -ge 0 -and @('light', 'mid', 'heavy').IndexOf($demand) -le @('light', 'mid', 'heavy').IndexOf($capacity)
+            if (($null -ne $selected) -ne $expected) { throw 'Capacity compatibility matrix changed.' }
+        }
+    }
+    $script:jobs = @((New-Job 1 'it-inventory-light')); $script:jobCount = 1
+    if ($null -ne (Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-ephemeral')) { throw 'Legacy runner accepted normal demand.' }
+    $script:jobs = @((New-Job 1 'it-inventory-ephemeral'))
+    if ($null -eq (Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-ephemeral')) { throw 'Legacy singleton lost its own demand.' }
+    $script:jobs = @((New-Job 1 'it-inventory-heavy'), (New-Job 2 'it-inventory-light')); $script:jobCount = 2
+    if ((Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-mid').id -ne 2) { throw 'Demand scan stopped at an incompatible first job.' }
+    $script:runCount = 101
+    Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
+    $script:runCount = 1; $script:jobCount = 101
+    Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
+    $script:jobCount = 1
+    foreach ($case in @('cancelled', 'incompatible', 'lower', 'unexpected-readback', 'overflow')) {
+        $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0
+        $script:badReadback = $case -eq 'unexpected-readback'
+        $script:jobs = switch ($case) {
+            'cancelled' { New-Job 1 'it-inventory-heavy' }
+            'incompatible' { New-Job 1 'it-inventory-heavy' }
+            default { New-Job 1 'it-inventory-light' }
+        }
+        $script:jobCount = if ($case -eq 'overflow') { 101 } else { 1 }
+        if ($case -in @('unexpected-readback', 'overflow')) { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
+        else {
+            $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
+            if ($case -eq 'lower') { if ($result.id -ne 42 -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Compatible lower demand did not execute the actual session.' } }
+            elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne 2) { throw 'Withdrawn demand registered or executed an idle JIT.' }
+        }
+        if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }
+    }
+    Write-Host 'JIT demand passed: capacity matrix, queue filtering, overflow refusal, canceled startup, lower demand, exact readback and actual-session cleanup.'
+} finally {
+    if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -cne ([IO.Path]::GetTempPath()).TrimEnd('\') -or [IO.Path]::GetFileName($base) -notmatch '^ITIR-demand-[0-9a-f]{32}$') { throw 'Unexpected demand fixture cleanup path.' }
+    Remove-Item -LiteralPath $base -Recurse -Force
+}

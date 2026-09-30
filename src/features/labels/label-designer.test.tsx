@@ -64,6 +64,7 @@ const quantity: LiveLabel = {
   key: quantityId,
   name: 'Adapters',
   context: 'Cables',
+  holdingContext: 'ITC-S1A: 3',
   categoryName: 'Cables',
   state: 'active',
   tag: null,
@@ -75,6 +76,7 @@ const asset: LiveLabel = {
   key: assetId,
   name: 'Laptop',
   context: 'Computers / Shelf 1A',
+  holdingContext: 'Computers / Shelf 1A',
   categoryName: 'Computers',
   state: 'active',
   tag: 'lap-001',
@@ -102,6 +104,32 @@ beforeEach(() => {
     pageSize: 25,
   });
   vi.stubGlobal('print', vi.fn());
+});
+
+it('describes queued locations as locations while retaining inventory category fallbacks', async () => {
+  const location: LiveLabel = {
+    kind: 'location',
+    key: 'ITC-S1A',
+    name: 'Shelf 1A',
+    context: 'IT Closet / Shelf 1A',
+    holdingContext: 'IT Closet / Shelf 1A',
+    categoryName: null,
+    state: 'active',
+    tag: null,
+    barcode: 'ITC-S1A',
+    path: '/locations/ITC-S1A',
+  };
+  const uncategorized = { ...quantity, categoryName: null };
+  mocks.getQueueRecords.mockResolvedValue([location, uncategorized]);
+  render(<LabelDesigner {...props} initial={[location, uncategorized]} />);
+  await waitFor(() =>
+    expect(
+      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · active'),
+    ).toBeInTheDocument(),
+  );
+  expect(
+    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · active'),
+  ).toBeInTheDocument();
 });
 
 it('automatically validates the initial queue and prints only after final revalidation', async () => {
@@ -132,6 +160,40 @@ it('automatically validates the initial queue and prints only after final revali
   expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
     'data-print-authorized',
   );
+});
+
+it('updates stock and custody context without regenerating permanent print content', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const sheet = document.querySelector('.label-print-root')!;
+  const originalGeneration = sheet.getAttribute('data-sheet-generation');
+  const originalCard = sheet.querySelector('.label-card');
+  mocks.getQueueRecords.mockResolvedValueOnce([
+    {
+      ...quantity,
+      context: 'Cables / ITC-S1A: 9',
+      holdingContext: 'ITC-S1A: 9',
+    },
+    {
+      ...asset,
+      context: 'Computers / West Office [W-01] · assigned site',
+      holdingContext: 'West Office [W-01] · assigned site',
+    },
+  ]);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(
+      screen.getByRole('region', { name: 'Label queue' }),
+    ).toHaveTextContent('ITC-S1A: 9'),
+  );
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    'West Office [W-01] · assigned site',
+  );
+  expect(sheet).toHaveAttribute('data-sheet-generation', originalGeneration);
+  expect(sheet.querySelector('.label-card')).toBe(originalCard);
+  expect(sheet).not.toHaveTextContent('ITC-S1A: 9');
+  expect(sheet).not.toHaveTextContent('West Office');
 });
 
 it('waits for the refreshed generation to finish code and fit measurement before printing', async () => {
@@ -478,12 +540,12 @@ it('requires acknowledgement of changed tag and then revalidates automatically',
   await waitFor(() => expect(printButton()).toBeEnabled());
   mocks.getQueueRecords.mockResolvedValueOnce([
     quantity,
-    { ...asset, tag: 'lap-002' },
+    { ...asset, tag: 'lap-002', barcode: 'lap-002' },
   ]);
   fireEvent.click(printButton());
   mocks.getQueueRecords.mockResolvedValue([
     quantity,
-    { ...asset, tag: 'lap-002' },
+    { ...asset, tag: 'lap-002', barcode: 'lap-002' },
   ]);
   fireEvent.click(
     await screen.findByRole('button', { name: 'Acknowledge changes' }),
@@ -499,9 +561,21 @@ it('requires acknowledgement when Code 128 falls back to QR', async () => {
   fireEvent.change(screen.getByRole('combobox', { name: 'Code' }), {
     target: { value: 'code128' },
   });
+  const fallback = await screen.findByRole('alert');
+  expect(fallback).toHaveTextContent(
+    'queued record(s) will use stable QR links',
+  );
+  expect(fallback).toHaveTextContent('Long barcodes that do not fit');
+  expect(screen.queryByText(/Some labels will use QR because/)).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Acknowledge QR fallback' }),
+  ).toBeInTheDocument();
   fireEvent.click(
     await screen.findByRole('button', { name: 'Acknowledge QR fallback' }),
   );
+  expect(
+    screen.queryByRole('button', { name: 'Acknowledge QR fallback' }),
+  ).toBeNull();
   fireEvent.click(printButton());
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
 });

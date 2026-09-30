@@ -14,23 +14,49 @@ import { Button } from '@/components/ui/button';
 import { readFilters } from '@/features/inventory/read-model';
 import { getSites } from '@/features/custody/queries.server';
 import { getFileListSummaries } from '@/features/files/list.server';
+import { Download } from 'lucide-react';
+import {
+  authDiagnosticsEnabled,
+  createAuthDiagnostic,
+  observeAuthStage,
+} from '@/lib/auth/diagnostic.server';
 export default async function InventoryPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { member } = await requireMember();
+  const diagnostic = createAuthDiagnostic();
+  const { member } = await observeAuthStage(
+    diagnostic,
+    'inventory.pageMembership',
+    () => requireMember(),
+  );
   const raw = await searchParams;
   const params = Object.fromEntries(
     Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]),
   );
-  const [result, categories, locations, sites] = await Promise.all([
-    getInventory(params),
-    getCategories(),
-    getLocations(),
-    getSites(),
-  ]);
-  const fileSummaries = await getFileListSummaries(result.rows);
+  const [result, categories, locations, sites] = await observeAuthStage(
+    diagnostic,
+    'inventory.parallelReads',
+    () =>
+      Promise.all([
+        observeAuthStage(diagnostic, 'inventory.search', () =>
+          getInventory(params),
+        ),
+        observeAuthStage(diagnostic, 'inventory.categories', () =>
+          getCategories(),
+        ),
+        observeAuthStage(diagnostic, 'inventory.locations', () =>
+          getLocations(),
+        ),
+        observeAuthStage(diagnostic, 'inventory.sites', () => getSites()),
+      ]),
+  );
+  const fileSummaries = await observeAuthStage(
+    diagnostic,
+    'inventory.fileSummaries',
+    () => getFileListSummaries(result.rows),
+  );
   const filters = readFilters(params);
   const exportParams = new URLSearchParams();
   if (filters.query) exportParams.set('q', filters.query);
@@ -45,13 +71,13 @@ export default async function InventoryPage({
       <p className="experience-eyebrow">
         Logical storage and site custody · Inventory
       </p>
-      <h1 className="experience-heading mt-3">Inventory workspace</h1>
-      <p className="experience-muted mt-3 max-w-2xl text-sm">
+      <h1 className="experience-heading mt-2">Inventory</h1>
+      <p className="experience-muted mt-2 max-w-2xl text-sm">
         Search available storage, assigned site holdings, and individually
         tracked assets.
       </p>
       {member.role === 'staff' && (
-        <div className="my-5 flex flex-wrap gap-3">
+        <div className="my-3 flex flex-wrap gap-2">
           <Button asChild>
             <Link href="/inventory/quantity/new">
               Create quantity inventory
@@ -62,32 +88,44 @@ export default async function InventoryPage({
           </Button>
         </div>
       )}
-      <div className="mt-6">
+      <div className="mt-4">
         <SearchForm
+          key={exportParams.toString()}
           params={params}
           categories={categories}
           locations={locations}
           sites={sites}
+          diagnosticsEnabled={authDiagnosticsEnabled()}
         />
-        <div className="mb-5 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-          <a
-            className="min-h-11 py-3 text-cyan-300 underline"
-            href={'/api/exports/inventory?' + exportParams}
-          >
-            Download filtered inventory CSV
-          </a>
-          <a
-            className="min-h-11 py-3 text-cyan-300 underline"
-            href={'/api/exports/inventory?export=low_stock&' + exportParams}
-          >
-            Download matching low-stock CSV
-          </a>
-          <a
-            className="min-h-11 py-3 text-cyan-300 underline"
-            href={'/api/exports/inventory?customFields=true&' + exportParams}
-          >
-            Download inventory CSV with custom fields
-          </a>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Matching inventory</h2>
+            <p className="experience-muted text-sm tabular-nums">
+              {result.total} results
+            </p>
+          </div>
+          <details className="experience-export-menu">
+            <summary>
+              <Download size={15} aria-hidden="true" /> Export CSV
+            </summary>
+            <div role="group" aria-label="CSV export options">
+              <a href={'/api/exports/inventory?' + exportParams}>
+                Filtered inventory
+              </a>
+              <a
+                href={'/api/exports/inventory?export=low_stock&' + exportParams}
+              >
+                Matching low-stock items
+              </a>
+              <a
+                href={
+                  '/api/exports/inventory?customFields=true&' + exportParams
+                }
+              >
+                Inventory with custom fields
+              </a>
+            </div>
+          </details>
         </div>
         {filters.lowStock && (
           <p className="mb-4 text-sm text-slate-400">
@@ -96,12 +134,6 @@ export default async function InventoryPage({
             item-wide threshold calculation.
           </p>
         )}
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-lg font-semibold">Matching inventory</h2>
-          <p className="experience-muted text-sm tabular-nums">
-            {result.total} results
-          </p>
-        </div>
         <InventoryRows rows={result.rows} fileSummaries={fileSummaries} />
         <Pagination result={result} base="/inventory" params={params} />
       </div>

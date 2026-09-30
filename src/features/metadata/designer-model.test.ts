@@ -4,11 +4,14 @@ import { describe, expect, it } from 'vitest';
 import type { MetadataDefinition } from './contracts';
 import {
   canReparent,
+  controlMoveBlockReason,
   designerIssues,
   moveControl,
   optionPath,
+  removeSection,
   supportedCurrencyCodes,
 } from './designer-model';
+import { controlKinds, controlVisible } from './effective-controls';
 
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -43,6 +46,317 @@ const definition = (): MetadataDefinition => ({
 });
 
 describe('form designer model', () => {
+  it('intersects section, control, field and intrinsic kind without confusing scope with visibility', () => {
+    const draft = definition();
+    const section = draft.layout[0];
+    const fieldControl = section.controls[2];
+    expect(controlKinds(draft, section, fieldControl)).toEqual(['asset']);
+    fieldControl.visible = false;
+    expect(controlKinds(draft, section, fieldControl)).toEqual(['asset']);
+    expect(controlVisible(draft, section, fieldControl, 'asset')).toBe(false);
+    section.applies_to = ['quantity'];
+    expect(controlKinds(draft, section, fieldControl)).toEqual([]);
+    section.applies_to = ['quantity', 'asset'];
+    section.controls.push({
+      id: id(21),
+      kind: 'builtin',
+      builtin: 'item_code',
+      width: 12,
+    });
+    expect(controlKinds(draft, section, section.controls.at(-1)!)).toEqual([
+      'quantity',
+    ]);
+  });
+  it('moves protected controls only to a compatible visible destination and unplaces optional controls', () => {
+    const draft = definition();
+    draft.layout[0].controls.push({
+      id: id(20),
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 12,
+    });
+    draft.layout[0].controls.push({
+      id: id(21),
+      kind: 'builtin',
+      builtin: 'description',
+      width: 12,
+    });
+    expect(removeSection(draft, id(2), null)).toBe(draft);
+    draft.layout[1].visible = false;
+    expect(removeSection(draft, id(2), id(6))).toBe(draft);
+    draft.layout[1].visible = true;
+    draft.layout[1].applies_to = ['quantity'];
+    expect(removeSection(draft, id(2), id(6))).toBe(draft);
+    draft.layout[1].applies_to = ['quantity', 'asset'];
+    const moved = removeSection(draft, id(2), id(6));
+    expect(moved).not.toBe(draft);
+    expect(moved.layout[0].controls.map((control) => control.id)).toEqual([
+      id(3),
+      id(4),
+      id(5),
+      id(20),
+      id(21),
+    ]);
+    expect(moved.fields).toEqual(draft.fields);
+    const optional = structuredClone(moved);
+    optional.layout.push({
+      id: id(22),
+      label: 'Temporary',
+      controls: [
+        { id: id(23), kind: 'builtin', builtin: 'description', width: 12 },
+      ],
+    });
+    optional.layout[0].controls = optional.layout[0].controls.filter(
+      (control) => control.builtin !== 'description',
+    );
+    const unplaced = removeSection(optional, id(22), null);
+    expect(unplaced.layout).toHaveLength(1);
+    expect(unplaced.fields).toEqual(optional.fields);
+  });
+  it('preserves a removed section’s scope and hidden state in a wider visible destination', () => {
+    const draft = definition();
+    draft.layout[0].controls.push({
+      id: id(32),
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 6,
+    });
+    draft.layout.push({
+      id: id(30),
+      label: 'Quantity details',
+      applies_to: ['quantity'],
+      controls: [
+        { id: id(31), kind: 'builtin', builtin: 'description', width: 6 },
+      ],
+    });
+    const next = removeSection(draft, id(30), id(6));
+    expect(next).not.toBe(draft);
+    const moved = next.layout[1].controls[0];
+    expect(moved.id).toBe(id(31));
+    expect(controlKinds(next, next.layout[1], moved)).toEqual(['quantity']);
+    expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
+
+    const hidden = structuredClone(draft);
+    hidden.layout[2].visible = false;
+    const restored = removeSection(hidden, id(30), id(6));
+    expect(restored.layout[1].controls[0].visible).toBe(false);
+    expect(
+      controlVisible(
+        restored,
+        restored.layout[1],
+        restored.layout[1].controls[0],
+        'quantity',
+      ),
+    ).toBe(false);
+  });
+  it.each(['builtin', 'field'] as const)(
+    'recovers an excluded optional %s control using its own serialized scope',
+    (kind) => {
+      const draft = definition();
+      draft.fields[0].required = false;
+      draft.layout[0].controls = draft.layout[0].controls.filter(
+        (control) => control.kind !== 'field',
+      );
+      draft.layout.push({
+        id: id(30),
+        label: 'Quantity only',
+        applies_to: ['quantity'],
+        controls: [
+          kind === 'builtin'
+            ? { id: id(31), kind, builtin: 'serial_number', width: 6 }
+            : { id: id(31), kind, field_id: id(1), width: 6 },
+        ],
+      });
+      draft.layout.push({
+        id: id(34),
+        label: 'Serialized only',
+        applies_to: ['asset'],
+        controls: [],
+      });
+      draft.layout.push({
+        id: id(35),
+        label: 'Another quantity section',
+        applies_to: ['quantity'],
+        controls: [],
+      });
+      draft.layout.push({
+        id: id(36),
+        label: 'Hidden',
+        visible: false,
+        controls: [],
+      });
+      expect(
+        controlKinds(draft, draft.layout[2], draft.layout[2].controls[0]),
+      ).toEqual([]);
+      expect(controlMoveBlockReason(draft, id(31), id(34))).toBeNull();
+      expect(controlMoveBlockReason(draft, id(31), id(35))).toMatch(
+        /excludes a form type/,
+      );
+      expect(controlMoveBlockReason(draft, id(31), id(36))).toMatch(/hidden/);
+      for (const destination of [id(6), id(34)]) {
+        const next = moveControl(draft, id(31), destination, 0);
+        expect(next).not.toBe(draft);
+        const section = next.layout.find((item) => item.id === destination)!;
+        expect(section.controls[0].applies_to).toEqual(['asset']);
+        expect(controlKinds(next, section, section.controls[0])).toEqual([
+          'asset',
+        ]);
+        expect(next.fields).toEqual(draft.fields);
+        expect(next.layout[2].controls).toEqual([]);
+      }
+      expect(moveControl(draft, id(31), id(35), 0)).toBe(draft);
+      expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
+
+      draft.layout[2].visible = false;
+      const hiddenMove = moveControl(draft, id(31), id(34), 0);
+      expect(hiddenMove.layout[3].controls[0].visible).toBe(false);
+      expect(
+        controlVisible(
+          hiddenMove,
+          hiddenMove.layout[3],
+          hiddenMove.layout[3].controls[0],
+          'asset',
+        ),
+      ).toBe(false);
+
+      // Removing a section shares the transfer path and must preserve protection.
+      draft.layout[0].controls.push({
+        id: id(37),
+        kind: 'builtin',
+        builtin: 'asset_tag',
+        width: 6,
+      });
+      const removed = removeSection(draft, id(30), id(34));
+      expect(removed).not.toBe(draft);
+      const destination = removed.layout.find((item) => item.id === id(34))!;
+      expect(destination.controls[0].applies_to).toEqual(['asset']);
+      expect(destination.controls[0].visible).toBe(false);
+    },
+  );
+  it('cannot recover a missing field or an intrinsic/control scope contradiction', () => {
+    const draft = definition();
+    draft.layout[0].controls[2].field_id = id(99);
+    expect(controlMoveBlockReason(draft, id(5), id(6))).toMatch(
+      /no effective form type/,
+    );
+    expect(moveControl(draft, id(5), id(6), 0)).toBe(draft);
+    draft.layout[0].controls[2].field_id = id(1);
+    draft.layout[0].controls[2].applies_to = ['quantity'];
+    expect(controlMoveBlockReason(draft, id(5), id(6))).toMatch(
+      /no effective form type/,
+    );
+    expect(moveControl(draft, id(5), id(6), 0)).toBe(draft);
+  });
+  it('preserves moved control scope and rejects an intrinsically empty intersection', () => {
+    const draft = definition();
+    draft.layout.push({
+      id: id(30),
+      label: 'Quantity details',
+      applies_to: ['quantity'],
+      controls: [
+        { id: id(31), kind: 'builtin', builtin: 'description', width: 6 },
+      ],
+    });
+    const next = moveControl(draft, id(31), id(6), 0);
+    expect(next.layout[1].controls[0].id).toBe(id(31));
+    expect(
+      controlKinds(next, next.layout[1], next.layout[1].controls[0]),
+    ).toEqual(['quantity']);
+    expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
+
+    draft.layout[2].controls[0].builtin = 'serial_number';
+    draft.layout[2].controls[0].applies_to = ['quantity'];
+    expect(moveControl(draft, id(31), id(6), 0)).toBe(draft);
+    expect(removeSection(draft, id(30), id(6))).toBe(draft);
+
+    draft.layout[2].controls[0].builtin = 'description';
+    draft.layout[1].visible = false;
+    expect(moveControl(draft, id(31), id(6), 0)).toBe(draft);
+    expect(removeSection(draft, id(30), id(6))).toBe(draft);
+  });
+  it('keeps intrinsic built-in and custom-field applicability when removing a section', () => {
+    const draft = definition();
+    draft.layout[0].controls.push({
+      id: id(32),
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 6,
+    });
+    draft.fields.push({
+      id: id(33),
+      type: 'short_text',
+      label: 'Asset note',
+      applies_to: ['asset'],
+      required: false,
+      rules: {},
+      options: [],
+    });
+    draft.layout.push({
+      id: id(34),
+      label: 'Optional',
+      controls: [
+        { id: id(35), kind: 'builtin', builtin: 'item_code', width: 6 },
+        { id: id(36), kind: 'field', field_id: id(33), width: 6 },
+      ],
+    });
+    const next = removeSection(draft, id(34), id(6));
+    expect(next).not.toBe(draft);
+    expect(next.layout[1].controls.map((control) => control.id)).toEqual([
+      id(35),
+      id(36),
+    ]);
+    expect(
+      controlKinds(next, next.layout[1], next.layout[1].controls[0]),
+    ).toEqual(['quantity']);
+    expect(
+      controlKinds(next, next.layout[1], next.layout[1].controls[1]),
+    ).toEqual(['asset']);
+    expect(draft.layout[2].controls[0].applies_to).toBeUndefined();
+  });
+  it('reports hidden and incompatible destinations before a move can be offered', () => {
+    const draft = definition();
+    draft.layout[0].controls.push({
+      id: id(32),
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 6,
+    });
+    draft.layout[0].controls.push({
+      id: id(33),
+      kind: 'builtin',
+      builtin: 'item_code',
+      width: 6,
+    });
+    draft.layout.push({
+      id: id(34),
+      label: 'Quantity',
+      applies_to: ['quantity'],
+      controls: [],
+    });
+    draft.layout.push({
+      id: id(35),
+      label: 'Serialized',
+      applies_to: ['asset'],
+      controls: [],
+    });
+    draft.layout.push({
+      id: id(36),
+      label: 'Hidden',
+      visible: false,
+      controls: [],
+    });
+    expect(controlMoveBlockReason(draft, id(33), id(34))).toBeNull();
+    expect(controlMoveBlockReason(draft, id(32), id(35))).toBeNull();
+    expect(controlMoveBlockReason(draft, id(33), id(35))).toMatch(
+      /excludes a form type/,
+    );
+    expect(controlMoveBlockReason(draft, id(32), id(34))).toMatch(
+      /excludes a form type/,
+    );
+    expect(controlMoveBlockReason(draft, id(33), id(36))).toMatch(/hidden/);
+    expect(moveControl(draft, id(33), id(35), 0)).toBe(draft);
+    expect(moveControl(draft, id(32), id(36), 0)).toBe(draft);
+  });
   it('rejects protected and required controls hidden through their section', () => {
     const draft = definition();
     draft.layout[0].controls.push({

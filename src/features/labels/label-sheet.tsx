@@ -3,6 +3,8 @@ import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import JsBarcode from 'jsbarcode';
+import { motion } from 'motion/react';
+import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { barcodeCompatibleTag } from '@/features/scan/targets';
 
 const qrCache = new Map<string, Promise<string>>();
@@ -27,13 +29,53 @@ export type LabelRecord = {
   kind: 'location' | 'asset' | 'quantity';
   key: string;
   name: string;
-  context: string;
   path: string;
   barcode?: string | null;
   humanId?: string | null;
-  state: string;
+  categoryName?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  serialNumber?: string | null;
+  locationHierarchy?: string | null;
 };
 export type LabelSize = '70x35' | '90x50';
+
+export function printableLabelLines(record: LabelRecord): {
+  identifier: string;
+  details: string;
+  serial: string | null;
+} {
+  const identifier =
+    record.kind === 'location'
+      ? record.key
+      : record.kind === 'quantity'
+        ? record.humanId
+          ? `Item code: ${record.humanId}`
+          : 'Quantity item'
+        : record.barcode
+          ? `Asset tag: ${record.barcode}`
+          : record.serialNumber
+            ? `Serial: ${record.serialNumber}`
+            : 'Untagged asset';
+  const details =
+    record.kind === 'location'
+      ? (record.locationHierarchy ?? '')
+          .split(/\s*\/\s*/)
+          .filter(Boolean)
+          .slice(-2)
+          .join(' / ')
+      : [record.categoryName, record.manufacturer, record.model]
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join(' · ');
+  return {
+    identifier,
+    details,
+    serial:
+      record.kind === 'asset' && record.barcode && record.serialNumber
+        ? `Serial: ${record.serialNumber}`
+        : null,
+  };
+}
 
 export function barcodePayload(record: LabelRecord): string | null {
   if (record.kind === 'location') return 'LOC:' + record.key;
@@ -61,6 +103,8 @@ export function LabelSheet({
   generation: string;
 }) {
   const [width, height] = size.split('x').map(Number);
+  const reducedMotion = useEffectiveReducedMotion();
+  const copyOrdinals = new Map<string, number>();
   return (
     <>
       <style>{`@page { size: ${page}; margin: 8mm; background: #fff; }
@@ -75,6 +119,7 @@ export function LabelSheet({
       .label-print-root .label-card { border: 0.2mm solid #222; }
       .label-print-root .label-card, .label-print-root .label-card * { color: black !important; background: white !important; }
       .label-print-root .label-card { break-inside: avoid; page-break-inside: avoid; }
+      .label-print-root .label-preview-item { transform: none !important; opacity: 1 !important; break-inside: avoid; page-break-inside: avoid; }
       .label-print-root .label-card * { animation: none !important; transition: none !important; }
     }`}</style>
       <div
@@ -82,26 +127,31 @@ export function LabelSheet({
         aria-label="Print preview"
         data-sheet-generation={generation}
       >
-        {records.map((record, index) => (
-          <LabelCard
-            key={[
-              record.kind,
-              record.key,
-              index,
-              size,
-              record.name,
-              record.context,
-              record.humanId,
-            ].join(':')}
-            record={record}
-            origin={origin}
-            preview={preview}
-            width={width}
-            height={height}
-            format={format}
-            generation={generation}
-          />
-        ))}
+        {records.map((record) => {
+          const identity = JSON.stringify([record.kind, record.key]);
+          const ordinal = copyOrdinals.get(identity) ?? 0;
+          copyOrdinals.set(identity, ordinal + 1);
+          return (
+            <motion.div
+              key={JSON.stringify([identity, ordinal])}
+              className="label-preview-item"
+              layout={reducedMotion ? false : 'position'}
+              initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reducedMotion ? 0 : 0.2 }}
+            >
+              <LabelCard
+                record={record}
+                origin={origin}
+                preview={preview}
+                width={width}
+                height={height}
+                format={format}
+                generation={generation}
+              />
+            </motion.div>
+          );
+        })}
       </div>
     </>
   );
@@ -136,7 +186,7 @@ function LabelCard({
   const [measuredGeneration, setMeasuredGeneration] = useState<string | null>(
     null,
   );
-  const [compact, setCompact] = useState(false);
+  const [compactKey, setCompactKey] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
   const payload = barcodePayload(record);
@@ -200,18 +250,21 @@ function LabelCard({
   }, [payload, format, width, barcodeKey]);
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
   const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);
-  const identifier =
-    record.humanId ||
-    (record.kind === 'asset' ? record.barcode : null) ||
-    (record.kind === 'location' ? record.key : null);
-  const displayIdentifier =
-    identifier ||
-    (record.kind === 'quantity' ? 'Quantity item' : 'Untagged asset');
-  const shortContext = record.context
-    .split(/\s*\/\s*/)
-    .filter(Boolean)
-    .slice(-2)
-    .join(' / ');
+  const printable = printableLabelLines(record);
+  // Fitting belongs to the current content/layout, independently of QR identity.
+  const fittingKey = JSON.stringify([
+    record.name,
+    printable.identifier,
+    printable.details,
+    printable.serial,
+    width,
+    height,
+    useBarcode,
+    Boolean(qr),
+    preview,
+  ]);
+  const compact = compactKey === fittingKey;
+  const measurementKey = JSON.stringify([generation, fittingKey]);
   useEffect(() => {
     let current = true;
     const box = textBox.current;
@@ -231,10 +284,11 @@ function LabelCard({
         );
       if (over && !compact) {
         setMeasuredGeneration(null);
-        setCompact(true);
+        setCompactKey(fittingKey);
       } else {
+        if (!compact) setCompactKey(null);
         setTextOverflow(over);
-        setMeasuredGeneration(generation);
+        setMeasuredGeneration(measurementKey);
       }
     };
     measure();
@@ -250,22 +304,25 @@ function LabelCard({
     };
   }, [
     record.name,
-    identifier,
-    shortContext,
+    printable.identifier,
+    printable.details,
+    printable.serial,
     width,
     height,
     useBarcode,
     compact,
     generation,
+    fittingKey,
+    measurementKey,
   ]);
   return (
     <article
       className="label-card flex shrink-0 flex-col border border-slate-700 bg-white p-[2mm] text-black"
       style={{ width: `${width}mm`, height: `${height}mm` }}
       data-sheet-generation={generation}
-      data-text-measured={measuredGeneration === generation}
+      data-text-measured={measuredGeneration === measurementKey}
       data-code-ready={Boolean(
-        measuredGeneration === generation &&
+        measuredGeneration === measurementKey &&
         barcodeResolved &&
         !textOverflow &&
         (qr || useBarcode),
@@ -311,20 +368,25 @@ function LabelCard({
           <span
             data-fit-text
             className={`mt-[0.5mm] line-clamp-2 block break-words font-mono leading-tight ${compact ? 'text-[7pt]' : 'text-[8pt]'}`}
-            title={identifier || undefined}
+            title={printable.identifier}
           >
-            {displayIdentifier}
+            {printable.identifier}
           </span>
-          <span
-            data-fit-text
-            className="mt-[0.5mm] line-clamp-2 block break-words text-[7pt] leading-tight"
-            title={record.context}
-          >
-            {shortContext}
-          </span>
-          {record.state !== 'active' && (
-            <span className="block font-bold uppercase text-[8pt]">
-              {record.state}
+          {printable.serial && (
+            <span
+              data-fit-text
+              className="mt-[0.5mm] line-clamp-1 block break-words text-[7pt] leading-tight"
+            >
+              {printable.serial}
+            </span>
+          )}
+          {printable.details && (
+            <span
+              data-fit-text
+              className="mt-[0.5mm] line-clamp-2 block break-words text-[7pt] leading-tight"
+              title={printable.details}
+            >
+              {printable.details}
             </span>
           )}
         </div>
@@ -349,11 +411,6 @@ function LabelCard({
               : undefined
           }
         />
-      )}
-      {format === 'code128' && !useBarcode && (
-        <span className="text-[7pt]">
-          QR used: no compatible tag or Code 128 would exceed label width.
-        </span>
       )}
     </article>
   );

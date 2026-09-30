@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
@@ -10,7 +10,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Inventory workspace' }),
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
 
@@ -22,6 +22,31 @@ async function chooseDesigner(page: Page, name: string) {
     designer.getByRole('button', { name: 'Save changes' }),
   ).toBeVisible();
   return designer;
+}
+
+function inspectorFor(control: Locator) {
+  return control
+    .locator('xpath=ancestor::*[@data-testid="designer-panes"]')
+    .getByTestId('designer-inspector');
+}
+
+async function inspectControl(control: Locator) {
+  await control.press('Enter');
+  const designer = control.locator(
+    'xpath=ancestor::section[@aria-labelledby="metadata-settings-heading"]',
+  );
+  const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
+  if (await tab.isVisible()) await tab.click();
+  await expect(inspectorFor(control).getByLabel('Width')).toBeVisible();
+}
+
+async function chooseControlSection(control: Locator, name: string) {
+  const section = inspectorFor(control).getByLabel('Section');
+  const option = section.locator('option').filter({ hasText: `${name} ·` });
+  await expect(option).toHaveCount(1);
+  const id = await option.getAttribute('value');
+  expect(id).toBeTruthy();
+  await section.selectOption(id!);
 }
 
 test('an account switch in another tab masks the old designer on focus', async ({
@@ -46,7 +71,7 @@ test('an account switch in another tab masks the old designer on focus', async (
     await other.getByLabel('Password', { exact: true }).fill(fixture.password);
     await other.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(
-      other.getByRole('heading', { name: 'Inventory workspace' }),
+      other.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -77,18 +102,30 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(panels.getByRole('button', { name: 'Inspector' })).toBeVisible();
   await designer.getByLabel('Label', { exact: true }).fill('Connector type');
   await panels.getByRole('button', { name: 'Canvas' }).click();
+  await designer
+    .getByRole('button', { name: 'Inspect section' })
+    .first()
+    .click();
+  await expect(
+    designer
+      .getByTestId('designer-inspector')
+      .getByLabel('Label', { exact: true }),
+  ).toHaveCount(0);
+  await expect(designer.getByTestId('designer-inspector')).toContainText(
+    'Section Details',
+  );
+  await panels.getByRole('button', { name: 'Canvas' }).click();
+  const connectorControl = designer.locator(
+    '[data-control-id]:has(button[aria-label="Drag Connector type"])',
+  );
+  await connectorControl.press('Enter');
   await expect(
     designer.getByRole('button', { name: 'Drag Connector type' }),
   ).toBeVisible();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Specifications');
-  const connectorControl = designer
-    .locator('[data-control-id]')
-    .filter({ has: page.getByRole('button', { name: 'Drag Connector type' }) });
-  await connectorControl.getByText('Layout options').click();
-  await connectorControl
-    .getByLabel('Section')
-    .selectOption({ label: 'Specifications' });
+  await inspectControl(connectorControl);
+  await chooseControlSection(connectorControl, 'Specifications');
   await designer
     .getByText('Live preview · open quantity or asset form')
     .click();
@@ -174,11 +211,10 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
-  await nameControl.getByText('Layout options').click();
+  await nameControl.press('Enter');
   for (const control of [
     nameControl.getByRole('button', { name: 'Drag Name' }),
     nameControl.getByRole('button', { name: 'Resize Name' }),
-    nameControl.getByRole('button', { name: 'Move down' }),
   ]) {
     const bounds = await control.boundingBox();
     expect(bounds).toBeTruthy();
@@ -189,7 +225,15 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
       .getByRole('button', { name: 'Drag Name' })
       .boundingBox())!.width,
   ).toBeGreaterThanOrEqual(44);
-  await nameControl.getByRole('button', { name: 'Move down' }).focus();
+  await inspectControl(nameControl);
+  expect(
+    (await inspectorFor(nameControl)
+      .getByRole('button', { name: 'Move down' })
+      .boundingBox())!.height,
+  ).toBeGreaterThanOrEqual(44);
+  await inspectorFor(nameControl)
+    .getByRole('button', { name: 'Move down' })
+    .focus();
   await page.keyboard.press('Enter');
   await expect(
     designer
@@ -199,6 +243,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
       .first(),
   ).toHaveAttribute('aria-label', 'Drag Category');
   await designer.getByRole('button', { name: 'Undo edit' }).click();
+  await panels.getByRole('button', { name: 'Canvas', exact: true }).click();
   await designer.getByRole('button', { name: 'Add section' }).click();
   await designer.getByLabel('Section heading').last().fill('Phone checks');
 
@@ -214,8 +259,8 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     const control = designer.locator(
       `[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`,
     );
-    await control.getByText('Layout options').click();
-    await control.getByLabel('Section').selectOption({ label: 'Phone checks' });
+    await inspectControl(control);
+    await chooseControlSection(control, 'Phone checks');
   };
   for (const name of ['Flag one', 'Flag two', 'Flag three'])
     await addField('boolean', name);
@@ -298,9 +343,11 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
   const nameControl = designer.locator(
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
-  await nameControl.getByText('Layout options').click();
-  await nameControl.getByLabel('Width').selectOption('6');
-  await nameControl.getByRole('button', { name: 'Move down' }).focus();
+  await inspectControl(nameControl);
+  await inspectorFor(nameControl).getByLabel('Width').selectOption('6');
+  await inspectorFor(nameControl)
+    .getByRole('button', { name: 'Move down' })
+    .focus();
   await page.keyboard.press('Enter');
   await designer.getByRole('button', { name: 'Save changes' }).click();
   await expect(designer.getByRole('status')).toContainText(
@@ -310,15 +357,11 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
   await expect(designer.getByLabel('Section heading').last()).toHaveValue(
     'Persisted section',
   );
-  await designer
-    .locator('[data-control-id]:has(button[aria-label="Drag Name"])')
-    .getByText('Layout options')
-    .click();
-  await expect(
-    designer
-      .locator('[data-control-id]:has(button[aria-label="Drag Name"])')
-      .getByLabel('Width'),
-  ).toHaveValue('6');
+  const reloadedName = designer.locator(
+    '[data-control-id]:has(button[aria-label="Drag Name"])',
+  );
+  await inspectControl(reloadedName);
+  await expect(inspectorFor(reloadedName).getByLabel('Width')).toHaveValue('6');
   await expect(
     designer
       .locator('[data-section-id]')

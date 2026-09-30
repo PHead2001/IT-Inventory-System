@@ -91,6 +91,7 @@ const test = () => {
     ['--import', 'tsx', 'tests/integration/files-completion.ts'],
     localTestEnv(status),
   );
+  node(['tests/integration/preview-file-keys.mjs'], localTestEnv(status));
   node(['--import', 'tsx', 'tests/integration/files.ts'], localTestEnv(status));
 };
 try {

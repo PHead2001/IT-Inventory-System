@@ -1,10 +1,17 @@
 import Link from 'next/link';
-import { ArrowRight, Download, Map } from 'lucide-react';
+import {
+  ArrowRight,
+  CircleCheck,
+  Download,
+  Map,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getLowStockDashboard } from '@/features/inventory/queries.server';
 import { Pagination } from '@/features/inventory/components/read-ui';
 import { RefreshButton } from '@/features/inventory/components/refresh-button';
 import { ClosetPreview } from '@/components/experience/closet-preview';
+import { AmbientLight } from '@/components/experience/ambient-light';
 
 export default async function DashboardPage({
   searchParams,
@@ -19,6 +26,7 @@ export default async function DashboardPage({
   return (
     <div className="space-y-5">
       <section className="experience-overview-hero experience-surface-bright">
+        <AmbientLight />
         <div>
           <p className="experience-eyebrow">Storage availability · Overview</p>
           <h1 className="experience-heading mt-3">Low-stock overview</h1>
@@ -89,14 +97,45 @@ export default async function DashboardPage({
           </div>
         </div>
         {result.configuredCount === 0 ? (
-          <p className="experience-surface p-5 text-sm text-slate-300">
-            No active quantity items have a reorder threshold. Staff can set one
-            on a quantity item; 0 alerts when available storage reaches zero.
-          </p>
+          <div className="experience-surface experience-empty-state">
+            <SlidersHorizontal size={26} aria-hidden="true" />
+            <div>
+              <h3 className="font-semibold">No items are monitored yet</h3>
+              <p className="experience-muted mt-1 text-sm">
+                No active quantity item has a reorder threshold. Set one on an
+                item to begin monitoring storage availability; a threshold of 0
+                alerts when available storage reaches zero.
+              </p>
+              <Link
+                href="/inventory?type=quantity"
+                className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200"
+              >
+                Browse quantity items{' '}
+                <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+            </div>
+          </div>
         ) : result.needsRestockingCount === 0 ? (
-          <p className="experience-surface p-5 text-sm text-slate-300">
-            No monitored items need restocking.
-          </p>
+          <div className="experience-surface experience-empty-state">
+            <CircleCheck size={26} aria-hidden="true" />
+            <div>
+              <h3 className="font-semibold">
+                Monitored items need no restocking
+              </h3>
+              <p className="experience-muted mt-1 text-sm">
+                All {result.configuredCount} monitored active quantity items are
+                above their alert thresholds. Other inventory may have no
+                threshold.
+              </p>
+              <Link
+                href="/inventory?type=quantity"
+                className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200"
+              >
+                Browse quantity items{' '}
+                <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+            </div>
+          </div>
         ) : (
           <>
             <ul className="experience-surface overflow-hidden">
