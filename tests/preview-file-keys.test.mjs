@@ -540,6 +540,8 @@ test('environment PATCH obeys strict v9 schema and preserves sensitive scope, in
           Object.keys(options.body).filter((key) => !documented.includes(key)),
           [],
         );
+        // Saved Sensitive/Secret names cannot be edited, even to the same name.
+        assert.equal(Object.hasOwn(options.body, 'key'), false);
       }
       calls.push({ url, options });
       return {};
@@ -556,8 +558,9 @@ test('environment PATCH obeys strict v9 schema and preserves sensitive scope, in
   };
   const before = structuredClone(body);
   await providers.vercel.writeEnv('env_test', body);
-  const { visibility, ...expected } = body;
+  const { visibility, key, ...expected } = body;
   assert.equal(visibility, 'secret');
+  assert.equal(key, 'INVENTORY_FILE_KEYS_JSON');
   assert.deepEqual(calls[0].options.body, expected);
   assert.equal(calls[0].options.method, 'PATCH');
   assert.equal(

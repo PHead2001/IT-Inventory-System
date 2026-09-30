@@ -257,10 +257,11 @@ export function fileProviders({
       };
     },
     writeEnv: async (id, body) => {
-      // PATCH v9 rejects additional properties. Visibility belongs to the
-      // owned-row/readback contract, not its documented request schema.
+      // PATCH v9 rejects additional properties and saved Sensitive/Secret names
+      // cannot be edited. Key/visibility remain owned-row/readback invariants.
       const patchBody = { ...body };
       delete patchBody.visibility;
+      delete patchBody.key;
       const result = id
         ? await api(
             `/v9/projects/${projectPath}/env/${encodeURIComponent(id)}`,
