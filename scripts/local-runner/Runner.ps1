@@ -327,7 +327,7 @@ function Get-RunnerArchive($State) {
     return $path
 }
 
-function Invoke-RunnerSession($Config) {
+function Invoke-RunnerSession($Config, $PilotAttempt = $null) {
     $script:RunnerOperationStage = 'preflight'
     Assert-InstalledHost $Config
     [void](Get-OwnerToken) # Check owner binding before changing the host or contacting GitHub.
@@ -336,6 +336,7 @@ function Invoke-RunnerSession($Config) {
     $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
     $state = [ordered]@{
         tag = $script:RunnerTag; vmName = $name; instancePath = $instance
+        claimMode = $Config.activation
         createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
         deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
         supervisorPid = $PID
@@ -345,10 +346,18 @@ function Invoke-RunnerSession($Config) {
     try {
         Assert-RunnerClaimOpen
         if (Get-RunnerState) { throw 'Another runner session is already recorded.' }
-        New-Item -ItemType Directory -Path $instance -Force | Out-Null
+        if ($Config.activation -eq 'pilot') {
+            if ($null -eq $PilotAttempt -or (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json'))) { throw 'Pilot claim requires a fresh bound receipt.' }
+            $PilotAttempt | Add-Member -NotePropertyName sessionName -NotePropertyValue $name -Force
+            $state.pilotClaim = Get-RunnerJsonEvidence $PilotAttempt
+        }
         Write-RunnerJson $script:RunnerStatePath $state
+        Invoke-RunnerTransitionCheckpoint 'claim-state'
+        Complete-RunnerPilotClaim ([pscustomobject]$state)
+        Invoke-RunnerTransitionCheckpoint 'claim-receipt'
     } finally { Exit-RunnerLock $mutex }
     try {
+        New-Item -ItemType Directory -Path $instance -Force | Out-Null
         $script:RunnerOperationStage = 'disk-copy'
         $disk = Join-Path $instance 'guest.vhdx'
         Copy-Item -LiteralPath $Config.baseVhdx -Destination $disk -ErrorAction Stop
@@ -536,6 +545,7 @@ function Invoke-SupervisorLoop {
             continue
         }
         $pilotAttemptPath = Join-Path $script:RunnerRoot 'pilot-attempt.json'
+        if (Get-RunnerState) { return } # A failed initial claim/cleanup requires recovery before further queue inspection.
         if ($config.activation -eq 'pilot' -and (Test-Path -LiteralPath $pilotAttemptPath)) {
             # A crashed or restarted supervisor must not take a second pilot job.
             return
@@ -552,20 +562,16 @@ function Invoke-SupervisorLoop {
                     $script:RunnerOperationStage = 'pilot-consumption'
                     $fresh = Get-PilotEvidence $config $job.pilotBinding $token
                     if (-not (Test-QueuedRunnerJob $fresh.job $config.pilotLabel)) { throw 'Bound pilot job changed before consumption.' }
-                    $claimLock = Enter-RunnerLock
-                    try {
-                        Assert-RunnerClaimOpen
-                        Write-RunnerJson $pilotAttemptPath ([ordered]@{
+                    $pilotAttempt = [pscustomobject][ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id
                         runId = $job.pilotBinding.runId; workflowId = $job.pilotBinding.workflowId
                         workflowPath = $job.pilotBinding.workflowPath; headSha = $job.pilotBinding.headSha
                         runAttempt = $job.pilotBinding.runAttempt; pilotLabel = $job.pilotBinding.pilotLabel
                         consumedUtc = [DateTime]::UtcNow.ToString('o')
-                        })
-                    } finally { Exit-RunnerLock $claimLock }
-                }
+                    }
+                } else { $pilotAttempt = $null }
                 $token = $null
-                $allocatedRunner = Invoke-RunnerSession $config
+                $allocatedRunner = Invoke-RunnerSession $config $pilotAttempt
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-verification'
                     $token = Get-OwnerToken
@@ -605,10 +611,12 @@ function Invoke-SupervisorLoop {
     }
 }
 
-function Stop-Supervisor {
+function Stop-SupervisorCore {
     Assert-Administrator
     Assert-SecureRoot
-    [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'stop.requested'), 'stop', [Text.UTF8Encoding]::new($false))
+    $claimLock = Enter-RunnerLock
+    try { Write-RunnerBytes (Join-Path $script:RunnerRoot 'stop.requested') ([Text.Encoding]::UTF8.GetBytes('stop')) }
+    finally { Exit-RunnerLock $claimLock }
     $task = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue
     if ($null -ne $task -and $task.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $script:RunnerSupervisorTask
@@ -680,7 +688,7 @@ function Complete-PilotRetry($Plan) {
     Invoke-RunnerTransitionCheckpoint 'retry-complete'
 }
 
-function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retry) {
+function Enable-RunnerPilotCore([string] $Sha, [string] $Reason = '', [switch] $Retry) {
     Assert-Administrator
     Assert-SecureRoot
     $label = Get-PilotLabel $Sha
@@ -695,8 +703,10 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
             $config = Get-RunnerConfig
             [void](Get-OwnerToken)
             Assert-RunnerControlIdle
-            $update = Read-RunnerJson (Join-Path $script:RunnerRoot 'update-journal.json')
-            if ($null -ne $update -and ($update.tag -cne $script:RunnerTag -or $update.phase -cne 'complete')) { throw 'Resume the pending installed update before pilot control.' }
+            foreach ($name in @('update-journal.json', 'setup-publication.json')) {
+                $update = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
+                if ($null -ne $update -and ($update.tag -cne $script:RunnerTag -or $update.phase -cne 'complete')) { throw 'Resume the pending setup/update before pilot control.' }
+            }
             $journalPath = Join-Path $script:RunnerRoot 'pilot-retry.json'
             $plan = Read-RunnerJson $journalPath
             if ($null -ne $plan) {
@@ -771,7 +781,7 @@ function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retr
     } finally { Exit-RunnerLock $supervisorLock }
 }
 
-function Enable-RunnerActive {
+function Enable-RunnerActiveCore {
     Assert-Administrator
     Assert-SecureRoot
     Assert-RunnerTransitionClear
@@ -800,6 +810,27 @@ function Enable-RunnerActive {
     } finally { Exit-RunnerLock $mutex }
 }
 
+function Stop-Supervisor { Invoke-RunnerControl { Assert-RunnerTransitionClear; Stop-SupervisorCore } }
+function Enable-RunnerPilot([string] $Sha, [string] $Reason = '', [switch] $Retry) {
+    Invoke-RunnerControl { Enable-RunnerPilotCore $Sha $Reason -Retry:$Retry }
+}
+function Enable-RunnerActive { Invoke-RunnerControl { Enable-RunnerActiveCore } }
+
+function Start-RunnerSupervisorCore {
+    Assert-Administrator
+    Assert-SecureRoot
+    $mutex = Enter-RunnerLock
+    try {
+        Assert-RunnerTransitionClear
+        $config = Get-RunnerConfig
+        if ($config.activation -eq 'disabled') { throw 'Job pickup is disabled. Open Setup and choose Enable one-job pilot after review.' }
+        $marker = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
+        if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
+    } finally { Exit-RunnerLock $mutex }
+    Write-Host 'Persistent SYSTEM supervisor started; it waits for a matching queued job.'
+}
+
 function Invoke-Watchdog {
     Assert-Administrator
     $mutex = Enter-RunnerLock
@@ -817,7 +848,11 @@ function Invoke-Watchdog {
     } finally { Exit-RunnerLock $mutex }
 }
 
-switch ($Action) {
+$actionControl = $null
+if ($Action -in @('StoreCredential', 'Start', 'Restart', 'Stop', 'EnablePilot', 'RetryPilot', 'EnableActive')) {
+    $actionControl = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
+}
+try { switch ($Action) {
     'Preflight' {
         Assert-HostPrerequisites
         $config = Get-RunnerConfig
@@ -826,6 +861,7 @@ switch ($Action) {
     'StoreCredential' {
         Assert-Administrator
         Assert-SecureRoot
+        Assert-RunnerTransitionClear
         [void](Get-RunnerConfig)
         Initialize-RunnerDpapi
         $secret = Read-Host 'Repository-scoped GitHub fine-grained token' -AsSecureString
@@ -842,26 +878,17 @@ switch ($Action) {
         Write-Host 'Machine-bound DPAPI credential stored under the SYSTEM/Administrators-only root.'
     }
     'Start' {
-        Assert-RunnerTransitionClear
-        Assert-Administrator
-        Assert-SecureRoot
-        $config = Get-RunnerConfig
-        if ($config.activation -eq 'disabled') { throw 'Job pickup is disabled. Open Setup and choose Enable one-job pilot after review.' }
-        if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) {
-            Remove-Item -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -Force
-        }
-        Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
-        Write-Host 'Persistent SYSTEM supervisor started; it waits for a matching queued job.'
+        Start-RunnerSupervisorCore
     }
     'Restart' {
         Assert-RunnerTransitionClear
-        Stop-Supervisor
-        Remove-Item -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -Force
-        Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
+        Stop-SupervisorCore
+        Start-RunnerSupervisorCore
         Write-Host 'Supervisor restarted. Its next job uses a new VM.'
     }
     'Stop' {
-        Stop-Supervisor
+        Assert-RunnerTransitionClear
+        Stop-SupervisorCore
         Write-Host 'Supervisor stopped and its owned VM removed.'
     }
     'Status' {
@@ -883,7 +910,7 @@ switch ($Action) {
         if ($null -ne $attempt) { Write-Host "Pilot consumed for job $($attempt.jobId). Failure or uncertainty requires maintainer investigation; it cannot take another pilot job." }
         $pilot = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
         if ($null -ne $pilot) { Write-Host "Pilot proof: status=$($pilot.status); conclusion=$($pilot.conclusion); verified=$($pilot.verified)." }
-        foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
+        foreach ($name in @('pilot-retry.json', 'update-journal.json', 'setup-publication.json')) {
             $journal = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
             if ($null -ne $journal) {
                 $phase = if ($journal.tag -ceq $script:RunnerTag -and $journal.phase -cin @('pending', 'complete')) { $journal.phase } else { 'invalid' }
@@ -901,8 +928,8 @@ switch ($Action) {
     }
     'Supervise' { Invoke-Supervisor }
     'EnablePilot' {
-        Enable-RunnerPilot $ExpectedPilotSha
+        Enable-RunnerPilotCore $ExpectedPilotSha
     }
-    'RetryPilot' { Enable-RunnerPilot $ExpectedPilotSha $RetryReason -Retry }
-    'EnableActive' { Enable-RunnerActive }
-}
+    'RetryPilot' { Enable-RunnerPilotCore $ExpectedPilotSha $RetryReason -Retry }
+    'EnableActive' { Enable-RunnerActiveCore }
+} } finally { if ($null -ne $actionControl) { Exit-RunnerLock $actionControl } }

@@ -15,11 +15,18 @@ if ($EnableHyperV) {
     Write-Host "Hyper-V feature state: $($result.State). Restart Windows if requested, then rerun Setup.ps1 without -EnableHyperV."
     return
 }
+$publicationPath = Join-Path $script:RunnerRoot 'setup-publication.json'
+if (Test-Path -LiteralPath $publicationPath) {
+    Resume-RunnerSetupPublication
+    return
+}
 Assert-HostPrerequisites
 $setupBundle = Get-RunnerBundle $PSScriptRoot
 
-$mutex = Enter-RunnerLock
+$control = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
+$mutex = $null
 try {
+    $mutex = Enter-RunnerLock
     if (Test-Path -LiteralPath $script:RunnerRoot) {
         Assert-SecureRoot
     } else {
@@ -182,12 +189,6 @@ try {
     elseif ($gateway.PrefixLength -ne 29) { throw 'Reserved gateway has the wrong prefix length.' }
     if ($null -eq $existingNat) { New-NetNat -Name $script:RunnerNat -InternalIPInterfaceAddressPrefix '172.30.240.0/29' | Out-Null }
 
-    foreach ($file in @($setupBundle.manifest.files.name) + @('Bundle.json')) {
-        $destination = Assert-OwnedPath (Join-Path $binDir $file)
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $destination -Force
-        $expectedHash = if ($file -ceq 'Bundle.json') { $setupBundle.hash } else { @($setupBundle.manifest.files | Where-Object name -CEQ $file)[0].hash }
-        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -cne $expectedHash) { throw 'Installed initial bundle differs from source manifest.' }
-    }
     $installed = Join-Path $binDir 'Runner.ps1'
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Watchdog"
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -198,17 +199,30 @@ try {
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName $script:RunnerSupervisorTask -Action $supervisorAction -Trigger $boot -Principal $principal -Settings $settings -Force | Out-Null
 
-    Write-RunnerJson $script:RunnerConfigPath ([ordered]@{
+    $configEvidence = Get-RunnerJsonEvidence ([ordered]@{
         schema = 1; tag = $script:RunnerTag; repo = $Repository; runnerGroupId = $RunnerGroupId
         label = 'it-inventory-ephemeral'; maxMinutes = 120; activation = 'disabled'
         baseVhdx = $vhdxPath; baseSha256 = $vhdxHash
         guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; prefixLength = 29
     })
-    Write-RunnerJson (Join-Path $script:RunnerRoot 'installed-bundle.json') ([ordered]@{
+    $receiptEvidence = Get-RunnerJsonEvidence ([ordered]@{
         tag = $script:RunnerTag; version = $setupBundle.manifest.version; manifestHash = $setupBundle.hash
     })
-    Remove-Item -LiteralPath $stagePath -Force
+    $files = foreach ($name in @($setupBundle.manifest.files.name) + @('Bundle.json')) {
+        $evidence = Get-RunnerBytesEvidence ([IO.File]::ReadAllBytes((Join-Path $PSScriptRoot $name)))
+        $expected = if ($name -ceq 'Bundle.json') { $setupBundle.hash } else { @($setupBundle.manifest.files | Where-Object name -CEQ $name)[0].hash }
+        if ($evidence.hash -cne $expected) { throw 'Setup checkout changed before final publication intent.' }
+        [pscustomobject]@{ name = $name; evidence = $evidence }
+    }
+    $plan = [pscustomobject]@{
+        schema = 1; tag = $script:RunnerTag; phase = 'pending'; files = @($files)
+        config = $configEvidence; receipt = $receiptEvidence; stage = Get-RunnerFileEvidence $stagePath
+    }
+    Write-RunnerJson $publicationPath $plan
+    Invoke-RunnerTransitionCheckpoint 'setup-pending'
+    Complete-RunnerSetupPublication $plan
     Write-Host 'Runner files, isolated NAT and watchdog installed. Job pickup remains disabled.'
 } finally {
-    Exit-RunnerLock $mutex
+    if ($null -ne $mutex) { Exit-RunnerLock $mutex }
+    Exit-RunnerLock $control
 }

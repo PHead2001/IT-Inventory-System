@@ -21,6 +21,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell pilot binding regress
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Update.Controls.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Atomicity.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression failed.' }
 
@@ -33,10 +35,10 @@ $script:RunnerStatePath = Join-Path $testRoot 'state.json'
 $script:RunnerConfigPath = Join-Path $testRoot 'config.json'
 $script:contractLockPrefix = 'Local\ITIR-contract-' + [guid]::NewGuid().ToString('N')
 $script:realEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
     $mapped = if ($Name -eq 'Global\ITInventoryLocalRunner-v1') { $script:contractLockPrefix + '-state' }
         elseif ($Name -eq 'Global\ITInventoryLocalRunner-Supervisor-v1') { $script:contractLockPrefix + '-supervisor' } else { $Name }
-    return & $script:realEnterLock $mapped
+    return & $script:realEnterLock $mapped -FailFast:$FailFast
 }
 try {
     $insecureRootRejected = $false
@@ -665,7 +667,8 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
     function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123; pilotBinding = [pscustomobject]@{ runId = 456; workflowId = 789; workflowPath = '.github/workflows/local-runner-pilot.yml'; headSha = ('a' * 40); runAttempt = 1; pilotLabel = 'it-inventory-pilot-' + ('a' * 40) } } }
     function Get-PilotEvidence { param($Config, $Binding, $Token) return [pscustomobject]@{ job = [pscustomobject]@{ status = 'queued'; labels = @('self-hosted', ('it-inventory-pilot-' + ('a' * 40))); runner_id = 0 } } }
     function Invoke-RunnerSession {
-        param($Config)
+        param($Config, $PilotAttempt)
+        Write-RunnerJson (Join-Path $testRoot 'pilot-attempt.json') $PilotAttempt
         $script:RunnerOperationStage = 'key-generation'; $script:RunnerSessionName = $validName
         throw 'synthetic failure containing SENTINEL_SECRET'
     }

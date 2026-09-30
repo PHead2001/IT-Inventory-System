@@ -46,7 +46,11 @@ while ($true) {
         switch ($choice) {
             '1' { & (Join-Path $PSScriptRoot 'Setup.ps1') -EnableHyperV }
             '2' {
-                if (-not (Test-Path -LiteralPath $script:RunnerConfigPath)) {
+                $publication = Read-RunnerJson (Join-Path $script:RunnerRoot 'setup-publication.json')
+                if ($null -ne $publication -and ($publication.phase -cne 'complete' -or
+                    (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'setup-stage.json')))) {
+                    Resume-RunnerSetupPublication
+                } elseif (-not (Test-Path -LiteralPath $script:RunnerConfigPath)) {
                     & (Join-Path $PSScriptRoot 'Setup.ps1')
                 } else {
                     $update = Read-RunnerJson (Join-Path $script:RunnerRoot 'update-journal.json')

@@ -10,7 +10,7 @@ $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-update-controls-' + [guid]::
 [void][IO.Directory]::CreateDirectory($base)
 $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
 $script:lockPrefix = 'Local\ITIR-update-controls-' + [guid]::NewGuid().ToString('N')
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') { & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) }
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) { & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast }
 function Assert-Administrator {}
 function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path); if ($script:badAcl -and $Path.EndsWith($script:badAcl)) { throw 'Unexpected ACL fixture.' } }

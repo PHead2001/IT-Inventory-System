@@ -13,8 +13,8 @@ $script:RunnerConfigPath = Join-Path $testRoot 'config.json'
 $script:RunnerStatePath = Join-Path $testRoot 'state.json'
 $script:pilotLockPrefix = 'Local\ITIR-pilot-test-' + [guid]::NewGuid().ToString('N')
 $script:realEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
-    return & $script:realEnterLock ($script:pilotLockPrefix + '-' + $Name.Replace('\', '-'))
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+    return & $script:realEnterLock ($script:pilotLockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast
 }
 function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     $rejected = $false

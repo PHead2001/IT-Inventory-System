@@ -74,11 +74,12 @@ function Assert-OwnedPath([string] $Path) {
     return $target
 }
 
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
     $mutex = [Threading.Mutex]::new($false, $Name)
     try {
         try {
-            if (-not $mutex.WaitOne([TimeSpan]::FromSeconds(20))) {
+            $timeout = if ($FailFast) { [TimeSpan]::Zero } else { [TimeSpan]::FromSeconds(20) }
+            if (-not $mutex.WaitOne($timeout)) {
                 throw 'Runner state is busy; retry after the other operation finishes.'
             }
         } catch [Threading.AbandonedMutexException] {
@@ -90,6 +91,13 @@ function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
         $mutex.Dispose()
         throw
     }
+}
+
+# Owner commands never queue behind another command. Background lifetime/state
+# locks deliberately do not acquire this mutex. Lock order: control, supervisor, state.
+function Invoke-RunnerControl([scriptblock] $Work) {
+    $control = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
+    try { & $Work } finally { Exit-RunnerLock $control }
 }
 
 function Test-QueuedRunnerJob($Job, [string] $Label) {
@@ -451,7 +459,11 @@ function Get-RunnerFileEvidence([string] $Path) {
     $Path = Assert-OwnedPath $Path
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ exists = $false; hash = ''; content = '' } }
     $bytes = [IO.File]::ReadAllBytes($Path)
-    return [pscustomobject]@{ exists = $true; hash = Get-RunnerBytesHash $bytes; content = [Convert]::ToBase64String($bytes) }
+    return Get-RunnerBytesEvidence $bytes
+}
+
+function Get-RunnerBytesEvidence([byte[]] $Bytes) {
+    return [pscustomobject]@{ exists = $true; hash = Get-RunnerBytesHash $Bytes; content = [Convert]::ToBase64String($Bytes) }
 }
 
 function Get-RunnerEvidenceValue($Evidence) {
@@ -493,7 +505,7 @@ function Write-RunnerEvidence([string] $Path, $Evidence) {
 }
 
 function Assert-RunnerTransitionClear {
-    foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
+    foreach ($name in @('pilot-retry.json', 'update-journal.json', 'setup-publication.json')) {
         $record = Read-RunnerJson (Assert-OwnedPath (Join-Path $script:RunnerRoot $name))
         if ($null -ne $record -and ($record.tag -cne $script:RunnerTag -or $record.phase -cne 'complete')) {
             throw 'A pending or invalid lifecycle journal blocks pickup/activation; explicitly resume the recorded operation.'
@@ -530,6 +542,28 @@ function Assert-RunnerProtectedPath([string] $Path) {
 # or callback that can change transition behavior.
 function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
 
+# A committed initial state is the durable claim. Complete its exact receipt
+# before any recovery can erase that state, including watchdog/Stop cleanup.
+function Complete-RunnerPilotClaim($State) {
+    if ($State.PSObject.Properties.Name -contains 'claimMode' -and
+        ($State.claimMode -cnotin @('pilot', 'active') -or
+        ($State.claimMode -ceq 'pilot' -and $State.PSObject.Properties.Name -notcontains 'pilotClaim') -or
+        ($State.claimMode -ceq 'active' -and $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
+        throw 'Recorded session claim mode/evidence is invalid; state must be retained.'
+    }
+    if ($State.PSObject.Properties.Name -notcontains 'pilotClaim') { return }
+    Assert-StateIdentity $State
+    $attempt = Get-RunnerEvidenceValue $State.pilotClaim
+    if ($null -eq $attempt -or $attempt.tag -cne $script:RunnerTag -or $attempt.sessionName -cne $State.vmName -or
+        $attempt.jobId -le 0 -or $attempt.runId -le 0 -or $attempt.workflowId -le 0 -or $attempt.runAttempt -le 0 -or
+        $attempt.workflowPath -cne '.github/workflows/local-runner-pilot.yml' -or
+        $attempt.pilotLabel -cne (Get-PilotLabel $attempt.headSha)) { throw 'Recorded pilot claim identity is invalid; state must be retained.' }
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'pilot-attempt.json')
+    if (Test-Path -LiteralPath $path) {
+        if (-not (Test-RunnerEvidence $path $State.pilotClaim)) { throw 'Pilot receipt differs from committed session claim; state must be retained.' }
+    } else { Write-RunnerEvidence $path $State.pilotClaim }
+}
+
 function Assert-StateIdentity($State) {
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'
@@ -542,6 +576,7 @@ function Assert-StateIdentity($State) {
 
 function Remove-RunnerInstance($State) {
     Assert-StateIdentity $State
+    Complete-RunnerPilotClaim $State
     $vm = Get-VM -Name $State.vmName -ErrorAction SilentlyContinue
     if ($null -ne $vm) {
         $disk = @(Get-VMHardDiskDrive -VMName $State.vmName)

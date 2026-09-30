@@ -12,11 +12,15 @@ function Get-RunnerBundleVersion([string] $Version) {
     return [pscustomobject]@{ date = $date; revision = $revision }
 }
 
+function Get-RunnerBundleNames {
+    return @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
+        'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
+}
+
 function Get-RunnerBundle([string] $SourceRoot) {
     $path = Join-Path $SourceRoot 'Bundle.json'
     $bundle = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    $names = @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
-        'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
+    $names = Get-RunnerBundleNames
     if ($bundle.schema -ne 1 -or $bundle.tag -cne $script:RunnerTag -or $bundle.version -cnotmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' -or
         $bundle.files.Count -ne $names.Count -or (Compare-Object @($bundle.files.name | Sort-Object) @($names | Sort-Object))) {
         throw 'Runner bundle manifest identity/version/dependency list is invalid.'
@@ -31,6 +35,76 @@ function Get-RunnerBundle([string] $SourceRoot) {
         }
     }
     return [pscustomobject]@{ manifest = $bundle; hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
+}
+
+# Initial setup publication is recoverable even after config becomes visible.
+# The journal contains the exact reviewed bytes; resume never reads a later checkout.
+function Complete-RunnerSetupPublication($Plan) {
+    if ($Plan.schema -ne 1 -or $Plan.tag -cne $script:RunnerTag -or $Plan.phase -cnotin @('pending', 'complete')) { throw 'Setup publication identity is invalid.' }
+    $config = Get-RunnerEvidenceValue $Plan.config
+    $receipt = Get-RunnerEvidenceValue $Plan.receipt
+    $stage = Get-RunnerEvidenceValue $Plan.stage
+    if ($null -eq $config -or $config.tag -cne $script:RunnerTag -or $config.schema -ne 1 -or $config.activation -cne 'disabled' -or
+        $null -eq $stage -or $stage.tag -cne $script:RunnerTag -or $stage.repo -cne $config.repo -or $stage.group -ne $config.runnerGroupId) {
+        throw 'Setup publication does not match its owned setup stage/disabled config.'
+    }
+    $stagePath = Assert-OwnedPath (Join-Path $script:RunnerRoot 'setup-stage.json')
+    if (-not (Test-RunnerEvidence $stagePath $Plan.stage) -and -not ($Plan.phase -ceq 'complete' -and -not (Test-Path -LiteralPath $stagePath))) { throw 'Owned setup stage changed outside publication.' }
+    $names = @(Get-RunnerBundleNames) + @('Bundle.json')
+    if ($Plan.files.Count -ne $names.Count -or (Compare-Object @($Plan.files.name | Sort-Object) @($names | Sort-Object))) { throw 'Setup publication dependency set is invalid.' }
+    $manifestRecord = @($Plan.files | Where-Object name -CEQ 'Bundle.json')[0]
+    $manifest = Get-RunnerEvidenceValue $manifestRecord.evidence
+    if ($manifest.schema -ne 1 -or $manifest.tag -cne $script:RunnerTag -or
+        $manifest.files.Count -ne ($names.Count - 1) -or (Compare-Object @($manifest.files.name | Sort-Object) @(Get-RunnerBundleNames | Sort-Object)) -or
+        $receipt.tag -cne $script:RunnerTag -or $receipt.version -cne $manifest.version -or $receipt.manifestHash -cne $manifestRecord.evidence.hash) { throw 'Setup publication bundle/receipt is incoherent.' }
+    [void](Get-RunnerBundleVersion $manifest.version)
+    $bin = Assert-OwnedPath (Join-Path $script:RunnerRoot 'bin')
+    Assert-RunnerProtectedPath $bin
+    $artifacts = @()
+    foreach ($file in $Plan.files) {
+        $bytes = [Convert]::FromBase64String($file.evidence.content)
+        $expected = if ($file.name -ceq 'Bundle.json') { $receipt.manifestHash } else { @($manifest.files | Where-Object name -CEQ $file.name)[0].hash }
+        if (-not $file.evidence.exists -or $expected -cnotmatch '^[0-9A-F]{64}$' -or $file.evidence.hash -cne $expected -or (Get-RunnerBytesHash $bytes) -cne $expected) { throw 'Setup publication bytes differ from its manifest.' }
+        $artifacts += [pscustomobject]@{ path = Assert-OwnedPath (Join-Path $bin $file.name); evidence = $file.evidence; checkpoint = ('setup-file-' + $file.name) }
+    }
+    $artifacts += [pscustomobject]@{ path = Join-Path $script:RunnerRoot 'installed-bundle.json'; evidence = $Plan.receipt; checkpoint = 'setup-receipt' }
+    $artifacts += [pscustomobject]@{ path = $script:RunnerConfigPath; evidence = $Plan.config; checkpoint = 'setup-config' }
+    # Validate every target before the first write. Existing bytes must be exact;
+    # missing artifacts are recoverable only through this durable intent.
+    foreach ($artifact in $artifacts) {
+        if (Test-Path -LiteralPath $artifact.path) {
+            Assert-RunnerProtectedPath $artifact.path
+            if (-not (Test-RunnerEvidence $artifact.path $artifact.evidence)) { throw 'Setup target differs from exact publication intent; refusing adoption.' }
+        } elseif ($Plan.phase -ceq 'complete') { throw 'Completed setup has missing artifacts; publication cannot repair arbitrary damage.' }
+    }
+    foreach ($artifact in $artifacts) {
+        if (-not (Test-Path -LiteralPath $artifact.path)) { Write-RunnerBytes $artifact.path ([Convert]::FromBase64String($artifact.evidence.content)) }
+        if (-not (Test-RunnerEvidence $artifact.path $artifact.evidence)) { throw 'Setup publication readback failed.' }
+        Assert-RunnerProtectedPath $artifact.path
+        Invoke-RunnerTransitionCheckpoint $artifact.checkpoint
+    }
+    [void](Get-CoherentInstalledRunnerBundle)
+    $Plan.phase = 'complete'
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'setup-publication.json') $Plan
+    Invoke-RunnerTransitionCheckpoint 'setup-complete'
+    if (Test-Path -LiteralPath $stagePath) { Remove-Item -LiteralPath $stagePath -Force }
+    Invoke-RunnerTransitionCheckpoint 'setup-stage-removed'
+}
+
+function Resume-RunnerSetupPublication {
+    Invoke-RunnerControl {
+        Assert-Administrator
+        Assert-SecureRoot
+        $mutex = Enter-RunnerLock
+        try {
+            $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'setup-publication.json')
+            Assert-RunnerProtectedPath $path
+            $plan = Read-RunnerJson $path
+            if ($null -eq $plan) { throw 'No recorded setup publication exists.' }
+            Assert-RunnerControlIdle
+            Complete-RunnerSetupPublication $plan
+        } finally { Exit-RunnerLock $mutex }
+    }
 }
 
 function Test-InstalledRunnerBundle([string] $SourceRoot) {
@@ -78,10 +152,10 @@ function Assert-RunnerBundleUpgrade($SourceBundle) {
 function Assert-RunnerBundleCurrent([string] $SourceRoot, [switch] $AllowPendingRetry) {
     Assert-SecureRoot
     if ($AllowPendingRetry) {
-        foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
+        foreach ($name in @('pilot-retry.json', 'update-journal.json', 'setup-publication.json')) {
             $journal = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
             if ($null -ne $journal -and ($journal.tag -cne $script:RunnerTag -or
-                $journal.phase -cnotin @('pending', 'complete') -or ($name -ceq 'update-journal.json' -and $journal.phase -ceq 'pending'))) {
+                $journal.phase -cnotin @('pending', 'complete') -or ($name -cne 'pilot-retry.json' -and $journal.phase -ceq 'pending'))) {
                 throw 'Invalid retry journal or pending update blocks retry control.'
             }
         }
@@ -101,11 +175,16 @@ function Assert-RunnerBundleCurrent([string] $SourceRoot, [switch] $AllowPending
 function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
     $marker = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
     if (Test-Path -LiteralPath $marker) { Assert-RunnerProtectedPath $marker }
-    if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
-        throw 'Update requires no session or owned-prefix VM; no job was stopped.'
-    }
-    Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
-    Assert-RunnerProtectedPath $marker
+    $claimLock = Enter-RunnerLock
+    try {
+        Invoke-RunnerTransitionCheckpoint 'update-before-marker'
+        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+            throw 'Update requires no session or owned-prefix VM; no job was stopped.'
+        }
+        Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
+        Assert-RunnerProtectedPath $marker
+        Invoke-RunnerTransitionCheckpoint 'update-marker'
+    } finally { Exit-RunnerLock $claimLock }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         Invoke-RunnerTransitionCheckpoint 'update-wait'
@@ -208,7 +287,7 @@ function Complete-RunnerBundleUpdate($Plan) {
     Write-Host "Runner bundle $($Plan.version) installed and verified. Config/evidence preserved; pickup remains stopped."
 }
 
-function Install-RunnerBundle([string] $SourceRoot, [switch] $Resume) {
+function Install-RunnerBundleCore([string] $SourceRoot, [switch] $Resume) {
     Assert-Administrator
     Assert-SecureRoot
     $journalPath = Assert-OwnedPath (Join-Path $script:RunnerRoot 'update-journal.json')
@@ -280,6 +359,10 @@ function Install-RunnerBundle([string] $SourceRoot, [switch] $Resume) {
             Complete-RunnerBundleUpdate $plan
         } finally { Exit-RunnerLock $mutex }
     } finally { Exit-RunnerLock $supervisorLock }
+}
+
+function Install-RunnerBundle([string] $SourceRoot, [switch] $Resume) {
+    Invoke-RunnerControl { Install-RunnerBundleCore $SourceRoot -Resume:$Resume }
 }
 
 if ($MyInvocation.InvocationName -ne '.') { Install-RunnerBundle $PSScriptRoot -Resume:$Resume }

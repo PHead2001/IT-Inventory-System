@@ -11,9 +11,9 @@ $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-lifecycle-tests-' + [guid]::
 $script:lockPrefix = 'Local\ITIR-lifecycle-' + [guid]::NewGuid().ToString('N')
 $script:realEnter = (Get-Command Enter-RunnerLock).ScriptBlock
 $script:locks = [Collections.Generic.List[string]]::new()
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
     $script:locks.Add($Name)
-    return & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-'))
+    return & $script:realEnter ($script:lockPrefix + '-' + $Name.Replace('\', '-')) -FailFast:$FailFast
 }
 function Assert-Administrator {}
 function Write-Host {}
@@ -73,7 +73,7 @@ try {
         Enable-RunnerPilot ('b' * 40) 'reviewed diagnosis' -Retry
         if (-not (Test-RunnerEvidence $script:RunnerConfigPath $before)) { throw 'Completed retry replay changed its target.' }
         Assert-Rejected { Enable-RunnerPilot ('c' * 40) } 'completed journal initial bypass'
-        if ($script:locks[0] -cne 'Global\ITInventoryLocalRunner-Supervisor-v1' -or $script:locks[1] -cne 'Global\ITInventoryLocalRunner-v1') { throw 'Retry lock order changed.' }
+        if ($script:locks[0] -cne 'Global\ITInventoryLocalRunner-Control-v1' -or $script:locks[1] -cne 'Global\ITInventoryLocalRunner-Supervisor-v1' -or $script:locks[2] -cne 'Global\ITInventoryLocalRunner-v1') { throw 'Retry lock order changed.' }
     }
     foreach ($changed in @('config', 'receipt', 'archive')) {
         New-Fixture ('retry-changed-' + $changed)
@@ -135,7 +135,7 @@ try {
             throw "Update $point failed to restore exact old config and coherent bundle."
         }
         Assert-UpdatePreservedHashes $preserved
-        if ($script:locks[0] -cne 'Global\ITInventoryLocalRunner-Supervisor-v1' -or $script:locks[1] -cne 'Global\ITInventoryLocalRunner-v1') { throw 'Update lock order changed.' }
+        if ($script:locks[0] -cne 'Global\ITInventoryLocalRunner-Control-v1' -or $script:locks[1] -cne 'Global\ITInventoryLocalRunner-v1' -or $script:locks[2] -cne 'Global\ITInventoryLocalRunner-Supervisor-v1' -or $script:locks[3] -cne 'Global\ITInventoryLocalRunner-v1') { throw 'Update lock order changed.' }
     }
     foreach ($changed in @('source', 'missing-dependency', 'acl', 'config', 'receipt', 'running-task', 'vm', 'state', 'staged-source')) {
         New-Fixture ('update-invalid-' + $changed)
