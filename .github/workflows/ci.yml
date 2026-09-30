@@ -12,7 +12,7 @@ env:
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
   app:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, it-inventory-ephemeral]
     timeout-minutes: 15
     env:
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
@@ -27,13 +27,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
       - run: npm install --global npm@11.11.0
       - run: npm ci
       - run: git rev-parse HEAD
       - run: npm run validate:app
   database:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, it-inventory-ephemeral]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +42,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
       - run: npm install --global npm@11.11.0
       - run: npm ci
       - run: git rev-parse HEAD
@@ -57,19 +55,24 @@ jobs:
       - if: ${{ !cancelled() && steps.database_tests.outcome == 'success' }}
         run: npm run test:e2e
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: failure_artifact
         if: failure() || cancelled()
+        continue-on-error: true
         with:
           name: foundation-failures-${{ env.TESTED_SHA }}
           path: |
             test-results/
             playwright-report/
           retention-days: 7
+      - name: Warn when failure diagnostics cannot be uploaded
+        if: ${{ always() && steps.failure_artifact.outcome == 'failure' }}
+        run: echo '::warning::Failure diagnostics could not be uploaded; GitHub artifact storage quota or availability may prevent retrieval. Test failures remain failures.'
       - if: always()
         run: npm run db:stop
   required:
     if: always()
     needs: [app, database]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, it-inventory-ephemeral]
     steps:
       - name: Require all foundation gates
         env:
@@ -83,7 +86,7 @@ jobs:
     name: ${{ github.event_name == 'push' && 'Production database ready' || 'Production database inactive (PR)' }}
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [required]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, it-inventory-ephemeral]
     timeout-minutes: 15
     environment: production-database
     steps:
@@ -98,7 +101,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
       - run: npm install --global npm@11.11.0
       - run: npm ci
       - run: npm run db:deliver:production
