@@ -257,11 +257,15 @@ export function fileProviders({
       };
     },
     writeEnv: async (id, body) => {
+      // PATCH v9 rejects additional properties. Visibility belongs to the
+      // owned-row/readback contract, not its documented request schema.
+      const patchBody = { ...body };
+      delete patchBody.visibility;
       const result = id
         ? await api(
             `/v9/projects/${projectPath}/env/${encodeURIComponent(id)}`,
             'PATCH',
-            body,
+            patchBody,
           )
         : await api(`/v10/projects/${projectPath}/env`, 'POST', body);
       if (result?.failed?.length) refuse('FILE_ENV_WRITE_FAILED');

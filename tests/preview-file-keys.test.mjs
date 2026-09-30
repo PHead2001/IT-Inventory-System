@@ -518,6 +518,82 @@ test('provider adapter sends parameterized single guarded statements and fresh b
   });
 });
 
+test('environment PATCH obeys strict v9 schema and preserves sensitive scope, intent and value', async () => {
+  const calls = [];
+  const documented = [
+    'key',
+    'target',
+    'gitBranch',
+    'type',
+    'value',
+    'customEnvironmentIds',
+    'comment',
+  ];
+  const providers = fileProviders({
+    managementToken: 'dummy',
+    vercelToken: 'dummy',
+    pins: { projectId: 'prj_test', teamId: 'team_test' },
+    request: async (url, options) => {
+      if (options.method === 'PATCH') {
+        // Mirrors additionalProperties:false in Vercel's official OpenAPI.
+        assert.deepEqual(
+          Object.keys(options.body).filter((key) => !documented.includes(key)),
+          [],
+        );
+      }
+      calls.push({ url, options });
+      return {};
+    },
+  });
+  const body = {
+    key: 'INVENTORY_FILE_KEYS_JSON',
+    value: JSON.stringify({ [keyId]: secret }),
+    type: 'sensitive',
+    visibility: 'secret',
+    target: ['preview'],
+    gitBranch: 'feature',
+    comment: marker,
+  };
+  const before = structuredClone(body);
+  await providers.vercel.writeEnv('env_test', body);
+  const { visibility, ...expected } = body;
+  assert.equal(visibility, 'secret');
+  assert.deepEqual(calls[0].options.body, expected);
+  assert.equal(calls[0].options.method, 'PATCH');
+  assert.equal(
+    new URL(calls[0].url).pathname,
+    '/v9/projects/prj_test/env/env_test',
+  );
+  assert.equal(new URL(calls[0].url).searchParams.get('teamId'), 'team_test');
+  assert.deepEqual(body, before);
+  await providers.vercel.writeEnv(null, body);
+  assert.equal(calls[1].options.method, 'POST');
+  assert.deepEqual(calls[1].options.body, before);
+});
+
+test('environment ownership still requires secret visibility before writes and after readback', async () => {
+  for (const visibility of [undefined, 'config']) {
+    const before = fixture();
+    before.state.key = staged();
+    before.state.env = { ...ownedEnv(), visibility };
+    await assert.rejects(provisionPreviewFiles(before.options), {
+      code: 'FILE_ENV_OWNERSHIP',
+    });
+    assert.deepEqual(before.writes, []);
+    const readback = fixture();
+    const write = readback.options.vercel.writeEnv;
+    readback.options.vercel.writeEnv = async (...args) => {
+      await write(...args);
+      readback.state.env.visibility = visibility;
+    };
+    await assert.rejects(provisionPreviewFiles(readback.options), {
+      code: 'FILE_ENV_OWNERSHIP',
+    });
+    assert.deepEqual(readback.writes, ['stage', 'env']);
+    assert.equal(readback.state.key.accepts_new, false);
+  }
+});
+
 test('provider backend checks reject contradictory wider preview URL and track ID/revision', async () => {
   const f = backendFixture();
   const first = await f.check();
