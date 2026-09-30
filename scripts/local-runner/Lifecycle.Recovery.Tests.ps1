@@ -22,16 +22,9 @@ function Get-OwnerToken { return 'dummy' }
 function Assert-RunnerProtectedPath { param($Path) if ($script:rejectAcl -and $Path.EndsWith($script:rejectAcl)) { throw 'Synthetic unexpected ACL.' }; [void](Assert-OwnedPath $Path) }
 function Get-ScheduledTask { param($TaskName) return [pscustomobject]@{ State = $(if ($script:taskRunning) { 'Running' } else { 'Ready' }) } }
 function Get-VM { if ($script:vmPresent) { return [pscustomobject]@{ Name = 'ITIR-' + ('c' * 32) } } }
-function Invoke-InstalledRunnerStop {
-    param($RunnerPath = '')
-    $pending = Read-RunnerJson (Join-Path $script:RunnerRoot 'update-journal.json')
-    if ($null -ne $pending -and $pending.phase -eq 'pending') {
-        $expected = Join-Path (Join-Path (Join-Path (Join-Path $script:RunnerRoot 'bin') 'updates') $pending.updateId) 'Runner.ps1'
-        if ($RunnerPath -cne $expected) { throw 'Resume used a partially replaced installed Stop instead of the coherent staged Stop.' }
-        [void](Get-RunnerBundle (Split-Path $RunnerPath -Parent))
-    }
-    [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'stop.requested'), 'stop')
-}
+$script:realWaitUpdate = (Get-Command Wait-RunnerUpdateIdle).ScriptBlock
+function Wait-RunnerUpdateIdle { & $script:realWaitUpdate -TimeoutSeconds 0 }
+function Invoke-InstalledRunnerStop { throw 'Updater invoked destructive Stop.' }
 function Invoke-RunnerTransitionCheckpoint {
     param($Name)
     if ($Name -ceq $script:fault) { throw "Synthetic interruption at $Name" }
@@ -191,13 +184,16 @@ try {
     if ($script:menuUpdates.Count -ne 2 -or $script:menuUpdates[0] -or -not $script:menuUpdates[1]) { throw 'Repository menu skipped installed bundle update/resume.' }
     # The actual menu retry clause may pass a pending retry, but not an update.
     Write-RunnerJson (Join-Path $script:RunnerRoot 'update-journal.json') ([ordered]@{ tag = $script:RunnerTag; phase = 'complete' })
-    Write-RunnerJson (Join-Path $script:RunnerRoot 'pilot-retry.json') ([ordered]@{ tag = $script:RunnerTag; phase = 'pending' })
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'pilot-retry.json') ([ordered]@{
+        tag = $script:RunnerTag; phase = 'pending'; schema = 1; retryId = ('a' * 32); nextSha = ('b' * 40); reason = 'recorded fixture value'
+    })
     function Test-InstalledRunnerBundle { return $true }
+    function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ verified = $true } }
     function Read-Host { return 'recorded fixture value' }
     $sink = Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1'
     [IO.File]::WriteAllText($sink, @'
 param($Action, $ExpectedPilotSha, $RetryReason)
-if ($Action -ne 'RetryPilot' -or $ExpectedPilotSha -ne 'recorded fixture value' -or $RetryReason -ne 'recorded fixture value') { throw 'Menu retry parameters changed.' }
+if ($Action -ne 'RetryPilot' -or $ExpectedPilotSha -ne ('b' * 40) -or $RetryReason -ne 'recorded fixture value') { throw 'Menu retry parameters changed.' }
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'menu-resumed'), 'called')
 '@)
     $clause = @($menuSwitch.Clauses | Where-Object { $_.Item1.Value -eq '9' })[0].Item2

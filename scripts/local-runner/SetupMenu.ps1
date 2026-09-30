@@ -78,8 +78,15 @@ while ($true) {
             }
             '9' {
                 Assert-RunnerBundleCurrent $PSScriptRoot -AllowPendingRetry
-                $pilotSha = Read-Host 'New reviewed SHA, or exact recorded SHA for pending retry (40 lowercase characters)'
-                $reason = Read-Host 'Investigation reason (nonsecret; identical recorded reason for pending retry)'
+                $retry = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-retry.json')
+                if ($null -ne $retry -and $retry.phase -ceq 'pending') {
+                    $pilotSha = $retry.nextSha
+                    $reason = $retry.reason
+                    Write-Host 'Resuming the recorded retry using its verified installed bundle and exact recorded SHA/reason.'
+                } else {
+                    $pilotSha = Read-Host 'New reviewed SHA (40 lowercase characters)'
+                    $reason = Read-Host 'Investigation reason (nonsecret)'
+                }
                 & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action RetryPilot -ExpectedPilotSha $pilotSha -RetryReason $reason
             }
             default { Write-Host 'Choose a number from 1 to 9.' }

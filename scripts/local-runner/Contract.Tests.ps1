@@ -19,6 +19,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell image download regres
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell pilot binding regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Recovery.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Update.Controls.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression failed.' }
 

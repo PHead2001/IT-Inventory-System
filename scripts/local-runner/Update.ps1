@@ -3,6 +3,15 @@
 param([switch] $Resume)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 
+function Get-RunnerBundleVersion([string] $Version) {
+    if ($Version -cnotmatch '^([0-9]{4}-[0-9]{2}-[0-9]{2})\.([0-9]+)$') { throw 'Runner bundle version is invalid.' }
+    try {
+        $date = [DateTime]::ParseExact($Matches[1], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $revision = [long]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture)
+    } catch { throw 'Runner bundle version date/revision is invalid.' }
+    return [pscustomobject]@{ date = $date; revision = $revision }
+}
+
 function Get-RunnerBundle([string] $SourceRoot) {
     $path = Join-Path $SourceRoot 'Bundle.json'
     $bundle = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
@@ -12,6 +21,7 @@ function Get-RunnerBundle([string] $SourceRoot) {
         $bundle.files.Count -ne $names.Count -or (Compare-Object @($bundle.files.name | Sort-Object) @($names | Sort-Object))) {
         throw 'Runner bundle manifest identity/version/dependency list is invalid.'
     }
+    [void](Get-RunnerBundleVersion $bundle.version)
     foreach ($file in $bundle.files) {
         $sourcePath = Join-Path $SourceRoot $file.name
         if ($file.hash -cnotmatch '^[0-9A-F]{64}$' -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or
@@ -35,7 +45,34 @@ function Test-InstalledRunnerBundle([string] $SourceRoot) {
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -cne $file.hash) { return $false }
     }
     $manifestPath = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Bundle.json')
+    if (Test-Path -LiteralPath $manifestPath) { Assert-RunnerProtectedPath $manifestPath }
     return (Test-Path -LiteralPath $manifestPath -PathType Leaf) -and (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ceq $source.hash
+}
+
+function Get-CoherentInstalledRunnerBundle {
+    $bin = Assert-OwnedPath (Join-Path $script:RunnerRoot 'bin')
+    Assert-RunnerProtectedPath $bin
+    foreach ($name in @('Bundle.json', 'installed-bundle.json')) {
+        $path = if ($name -ceq 'Bundle.json') { Join-Path $bin $name } else { Join-Path $script:RunnerRoot $name }
+        Assert-RunnerProtectedPath (Assert-OwnedPath $path)
+    }
+    $bundle = Get-RunnerBundle $bin
+    if (-not (Test-InstalledRunnerBundle $bin)) { throw 'Installed manifest, receipt or dependencies are not coherent.' }
+    return $bundle
+}
+
+function Assert-RunnerBundleUpgrade($SourceBundle) {
+    $bin = Assert-OwnedPath (Join-Path $script:RunnerRoot 'bin')
+    $manifestExists = Test-Path -LiteralPath (Join-Path $bin 'Bundle.json')
+    $receiptExists = Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'installed-bundle.json')
+    if ($manifestExists -or $receiptExists) {
+        $installed = Get-CoherentInstalledRunnerBundle
+        $oldVersion = Get-RunnerBundleVersion $installed.manifest.version
+        $newVersion = Get-RunnerBundleVersion $SourceBundle.manifest.version
+        if ($newVersion.date -lt $oldVersion.date -or ($newVersion.date -eq $oldVersion.date -and $newVersion.revision -le $oldVersion.revision)) {
+            throw 'Changed runner bundles require a strictly increasing date/numeric revision; downgrade or equal-version replacement refused.'
+        }
+    } # Only installations predating both manifest and receipt use the legacy upgrade window.
 }
 
 function Assert-RunnerBundleCurrent([string] $SourceRoot, [switch] $AllowPendingRetry) {
@@ -48,15 +85,40 @@ function Assert-RunnerBundleCurrent([string] $SourceRoot, [switch] $AllowPending
                 throw 'Invalid retry journal or pending update blocks retry control.'
             }
         }
+        $retry = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-retry.json')
+        if ($null -ne $retry -and $retry.phase -ceq 'pending') {
+            if ($retry.retryId -cnotmatch '^[0-9a-f]{32}$' -or $retry.nextSha -cnotmatch '^[0-9a-f]{40}$' -or
+                [string]::IsNullOrWhiteSpace($retry.reason) -or $retry.reason.Length -gt 256 -or $retry.reason -match '[\x00-\x1f\x7f]') {
+                throw 'Pending retry identity/SHA/reason is invalid.'
+            }
+            [void](Get-CoherentInstalledRunnerBundle)
+            return # Recovery belongs to the recorded installed bundle, not a later checkout.
+        }
     } else { Assert-RunnerTransitionClear }
     if (-not (Test-InstalledRunnerBundle $SourceRoot)) { throw 'Installed runner bundle differs from this reviewed checkout. Choose option 2 to explicitly update while idle.' }
 }
 
-function Invoke-InstalledRunnerStop([string] $RunnerPath = '') {
-    $runner = if ($RunnerPath) { Assert-OwnedPath $RunnerPath } else { Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') }
-    Assert-RunnerProtectedPath $runner
-    $exitCode = Invoke-RunnerNative 'powershell.exe' @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $runner, '-Action', 'Stop')
-    if ($exitCode -ne 0) { throw 'Installed supported Stop failed; update was not activated.' }
+function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
+    $marker = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
+    if (Test-Path -LiteralPath $marker) { Assert-RunnerProtectedPath $marker }
+    if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        throw 'Update requires no session or owned-prefix VM; no job was stopped.'
+    }
+    Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
+    Assert-RunnerProtectedPath $marker
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        Invoke-RunnerTransitionCheckpoint 'update-wait'
+        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+            throw 'A session or VM appeared during graceful suspension; update refused without stopping it.'
+        }
+        if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -ne 'Running') {
+            Invoke-RunnerTransitionCheckpoint 'update-acknowledged'
+            return
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'Supervisor did not exit gracefully before the update deadline; no job was stopped.' }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
 }
 
 function Get-UpdatePreservedHashes {
@@ -164,27 +226,29 @@ function Install-RunnerBundle([string] $SourceRoot, [switch] $Resume) {
             $path = Assert-OwnedPath (Join-Path $binPath $name)
             if (Test-Path -LiteralPath $path) { Assert-RunnerProtectedPath $path }
         }
+        Assert-RunnerBundleUpgrade $sourceBundle
     }
-    # Stop is the sole runner mutation before locking. Never update a live session.
-    if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) { throw 'Update requires no session or owned-prefix VM.' }
     if ($Resume) {
-        # A partially replaced installed Runner may lack its newly required helper.
-        # Run supported Stop from the complete, verified retained bundle instead.
         if ($pending.schema -ne 1 -or $pending.updateId -cnotmatch '^[0-9a-f]{32}$') { throw 'Pending update identity is invalid.' }
         $stage = Assert-OwnedPath (Join-Path (Join-Path (Join-Path $script:RunnerRoot 'bin') 'updates') $pending.updateId)
         Assert-RunnerProtectedPath $stage
         $retained = Get-RunnerBundle $stage
-        if ($retained.hash -cne $pending.manifestHash -or $retained.manifest.version -cne $pending.version) { throw 'Pending Stop bundle differs from retained update intent.' }
+        if ($retained.hash -cne $pending.manifestHash -or $retained.manifest.version -cne $pending.version) { throw 'Pending bundle differs from retained update intent.' }
         foreach ($name in @($retained.manifest.files.name) + @('Bundle.json')) { Assert-RunnerProtectedPath (Assert-OwnedPath (Join-Path $stage $name)) }
-        Invoke-InstalledRunnerStop (Join-Path $stage 'Runner.ps1')
-    } else { Invoke-InstalledRunnerStop }
+    }
+    # Never invoke destructive Stop: an idle precheck can race a legacy job claim.
+    Wait-RunnerUpdateIdle
     $supervisorLock = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
     try {
         $mutex = Enter-RunnerLock
         try {
             Assert-RunnerControlIdle
-            if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -PathType Leaf)) { throw 'Supported Stop marker is absent.' }
+            if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested') -PathType Leaf)) { throw 'Graceful suspension marker was removed; update refused.' }
             if ($Resume) { Complete-RunnerBundleUpdate $pending; return }
+            # Another updater/retry may have completed while we waited for ownership.
+            Assert-RunnerTransitionClear
+            if (Test-InstalledRunnerBundle $SourceRoot) { Write-Host 'Installed runner bundle already matches this checkout.'; return }
+            Assert-RunnerBundleUpgrade $sourceBundle
             $oldConfig = Get-RunnerFileEvidence $script:RunnerConfigPath
             [void](Get-RunnerConfig)
             $disabled = Get-RunnerEvidenceValue $oldConfig; $disabled.activation = 'disabled'

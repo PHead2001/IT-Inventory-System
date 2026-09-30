@@ -501,6 +501,13 @@ function Assert-RunnerTransitionClear {
     }
 }
 
+function Assert-RunnerClaimOpen {
+    Assert-RunnerTransitionClear
+    if (Test-Path -LiteralPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
+        throw 'Pickup suspension requested; no new job may be consumed or created.'
+    }
+}
+
 function Assert-RunnerControlIdle {
     if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -eq 'Running' -or
         (Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {

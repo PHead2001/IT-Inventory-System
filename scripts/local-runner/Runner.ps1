@@ -343,6 +343,7 @@ function Invoke-RunnerSession($Config) {
     }
     $mutex = Enter-RunnerLock
     try {
+        Assert-RunnerClaimOpen
         if (Get-RunnerState) { throw 'Another runner session is already recorded.' }
         New-Item -ItemType Directory -Path $instance -Force | Out-Null
         Write-RunnerJson $script:RunnerStatePath $state
@@ -545,17 +546,23 @@ function Invoke-SupervisorLoop {
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token
             if ($null -ne $job) {
+                if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
+                Assert-RunnerTransitionClear
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-consumption'
                     $fresh = Get-PilotEvidence $config $job.pilotBinding $token
                     if (-not (Test-QueuedRunnerJob $fresh.job $config.pilotLabel)) { throw 'Bound pilot job changed before consumption.' }
-                    Write-RunnerJson $pilotAttemptPath ([ordered]@{
+                    $claimLock = Enter-RunnerLock
+                    try {
+                        Assert-RunnerClaimOpen
+                        Write-RunnerJson $pilotAttemptPath ([ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id
                         runId = $job.pilotBinding.runId; workflowId = $job.pilotBinding.workflowId
                         workflowPath = $job.pilotBinding.workflowPath; headSha = $job.pilotBinding.headSha
                         runAttempt = $job.pilotBinding.runAttempt; pilotLabel = $job.pilotBinding.pilotLabel
                         consumedUtc = [DateTime]::UtcNow.ToString('o')
-                    })
+                        })
+                    } finally { Exit-RunnerLock $claimLock }
                 }
                 $token = $null
                 $allocatedRunner = Invoke-RunnerSession $config
@@ -879,8 +886,9 @@ switch ($Action) {
         foreach ($name in @('pilot-retry.json', 'update-journal.json')) {
             $journal = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
             if ($null -ne $journal) {
-                $phase = if ($journal.phase -cin @('pending', 'complete')) { $journal.phase } else { 'invalid' }
-                Write-Host "Lifecycle journal $name : $phase. Pending operations require explicit resume; pickup is blocked."
+                $phase = if ($journal.tag -ceq $script:RunnerTag -and $journal.phase -cin @('pending', 'complete')) { $journal.phase } else { 'invalid' }
+                if ($phase -ceq 'complete') { Write-Host "Lifecycle journal $name : complete. Retained history; this journal does not block pickup." }
+                else { Write-Host "Lifecycle journal $name : $phase. Explicit recovery is required; pickup is blocked." }
             }
         }
     }
