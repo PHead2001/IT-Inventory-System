@@ -31,7 +31,9 @@ async function requestJson(url, options = {}) {
   if (response.redirected)
     throw coded('Staging identity mirror redirect was refused');
   if (!response.ok)
-    throw coded(`Staging identity mirror provider request failed: HTTP ${response.status}`);
+    throw coded(
+      `Staging identity mirror provider request failed: HTTP ${response.status}`,
+    );
   if (response.status === 204) return null;
   try {
     return await response.json();
@@ -56,7 +58,9 @@ async function main() {
     process.env.GITHUB_REF !== 'refs/heads/main' ||
     !token
   )
-    throw new Error('Trusted staging identity mirror environment is incomplete');
+    throw new Error(
+      'Trusted staging identity mirror environment is incomplete',
+    );
 
   const mgmtHeaders = managementHeaders(token);
   const branches = await requestJson(
