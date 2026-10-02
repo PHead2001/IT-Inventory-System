@@ -111,6 +111,190 @@ describe('category form designer', () => {
     vi.mocked(verifyMetadataDesignerIdentity).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({ ok: true });
   });
+  it.each([
+    'Undo edit',
+    'Discard unsaved edits',
+    'Refresh from server',
+    'Apply JSON to visual editor',
+  ])(
+    'reconciles invalid rule drafts and Save errors after %s restores the same field ID',
+    async (action) => {
+      const savedForm = structuredClone(form);
+      savedForm.published_definition.fields.push({
+        id: id(8),
+        type: 'short_text',
+        label: 'Bounded note',
+        required: false,
+        applies_to: ['quantity', 'asset'],
+        rules: { minLength: 5 },
+        options: [],
+      });
+      savedForm.published_definition.layout[0].controls.push({
+        id: id(9),
+        kind: 'field',
+        field_id: id(8),
+        width: 12,
+      });
+      const props = {
+        memberId: id(50),
+        categories: [{ id: id(1), name: 'Cables', active: true }],
+        forms: { [id(1)]: savedForm },
+      };
+      const { rerender } = render(<MetadataSettings {...props} />);
+      fireEvent.click(document.querySelector(`[data-control-id="${id(9)}"]`)!);
+      const openRules = () => {
+        const summary = screen.getByText('Optional rules', {
+          selector: 'summary',
+        });
+        if (!(summary.closest('details') as HTMLDetailsElement).open)
+          fireEvent.click(summary);
+      };
+      openRules();
+      fireEvent.change(
+        screen.getByLabelText('Minimum characters', { exact: true }),
+        { target: { value: '-' } },
+      );
+      expect(
+        screen.getByLabelText('Minimum characters', { exact: true }),
+      ).toHaveValue('-');
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      try {
+        if (action === 'Apply JSON to visual editor') {
+          fireEvent.click(screen.getByText('Advanced JSON recovery'));
+          fireEvent.change(screen.getByLabelText('Form definition JSON'), {
+            target: { value: JSON.stringify(savedForm.published_definition) },
+          });
+        }
+        fireEvent.click(screen.getByRole('button', { name: action }));
+        if (action === 'Refresh from server')
+          rerender(
+            <MetadataSettings
+              {...props}
+              forms={{ [id(1)]: { ...savedForm, published_number: '2' } }}
+            />,
+          );
+        openRules();
+        expect(
+          screen.getByLabelText('Minimum characters', { exact: true }),
+        ).toHaveValue('5');
+        expect(
+          screen.queryByText(/Minimum characters needs a whole number/),
+        ).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Field name'), {
+          target: { value: 'Restored bounded note' },
+        });
+        await waitFor(() =>
+          expect(
+            screen.getByRole('button', { name: 'Save changes' }),
+          ).toBeEnabled(),
+        );
+      } finally {
+        confirm.mockRestore();
+      }
+    },
+  );
+  it('restores a valid numeric rule display on Undo while retaining incomplete ordinary typing', () => {
+    mount();
+    addField('Ports');
+    fireEvent.change(screen.getByLabelText('Field type'), {
+      target: { value: 'integer' },
+    });
+    fireEvent.click(
+      screen.getByText('Optional rules', { selector: 'summary' }),
+    );
+    fireEvent.click(screen.getByLabelText('Use minimum value'));
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '5' },
+    });
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '10' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    const summary = screen.getByText('Optional rules', { selector: 'summary' });
+    if (!(summary.closest('details') as HTMLDetailsElement).open)
+      fireEvent.click(summary);
+    expect(screen.getByLabelText('Minimum value', { exact: true })).toHaveValue(
+      '5',
+    );
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '-' },
+    });
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Port count' },
+    });
+    expect(screen.getByLabelText('Minimum value', { exact: true })).toHaveValue(
+      '-',
+    );
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+  it('removes only a broken placement so a legacy document can be saved without inventing a field', async () => {
+    const legacy = structuredClone(form);
+    legacy.published_definition.fields.push({
+      id: id(8),
+      type: 'boolean',
+      label: 'Known answer',
+      required: false,
+      applies_to: ['quantity', 'asset'],
+      rules: {},
+      options: [],
+      default: false,
+    });
+    legacy.published_definition.layout[0].controls.push(
+      { id: id(9), kind: 'field', field_id: id(8), width: 12 },
+      {
+        id: id(10),
+        kind: 'field',
+        field_id: id(99),
+        width: 12,
+        visible: false,
+      },
+    );
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[{ id: id(1), name: 'Cables', active: true }]}
+        forms={{ [id(1)]: legacy }}
+      />,
+    );
+    fireEvent.click(document.querySelector(`[data-control-id="${id(9)}"]`)!);
+    expect(
+      screen.queryByRole('button', { name: 'Remove broken placement' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector(`[data-control-id="${id(10)}"]`)!);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove broken placement' }),
+    );
+    expect(document.querySelector(`[data-control-id="${id(10)}"]`)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Remove broken placement' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(
+      document.querySelector(`[data-control-id="${id(10)}"]`),
+    ).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove broken placement' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: false,
+      code: 'unexpected',
+      message: 'Test response.',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(1));
+    const saved = vi.mocked(saveMetadataForm).mock.calls[0][0].payload
+      .definition as MetadataDefinition;
+    expect(saved.fields).toEqual(legacy.published_definition.fields);
+    expect(saved.layout[0].controls).toEqual(
+      legacy.published_definition.layout[0].controls.slice(0, -1),
+    );
+  });
   it('cancels staged addition while preserving unrelated unsaved section edits and adds in one undo step', () => {
     mount();
     fireEvent.change(screen.getByLabelText('Section heading'), {
@@ -762,7 +946,9 @@ describe('category form designer', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('Stale draft.'),
+      expect(
+        screen.getByText('Stale draft.', { selector: '[role="status"]' }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
@@ -1141,6 +1327,77 @@ describe('category form designer', () => {
           ),
       ).toBe(true),
     );
+  });
+  it('invalidates an undispatched impact confirmation on Undo and reviews the restored proposal before confirming', async () => {
+    const review = (token: string) => ({
+      ok: true as const,
+      data: {
+        status: 'confirmation_required' as const,
+        changed: false,
+        token,
+        expires_at: '2030-09-24T20:00:00Z',
+        category_id: id(1),
+        expected_published_revision_id: id(2),
+        expected_draft_id: null,
+        expected_draft_version: '0',
+        reasons: [],
+        affected_quantity: '3',
+        affected_assets: '2',
+        newly_needs_quantity: '1',
+        newly_needs_assets: '0',
+      },
+    });
+    vi.mocked(saveMetadataForm)
+      .mockResolvedValueOnce(review(id(10)))
+      .mockResolvedValueOnce(review(id(11)))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'unexpected',
+        message: 'Test response.',
+      });
+    mount();
+    addField('Restored proposal');
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Old reviewed proposal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Confirm and save changes' }),
+      ).toBeEnabled(),
+    );
+    const oldReview = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Restored proposal',
+    );
+    expect(
+      screen.queryByRole('region', { name: 'Form save impact' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm and save changes' }),
+    ).not.toBeInTheDocument();
+    expect(saveMetadataForm).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Confirm and save changes' }),
+      ).toBeEnabled(),
+    );
+    const restoredReview = vi.mocked(saveMetadataForm).mock.calls[1][0];
+    expect(restoredReview.requestId).not.toBe(oldReview.requestId);
+    expect(restoredReview.payload).not.toHaveProperty('review_token');
+    expect(
+      (restoredReview.payload.definition as MetadataDefinition).fields[0].label,
+    ).toBe('Restored proposal');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm and save changes' }),
+    );
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(saveMetadataForm).mock.calls[2][0].payload).toEqual({
+      ...restoredReview.payload,
+      review_token: id(11),
+    });
   });
   it('keeps a legacy draft as the exact save baseline', async () => {
     const draftForm = {

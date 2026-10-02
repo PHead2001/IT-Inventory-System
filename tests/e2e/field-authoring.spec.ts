@@ -40,6 +40,68 @@ const fields = [
   { type: 'Multiple choice', name: 'Features', value: 'USB-C' },
   { type: 'Nested dropdown', name: 'Connection type', value: 'USB-C' },
 ] as const;
+function csvRows(csv: string): string[][] {
+  csv = csv.replace(/^\uFEFF/, '');
+  const rows: string[][] = [],
+    row: string[] = [];
+  let cell = '',
+    quoted = false;
+  for (let index = 0; index < csv.length; index++) {
+    const char = csv[index];
+    if (char === '"') {
+      if (quoted && csv[index + 1] === '"') {
+        cell += '"';
+        index++;
+      } else quoted = !quoted;
+    } else if (!quoted && char === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (!quoted && (char === '\n' || char === '\r')) {
+      if (char === '\r' && csv[index + 1] === '\n') index++;
+      row.push(cell);
+      rows.push([...row]);
+      row.length = 0;
+      cell = '';
+    } else cell += char;
+  }
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  expect(quoted).toBe(false);
+  return rows;
+}
+function choicePaths(
+  field: {
+    type: string;
+    options: { id: string; label: string; parent_id: string | null }[];
+  },
+  value: unknown,
+): string[][] {
+  if (
+    !['single_select', 'multi_select', 'hierarchical_select'].includes(
+      field.type,
+    )
+  )
+    return [];
+  const path = (id: string): string[] => {
+    const option = field.options.find((option) => option.id === id)!;
+    return option.parent_id
+      ? [...path(option.parent_id), option.label]
+      : [option.label];
+  };
+  return (Array.isArray(value) ? value : [value]).map(path);
+}
+async function followHistoryLink(page: Page, name: string) {
+  const link = page.getByRole('link', { name, exact: true }).first();
+  const destination = new URL((await link.getAttribute('href'))!, page.url());
+  await link.click();
+  await expect(page).toHaveURL(destination.href);
+  const history = page.getByRole('region', { name: 'Custom history field' });
+  await expect(history).toBeVisible();
+  const fieldId = destination.searchParams.get('field');
+  if (fieldId) await expect(history).toContainText('field ' + fieldId);
+}
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);
@@ -426,12 +488,14 @@ test('authors all twelve types through the UI and preserves their preview, creat
   expect(envelope.error).toBeNull();
   const definition = (
     envelope.data as unknown as {
+      published_revision_id: string;
       published_definition: {
         fields: {
           id: string;
           label: string;
+          type: string;
           default: unknown;
-          options: { id: string; label: string }[];
+          options: { id: string; label: string; parent_id: string | null }[];
         }[];
       };
     }
@@ -563,27 +627,92 @@ test('authors all twelve types through the UI and preserves their preview, creat
     await expect(metadataAnswer(page, label)).toHaveText(value);
   expect(after.data!.custom_values[ids['Port count']].value).toBe(0);
   await page.goto('/history?entityId=' + quantityId);
-  await page
-    .getByRole('link', {
-      name: 'Custom metadata changed — inspect before and after',
-    })
-    .first()
-    .click();
-  for (
-    let index = 0;
-    index < 12 &&
-    !(await page
-      .getByRole('heading', { name: 'Inspection description', exact: true })
-      .isVisible());
-    index++
-  )
-    await page.getByRole('link', { name: 'Next custom field' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Inspection description', exact: true }),
-  ).toBeVisible();
-  await expect(page.locator('pre')).toContainText('Spare connector');
-  await page.getByRole('link', { name: 'After event' }).click();
-  await expect(page.locator('pre')).toContainText('Edited connector');
+  await followHistoryLink(
+    page,
+    'Custom metadata changed — inspect before and after',
+  );
+  const eventKey = new URL(page.url()).searchParams.get('event')!;
+  const eventId = eventKey.split(':')[1];
+  const recordedEvent = await client
+    .from('quantity_events')
+    .select('before_metadata,after_metadata')
+    .eq('id', eventId)
+    .single();
+  expect(recordedEvent.error).toBeNull();
+  expect(recordedEvent.data!.before_metadata.custom_values).toEqual(
+    before.data!.custom_values,
+  );
+  expect(recordedEvent.data!.after_metadata.custom_values).toEqual(
+    after.data!.custom_values,
+  );
+  expect(recordedEvent.data!.before_metadata.category_id).toBe(
+    fieldsRead.data!.id,
+  );
+  expect(recordedEvent.data!.after_metadata.category_id).toBe(
+    fieldsRead.data!.id,
+  );
+  const seenHistory: string[] = [];
+  for (let index = 0; index < fields.length; index++) {
+    const historyField = page.getByRole('region', {
+      name: 'Custom history field',
+    });
+    const label = await historyField
+      .getByRole('heading', { level: 2 })
+      .innerText();
+    const historicalField = definition.fields.find(
+      (field) => field.label === label,
+    )!;
+    expect(historicalField).toBeTruthy();
+    seenHistory.push(historicalField.id);
+    for (const [side, expected] of [
+      ['before', before.data!.custom_values],
+      ['after', after.data!.custom_values],
+    ] as const) {
+      await followHistoryLink(
+        page,
+        side === 'before' ? 'Before event' : 'After event',
+      );
+      await expect(historyField).toContainText(
+        (side === 'before' ? 'Before' : 'After') +
+          ' · field ' +
+          historicalField.id,
+      );
+      expect(
+        JSON.parse((await historyField.locator('pre').textContent())!),
+      ).toEqual(expected[historicalField.id].value);
+      await expect(
+        historyField.getByText(
+          'Validated revision: ' +
+            expected[historicalField.id].validated_revision_id,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(
+        historyField.getByText('Type: ' + historicalField.type, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(
+        historyField.getByText('Field owner category: ' + fieldsRead.data!.id, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      expect(await historyField.locator('li').allTextContents()).toEqual(
+        choicePaths(historicalField, expected[historicalField.id].value).map(
+          (path) => path.join(' / '),
+        ),
+      );
+    }
+    if (index < fields.length - 1)
+      await followHistoryLink(page, 'Next custom field');
+  }
+  expect(seenHistory.sort()).toEqual(
+    definition.fields.map((field) => field.id).sort(),
+  );
+  // The first update changed eleven types; timezone-only viewing preserved the complete datetime envelope.
+  expect(
+    recordedEvent.data!.before_metadata.custom_values[ids.Appointment],
+  ).toEqual(recordedEvent.data!.after_metadata.custom_values[ids.Appointment]);
   await capture(page, info, 'metadata-history');
   await page.goto(quantityUrl);
   await page
@@ -621,6 +750,57 @@ test('authors all twelve types through the UI and preserves their preview, creat
     expect(finalValues.data!.custom_values[ids[label]].value).toEqual(value);
   await expect(metadataAnswer(page, 'Has USB-C?')).toHaveText('No');
   await expect(metadataAnswer(page, 'Appointment')).toContainText('2026');
+  await page.goto('/history?entityId=' + quantityId);
+  await followHistoryLink(
+    page,
+    'Custom metadata changed — inspect before and after',
+  );
+  const timeEventId = new URL(page.url()).searchParams
+    .get('event')!
+    .split(':')[1];
+  const timeEvent = await client
+    .from('quantity_events')
+    .select('before_metadata,after_metadata')
+    .eq('id', timeEventId)
+    .single();
+  expect(timeEvent.error).toBeNull();
+  expect(timeEvent.data!.before_metadata.custom_values).toEqual(
+    after.data!.custom_values,
+  );
+  expect(timeEvent.data!.after_metadata.custom_values).toEqual(
+    finalValues.data!.custom_values,
+  );
+  for (
+    let index = 0;
+    index < fields.length &&
+    !(await page
+      .getByRole('heading', { name: 'Appointment', exact: true })
+      .isVisible());
+    index++
+  )
+    await followHistoryLink(page, 'Next custom field');
+  await expect(
+    page.getByRole('heading', { name: 'Appointment', exact: true }),
+  ).toBeVisible();
+  for (const [side, snapshot] of [
+    ['before', after.data!.custom_values],
+    ['after', finalValues.data!.custom_values],
+  ] as const) {
+    await followHistoryLink(
+      page,
+      side === 'before' ? 'Before event' : 'After event',
+    );
+    expect(JSON.parse((await page.locator('pre').textContent())!)).toEqual(
+      snapshot[ids.Appointment].value,
+    );
+    await expect(
+      page.getByText(
+        'Validated revision: ' +
+          snapshot[ids.Appointment].validated_revision_id,
+        { exact: true },
+      ),
+    ).toBeVisible();
+  }
   await page.goto('/inventory?q=' + encodeURIComponent(record));
   const downloadEvent = page.waitForEvent('download');
   await page.getByText('Export CSV', { exact: true }).click();
@@ -630,7 +810,14 @@ test('authors all twelve types through the UI and preserves their preview, creat
   const downloaded = await downloadEvent;
   const csvPath = info.outputPath('base-export.csv');
   await downloaded.saveAs(csvPath);
-  expect(readFileSync(csvPath, 'utf8')).toContain(record);
+  const baseRows = csvRows(readFileSync(csvPath, 'utf8'));
+  expect(baseRows[0]).not.toContain('Custom Fields JSON');
+  const baseRow = baseRows
+    .slice(1)
+    .find((row) => row[baseRows[0].indexOf('Record ID')] === quantityId)!;
+  expect(baseRow[baseRows[0].indexOf('Name')]).toBe(record);
+  expect(baseRow[baseRows[0].indexOf('Type')]).toBe('Quantity');
+  expect(baseRow[baseRows[0].indexOf('Category')]).toBe(category);
   const customDownloadEvent = page.waitForEvent('download');
   await page
     .getByRole('link', { name: 'Inventory with custom fields', exact: true })
@@ -642,9 +829,33 @@ test('authors all twelve types through the UI and preserves their preview, creat
   expect(csv).toContain('Custom Fields JSON');
   expect(csv).toContain('Edited connector');
   expect(csv).toContain('0.00');
+  const exportRows = csvRows(csv),
+    exportHeaders = exportRows[0];
+  const exportedRow = exportRows
+    .slice(1)
+    .find((row) => row[exportHeaders.indexOf('Record ID')] === quantityId)!;
+  const exportedCustom = JSON.parse(
+    exportedRow[exportHeaders.indexOf('Custom Fields JSON')],
+  );
+  expect(Object.keys(exportedCustom).sort()).toEqual(
+    definition.fields.map((field) => field.id).sort(),
+  );
+  const publishedRevision = (
+    envelope.data as unknown as { published_revision_id: string }
+  ).published_revision_id;
   for (const field of definition.fields) {
-    expect(csv).toContain(field.id);
-    expect(csv).toContain(field.label);
+    const saved = finalValues.data!.custom_values[field.id];
+    const optionPaths = choicePaths(field, saved.value);
+    expect(exportedCustom[field.id]).toEqual({
+      value: saved.value,
+      validated_revision_id: saved.validated_revision_id,
+      label: field.label,
+      field_type: field.type,
+      option_paths: optionPaths,
+      legacy: false,
+      category_id: fieldsRead.data!.id,
+      current_published_revision_id: publishedRevision,
+    });
   }
   await info.attach('custom-export.csv', {
     path: customCsvPath,

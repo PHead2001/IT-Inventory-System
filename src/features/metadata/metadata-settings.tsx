@@ -307,10 +307,34 @@ function ControlProperties({
             : 'Hiding retains stored values. Restore this field in Hidden fields.'}
       </p>
       {control.kind === 'field' && !field && (
-        <p role="alert" className="text-sm text-rose-300">
-          This placement refers to a missing field. Hide it, then use Add field
-          to place an existing definition.
-        </p>
+        <div className="space-y-2">
+          <p role="alert" className="text-sm text-rose-300">
+            This placement refers to a missing field. Remove the broken
+            placement to repair the form. Existing fields and stored answers are
+            retained. Use Add field to place an existing field.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              edit({
+                ...definition,
+                layout: definition.layout.map((item) =>
+                  item.id === section.id
+                    ? {
+                        ...item,
+                        controls: item.controls.filter(
+                          (entry) => entry.id !== control.id,
+                        ),
+                      }
+                    : item,
+                ),
+              })
+            }
+          >
+            Remove broken placement
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -577,7 +601,15 @@ export function MetadataSettings({
     field?: Field;
   } | null>(null);
   const [configErrors, setConfigErrors] = useState<Record<string, string>>({});
+  const [inspectorRevision, setInspectorRevision] = useState(0);
   const [scopeMessage, setScopeMessage] = useState('');
+  // Restored documents replace local drafts even when field IDs match.
+  // Ordinary edits retain drafts so incomplete typing stays editable.
+  const resetInspector = () => {
+    setInspectorRevision((revision) => revision + 1);
+    setConfigErrors({});
+    setScopeMessage('');
+  };
   const [previewKind, setPreviewKind] = useState<'quantity' | 'asset'>(
     'quantity',
   );
@@ -819,8 +851,7 @@ export function MetadataSettings({
     setAdvancedError('');
     setRemoveSectionId(null);
     setAddition(null);
-    setConfigErrors({});
-    setScopeMessage('');
+    resetInspector();
     setMessage('');
   };
   useEffect(() => {
@@ -933,6 +964,19 @@ export function MetadataSettings({
       identityStatus !== 'verified'
     )
       return;
+    if (
+      confirmed &&
+      (!saveReview ||
+        !savePayload ||
+        JSON.stringify(savePayload.definition) !== JSON.stringify(definition))
+    ) {
+      setSaveReview(null);
+      setSavePayload(null);
+      setMessage(
+        'The form changed. Save changes to review its current impact.',
+      );
+      return;
+    }
     const payload =
       confirmed && savePayload
         ? { ...savePayload, review_token: saveReview?.token }
@@ -1358,6 +1402,9 @@ export function MetadataSettings({
                   variant="outline"
                   onClick={() => {
                     setDefinition(recovery.definition);
+                    resetInspector();
+                    setSaveReview(null);
+                    setSavePayload(null);
                     setSelectedFieldId(
                       recovery.definition.fields[0]?.id ?? null,
                     );
@@ -1422,11 +1469,17 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
-                disabled={history.length === 0 || pending}
+                disabled={history.length === 0 || pending || operationPending}
                 onClick={() => {
+                  if (busy.current) return;
                   const prior = history.at(-1);
                   if (prior) {
+                    editEpoch.current += 1;
                     setDefinition(prior);
+                    resetInspector();
+                    setSaveReview(null);
+                    setSavePayload(null);
+                    setMessage('');
                     setPreviewVersion((version) => version + 1);
                     setHistory(history.slice(0, -1));
                   }
@@ -1521,6 +1574,7 @@ export function MetadataSettings({
                     return;
                   }
                   edit(result.data);
+                  resetInspector();
                   setAdvancedError('');
                   setMessage(
                     'JSON applied to the local editor. Save changes to publish it.',
@@ -2119,7 +2173,7 @@ export function MetadataSettings({
                           {fieldTypeInfo[selectedField.type].name}
                         </h3>
                         <FieldSettings
-                          key={selectedField.id}
+                          key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
                           change={updateField}
                           published={Boolean(
