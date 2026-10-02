@@ -333,9 +333,32 @@ test('designer hide and restore retain false, zero and empty values while an uns
   const detail = `/inventory/quantity/${id}`;
 
   const edit = await openEditForm(page);
+  // Edit lives on the detail route: discarding must reset the mounted editor.
+  await edit.getByLabel('Name', { exact: true }).fill('Discarded item name');
+  await edit.getByLabel('Cleared note').fill('Discarded custom note');
+  await edit.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Discard changes?' })
+    .getByRole('button', { name: 'Discard changes', exact: true })
+    .click();
+  await expect(edit).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`${detail}$`));
+  await expect(
+    page.locator('summary').filter({ hasText: 'Edit quantity metadata' }),
+  ).toBeFocused();
+  await openEditForm(page);
+  await expect(edit.getByLabel('Name', { exact: true })).toHaveValue(
+    `Value item ${category}`,
+  );
+  await expect(edit.getByLabel('Cleared note')).toHaveValue('remove me');
+  await expect(edit.getByLabel('False flag')).not.toBeChecked();
+  await expect(edit.getByLabel('Zero count')).toHaveValue('0');
+  await expect(edit.getByLabel('Empty note')).toHaveValue('');
   await edit
-    .getByLabel('Cleared note')
-    .locator('..')
+    .locator('div')
+    .filter({ has: edit.getByLabel('Cleared note') })
+    .filter({ has: edit.getByRole('button', { name: 'Clear answer' }) })
+    .last()
     .getByRole('button', { name: 'Clear answer' })
     .click();
   await reviewMetadata(edit);

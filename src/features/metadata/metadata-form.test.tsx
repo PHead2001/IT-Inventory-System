@@ -699,6 +699,96 @@ describe('published metadata form', () => {
     expect(push).toHaveBeenCalledWith('/sites/PROPERTY-A');
     expect(submitCustody).not.toHaveBeenCalled();
   });
+  it.each(['quantity', 'asset'] as const)(
+    'discards a mounted %s edit, closes it, and reopens saved values without touched patches',
+    async (kind) => {
+      const current = form();
+      current.published_definition.fields[0] = {
+        ...current.published_definition.fields[0],
+        type: 'integer',
+        label: 'Count',
+        required: false,
+        applies_to: [kind],
+      };
+      const saved = {
+        ...item,
+        customValues: {
+          [fieldId]: {
+            type: 'integer' as const,
+            value: 0,
+            label: 'Count',
+            validated_revision_id: firstRevision,
+            owner_category_id: categoryId,
+          },
+        },
+      };
+      const savedAsset = {
+        ...saved,
+        assetTag: null,
+        serialNumber: null,
+        locationId: null,
+        locationCode: null,
+        locationName: null,
+        status: 'active' as const,
+      };
+      render(
+        <details open>
+          <summary>Edit metadata</summary>
+          <MetadataForm
+            {...props}
+            kind={kind}
+            item={kind === 'quantity' ? saved : undefined}
+            asset={kind === 'asset' ? savedAsset : undefined}
+            forms={{ [categoryId]: current }}
+          />
+        </details>,
+      );
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Discard this core edit' },
+      });
+      fireEvent.change(screen.getByLabelText('Count'), {
+        target: { value: '-' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+      const summary = screen.getByText('Edit metadata');
+      expect(summary.parentElement).not.toHaveAttribute('open');
+      expect(summary).toHaveFocus();
+      expect(push).not.toHaveBeenCalled();
+      summary.parentElement!.setAttribute('open', '');
+      expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+      expect(screen.getByLabelText('Count')).toHaveValue('0');
+      expect(screen.queryByRole('alert')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      expect(
+        screen.getByRole('button', { name: 'Confirm save' }),
+      ).toBeEnabled();
+      // Pristine Cancel also closes and clears review state without a prompt.
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(summary.parentElement).not.toHaveAttribute('open');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      summary.parentElement!.setAttribute('open', '');
+      expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Actual edit' },
+      });
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: true,
+        entityId: item.id,
+        version: '2',
+        changed: true,
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+        payload: {
+          name: 'Actual edit',
+          custom_patch: { set: {}, unset: [] },
+        },
+      });
+    },
+  );
   it('prompts for dirty Cancel, traps focus and restores it on Keep editing and Escape', () => {
     render(
       <MetadataForm

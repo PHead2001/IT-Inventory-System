@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { AddFieldDialog } from './add-field-dialog';
 import { FieldSettings, makeField } from './field-settings';
-import { fieldTypes, type MetadataDefinition } from './contracts';
+import {
+  fieldTypes,
+  type FieldType,
+  type MetadataDefinition,
+} from './contracts';
 import {
   additionRestriction,
   fieldName,
@@ -11,6 +15,7 @@ import {
   fieldTypeInfo,
   placementName,
   scopeRestriction,
+  settingRuleLabel,
 } from './field-authoring-model';
 import {
   addFieldToSection,
@@ -277,6 +282,118 @@ describe('staged field authoring', () => {
     fireEvent.change(minimum, { target: { value: '-2' } });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(minimum).toHaveValue('-2');
+  });
+  it.each(
+    (
+      [
+        ['short_text', ['minLength', 'maxLength'], '0'],
+        ['long_text', ['minLength', 'maxLength'], '0'],
+        ['integer', ['min', 'max'], '0'],
+        ['decimal', ['min', 'max'], '0'],
+        ['currency', ['min', 'max'], '0'],
+        ['date', ['min', 'max'], '2026-10-02'],
+        ['datetime', ['min', 'max'], '2026-10-02'],
+        ['multi_select', ['maxSelections'], '1'],
+      ] as [FieldType, string[], string][]
+    ).flatMap(([type, keys, value]) =>
+      keys.map((key) => ({ type, key, value })),
+    ),
+  )(
+    'requires enabled $type $key until filled or unchecked',
+    ({ type, key, value }) => {
+      const field = makeField(type, 'Bounded field');
+      const label = settingRuleLabel(field, key);
+      const { add, dialog } = openPicker(field);
+      fireEvent.click(
+        within(dialog).getByText('Optional rules', { selector: 'summary' }),
+      );
+      const toggle = within(dialog).getByLabelText(
+        `Use ${label.toLowerCase()}`,
+      );
+      fireEvent.click(toggle);
+      expect(toggle).toBeChecked();
+      expect(
+        within(dialog)
+          .getAllByRole('alert')
+          .some((alert) =>
+            alert.textContent?.toLowerCase().includes(label.toLowerCase()),
+          ),
+      ).toBe(true);
+      const submit = () =>
+        fireEvent.click(
+          within(dialog).getByRole('button', { name: 'Add to form' }),
+        );
+      submit();
+      expect(add).not.toHaveBeenCalled();
+      if (type === 'datetime') {
+        const group = within(dialog).getByRole('group', { name: label });
+        fireEvent.change(within(group).getByLabelText('Display timezone'), {
+          target: { value: 'UTC' },
+        });
+        fireEvent.change(within(group).getByLabelText('Date'), {
+          target: { value },
+        });
+        submit();
+        expect(add).not.toHaveBeenCalled();
+        expect(within(group).getByLabelText('Date')).toHaveValue(value);
+        fireEvent.change(within(group).getByLabelText('Time'), {
+          target: { value: '09:00' },
+        });
+      } else {
+        fireEvent.change(
+          within(dialog).getByLabelText(label, { exact: true }),
+          { target: { value } },
+        );
+      }
+      submit();
+      expect(add).toHaveBeenCalledTimes(1);
+      const saved = add.mock.calls[0][0] as Field;
+      expect(saved.rules[key]).toEqual(
+        type === 'datetime'
+          ? '2026-10-02T09:00:00Z'
+          : ['minLength', 'maxLength', 'maxSelections'].includes(key)
+            ? Number(value)
+            : value,
+      );
+      add.mockClear();
+      if (type === 'datetime') {
+        const group = within(dialog).getByRole('group', { name: label });
+        fireEvent.click(
+          within(group.parentElement!).getByRole('button', {
+            name: 'Clear answer',
+          }),
+        );
+      } else {
+        fireEvent.change(
+          within(dialog).getByLabelText(label, { exact: true }),
+          { target: { value: '' } },
+        );
+      }
+      expect(toggle).toBeChecked();
+      submit();
+      expect(add).not.toHaveBeenCalled();
+      fireEvent.click(toggle);
+      expect(toggle).not.toBeChecked();
+      submit();
+      expect(add).toHaveBeenCalledTimes(1);
+      expect((add.mock.calls[0][0] as Field).rules).not.toHaveProperty(key);
+    },
+  );
+  it('keeps an unchecked checkbox default distinct from no default', () => {
+    const { add, dialog } = openPicker(makeField('boolean', 'Has USB-C?'));
+    fireEvent.click(
+      within(dialog).getByText('Optional rules', { selector: 'summary' }),
+    );
+    fireEvent.change(within(dialog).getByLabelText('Starts with (optional)'), {
+      target: { value: 'false' },
+    });
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add to form' }),
+    );
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({ default: false }),
+      id(1),
+    );
   });
   it('keeps multiline starts-with and optional date restrictions type-specific', () => {
     const onChange = vi.fn();

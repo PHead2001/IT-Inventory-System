@@ -196,6 +196,59 @@ describe('category form designer', () => {
       }
     },
   );
+  it.each([
+    ['short_text', 'minimum characters'],
+    ['long_text', 'maximum characters'],
+    ['integer', 'minimum value'],
+    ['decimal', 'maximum value'],
+    ['currency', 'minimum amount'],
+    ['date', 'earliest allowed date'],
+    ['datetime', 'latest allowed date and time'],
+    ['multi_select', 'maximum selections'],
+  ])(
+    'blocks Save for an enabled empty %s restriction and resets it on Undo',
+    async (type, label) => {
+      mount();
+      addField('Bounded field');
+      if (type !== 'short_text')
+        fireEvent.change(screen.getByLabelText('Field type'), {
+          target: { value: type },
+        });
+      const openRules = () => {
+        const summary = screen.getByText('Optional rules', {
+          selector: 'summary',
+        });
+        if (!(summary.closest('details') as HTMLDetailsElement).open)
+          fireEvent.click(summary);
+      };
+      openRules();
+      fireEvent.click(screen.getByLabelText(`Use ${label}`));
+      expect(screen.getByLabelText(`Use ${label}`)).toBeChecked();
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      fireEvent.change(screen.getByLabelText('Field name'), {
+        target: { value: 'Recoverable draft' },
+      });
+      expect(screen.getByLabelText(`Use ${label}`)).toBeChecked();
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+      openRules();
+      expect(screen.getByLabelText(`Use ${label}`)).not.toBeChecked();
+      expect(
+        screen.queryByText(`Enter ${label} or turn off this restriction.`),
+      ).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Save changes' }),
+        ).toBeEnabled(),
+      );
+      expect(saveMetadataForm).not.toHaveBeenCalled();
+    },
+  );
   it('restores a valid numeric rule display on Undo while retaining incomplete ordinary typing', () => {
     mount();
     addField('Ports');

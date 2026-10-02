@@ -288,16 +288,37 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   const checks = ['Flag one', 'Flag two', 'Flag three'].map((name) =>
     preview.getByRole('checkbox', { name }),
   );
-  const boxes = await Promise.all(checks.map((check) => check.boundingBox()));
+  // The associated label is the complete touch target, including its padding.
+  const targets = checks.map((check) =>
+    check.locator('xpath=ancestor::label[1]'),
+  );
+  const boxes = await Promise.all(
+    targets.map((target) => target.boundingBox()),
+  );
   for (const box of boxes) {
     expect(box).toBeTruthy();
     expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
   }
   expect(boxes[0]!.y).toBeCloseTo(boxes[1]!.y, 0);
   expect(boxes[1]!.y).toBeCloseTo(boxes[2]!.y, 0);
   expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x);
   expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x);
+  expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
+  expect(boxes[1]!.x + boxes[1]!.width).toBeLessThanOrEqual(boxes[2]!.x);
   await expect(checks[0]).toHaveAttribute('aria-checked', 'mixed');
+  const glyph = await checks[0].boundingBox();
+  const paddingPoint = {
+    x: boxes[0]!.x + boxes[0]!.width / 2,
+    y: boxes[0]!.y + boxes[0]!.height - 3,
+  };
+  expect(paddingPoint.y).toBeGreaterThan(glyph!.y + glyph!.height);
+  await page.mouse.click(paddingPoint.x, paddingPoint.y);
+  await expect(checks[0]).toBeChecked();
+  await expect(checks[1]).not.toBeChecked();
+  await checks[0].focus();
+  await page.keyboard.press('Space');
+  await expect(checks[0]).not.toBeChecked();
   await checks[0].check();
   await checks[0].uncheck();
   await expect(checks[0]).toHaveAttribute('aria-checked', 'false');

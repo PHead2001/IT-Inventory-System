@@ -220,6 +220,8 @@ export function MetadataForm({
     initialCore(latest, categories),
   );
   const [discardOpen, setDiscardOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [inputGeneration, setInputGeneration] = useState(0);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const [uncertain, setUncertain] = useState(false);
@@ -391,7 +393,7 @@ export function MetadataForm({
         : undefined;
     return (
       <MetadataFieldInput
-        key={id}
+        key={`${id}-${inputGeneration}`}
         id={`${scopeId}-metadata-${id}`}
         field={config}
         value={value}
@@ -525,10 +527,48 @@ export function MetadataForm({
           : '/inventory',
       )
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
+  const discard = () => {
+    if (pending || uncertain || dispatched.current) return;
+    setDiscardOpen(false);
+    if (creating) {
+      router.push(cancelPath);
+      return;
+    }
+    // Same-route navigation can preserve this mounted form. Discard explicitly,
+    // including local drafts in the shared inputs, before closing the editor.
+    const originalCore = initialCore(latest, categories);
+    setCore(originalCore);
+    setCleanCore(originalCore);
+    setBaseline(latest);
+    setCustom(initialCustom(latest?.customValues));
+    setTouched([]);
+    setThresholdTouched(false);
+    setAnswerErrors({});
+    setInputGeneration((generation) => generation + 1);
+    setReviewedForms({});
+    setPriorForms({});
+    loadGeneration.current += 1;
+    conflictGeneration.current += 1;
+    setFormLoading(false);
+    setFormLoadError('');
+    setLoadRetry((retry) => retry + 1);
+    setSchemaConflictPending(false);
+    setSchemaRefreshError('');
+    setReview(false);
+    setAckLegacy(false);
+    setState(null);
+    setReceipt(null);
+    setDuplicates([]);
+    const details = formRef.current?.closest('details');
+    if (details) {
+      details.open = false;
+      details.querySelector('summary')?.focus();
+    }
+  };
   const cancel = () => {
     if (pending || uncertain || dispatched.current) return;
     if (dirty) setDiscardOpen(true);
-    else router.push(cancelPath);
+    else discard();
   };
   useEffect(() => {
     if (discardOpen) keepRef.current?.focus();
@@ -711,6 +751,7 @@ export function MetadataForm({
   };
   return (
     <form
+      ref={formRef}
       className="min-w-0 space-y-5"
       aria-label={
         preview
@@ -1140,14 +1181,7 @@ export function MetadataForm({
               >
                 Keep editing
               </Button>
-              <Button
-                type="button"
-                data-discard
-                onClick={() => {
-                  setDiscardOpen(false);
-                  router.push(cancelPath);
-                }}
-              >
+              <Button type="button" data-discard onClick={discard}>
                 Discard changes
               </Button>
             </div>

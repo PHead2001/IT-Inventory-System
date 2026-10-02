@@ -60,7 +60,11 @@ export function FieldSettings({
     onValidityChange?.(Object.values(next).filter(Boolean).join(' '));
   };
   const ruleLabel = (key: string) => settingRuleLabel(field, key);
+  const missingRuleMessage = (key: string) =>
+    `Enter ${ruleLabel(key).toLowerCase()} or turn off this restriction.`;
   const ruleErrors = fieldSettingErrors(field);
+  for (const key of Object.keys(field.rules))
+    if (field.rules[key] === '') ruleErrors[key] = missingRuleMessage(key);
   const keys = ['short_text', 'long_text'].includes(field.type)
     ? ['minLength', 'maxLength']
     : ['integer', 'decimal', 'currency', 'date', 'datetime'].includes(
@@ -83,10 +87,10 @@ export function FieldSettings({
       change({ ...field, rules: { ...field.rules, [key]: raw } });
       return;
     }
-    report(key, '');
+    report(key, raw === '' ? missingRuleMessage(key) : '');
     const rules = { ...field.rules };
-    if (raw === '') delete rules[key];
-    else rules[key] = numeric ? Number(raw) : raw;
+    // An enabled, empty restriction is an invalid recoverable draft, not absent.
+    rules[key] = raw === '' ? '' : numeric ? Number(raw) : raw;
     change({ ...field, rules });
   };
   const starts = selectTypes.includes(field.type);
@@ -300,7 +304,14 @@ export function FieldSettings({
                       const rules = { ...field.rules };
                       delete rules[key];
                       change({ ...field, rules });
-                    } else setDraftRules((prior) => ({ ...prior, [key]: '' }));
+                    } else {
+                      setDraftRules((prior) => ({ ...prior, [key]: '' }));
+                      report(key, missingRuleMessage(key));
+                      change({
+                        ...field,
+                        rules: { ...field.rules, [key]: '' },
+                      });
+                    }
                   }}
                 />{' '}
                 Use {ruleLabel(key).toLowerCase()}
@@ -320,12 +331,28 @@ export function FieldSettings({
                     id={`${prefix}-${key}`}
                     value={field.rules[key]}
                     onChange={(value) => {
+                      setDraftRules((prior) => ({
+                        ...prior,
+                        [key]: String(value ?? ''),
+                      }));
+                      report(
+                        key,
+                        value === undefined || value === ''
+                          ? missingRuleMessage(key)
+                          : '',
+                      );
                       const rules = { ...field.rules };
-                      if (value === undefined) delete rules[key];
-                      else rules[key] = value;
+                      rules[key] = value ?? '';
                       change({ ...field, rules });
                     }}
-                    onValidityChange={(message) => report(key, message)}
+                    onValidityChange={(message) =>
+                      report(
+                        key,
+                        field.rules[key] === ''
+                          ? missingRuleMessage(key)
+                          : message,
+                      )
+                    }
                   />
                 ) : (
                   <label className="block text-sm">
