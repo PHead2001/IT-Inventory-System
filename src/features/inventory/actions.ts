@@ -32,6 +32,17 @@ export async function submitInventory(input: unknown): Promise<MutationState> {
       error: authError,
     } = await supabase.auth.getUser();
     if (authError || !user) return mutationError('P1001');
+    if (
+      command.data.expectedActorId &&
+      command.data.expectedActorId !== user.id
+    )
+      return {
+        ok: false,
+        kind: 'domain',
+        code: 'actor_changed',
+        message:
+          'The signed-in staff member changed. Return to the original account before saving these entries.',
+      };
     const { data: member, error: memberError } = await supabase
       .from('app_members')
       .select('user_id,display_name,role,active')

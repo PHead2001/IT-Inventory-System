@@ -73,7 +73,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     fullPage: true,
   });
   await page
-    .locator('a[href^="/inventory/quantity/"]:not([href$="/new"])')
+    .locator('a[href^="/inventory/quantity/"]:not([href*="/new"])')
     .first()
     .click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
@@ -93,7 +93,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   });
   await page.goto('/inventory?type=asset');
   await page
-    .locator('a[href^="/inventory/assets/"]:not([href$="/new"])')
+    .locator('a[href^="/inventory/assets/"]:not([href*="/new"])')
     .first()
     .click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
@@ -171,7 +171,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     fullPage: true,
   });
   await page
-    .locator('a[href^="/inventory/quantity/"]:not([href$="/new"])')
+    .locator('a[href^="/inventory/quantity/"]:not([href*="/new"])')
     .first()
     .click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
@@ -191,7 +191,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   });
   await page.goto('/inventory?type=asset');
   await page
-    .locator('a[href^="/inventory/assets/"]:not([href$="/new"])')
+    .locator('a[href^="/inventory/assets/"]:not([href*="/new"])')
     .first()
     .click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
@@ -696,12 +696,22 @@ test('configuration and inventory creation surfaces render at desktop and phone 
       await page
         .getByRole('button', { name: 'Add field', exact: true })
         .click();
+      const addition = page.getByRole('dialog', { name: 'Add field' });
+      await addition
+        .getByRole('button', { name: 'Short text', exact: true })
+        .click();
+      await addition
+        .getByLabel('Field name', { exact: true })
+        .fill('Visual check field');
+      await addition
+        .getByRole('button', { name: 'Add to form', exact: true })
+        .click();
       await expect(
         page.getByRole('complementary', { name: 'Designer inspector' }),
       ).toBeVisible();
       const fieldLabel = page
         .getByRole('complementary', { name: 'Designer inspector' })
-        .getByLabel('Label', { exact: true });
+        .getByLabel('Field name', { exact: true });
       await expect(fieldLabel).toBeVisible();
       await fieldLabel.fill('Visual check field');
       await expect(

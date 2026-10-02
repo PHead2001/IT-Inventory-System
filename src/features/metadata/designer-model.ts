@@ -767,3 +767,95 @@ export function designerIssues(def: MetadataDefinition): string[] {
       issues.push(`${builtin} appears more than once in the layout.`);
   return [...new Set(issues)];
 }
+
+/** Add the definition and its visible placement in one local undo snapshot. */
+export function addFieldToSection(
+  def: MetadataDefinition,
+  field: Field,
+  sectionId: string,
+): MetadataDefinition {
+  if (
+    def.fields.length >= 100 ||
+    def.fields.some((item) => item.id === field.id)
+  )
+    return def;
+  const destination = def.layout.find((item) => item.id === sectionId);
+  if (
+    def.layout.length &&
+    (!destination ||
+      destination.visible === false ||
+      field.applies_to.some(
+        (kind) => !(destination.applies_to ?? formKinds).includes(kind),
+      ))
+  )
+    return def;
+  const control: Control = {
+    id: newId(),
+    kind: 'field',
+    field_id: field.id,
+    width: 'Auto',
+  };
+  return {
+    ...def,
+    fields: [...def.fields, field],
+    layout: def.layout.length
+      ? def.layout.map((section) =>
+          section.id === sectionId
+            ? { ...section, controls: [...section.controls, control] }
+            : section,
+        )
+      : [{ id: sectionId, label: 'Details', controls: [control] }],
+  };
+}
+
+/** Hide preserves definitions and answers. Required fields need an explicit optional transition. */
+export function hidePlacement(
+  def: MetadataDefinition,
+  controlId: string,
+  makeOptional = false,
+): MetadataDefinition {
+  const control = def.layout
+    .flatMap((section) => section.controls)
+    .find((item) => item.id === controlId);
+  if (
+    !control ||
+    (control.kind === 'builtin' && protectedBuiltins.has(control.builtin ?? ''))
+  )
+    return def;
+  const field = def.fields.find((item) => item.id === control.field_id);
+  if (field?.required && !makeOptional) return def;
+  return {
+    ...def,
+    fields: field?.required
+      ? def.fields.map((item) =>
+          item.id === field.id ? { ...item, required: false } : item,
+        )
+      : def.fields,
+    layout: def.layout.map((section) => ({
+      ...section,
+      controls: section.controls.map((item) =>
+        item.id === controlId ? { ...item, visible: false } : item,
+      ),
+    })),
+  };
+}
+
+/** Section edits must keep every required field reachable on its declared forms. */
+export function sectionEditBlockReason(
+  def: MetadataDefinition,
+  sectionId: string,
+  patch: Pick<Partial<Section>, 'visible' | 'applies_to'>,
+): string | null {
+  const section = def.layout.find((item) => item.id === sectionId);
+  if (!section) return 'This section is unavailable.';
+  const next = { ...section, ...patch };
+  for (const control of section.controls) {
+    const field = def.fields.find((item) => item.id === control.field_id);
+    if (
+      field?.required &&
+      field.applies_to.some((kind) => !controlVisible(def, next, control, kind))
+    )
+      return `Make ${field.label || 'Untitled field'} optional or move it to a compatible visible section first.`;
+  }
+  return null;
+}

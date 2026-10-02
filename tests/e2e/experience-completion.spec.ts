@@ -296,9 +296,22 @@ test('designer hide and restore retain false, zero and empty values while an uns
     { type: 'short_text', name: 'Cleared note' },
   ] as const;
   for (const field of fields) {
-    await designer.getByLabel('New field type').selectOption(field.type);
-    await designer.getByRole('button', { name: 'Add field' }).click();
-    await designer.getByLabel('Label', { exact: true }).fill(field.name);
+    await designer
+      .getByRole('button', { name: 'Add field', exact: true })
+      .click();
+    const addition = designer.getByRole('dialog', { name: 'Add field' });
+    await addition
+      .getByRole('button', {
+        name:
+          field.type === 'boolean'
+            ? /Checkbox/
+            : field.type === 'integer'
+              ? /Whole number/
+              : /Short text/,
+      })
+      .click();
+    await addition.getByLabel('Field name').fill(field.name);
+    await addition.getByRole('button', { name: 'Add to form' }).click();
   }
   await saveDesigner(designer);
 
@@ -320,10 +333,33 @@ test('designer hide and restore retain false, zero and empty values while an uns
   const detail = `/inventory/quantity/${id}`;
 
   const edit = await openEditForm(page);
+  // Edit lives on the detail route: discarding must reset the mounted editor.
+  await edit.getByLabel('Name', { exact: true }).fill('Discarded item name');
+  await edit.getByLabel('Cleared note').fill('Discarded custom note');
+  await edit.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Discard changes?' })
+    .getByRole('button', { name: 'Discard changes', exact: true })
+    .click();
+  await expect(edit).toBeHidden();
+  await expect(page).toHaveURL(new RegExp(`${detail}$`));
+  await expect(
+    page.locator('summary').filter({ hasText: 'Edit quantity metadata' }),
+  ).toBeFocused();
+  await openEditForm(page);
+  await expect(edit.getByLabel('Name', { exact: true })).toHaveValue(
+    `Value item ${category}`,
+  );
+  await expect(edit.getByLabel('Cleared note')).toHaveValue('remove me');
+  await expect(edit.getByLabel('False flag')).not.toBeChecked();
+  await expect(edit.getByLabel('Zero count')).toHaveValue('0');
+  await expect(edit.getByLabel('Empty note')).toHaveValue('');
   await edit
-    .getByLabel('Cleared note')
-    .locator('..')
-    .getByRole('button', { name: 'Unset' })
+    .locator('div')
+    .filter({ has: page.getByLabel('Cleared note') })
+    .filter({ has: page.getByRole('button', { name: 'Clear answer' }) })
+    .last()
+    .getByRole('button', { name: 'Clear answer' })
     .click();
   await reviewMetadata(edit);
 
@@ -373,8 +409,8 @@ test('designer hide and restore retain false, zero and empty values while an uns
     await control.click();
     await designer
       .getByTestId('designer-inspector')
-      .getByRole('checkbox', { name: 'Show control' })
-      .uncheck();
+      .getByRole('button', { name: 'Hide from form' })
+      .click();
   }
   await saveDesigner(designer);
   expect(await readValues()).toEqual(original);
@@ -384,11 +420,12 @@ test('designer hide and restore retain false, zero and empty values while an uns
     await expect(hiddenEdit.getByLabel(field.name)).toHaveCount(0);
 
   designer = await openDesigner(page, category);
-  await designer.getByText(/Hidden & unplaced/).click();
+  await designer
+    .locator('summary')
+    .filter({ hasText: /Hidden fields/ })
+    .click();
   for (const field of fields)
-    await designer
-      .getByRole('button', { name: `Restore ${field.name}` })
-      .click();
+    await designer.getByRole('button', { name: `Show ${field.name}` }).click();
   await saveDesigner(designer);
   expect(await readValues()).toEqual(original);
   await page.goto(detail);

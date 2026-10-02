@@ -42,7 +42,7 @@ async function inspectControl(control: Locator) {
 
 async function chooseControlSection(control: Locator, name: string) {
   const section = inspectorFor(control).getByLabel('Section');
-  const option = section.locator('option').filter({ hasText: `${name} ·` });
+  const option = section.locator('option').filter({ hasText: name });
   await expect(option).toHaveCount(1);
   const id = await option.getAttribute('value');
   expect(id).toBeTruthy();
@@ -97,10 +97,16 @@ test('phone designer edits publish with one save and render in quantity and asse
   await page.setViewportSize({ width: 390, height: 844 });
   const panels = designer.getByRole('navigation', { name: 'Designer panels' });
   await panels.getByRole('button', { name: 'Library' }).click();
-  await designer.getByLabel('New field type').selectOption('short_text');
-  await designer.getByRole('button', { name: 'Add field' }).click();
+  await designer
+    .getByRole('button', { name: 'Add field', exact: true })
+    .click();
+  const addition = designer.getByRole('dialog', { name: 'Add field' });
+  await addition.getByLabel('Field name').fill('Connector type');
+  await addition.getByRole('button', { name: 'Add to form' }).click();
   await expect(panels.getByRole('button', { name: 'Inspector' })).toBeVisible();
-  await designer.getByLabel('Label', { exact: true }).fill('Connector type');
+  await designer
+    .getByLabel('Field name', { exact: true })
+    .fill('Connector type');
   await panels.getByRole('button', { name: 'Canvas' }).click();
   await designer
     .getByRole('button', { name: 'Inspect section' })
@@ -109,7 +115,7 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(
     designer
       .getByTestId('designer-inspector')
-      .getByLabel('Label', { exact: true }),
+      .getByLabel('Field name', { exact: true }),
   ).toHaveCount(0);
   await expect(designer.getByTestId('designer-inspector')).toContainText(
     'Section Details',
@@ -127,7 +133,7 @@ test('phone designer edits publish with one save and render in quantity and asse
   await inspectControl(connectorControl);
   await chooseControlSection(connectorControl, 'Specifications');
   await designer
-    .getByText('Live preview · open quantity or asset form')
+    .getByText('Try form · quantity items or serialized assets')
     .click();
   const preview = designer.getByRole('form', {
     name: 'Preview quantity metadata',
@@ -252,9 +258,17 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     fieldName: string,
   ) => {
     await panels.getByRole('button', { name: 'Library' }).click();
-    await designer.getByLabel('New field type').selectOption(type);
-    await designer.getByRole('button', { name: 'Add field' }).click();
-    await designer.getByLabel('Label', { exact: true }).fill(fieldName);
+    await designer
+      .getByRole('button', { name: 'Add field', exact: true })
+      .click();
+    const addition = designer.getByRole('dialog', { name: 'Add field' });
+    await addition
+      .getByRole('button', {
+        name: type === 'boolean' ? /Checkbox/ : /Short text/,
+      })
+      .click();
+    await addition.getByLabel('Field name').fill(fieldName);
+    await addition.getByRole('button', { name: 'Add to form' }).click();
     await panels.getByRole('button', { name: 'Canvas' }).click();
     const control = designer.locator(
       `[data-control-id]:has(button[aria-label="Drag ${fieldName}"])`,
@@ -265,7 +279,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   for (const name of ['Flag one', 'Flag two', 'Flag three'])
     await addField('boolean', name);
   await designer
-    .getByText('Live preview · open quantity or asset form')
+    .getByText('Try form · quantity items or serialized assets')
     .click();
   await designer.getByRole('button', { name: 'Phone width' }).click();
   const preview = designer.getByRole('form', {
@@ -274,20 +288,51 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   const checks = ['Flag one', 'Flag two', 'Flag three'].map((name) =>
     preview.getByRole('checkbox', { name }),
   );
-  const boxes = await Promise.all(checks.map((check) => check.boundingBox()));
+  // The associated label is the complete touch target, including its padding.
+  const targets = checks.map((check) =>
+    check.locator('xpath=ancestor::label[1]'),
+  );
+  await targets[0].scrollIntoViewIfNeeded();
+  const boxes = await Promise.all(
+    targets.map((target) => target.boundingBox()),
+  );
   for (const box of boxes) {
     expect(box).toBeTruthy();
     expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
   }
   expect(boxes[0]!.y).toBeCloseTo(boxes[1]!.y, 0);
   expect(boxes[1]!.y).toBeCloseTo(boxes[2]!.y, 0);
   expect(boxes[0]!.x).toBeLessThan(boxes[1]!.x);
   expect(boxes[1]!.x).toBeLessThan(boxes[2]!.x);
+  expect(boxes[0]!.x + boxes[0]!.width).toBeLessThanOrEqual(boxes[1]!.x);
+  expect(boxes[1]!.x + boxes[1]!.width).toBeLessThanOrEqual(boxes[2]!.x);
   await expect(checks[0]).toHaveAttribute('aria-checked', 'mixed');
+  const glyph = await checks[0].boundingBox();
+  const paddingPoint = {
+    x: boxes[0]!.x + boxes[0]!.width / 2,
+    y: boxes[0]!.y + boxes[0]!.height - 3,
+  };
+  expect(paddingPoint.y).toBeGreaterThan(glyph!.y + glyph!.height);
+  expect(paddingPoint.y).toBeLessThan(page.viewportSize()!.height);
+  expect(paddingPoint.y).toBeGreaterThanOrEqual(0);
+  await test.info().attach('boolean-touch-targets', {
+    body: JSON.stringify({ labels: boxes, glyph, paddingPoint }),
+    contentType: 'application/json',
+  });
+  await page.mouse.click(paddingPoint.x, paddingPoint.y);
+  await expect(checks[0]).toBeChecked();
+  await expect(checks[1]).not.toBeChecked();
+  await checks[0].focus();
+  await page.keyboard.press('Space');
+  await expect(checks[0]).not.toBeChecked();
+  await page.screenshot({
+    path: test.info().outputPath('phone-checkbox-targets.png'),
+  });
   await checks[0].check();
   await checks[0].uncheck();
   await expect(checks[0]).toHaveAttribute('aria-checked', 'false');
-  await preview.getByRole('button', { name: 'Unset' }).first().click();
+  await preview.getByRole('button', { name: 'Clear answer' }).first().click();
   await expect(checks[0]).toHaveAttribute('aria-checked', 'mixed');
 
   const longLabel = 'LongFieldLabel'.repeat(12);
@@ -295,7 +340,9 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   await addField('short_text', longLabel);
   await panels.getByRole('button', { name: 'Library' }).click();
   await designer.getByRole('button', { name: new RegExp(longLabel) }).click();
-  await designer.getByLabel('Help text').fill(longHelp);
+  await designer
+    .getByLabel('Description shown below this field')
+    .fill(longHelp);
   const label = preview.getByText(longLabel, { exact: true });
   const help = preview.getByText(longHelp, { exact: true });
   for (const text of [label, help]) {
@@ -309,17 +356,36 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     expect(metrics.scroll).toBeLessThanOrEqual(metrics.client + 1);
     expect(metrics.right).toBeLessThanOrEqual(metrics.viewport);
   }
-  await designer.getByRole('checkbox', { name: 'Quantity' }).uncheck();
-  await designer.getByRole('checkbox', { name: 'Asset' }).uncheck();
-  const issue = designer.getByRole('alert');
-  await expect(issue).toContainText(
-    `${longLabel} needs inventory applicability`,
-  );
+  await designer.getByText('Optional rules', { exact: true }).click();
+  await designer
+    .getByRole('checkbox', { name: 'Use minimum characters' })
+    .check();
+  await designer.getByLabel('Minimum characters', { exact: true }).fill('501');
+  await expect(
+    designer.getByRole('alert').filter({
+      hasText: 'Minimum characters must be a whole number from 0 to 500.',
+    }),
+  ).toBeVisible();
+  const issue = designer
+    .getByRole('alert')
+    .filter({ hasText: 'Resolve before saving:' });
+  await expect(issue).toContainText(`${longLabel} has invalid text bounds`);
   expect(
     await issue.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
   ).toBe(true);
-  await designer.getByRole('checkbox', { name: 'Quantity' }).check();
-  await designer.getByRole('checkbox', { name: 'Asset' }).check();
+  await designer
+    .getByRole('checkbox', { name: 'Use minimum characters' })
+    .uncheck();
+
+  const inspectorHeading = designer
+    .getByTestId('designer-inspector')
+    .getByRole('heading', { level: 3, name: new RegExp(longLabel) });
+  expect(
+    await inspectorHeading.evaluate(
+      (node) => node.scrollWidth <= node.clientWidth + 1,
+    ),
+  ).toBe(true);
+
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

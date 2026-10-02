@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { submitInventory } from '@/features/inventory/actions';
 import { submitCustody } from '@/features/custody/actions';
 import { fetchCategoryForm } from './form-fetch.actions';
@@ -10,9 +16,11 @@ import {
 } from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+const { push, refresh } = vi.hoisted(() => ({
+  push: vi.fn(),
+  refresh: vi.fn(),
 }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push }) }));
 vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
@@ -99,6 +107,9 @@ const props = {
   item,
 };
 describe('published metadata form', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
   it('omits a section whose only control does not apply to an asset while keeping quantity item code', () => {
     const current = form();
     current.published_definition.layout.push({
@@ -228,7 +239,7 @@ describe('published metadata form', () => {
     expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
     expect(submitInventory).not.toHaveBeenCalled();
   });
-  it('keeps missing, false, and true boolean values distinct with an explicit Unset', () => {
+  it('keeps missing, false, and true boolean values distinct with an explicit Clear answer', () => {
     render(
       <MetadataFormPreview
         kind="quantity"
@@ -239,15 +250,16 @@ describe('published metadata form', () => {
     );
     const checkbox = screen.getByRole('checkbox', { name: /Inspected/ });
     expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
-    expect(screen.getByText('Not set')).toBeInTheDocument();
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
     fireEvent.click(checkbox);
     expect(checkbox).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(checkbox);
     expect(checkbox).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText('No')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Unset' }));
+    expect(screen.queryByText('No')).toBeNull();
+    expect(checkbox).not.toHaveAttribute('required');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear answer' }));
     expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
-    expect(screen.getByText('Not set')).toBeInTheDocument();
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
   });
   it('validates quantity Item code by Unicode characters and keeps its display text', () => {
     const current = form();
@@ -614,7 +626,7 @@ describe('published metadata form', () => {
     ) as HTMLSelectElement;
     expect(newInput.value).toBe(choiceId);
     expect(
-      screen.getByText(/Retained historical choice: Original choice/),
+      screen.getByText(/Original choice.*unavailable/),
     ).toBeInTheDocument();
   });
   it('requires an explicit legacy-value acknowledgement when changing an item category', () => {
@@ -649,5 +661,474 @@ describe('published metadata form', () => {
     );
     fireEvent.click(acknowledgement);
     expect(screen.getByRole('button', { name: 'Confirm save' })).toBeEnabled();
+  });
+  it.each(['quantity', 'asset'] as const)(
+    'cancels untouched %s creation immediately without a write',
+    (kind) => {
+      const current = form();
+      current.published_definition.fields[0].default = false;
+      render(
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={undefined}
+          forms={{ [categoryId]: current }}
+          returnTo="/inventory?q=USB&type=quantity&page=2"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(push).toHaveBeenCalledWith(
+        '/inventory?q=USB&type=quantity&page=2',
+      );
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(submitInventory).not.toHaveBeenCalled();
+      expect(submitCustody).not.toHaveBeenCalled();
+    },
+  );
+  it('returns site opening cancellation to its known site, and rejects external return paths', () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+        openingSite={{ id: item.id, code: 'PROPERTY-A', name: 'Property' }}
+        returnTo="https://evil.test"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(push).toHaveBeenCalledWith('/sites/PROPERTY-A');
+    expect(submitCustody).not.toHaveBeenCalled();
+  });
+  it.each(['quantity', 'asset'] as const)(
+    'discards a mounted %s edit, closes it, and reopens saved values without touched patches',
+    async (kind) => {
+      const current = form();
+      current.published_definition.fields[0] = {
+        ...current.published_definition.fields[0],
+        type: 'integer',
+        label: 'Count',
+        required: false,
+        applies_to: [kind],
+      };
+      const saved = {
+        ...item,
+        customValues: {
+          [fieldId]: {
+            type: 'integer' as const,
+            value: 0,
+            label: 'Count',
+            validated_revision_id: firstRevision,
+            owner_category_id: categoryId,
+          },
+        },
+      };
+      const savedAsset = {
+        ...saved,
+        assetTag: null,
+        serialNumber: null,
+        locationId: null,
+        locationCode: null,
+        locationName: null,
+        status: 'active' as const,
+      };
+      render(
+        <details open>
+          <summary>Edit metadata</summary>
+          <MetadataForm
+            {...props}
+            kind={kind}
+            item={kind === 'quantity' ? saved : undefined}
+            asset={kind === 'asset' ? savedAsset : undefined}
+            forms={{ [categoryId]: current }}
+          />
+        </details>,
+      );
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Discard this core edit' },
+      });
+      fireEvent.change(screen.getByLabelText('Count'), {
+        target: { value: '-' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+      const summary = screen.getByText('Edit metadata');
+      expect(summary.parentElement).not.toHaveAttribute('open');
+      expect(summary).toHaveFocus();
+      expect(push).not.toHaveBeenCalled();
+      summary.parentElement!.setAttribute('open', '');
+      expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+      expect(screen.getByLabelText('Count')).toHaveValue('0');
+      expect(screen.queryByRole('alert')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      expect(
+        screen.getByRole('button', { name: 'Confirm save' }),
+      ).toBeEnabled();
+      // Pristine Cancel also closes and clears review state without a prompt.
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(summary.parentElement).not.toHaveAttribute('open');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      summary.parentElement!.setAttribute('open', '');
+      expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Actual edit' },
+      });
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: true,
+        entityId: item.id,
+        version: '2',
+        changed: true,
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+        payload: {
+          name: 'Actual edit',
+          custom_patch: { set: {}, unset: [] },
+        },
+      });
+    },
+  );
+  it('prompts for dirty Cancel, traps focus and restores it on Keep editing and Escape', () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'New cable' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Tab' });
+    expect(
+      screen.getByRole('button', { name: 'Discard changes' }),
+    ).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(screen.getByLabelText('Name')).toHaveValue('New cable');
+    expect(push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(push).toHaveBeenCalledWith('/inventory');
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('treats genuinely reverted entries as untouched and does not resurrect a cleared create default', () => {
+    const current = form();
+    current.published_definition.fields[0].default = false;
+    current.published_definition.fields[0].required = false;
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Temporary' },
+    });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    push.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear answer' }));
+    expect(screen.getByRole('checkbox')).toHaveAttribute(
+      'aria-checked',
+      'mixed',
+    );
+    expect(
+      buildCustomPatch(
+        current.published_definition,
+        'quantity',
+        {},
+        [fieldId],
+        true,
+      ),
+    ).toEqual({ set: {}, unset: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+  it('accepts required unchecked false during create and preserves zero and missing values', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Cable' },
+    });
+    const checkbox = screen.getByRole('checkbox');
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalled());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      payload: {
+        initial_quantity: 0,
+        custom_patch: { set: { [fieldId]: false }, unset: [] },
+      },
+    });
+  });
+  it('blocks double submit and Cancel during a dispatched mutation, then freezes unknown outcomes and retries the same identity', async () => {
+    let finish!: (result: Awaited<ReturnType<typeof submitInventory>>) => void;
+    vi.mocked(submitInventory)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '1',
+        changed: true,
+      });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Cable' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeDisabled();
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Create quantity inventory' }),
+    );
+    expect(submitInventory).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      finish({
+        ok: false,
+        kind: 'unexpected',
+        code: 'unexpected',
+        message: 'Unknown outcome',
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Edit values' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(
+      vi.mocked(submitInventory).mock.calls[0][0],
+    );
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith('/inventory/quantity/' + item.id),
+    );
+  });
+  it('keeps receipt after a thrown response instead of allowing cancellation or a new write identity', async () => {
+    vi.mocked(submitInventory).mockRejectedValueOnce(
+      new Error('Connection dropped'),
+    );
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Cable' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'could not be confirmed',
+    );
+  });
+  it('allows a touched then reverted grandfathered answer on the same category without weakening changed answers', () => {
+    const current = form();
+    current.published_definition.fields[0] = {
+      ...current.published_definition.fields[0],
+      type: 'short_text',
+      label: 'Old note',
+      rules: { maxLength: 2 },
+    };
+    render(
+      <MetadataForm
+        {...props}
+        item={{
+          ...item,
+          customValues: {
+            [fieldId]: {
+              value: 'Legacy long note',
+              validated_revision_id: firstRevision,
+            },
+          },
+        }}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Old note (required)'), {
+      target: { value: 'Different long note' },
+    });
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Old note (required)'), {
+      target: { value: 'Legacy long note' },
+    });
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeEnabled();
+  });
+  it.each(['forbidden', 'idempotency_conflict', 'actor_changed'])(
+    'keeps an unknown prior save unresolved when retry returns %s before receipt confirmation',
+    async (code) => {
+      vi.mocked(submitInventory)
+        .mockResolvedValueOnce({
+          ok: false,
+          kind: 'unexpected',
+          code: 'unexpected',
+          message: 'Unknown outcome',
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          kind: 'domain',
+          code,
+          message: 'Replay access denied',
+        });
+      render(
+        <MetadataForm
+          {...props}
+          item={undefined}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Cable' },
+      });
+      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Replay access denied',
+        ),
+      );
+      expect(refresh).toHaveBeenCalledTimes(code === 'actor_changed' ? 1 : 0);
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      expect(screen.getByLabelText('Name')).toBeDisabled();
+      expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(
+        vi.mocked(submitInventory).mock.calls[0][0],
+      );
+    },
+  );
+  it('retains inputs and the bound receipt across a different active staff actor, resuming only as the original actor', async () => {
+    vi.mocked(submitInventory)
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'unexpected',
+        code: 'unexpected',
+        message: 'Unknown outcome',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '1',
+        changed: true,
+      });
+    const { rerender } = render(
+      <MetadataForm
+        {...props}
+        actorId={firstRevision}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Actor-bound cable' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeEnabled(),
+    );
+    rerender(
+      <MetadataForm
+        {...props}
+        actorId={secondRevision}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('Actor-bound cable');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Retry same save' }),
+    ).toBeDisabled();
+    expect(
+      screen
+        .getAllByRole('alert')
+        .some((node) =>
+          node.textContent?.includes('signed-in staff member changed'),
+        ),
+    ).toBe(true);
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Create quantity inventory' }),
+    );
+    expect(submitInventory).toHaveBeenCalledTimes(1);
+    rerender(
+      <MetadataForm
+        {...props}
+        actorId={firstRevision}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(
+      vi.mocked(submitInventory).mock.calls[0][0],
+    );
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      expectedActorId: firstRevision,
+    });
   });
 });

@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   buildOptionIndex,
@@ -7,12 +7,11 @@ import {
   newId,
   type Field,
 } from './designer-model';
-
+import { ChoicePicker } from './choice-picker';
 const input =
   'min-h-10 w-full min-w-0 rounded border border-slate-600 bg-slate-950 px-2 py-1 text-sm';
 const PAGE = 50;
 
-/** One editable choice at a time keeps a 1,000-node hierarchy practical. */
 export function OptionTreeEditor({
   field,
   change,
@@ -24,271 +23,437 @@ export function OptionTreeEditor({
   const hierarchy = field.type === 'hierarchical_select';
   const index = useMemo(() => buildOptionIndex(options), [options]);
   const [search, setSearch] = useState('');
-  const [parentSearch, setParentSearch] = useState('');
-  const [branch, setBranch] = useState<string | null>(null);
+  const [destinationSearch, setDestinationSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
   const [page, setPage] = useState(0);
-  const selected = (selectedId && index.byId.get(selectedId)) || null;
-  const descendants = useMemo(
-    () => (selected ? index.descendantsOf(selected.id) : new Set<string>()),
-    [index, selected],
-  );
-  const subtreeHeight = useMemo(() => {
-    if (!selected) return 0;
-    const seen = new Set<string>([selected.id]);
-    const queue = [{ id: selected.id, depth: 1 }];
-    let height = 1;
-    for (let cursor = 0; cursor < queue.length; cursor += 1) {
-      const current = queue[cursor];
-      height = Math.max(height, current.depth);
-      for (const child of index.children.get(current.id) ?? []) {
-        if (seen.has(child.id)) continue;
-        seen.add(child.id);
-        queue.push({ id: child.id, depth: current.depth + 1 });
-      }
+  const [removalId, setRemovalId] = useState<string | null>(null);
+  const removalTitleId = useId();
+  const keepOptionButton = useRef<HTMLButtonElement>(null);
+  const addOptionButton = useRef<HTMLButtonElement>(null);
+  const removing = removalId ? index.byId.get(removalId) : undefined;
+  useEffect(() => {
+    if (removalId) keepOptionButton.current?.focus();
+  }, [removalId]);
+  const cancelRemoval = () => {
+    if (removalId) rowInputs.current.get(removalId)?.focus();
+    setRemovalId(null);
+  };
+  const isInitialSelection = (optionId: string) =>
+    field.default === optionId ||
+    (Array.isArray(field.default) && field.default.includes(optionId));
+  const removeOption = (optionId: string) => {
+    // Recheck the latest tree at confirmation: no operation removes descendants.
+    if ((index.children.get(optionId)?.length ?? 0) > 0) return;
+    const next = {
+      ...field,
+      options: options.filter((option) => option.id !== optionId),
+    };
+    if (isInitialSelection(optionId))
+      next.default = Array.isArray(field.default)
+        ? field.default.filter((value) => value !== optionId)
+        : undefined;
+    change(next);
+    if (selectedId === optionId) {
+      setSelectedId(null);
+      setMoving(false);
     }
-    return height;
-  }, [index, selected]);
-  const matching = options.filter((option) =>
-    search.trim()
-      ? (index.paths.get(option.id) ?? option.label)
-          .toLowerCase()
-          .includes(search.trim().toLowerCase())
-      : !hierarchy || (option.parent_id ?? null) === branch,
+    setRemovalId(null);
+    addOptionButton.current?.focus();
+  };
+  const pendingFocus = useRef<string | null>(null);
+  const rowInputs = useRef(new Map<string, HTMLInputElement>());
+  const selected = selectedId ? index.byId.get(selectedId) : undefined;
+  const ordered = useMemo(() => {
+    if (!hierarchy) return options;
+    const result: Field['options'] = [];
+    const seen = new Set<string>();
+    const visit = (parent: string | null) => {
+      for (const option of index.children.get(parent) ?? []) {
+        if (seen.has(option.id)) continue;
+        seen.add(option.id);
+        result.push(option);
+        visit(option.id);
+      }
+    };
+    visit(null);
+    for (const option of options) if (!seen.has(option.id)) result.push(option);
+    return result;
+  }, [hierarchy, options, index]);
+  const matching = ordered.filter((option) =>
+    (index.paths.get(option.id) ?? option.label)
+      .toLowerCase()
+      .includes(search.trim().toLowerCase()),
   );
-  const listed = matching.slice(page * PAGE, (page + 1) * PAGE);
-  const parentChoices = selected
-    ? options
-        .filter(
-          (option) =>
-            !descendants.has(option.id) &&
-            index.depths.get(option.id) !== null &&
-            (index.depths.get(option.id) ?? 65) + subtreeHeight <= 64 &&
-            (index.paths.get(option.id) ?? option.label)
-              .toLowerCase()
-              .includes(parentSearch.trim().toLowerCase()),
-        )
-        .slice(0, PAGE)
-    : [];
-  const currentParent = selected?.parent_id
-    ? index.byId.get(selected.parent_id)
-    : null;
-  if (
-    currentParent &&
-    !parentChoices.some((option) => option.id === currentParent.id)
-  )
-    parentChoices.unshift(currentParent);
-  const patch = (id: string, next: Partial<Field['options'][number]>) =>
+  const effectivePage = Math.min(
+    page,
+    Math.max(0, Math.ceil(matching.length / PAGE) - 1),
+  );
+  const listed = matching.slice(
+    effectivePage * PAGE,
+    (effectivePage + 1) * PAGE,
+  );
+  useEffect(() => {
+    const focusId = pendingFocus.current;
+    if (!focusId) return;
+    const row = rowInputs.current.get(focusId);
+    if (row) {
+      row.focus();
+      row.scrollIntoView?.({ block: 'nearest' });
+      pendingFocus.current = null;
+    }
+  }, [listed]);
+  const patch = (optionId: string, next: Partial<Field['options'][number]>) =>
     change({
       ...field,
       options: options.map((option) =>
-        option.id === id ? { ...option, ...next } : option,
+        option.id === optionId ? { ...option, ...next } : option,
       ),
     });
-  const setBranchAndReset = (id: string | null) => {
-    setBranch(id);
-    setPage(0);
+  const add = (parentId: string | null) => {
+    if (
+      options.length >= 1000 ||
+      (parentId && (index.depths.get(parentId) ?? 64) >= 64)
+    )
+      return;
+    const optionId = newId();
+    const next = [
+      ...options,
+      {
+        id: optionId,
+        label: '',
+        active: true,
+        ...(parentId ? { parent_id: parentId } : {}),
+      },
+    ];
+    // Insert just after the parent's current subtree so it is revealed on the correct page.
+    const insertion = parentId
+      ? ordered.findLastIndex((option) =>
+          index.descendantsOf(parentId).has(option.id),
+        ) + 1
+      : ordered.length;
+    change({ ...field, options: next });
     setSearch('');
-    setSelectedId(null);
+    setPage(Math.floor(insertion / PAGE));
+    setSelectedId(optionId);
+    setMoving(false);
+    pendingFocus.current = optionId;
   };
+  const reorder = (optionId: string, direction: -1 | 1) => {
+    const option = index.byId.get(optionId)!;
+    const siblings = options.filter(
+      (item) => (item.parent_id ?? null) === (option.parent_id ?? null),
+    );
+    const position = siblings.findIndex((item) => item.id === optionId);
+    const adjacent = siblings[position + direction];
+    if (!adjacent) return;
+    const next = [...options],
+      a = options.indexOf(option),
+      b = options.indexOf(adjacent);
+    [next[a], next[b]] = [next[b], next[a]];
+    change({ ...field, options: next });
+  };
+  const destinations = selected
+    ? options.filter(
+        (option) =>
+          option.active &&
+          canReparent(options, selected.id, option.id) &&
+          (index.paths.get(option.id) ?? option.label)
+            .toLowerCase()
+            .includes(destinationSearch.trim().toLowerCase()),
+      )
+    : [];
   return (
-    <div className="space-y-2 rounded border border-slate-600 p-2 text-xs">
+    <div
+      className="space-y-2 rounded border border-slate-600 p-2 text-xs"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && removalId) {
+          event.stopPropagation();
+          cancelRemoval();
+        }
+        if (event.key === 'Enter' && event.target instanceof HTMLInputElement)
+          event.preventDefault();
+      }}
+    >
       <p>
-        Choices ({options.length}/1,000). Retired choices keep their IDs and
-        historical values.
+        Rename or reorder options without changing saved answers. Retiring keeps
+        previous answers and makes the option unavailable for new selections.
       </p>
-      {hierarchy && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="underline"
-            onClick={() => setBranchAndReset(null)}
-          >
-            Root
-          </button>
-          {branch && (
-            <>
-              <span className="min-w-0 break-words">
-                {index.paths.get(branch) ?? 'Invalid path'}
-              </span>
-              <button
-                type="button"
-                className="underline"
-                onClick={() =>
-                  setBranchAndReset(index.byId.get(branch)?.parent_id ?? null)
-                }
-              >
-                Up
-              </button>
-            </>
-          )}
-        </div>
+      {options.length > PAGE && (
+        <label className="block">
+          Search options
+          <input
+            className={input}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
+          />
+        </label>
       )}
-      <label className="block">
-        Search choice paths
-        <input
-          className={input}
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(0);
-          }}
-        />
-      </label>
-      <ul className="max-h-64 space-y-1 overflow-auto" aria-label="Choices">
-        {listed.map((option) => (
-          <li key={option.id}>
-            <button
-              type="button"
-              aria-current={selected?.id === option.id ? 'true' : undefined}
-              className="block w-full min-w-0 rounded border border-slate-700 p-2 text-left break-words hover:bg-slate-800"
-              onClick={() => setSelectedId(option.id)}
+      {!options.length && (
+        <p>
+          {hierarchy
+            ? 'Add an option, then add children beneath it. For example: Connection → USB → USB-C.'
+            : 'Add your first option.'}
+        </p>
+      )}
+      <ul aria-label="Choices" className="max-h-96 space-y-2 overflow-auto">
+        {listed.map((option) => {
+          const siblings = index.children.get(option.parent_id ?? null) ?? [];
+          const position = siblings.findIndex((item) => item.id === option.id);
+          const children = index.children.get(option.id) ?? [];
+          return (
+            <li
+              key={option.id}
+              style={{
+                marginInlineStart: hierarchy
+                  ? `${Math.min((index.depths.get(option.id) ?? 1) - 1, 8) * 16}px`
+                  : undefined,
+              }}
+              className={`space-y-1 rounded border p-2 ${selectedId === option.id ? 'border-cyan-500 bg-cyan-950/30' : 'border-slate-700'}`}
             >
-              {index.paths.get(option.id) ?? option.label} ·{' '}
-              {option.active ? 'Active' : 'Retired'}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-wrap items-center gap-2">
-        <span>
-          {matching.length
-            ? `${page * PAGE + 1}–${Math.min((page + 1) * PAGE, matching.length)} of ${matching.length}`
-            : 'No choices in this branch'}
-        </span>
-        <button
-          type="button"
-          className="underline"
-          disabled={page === 0}
-          onClick={() => setPage(page - 1)}
-        >
-          Previous choices
-        </button>
-        <button
-          type="button"
-          className="underline"
-          disabled={(page + 1) * PAGE >= matching.length}
-          onClick={() => setPage(page + 1)}
-        >
-          Next choices
-        </button>
-      </div>
-      {selected && (
-        <div
-          className="space-y-2 rounded border border-cyan-700 p-2"
-          aria-label="Selected choice editor"
-        >
-          <p className="break-words">
-            Editing {index.paths.get(selected.id) ?? selected.label}
-          </p>
-          <label className="block">
-            Choice label
-            <input
-              className={input}
-              maxLength={200}
-              value={selected.label}
-              onChange={(event) =>
-                patch(selected.id, { label: event.target.value })
-              }
-            />
-          </label>
-          {hierarchy && (
-            <>
-              <button
-                type="button"
-                className="underline"
-                onClick={() => setBranchAndReset(selected.id)}
-              >
-                Open children
-              </button>
+              {hierarchy && option.parent_id && (
+                <p className="break-words text-slate-400">
+                  Under {index.paths.get(option.parent_id) ?? 'Invalid option'}
+                </p>
+              )}
               <label className="block">
-                Search parent paths
+                Option name
                 <input
+                  ref={(element) => {
+                    if (element) rowInputs.current.set(option.id, element);
+                    else rowInputs.current.delete(option.id);
+                  }}
+                  aria-label={`Option name: ${option.label || 'New option'}`}
                   className={input}
-                  value={parentSearch}
-                  onChange={(event) => setParentSearch(event.target.value)}
+                  maxLength={200}
+                  value={option.label}
+                  onFocus={() => setSelectedId(option.id)}
+                  onChange={(event) =>
+                    patch(option.id, { label: event.target.value })
+                  }
                 />
               </label>
-              <label className="block">
-                Parent
-                <select
-                  className={input}
-                  value={selected.parent_id ?? ''}
-                  onChange={(event) => {
-                    const parent = event.target.value || null;
-                    if (canReparent(options, selected.id, parent))
-                      patch(selected.id, { parent_id: parent });
+              <div className="flex flex-wrap items-center gap-3">
+                {!option.active && (
+                  <span className="text-amber-200">Retired</span>
+                )}
+                {hierarchy && (
+                  <button
+                    type="button"
+                    className="underline"
+                    disabled={
+                      options.length >= 1000 ||
+                      (index.depths.get(option.id) ?? 64) >= 64
+                    }
+                    onClick={() => add(option.id)}
+                  >
+                    Add child option{' '}
+                    <span className="sr-only">
+                      {' '}
+                      to {option.label || 'New option'}
+                    </span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="underline"
+                  disabled={position === 0}
+                  onClick={() => reorder(option.id, -1)}
+                >
+                  Move up <span className="sr-only"> {option.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="underline"
+                  disabled={position === siblings.length - 1}
+                  onClick={() => reorder(option.id, 1)}
+                >
+                  Move down <span className="sr-only"> {option.label}</span>
+                </button>
+                {hierarchy && (
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      setSelectedId(option.id);
+                      setMoving(!moving || selectedId !== option.id);
+                      setDestinationSearch('');
+                    }}
+                  >
+                    Move to… <span className="sr-only"> {option.label}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => patch(option.id, { active: !option.active })}
+                >
+                  {option.active ? 'Retire option' : 'Restore option'}{' '}
+                  <span className="sr-only"> {option.label}</span>
+                </button>
+                <button
+                  type="button"
+                  className="text-rose-300 underline"
+                  disabled={children.length > 0}
+                  onClick={() => {
+                    if (isInitialSelection(option.id)) setRemovalId(option.id);
+                    else removeOption(option.id);
                   }}
                 >
-                  <option value="">Root</option>
-                  {parentChoices.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {index.paths.get(option.id) ?? option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="text-slate-400">
-                Showing up to 50 matching parent paths. Search to locate another
-                parent.
-              </p>
-            </>
-          )}
+                  Remove option{' '}
+                  <span className="sr-only">
+                    {option.label || 'New option'}
+                  </span>
+                </button>
+                {children.length > 0 && (
+                  <span className="text-slate-400">
+                    {children.length} child option
+                    {children.length === 1 ? '' : 's'} retained. Move child
+                    options elsewhere before removing this option, or retire it.
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {removing && (
+        <div
+          role="alertdialog"
+          aria-labelledby={removalTitleId}
+          className="space-y-2 rounded border border-amber-500 p-3"
+        >
+          <p id={removalTitleId} className="font-semibold">
+            Remove {removing.label || 'New option'} and clear its initial
+            selection?
+          </p>
+          <p>
+            This option is selected in Starts with. Removing it clears that
+            initial selection for new records. Other initial selections and
+            historical answers are retained. Save changes reviews the impact on
+            the published form.
+          </p>
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
+              ref={keepOptionButton}
               className="underline"
-              onClick={() => patch(selected.id, { active: !selected.active })}
+              onClick={cancelRemoval}
             >
-              {selected.active ? 'Retire' : 'Restore'}
+              Keep option
             </button>
             <button
               type="button"
               className="text-rose-300 underline"
-              disabled={(index.children.get(selected.id)?.length ?? 0) > 0}
-              onClick={() => {
-                change({
-                  ...field,
-                  options: options.filter(
-                    (option) => option.id !== selected.id,
-                  ),
-                });
-                setSelectedId(null);
-              }}
+              disabled={(index.children.get(removing.id)?.length ?? 0) > 0}
+              onClick={() => removeOption(removing.id)}
             >
-              Remove
+              Remove and clear initial selection
             </button>
           </div>
         </div>
       )}
+      {matching.length > PAGE && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span>
+            {effectivePage * PAGE + 1}–
+            {Math.min((effectivePage + 1) * PAGE, matching.length)} of{' '}
+            {matching.length}
+          </span>
+          <button
+            type="button"
+            disabled={effectivePage === 0}
+            onClick={() => setPage(effectivePage - 1)}
+          >
+            Previous choices
+          </button>
+          <button
+            type="button"
+            disabled={(effectivePage + 1) * PAGE >= matching.length}
+            onClick={() => setPage(effectivePage + 1)}
+          >
+            Next choices
+          </button>
+        </div>
+      )}
+      {hierarchy && moving && selected && (
+        <fieldset className="space-y-2 rounded border border-cyan-700 p-2">
+          <legend>Move {selected.label || 'New option'}</legend>
+          <p>
+            Currently: {index.paths.get(selected.id)}. Child options move with
+            it. Destinations that create a cycle or exceed 64 levels are
+            excluded.
+          </p>
+          {options.length > PAGE && (
+            <label className="block">
+              Search destinations
+              <input
+                className={input}
+                value={destinationSearch}
+                onChange={(event) => setDestinationSearch(event.target.value)}
+              />
+            </label>
+          )}
+          <label className="block">
+            Move under
+            <select
+              className={input}
+              value={selected.parent_id ?? ''}
+              onChange={(event) => {
+                const parentId = event.target.value || null;
+                if (canReparent(options, selected.id, parentId)) {
+                  patch(selected.id, { parent_id: parentId });
+                  setMoving(false);
+                }
+              }}
+            >
+              <option value="">Top level</option>
+              {selected.parent_id &&
+                !destinations
+                  .slice(0, PAGE)
+                  .some((option) => option.id === selected.parent_id) && (
+                  <option value={selected.parent_id}>
+                    {index.paths.get(selected.parent_id)}
+                  </option>
+                )}
+              {destinations.slice(0, PAGE).map((option) => (
+                <option key={option.id} value={option.id}>
+                  {index.paths.get(option.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {destinations.length > PAGE && (
+            <p>
+              Showing 50 matching destinations. Search to find another option.
+            </p>
+          )}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => setMoving(false)}
+          >
+            Cancel move
+          </button>
+        </fieldset>
+      )}
       <Button
+        ref={addOptionButton}
         type="button"
         variant="outline"
         disabled={options.length >= 1000}
-        onClick={() => {
-          const id = newId();
-          change({
-            ...field,
-            options: [
-              ...options,
-              {
-                id,
-                label: '',
-                active: true,
-                ...(hierarchy && branch ? { parent_id: branch } : {}),
-              },
-            ],
-          });
-          setSelectedId(id);
-        }}
+        onClick={() => add(null)}
       >
-        Add {hierarchy && branch ? 'child' : 'choice'}
+        Add option
       </Button>
+      {options.length >= 1000 && <p>The limit is 1,000 options per field.</p>}
     </div>
   );
 }
 
-/** Paged defaults share the indexed option paths and keep selected IDs visible. */
 export function ChoiceDefaultEditor({
   field,
   change,
@@ -296,110 +461,18 @@ export function ChoiceDefaultEditor({
   field: Field;
   change: (next: Field) => void;
 }) {
-  const index = useMemo(() => buildOptionIndex(field.options), [field.options]);
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const multiple = field.type === 'multi_select';
-  const selected = multiple
-    ? Array.isArray(field.default)
-      ? field.default.filter((id): id is string => typeof id === 'string')
-      : []
-    : typeof field.default === 'string'
-      ? [field.default]
-      : [];
-  const selectedSet = new Set(selected);
-  const matching = field.options.filter(
-    (option) =>
-      (option.active || selectedSet.has(option.id)) &&
-      (index.paths.get(option.id) ?? option.label)
-        .toLowerCase()
-        .includes(search.trim().toLowerCase()),
-  );
-  const listed = matching.slice(page * PAGE, (page + 1) * PAGE);
-  const toggle = (id: string) => {
-    if (multiple) {
-      const next = selectedSet.has(id)
-        ? selected.filter((item) => item !== id)
-        : [...selected, id];
-      change({ ...field, default: next.length ? next : undefined });
-    } else change({ ...field, default: selectedSet.has(id) ? undefined : id });
-  };
   return (
-    <fieldset className="space-y-2 rounded border border-slate-600 p-2 text-sm">
-      <legend>Default {multiple ? 'choices' : 'choice'} (optional)</legend>
-      <p className="break-words text-xs">
-        {selected.length
-          ? `${selected.length} selected: ${selected
-              .slice(0, 5)
-              .map((id) => index.paths.get(id) ?? `Unknown ${id}`)
-              .join(
-                '; ',
-              )}${selected.length > 5 ? `; and ${selected.length - 5} more` : ''}`
-          : 'Unset'}
+    <div className="space-y-2">
+      <p className="text-xs text-slate-400">
+        Initial selections apply to new records only.
       </p>
-      {selected.length > 0 && (
-        <button
-          type="button"
-          className="text-xs underline"
-          onClick={() => change({ ...field, default: undefined })}
-        >
-          Clear all defaults
-        </button>
-      )}
-      <label className="block text-xs">
-        Search default choices
-        <input
-          className={input}
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPage(0);
-          }}
-        />
-      </label>
-      <ul
-        className="max-h-64 space-y-1 overflow-auto"
-        aria-label="Default choices"
-      >
-        {listed.map((option) => (
-          <li key={option.id}>
-            <button
-              type="button"
-              aria-pressed={selectedSet.has(option.id)}
-              disabled={!option.active && !selectedSet.has(option.id)}
-              className="block w-full rounded border border-slate-700 p-2 text-left break-words hover:bg-slate-800"
-              onClick={() => toggle(option.id)}
-            >
-              {selectedSet.has(option.id) ? '✓ ' : ''}
-              {index.paths.get(option.id) ?? option.label}
-              {!option.active ? ' (retired)' : ''}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span>
-          {matching.length
-            ? `${page * PAGE + 1}–${Math.min((page + 1) * PAGE, matching.length)} of ${matching.length}`
-            : 'No matching choices'}
-        </span>
-        <button
-          type="button"
-          className="underline"
-          disabled={page === 0}
-          onClick={() => setPage(page - 1)}
-        >
-          Previous defaults
-        </button>
-        <button
-          type="button"
-          className="underline"
-          disabled={(page + 1) * PAGE >= matching.length}
-          onClick={() => setPage(page + 1)}
-        >
-          Next defaults
-        </button>
-      </div>
-    </fieldset>
+      <ChoicePicker
+        options={field.options}
+        type={field.type}
+        value={field.default}
+        label="Starts with (optional)"
+        onChange={(value) => change({ ...field, default: value })}
+      />
+    </div>
   );
 }

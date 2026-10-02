@@ -93,6 +93,15 @@ function mount() {
   );
 }
 
+function addField(name = 'New field') {
+  fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+  const dialog = screen.getByRole('dialog', { name: 'Add field' });
+  fireEvent.change(within(dialog).getByLabelText('Field name'), {
+    target: { value: name },
+  });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add to form' }));
+}
+
 describe('category form designer', () => {
   beforeEach(() => {
     clearAllDesignerRecovery();
@@ -101,6 +110,309 @@ describe('category form designer', () => {
     vi.mocked(saveMetadataForm).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({ ok: true });
+  });
+  it.each([
+    'Undo edit',
+    'Discard unsaved edits',
+    'Refresh from server',
+    'Apply JSON to visual editor',
+  ])(
+    'reconciles invalid rule drafts and Save errors after %s restores the same field ID',
+    async (action) => {
+      const savedForm = structuredClone(form);
+      savedForm.published_definition.fields.push({
+        id: id(8),
+        type: 'short_text',
+        label: 'Bounded note',
+        required: false,
+        applies_to: ['quantity', 'asset'],
+        rules: { minLength: 5 },
+        options: [],
+      });
+      savedForm.published_definition.layout[0].controls.push({
+        id: id(9),
+        kind: 'field',
+        field_id: id(8),
+        width: 12,
+      });
+      const props = {
+        memberId: id(50),
+        categories: [{ id: id(1), name: 'Cables', active: true }],
+        forms: { [id(1)]: savedForm },
+      };
+      const { rerender } = render(<MetadataSettings {...props} />);
+      fireEvent.click(document.querySelector(`[data-control-id="${id(9)}"]`)!);
+      const openRules = () => {
+        const summary = screen.getByText('Optional rules', {
+          selector: 'summary',
+        });
+        if (!(summary.closest('details') as HTMLDetailsElement).open)
+          fireEvent.click(summary);
+      };
+      openRules();
+      fireEvent.change(
+        screen.getByLabelText('Minimum characters', { exact: true }),
+        { target: { value: '-' } },
+      );
+      expect(
+        screen.getByLabelText('Minimum characters', { exact: true }),
+      ).toHaveValue('-');
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      try {
+        if (action === 'Apply JSON to visual editor') {
+          fireEvent.click(screen.getByText('Advanced JSON recovery'));
+          fireEvent.change(screen.getByLabelText('Form definition JSON'), {
+            target: { value: JSON.stringify(savedForm.published_definition) },
+          });
+        }
+        fireEvent.click(screen.getByRole('button', { name: action }));
+        if (action === 'Refresh from server')
+          rerender(
+            <MetadataSettings
+              {...props}
+              forms={{ [id(1)]: { ...savedForm, published_number: '2' } }}
+            />,
+          );
+        openRules();
+        expect(
+          screen.getByLabelText('Minimum characters', { exact: true }),
+        ).toHaveValue('5');
+        expect(
+          screen.queryByText(/Minimum characters needs a whole number/),
+        ).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Field name'), {
+          target: { value: 'Restored bounded note' },
+        });
+        await waitFor(() =>
+          expect(
+            screen.getByRole('button', { name: 'Save changes' }),
+          ).toBeEnabled(),
+        );
+      } finally {
+        confirm.mockRestore();
+      }
+    },
+  );
+  it.each([
+    ['short_text', 'minimum characters'],
+    ['long_text', 'maximum characters'],
+    ['integer', 'minimum value'],
+    ['decimal', 'maximum value'],
+    ['currency', 'minimum amount'],
+    ['date', 'earliest allowed date'],
+    ['datetime', 'latest allowed date and time'],
+    ['multi_select', 'maximum selections'],
+  ])(
+    'blocks Save for an enabled empty %s restriction and resets it on Undo',
+    async (type, label) => {
+      mount();
+      addField('Bounded field');
+      if (type !== 'short_text')
+        fireEvent.change(screen.getByLabelText('Field type'), {
+          target: { value: type },
+        });
+      const openRules = () => {
+        const summary = screen.getByText('Optional rules', {
+          selector: 'summary',
+        });
+        if (!(summary.closest('details') as HTMLDetailsElement).open)
+          fireEvent.click(summary);
+      };
+      openRules();
+      fireEvent.click(screen.getByLabelText(`Use ${label}`));
+      expect(screen.getByLabelText(`Use ${label}`)).toBeChecked();
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      fireEvent.change(screen.getByLabelText('Field name'), {
+        target: { value: 'Recoverable draft' },
+      });
+      expect(screen.getByLabelText(`Use ${label}`)).toBeChecked();
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+      openRules();
+      expect(screen.getByLabelText(`Use ${label}`)).not.toBeChecked();
+      expect(
+        screen.queryByText(`Enter ${label} or turn off this restriction.`),
+      ).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Save changes' }),
+        ).toBeEnabled(),
+      );
+      expect(saveMetadataForm).not.toHaveBeenCalled();
+    },
+  );
+  it('restores a valid numeric rule display on Undo while retaining incomplete ordinary typing', () => {
+    mount();
+    addField('Ports');
+    fireEvent.change(screen.getByLabelText('Field type'), {
+      target: { value: 'integer' },
+    });
+    fireEvent.click(
+      screen.getByText('Optional rules', { selector: 'summary' }),
+    );
+    fireEvent.click(screen.getByLabelText('Use minimum value'));
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '5' },
+    });
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '10' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    const summary = screen.getByText('Optional rules', { selector: 'summary' });
+    if (!(summary.closest('details') as HTMLDetailsElement).open)
+      fireEvent.click(summary);
+    expect(screen.getByLabelText('Minimum value', { exact: true })).toHaveValue(
+      '5',
+    );
+    fireEvent.change(screen.getByLabelText('Minimum value', { exact: true }), {
+      target: { value: '-' },
+    });
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Port count' },
+    });
+    expect(screen.getByLabelText('Minimum value', { exact: true })).toHaveValue(
+      '-',
+    );
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+  it('removes only a broken placement so a legacy document can be saved without inventing a field', async () => {
+    const legacy = structuredClone(form);
+    legacy.published_definition.fields.push({
+      id: id(8),
+      type: 'boolean',
+      label: 'Known answer',
+      required: false,
+      applies_to: ['quantity', 'asset'],
+      rules: {},
+      options: [],
+      default: false,
+    });
+    legacy.published_definition.layout[0].controls.push(
+      { id: id(9), kind: 'field', field_id: id(8), width: 12 },
+      {
+        id: id(10),
+        kind: 'field',
+        field_id: id(99),
+        width: 12,
+        visible: false,
+      },
+    );
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[{ id: id(1), name: 'Cables', active: true }]}
+        forms={{ [id(1)]: legacy }}
+      />,
+    );
+    fireEvent.click(document.querySelector(`[data-control-id="${id(9)}"]`)!);
+    expect(
+      screen.queryByRole('button', { name: 'Remove broken placement' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector(`[data-control-id="${id(10)}"]`)!);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove broken placement' }),
+    );
+    expect(document.querySelector(`[data-control-id="${id(10)}"]`)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Remove broken placement' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(
+      document.querySelector(`[data-control-id="${id(10)}"]`),
+    ).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove broken placement' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: false,
+      code: 'unexpected',
+      message: 'Test response.',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(1));
+    const saved = vi.mocked(saveMetadataForm).mock.calls[0][0].payload
+      .definition as MetadataDefinition;
+    expect(saved.fields).toEqual(legacy.published_definition.fields);
+    expect(saved.layout[0].controls).toEqual(
+      legacy.published_definition.layout[0].controls.slice(0, -1),
+    );
+  });
+  it('cancels staged addition while preserving unrelated unsaved section edits and adds in one undo step', () => {
+    mount();
+    fireEvent.change(screen.getByLabelText('Section heading'), {
+      target: { value: 'Unsaved heading' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add field' });
+    fireEvent.change(within(dialog).getByLabelText('Field name'), {
+      target: { value: 'Canceled field' },
+    });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByLabelText('Section heading')).toHaveValue(
+      'Unsaved heading',
+    );
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(3);
+    expect(
+      screen.queryByRole('button', { name: 'Drag Canceled field' }),
+    ).not.toBeInTheDocument();
+    addField('Has USB-C?');
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(4);
+    expect(
+      screen.getByRole('heading', { name: /Has USB-C/ }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(3);
+    expect(screen.queryByLabelText('Field name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Section heading')).toHaveValue(
+      'Unsaved heading',
+    );
+  });
+  it('uses a real checkbox canvas with one configured question, description and unique IDs', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add field' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Checkbox' }));
+    fireEvent.change(within(dialog).getByLabelText('Field name'), {
+      target: { value: 'Has USB-C?' },
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText('Description shown below this field'),
+      { target: { value: 'Check the port before answering.' } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add to form' }),
+    );
+    const canvas = screen.getByTestId('designer-canvas');
+    const preview = canvas.querySelector(
+      '[data-control-id]:has(button[aria-label="Drag Has USB-C?"])',
+    )!;
+    const checkbox = preview.querySelector('input[type="checkbox"]')!;
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(
+      within(preview as HTMLElement).getAllByText('Has USB-C?', {
+        exact: true,
+      }),
+    ).toHaveLength(1);
+    expect(
+      preview.querySelector(`#${checkbox.getAttribute('aria-describedby')}`),
+    ).toHaveTextContent('Check the port before answering.');
+    expect(within(canvas).queryByText('Yes / No')).not.toBeInTheDocument();
+    const ids = [...document.querySelectorAll('[id]')].map(
+      (element) => element.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
   });
   it('keeps library, canvas, and inspector as three panes with hidden controls inside the library', () => {
     const hiddenForm = structuredClone(form);
@@ -128,15 +440,13 @@ describe('category form designer', () => {
     expect(nameRow?.closest('[data-control-id]')).toContainElement(
       screen.getByRole('button', { name: 'Resize Name' }),
     );
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
-    expect(
-      within(library).getByText('Hidden controls (1)'),
-    ).toBeInTheDocument();
     fireEvent.click(
-      within(library).getByRole('button', { name: 'Restore Name' }),
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
     );
+    expect(within(library).getByText('Hidden fields (1)')).toBeInTheDocument();
+    fireEvent.click(within(library).getByRole('button', { name: 'Show Name' }));
     expect(
-      within(library).queryByRole('button', { name: 'Restore Name' }),
+      within(library).queryByRole('button', { name: 'Show Name' }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('navigation', { name: 'Designer panels' }),
@@ -158,14 +468,16 @@ describe('category form designer', () => {
     expect(
       within(name).getByTestId('designer-control-preview'),
     ).toHaveAttribute('aria-hidden', 'true');
-    expect(name.querySelector('input, select, textarea')).toBeNull();
+    expect(within(name).getByLabelText('Name preview')).toBeDisabled();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     fireEvent.focus(name);
     expect(name).toHaveAttribute('data-selected', 'true');
     expect(
       within(inspector).getByRole('region', { name: 'Name layout properties' }),
     ).toBeInTheDocument();
-    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+    expect(
+      within(inspector).getByRole('button', { name: 'Hide from form' }),
+    ).toBeDisabled();
     fireEvent.change(within(inspector).getByLabelText('Width'), {
       target: { value: '6' },
     });
@@ -182,18 +494,24 @@ describe('category form designer', () => {
         name: 'Category layout properties',
       }),
     ).toBeInTheDocument();
-    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+    expect(
+      within(inspector).getByRole('button', { name: 'Hide from form' }),
+    ).toBeDisabled();
   });
   it('clears the previous field Inspector when inspecting or creating a section', () => {
     mount();
     const inspector = screen.getByTestId('designer-inspector');
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
-    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    expect(within(inspector).getByLabelText('Field name')).toHaveValue(
+      'Connector',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Inspect section' }));
-    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Field name'),
+    ).not.toBeInTheDocument();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     expect(within(inspector).getByText(/Section Details/)).toBeInTheDocument();
     fireEvent.click(
@@ -201,9 +519,13 @@ describe('category form designer', () => {
         .getByRole('button', { name: 'Drag Connector' })
         .closest('[data-control-id]')!,
     );
-    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    expect(within(inspector).getByLabelText('Field name')).toHaveValue(
+      'Connector',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
-    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Field name'),
+    ).not.toBeInTheDocument();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     expect(
       within(inspector).getByText(/Section New section/),
@@ -233,75 +555,80 @@ describe('category form designer', () => {
       />,
     );
     const library = screen.getByTestId('designer-library');
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
+    fireEvent.click(
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
+    );
     expect(
       within(library).getByText('Hidden sections (1)'),
     ).toBeInTheDocument();
-    expect(
-      within(library).getByText('Hidden controls (0)'),
-    ).toBeInTheDocument();
+    expect(within(library).getByText('Hidden fields (0)')).toBeInTheDocument();
     fireEvent.click(
       within(library).getByRole('button', {
         name: 'Restore section Archive details',
       }),
     );
-    expect(
-      within(library).getByText('Hidden controls (1)'),
-    ).toBeInTheDocument();
+    expect(within(library).getByText('Hidden fields (1)')).toBeInTheDocument();
     fireEvent.click(
-      within(library).getByRole('button', { name: 'Restore Description' }),
+      within(library).getByRole('button', { name: 'Show Description' }),
     );
     expect(within(library).getByText('No hidden fields')).toBeInTheDocument();
   });
   it('reports intrinsic kinds and places an unplaced standard control in a selected section', () => {
     mount();
     const library = screen.getByTestId('designer-library');
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
+    fireEvent.click(
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
+    );
     const itemCode = within(library)
-      .getByText(/Item Code · Standard control/)
+      .getByText(/Item Code · Standard field/)
       .closest('div')!;
     fireEvent.click(
-      within(itemCode).getByRole('button', { name: 'Place Item Code' }),
+      within(itemCode).getByRole('button', { name: 'Add Item Code to form' }),
     );
     const control = screen
       .getByRole('button', { name: 'Drag Item Code' })
       .closest('[data-control-id]')!;
     expect(
-      within(control as HTMLElement).getByTitle(
-        'Form types using this control',
-      ),
+      within(control as HTMLElement).getByTitle('Form types using this field'),
     ).toHaveTextContent('Quantity');
     fireEvent.click(
-      screen.getByText(/Live preview · open quantity or asset form/),
+      screen.getByText(/Try form · quantity items or serialized assets/),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Asset' }));
     expect(
       within(library).getByText('Excluded from Serialized preview (1)'),
     ).toBeInTheDocument();
   });
-  it('gives selected field headings a full-width row above inspector actions', () => {
+  it('keeps identity and retirement in Advanced and moves visible placements', () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    const heading = screen.getByRole('heading', {
-      name: 'Untitled field · Short Text',
-    });
-    expect(heading).toHaveClass('break-words');
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Field up' }),
-    );
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Field down' }),
-    );
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Remove field' }),
-    );
+    addField('Connector');
+    const inspector = screen.getByTestId('designer-inspector');
+    expect(
+      within(inspector).queryByRole('button', { name: 'Field up' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByRole('button', { name: 'Remove field' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(inspector).getByRole('button', { name: 'Move up' }),
+    ).toBeEnabled();
+    fireEvent.click(within(inspector).getByText('Advanced'));
+    expect(within(inspector).getByText(/Stable ID:/)).toBeInTheDocument();
+    expect(
+      within(inspector).getByRole('button', {
+        name: 'Discard unpublished field',
+      }),
+    ).toBeInTheDocument();
   });
-  it('keeps stable IDs and prevents an invalid form from becoming active', async () => {
+  it('keeps stable IDs and prevents an invalid form from becoming active', () => {
     mount();
-    expect(screen.getByText('Shared live preview')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
     const stableId = screen.getByText(/Stable ID:/).textContent?.split(': ')[1];
     expect(stableId).toMatch(/^[0-9a-f-]{36}$/);
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: '' },
+    });
     expect(screen.getByRole('alert')).toHaveTextContent(
       'A field needs a label',
     );
@@ -313,8 +640,8 @@ describe('category form designer', () => {
     expect(screen.getByTestId('preview-order')).toHaveTextContent(
       'name,category_id,asset_tag',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector family' },
     });
     expect(screen.getByTestId('preview-fields')).toHaveTextContent(
@@ -388,8 +715,8 @@ describe('category form designer', () => {
         name: 'Move down',
       }),
     ).toHaveClass('min-h-11');
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    expect(screen.getByRole('button', { name: 'Field down' })).toHaveClass(
+    addField();
+    expect(screen.getByRole('button', { name: 'Move down' })).toHaveClass(
       'min-h-11',
     );
   });
@@ -489,7 +816,7 @@ describe('category form designer', () => {
       id(42),
     );
     expect(
-      within(moved).getByTitle('Form types using this control'),
+      within(moved).getByTitle('Form types using this field'),
     ).toHaveTextContent('Serialized');
     fireEvent.click(screen.getByText('Advanced JSON recovery'));
     fireEvent.click(
@@ -583,7 +910,7 @@ describe('category form designer', () => {
       ...document.querySelectorAll<HTMLElement>('[data-section-id]'),
     ].at(-1)!;
     fireEvent.click(
-      within(custom).getByRole('button', { name: 'Add help text' }),
+      within(custom).getByRole('button', { name: 'Add instructions' }),
     );
     expect(custom.querySelectorAll('[data-control-id]')).toHaveLength(1);
     fireEvent.click(
@@ -641,13 +968,13 @@ describe('category form designer', () => {
       value: MouseEvent,
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
       configurable: true,
       value: vi.fn(),
     });
     const resize = screen.getByRole('button', {
-      name: 'Resize Missing field',
+      name: 'Resize New field',
     });
     const width = screen
       .getAllByLabelText('Width', { selector: 'select' })
@@ -666,15 +993,17 @@ describe('category form designer', () => {
       message: 'Stale draft.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('Stale draft.'),
+      expect(
+        screen.getByText('Stale draft.', { selector: '[role="status"]' }),
+      ).toBeInTheDocument(),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
   });
   it('asks before dropping unsaved edits on category switch', () => {
@@ -689,7 +1018,7 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form, [id(20)]: { ...form, category_id: id(20) } }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: id(20) },
     });
@@ -717,8 +1046,8 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form, [id(20)]: { ...form, category_id: id(20) } }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -733,15 +1062,15 @@ describe('category form designer', () => {
       ),
     );
     expect(category).toHaveValue(id(1));
-    expect(screen.getByLabelText('Label')).toHaveValue('Connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(
       vi.mocked(saveMetadataForm).mock.calls[0][0].payload.category_id,
     ).toBe(id(1));
   });
   it('offers explicit recovery after re-entry while retaining the original draft baseline', async () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Recovered connector' },
     });
     await waitFor(() =>
@@ -760,7 +1089,9 @@ describe('category form designer', () => {
       screen.queryByDisplayValue('Recovered connector'),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
-    expect(screen.getByLabelText('Label')).toHaveValue('Recovered connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Recovered connector',
+    );
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
     vi.mocked(saveMetadataForm).mockResolvedValue({
       ok: false,
@@ -778,8 +1109,8 @@ describe('category form designer', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     try {
       mount();
-      fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-      fireEvent.change(screen.getByLabelText('Label'), {
+      addField();
+      fireEvent.change(screen.getByLabelText('Field name'), {
         target: { value: 'Discard me' },
       });
       await waitFor(() =>
@@ -824,7 +1155,7 @@ describe('category form designer', () => {
         />,
       );
     mountTwo();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
     );
@@ -871,13 +1202,14 @@ describe('category form designer', () => {
         />,
       );
     mountSaved();
-    fireEvent.change(screen.getByLabelText('Label'), {
+    fireEvent.click(screen.getByRole('button', { name: /^Saved label/ }));
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Temporary' },
     });
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
     );
-    fireEvent.change(screen.getByLabelText('Label'), {
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Saved label' },
     });
     await waitFor(() =>
@@ -901,8 +1233,8 @@ describe('category form designer', () => {
       />
     );
     const { rerender } = render(view(id(50)));
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Member A private draft' },
     });
     await waitFor(() =>
@@ -919,22 +1251,21 @@ describe('category form designer', () => {
       readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
     ).toBe('Member A private draft');
   });
-  it('creates a new identity for a field type replacement', () => {
+  it('changes an unpublished type without creating a replacement identity', () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField('Ports');
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
     const first = screen.getByText(/Stable ID:/).textContent;
-    fireEvent.change(screen.getByLabelText(/Replacement type for/), {
+    fireEvent.change(screen.getByLabelText('Field type'), {
       target: { value: 'integer' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add replacement' }));
-    const replacement = screen.getByText(/Stable ID:/).textContent;
-    expect(replacement).not.toBe(first);
+    expect(screen.getByText(/Stable ID:/).textContent).toBe(first);
     expect(
-      screen.getByRole('button', { name: /Untitled field · Short Text/ }),
+      screen.getByRole('heading', { name: 'Ports · Whole number' }),
     ).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Untitled field replacement · Integer/).length,
-    ).toBeGreaterThan(0);
+      screen.queryByRole('button', { name: 'Create replacement field' }),
+    ).not.toBeInTheDocument();
   });
   it('saves an ordinary edit directly against the exact baseline', async () => {
     vi.mocked(saveMetadataForm).mockResolvedValue({
@@ -950,8 +1281,8 @@ describe('category form designer', () => {
       },
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1017,8 +1348,8 @@ describe('category form designer', () => {
         },
       });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1049,6 +1380,77 @@ describe('category form designer', () => {
           ),
       ).toBe(true),
     );
+  });
+  it('invalidates an undispatched impact confirmation on Undo and reviews the restored proposal before confirming', async () => {
+    const review = (token: string) => ({
+      ok: true as const,
+      data: {
+        status: 'confirmation_required' as const,
+        changed: false,
+        token,
+        expires_at: '2030-09-24T20:00:00Z',
+        category_id: id(1),
+        expected_published_revision_id: id(2),
+        expected_draft_id: null,
+        expected_draft_version: '0',
+        reasons: [],
+        affected_quantity: '3',
+        affected_assets: '2',
+        newly_needs_quantity: '1',
+        newly_needs_assets: '0',
+      },
+    });
+    vi.mocked(saveMetadataForm)
+      .mockResolvedValueOnce(review(id(10)))
+      .mockResolvedValueOnce(review(id(11)))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'unexpected',
+        message: 'Test response.',
+      });
+    mount();
+    addField('Restored proposal');
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Old reviewed proposal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Confirm and save changes' }),
+      ).toBeEnabled(),
+    );
+    const oldReview = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Restored proposal',
+    );
+    expect(
+      screen.queryByRole('region', { name: 'Form save impact' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm and save changes' }),
+    ).not.toBeInTheDocument();
+    expect(saveMetadataForm).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Confirm and save changes' }),
+      ).toBeEnabled(),
+    );
+    const restoredReview = vi.mocked(saveMetadataForm).mock.calls[1][0];
+    expect(restoredReview.requestId).not.toBe(oldReview.requestId);
+    expect(restoredReview.payload).not.toHaveProperty('review_token');
+    expect(
+      (restoredReview.payload.definition as MetadataDefinition).fields[0].label,
+    ).toBe('Restored proposal');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm and save changes' }),
+    );
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(saveMetadataForm).mock.calls[2][0].payload).toEqual({
+      ...restoredReview.payload,
+      review_token: id(11),
+    });
   });
   it('keeps a legacy draft as the exact save baseline', async () => {
     const draftForm = {
@@ -1156,8 +1558,8 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1182,8 +1584,8 @@ describe('category form designer', () => {
       })
       .mockResolvedValue({ ok: true });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Retained connector' },
     });
     fireEvent.focus(window);
@@ -1192,7 +1594,9 @@ describe('category form designer', () => {
         screen.getByRole('button', { name: 'Retry access check' }),
       ).toBeVisible(),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Retained connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Retained connector',
+    );
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry access check' }));
     await waitFor(() =>
@@ -1200,7 +1604,9 @@ describe('category form designer', () => {
         screen.getByRole('button', { name: 'Save changes' }),
       ).toBeEnabled(),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Retained connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Retained connector',
+    );
     expect(vi.mocked(verifyMetadataDesignerIdentity)).toHaveBeenCalledTimes(2);
   });
   it('latches a terminal mismatch across later focus events and delayed verification success', async () => {
@@ -1219,8 +1625,8 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Private connector' },
     });
     fireEvent.focus(window);
@@ -1255,9 +1661,9 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     fireEvent.pointerDown(
-      screen.getByRole('button', { name: 'Resize Missing field' }),
+      screen.getByRole('button', { name: 'Resize New field' }),
       {
         pointerId: 4,
         clientX: 10,

@@ -271,4 +271,31 @@ describe('inventory server-action boundary', () => {
     expect(mocks.duplicateSerials).toHaveBeenCalledWith('0001-A/B', itemId);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
+  it('rejects a valid but different expected actor before membership reads or mutation RPC, including another active staff member', async () => {
+    const result = await submitInventory({
+      ...command,
+      expectedActorId: locationId,
+    });
+    expect(result).toMatchObject({ ok: false, code: 'actor_changed' });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('validates actor UUIDs before backend access and preserves legacy callers while retaining current authorization', async () => {
+    expect(
+      await submitInventory({ ...command, expectedActorId: 'invalid' }),
+    ).toMatchObject({ ok: false, code: 'invalid_input' });
+    expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(
+      await submitInventory({ ...command, expectedActorId: userId }),
+    ).toMatchObject({ ok: true });
+    mocks.rpc.mockClear();
+    mocks.maybeSingle.mockResolvedValue({
+      data: { ...member, role: 'viewer' },
+      error: null,
+    });
+    expect(
+      await submitInventory({ ...command, expectedActorId: userId }),
+    ).toMatchObject({ ok: false, code: 'forbidden' });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,6 @@
 import { provisionPreviewFiles } from './preview-file-keys.mjs';
 import { fileProviders } from './preview-file-providers.mjs';
+import { createPreviewRequest } from './preview-access-request.mjs';
 import { readFile } from 'node:fs/promises';
 import {
   provisionPreview,
@@ -37,30 +38,7 @@ async function main() {
   } catch {
     throw coded('EVENT_INVALID_JSON');
   }
-  const request = async (
-    url,
-    { method = 'GET', headers = {}, body, allowNotFound = false } = {},
-  ) => {
-    let response;
-    try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch {
-      throw coded('NETWORK_ERROR');
-    }
-    if (allowNotFound && response.status === 404) return null;
-    if (!response.ok) throw coded(`HTTP_${response.status}`);
-    if (response.status === 204) return null;
-    try {
-      return await response.json();
-    } catch {
-      throw coded('RESPONSE_INVALID_JSON');
-    }
-  };
+  const request = createPreviewRequest();
   const ghHeaders = {
     Authorization: `Bearer ${githubToken}`,
     Accept: 'application/vnd.github+json',

@@ -18,7 +18,7 @@ Production migration delivery requires outbound public IPv4 connectivity to the 
 
 Development/CI use disposable local Supabase. Previews use the already-configured Supabase nonproduction/preview branching integration with fictional data. Production uses its own project and real inventory.
 
-The optional trusted-branch [preview staff fixture workflow](preview-staff-access.md) provisions a marked staff account only in verified GitHub-managed PR child branches after the matching Supabase deployment succeeds. It requires separate owner-managed `preview-access` environment secrets and does not run from PR code.
+The optional trusted-branch [preview staff fixture workflow](preview-staff-access.md) provisions a marked active staff account with configuration-management permission only in verified GitHub-managed PR child branches after the matching Supabase deployment succeeds. It requires separate owner-managed `preview-access` environment secrets and does not run from PR code. The configuration grant takes effect on future reconciliation after this change reaches trusted `main`.
 
 Record the preview branch and applied repository migration revision when certifying a schema-changing preview. Do not reuse a production database or create replacement hosted projects.
 
@@ -61,7 +61,7 @@ from public.app_members
 where user_id = '<verified-auth-uuid>'::uuid;
 ```
 
-Confirm that exactly one intended Auth user and one **active staff** membership match. Stop on a missing, inactive, viewer, or unexpected account; resolve membership identity and role separately with the owner before granting configuration access. In particular, never promote the shared preview staff fixture, every staff member, the first user, or an email domain. Only after that read-first check, the owner may grant the single capability and verify the returned row:
+Confirm that exactly one intended Auth user and one **active staff** membership match. Stop on a missing, inactive, viewer, or unexpected account; resolve membership identity and role separately with the owner before granting configuration access. Never grant configuration access to every staff member, the first user, or an email domain. The marked shared preview fixture receives this capability only through the separately authorized, guarded [preview workflow](preview-staff-access.md); that exception does not authorize production grants. Only after that read-first check, the owner may grant the single capability and verify the returned row:
 
 ```sql
 update public.app_members

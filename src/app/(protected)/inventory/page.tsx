@@ -66,6 +66,11 @@ export default async function InventoryPage({
   if (filters.location) exportParams.set('location', filters.location);
   if (filters.site) exportParams.set('site', filters.site);
   if (filters.lowStock) exportParams.set('lowStock', 'true');
+  const returnParams = new URLSearchParams(exportParams);
+  if (params.page) returnParams.set('page', params.page);
+  const returnTo =
+    '/inventory' + (returnParams.size ? '?' + returnParams.toString() : '');
+  const createQuery = new URLSearchParams({ returnTo }).toString();
   return (
     <>
       <p className="experience-eyebrow">
@@ -79,12 +84,14 @@ export default async function InventoryPage({
       {member.role === 'staff' && (
         <div className="my-3 flex flex-wrap gap-2">
           <Button asChild>
-            <Link href="/inventory/quantity/new">
+            <Link href={'/inventory/quantity/new?' + createQuery}>
               Create quantity inventory
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href="/inventory/assets/new">Create serialized asset</Link>
+            <Link href={'/inventory/assets/new?' + createQuery}>
+              Create serialized asset
+            </Link>
           </Button>
         </div>
       )}

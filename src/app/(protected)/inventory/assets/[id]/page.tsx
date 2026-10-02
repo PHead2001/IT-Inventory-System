@@ -189,6 +189,7 @@ export default async function AssetPage({
               >
                 <summary>Edit asset metadata</summary>
                 <MetadataForm
+                  actorId={member.user_id}
                   kind="asset"
                   asset={asset}
                   categories={categories}

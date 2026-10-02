@@ -24,6 +24,7 @@ export type Operation = (typeof operations)[number];
 export type MutationCommand = {
   operation: Operation;
   requestId: string;
+  expectedActorId?: string;
   payload: Record<string, unknown>;
 };
 export type MutationState =
@@ -218,6 +219,7 @@ export function validateCommand(input: unknown) {
     .strictObject({
       operation: z.enum(operations),
       requestId: uuid,
+      expectedActorId: uuid.optional(),
       payload: z.record(z.string(), z.unknown()),
     })
     .safeParse(input);

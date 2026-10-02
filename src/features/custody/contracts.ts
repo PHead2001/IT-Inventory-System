@@ -185,6 +185,7 @@ export function parseCustodyCommand(input: unknown) {
         ],
       ),
       requestId: id,
+      expectedActorId: id.optional(),
       payload: z.record(z.string(), z.unknown()),
     })
     .safeParse(input);

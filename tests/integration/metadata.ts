@@ -533,9 +533,85 @@ async function main() {
       unknown
     >[];
   const withLetter = (id: unknown) => 'a' + String(id).slice(1);
+  const invalidBoundCases: {
+    description: string;
+    type: string;
+    rules: Record<string, unknown>;
+  }[] = [
+    {
+      description: 'malformed date minimum',
+      type: 'date',
+      rules: { min: '2026-02-30' },
+    },
+    {
+      description: 'malformed date maximum',
+      type: 'date',
+      rules: { max: 'not a date' },
+    },
+    {
+      description: 'inverted date bounds',
+      type: 'date',
+      rules: { min: '2026-10-02', max: '2026-10-01' },
+    },
+    {
+      description: 'timezone-free datetime minimum',
+      type: 'datetime',
+      rules: { min: '2026-10-01T12:00:00' },
+    },
+    {
+      description: 'malformed datetime maximum',
+      type: 'datetime',
+      rules: { max: '2026-99-01T12:00:00Z' },
+    },
+    {
+      description: 'inverted datetime instants across offsets',
+      type: 'datetime',
+      rules: { min: '2026-10-01T12:00:00-05:00', max: '2026-10-01T12:00:00Z' },
+    },
+    {
+      description: 'malformed integer minimum',
+      type: 'integer',
+      rules: { min: 'abc' },
+    },
+    {
+      description: 'inverted integer bounds',
+      type: 'integer',
+      rules: { min: 2, max: 1 },
+    },
+    {
+      description: 'malformed decimal maximum',
+      type: 'decimal',
+      rules: { max: 'NaN' },
+    },
+    {
+      description: 'inverted decimal bounds',
+      type: 'decimal',
+      rules: { min: '2.00', max: '1.00', precision: 2 },
+    },
+    {
+      description: 'malformed money minimum',
+      type: 'currency',
+      rules: { currencyCode: 'USD', precision: 2, min: 'abc' },
+    },
+    {
+      description: 'inverted money bounds',
+      type: 'currency',
+      rules: { currencyCode: 'USD', precision: 2, min: '2.00', max: '1.00' },
+    },
+  ];
   const invalidCases: Array<
     [string, string, (d: Record<string, unknown>) => void]
   > = [
+    ...invalidBoundCases.map(
+      (scenario): [string, string, (d: Record<string, unknown>) => void] => [
+        scenario.description,
+        'P1021',
+        (document) => {
+          firstField(document).type = scenario.type;
+          firstField(document).rules = scenario.rules;
+        },
+      ],
+    ),
     [
       'unknown executable key',
       'P1021',
@@ -795,6 +871,12 @@ async function main() {
         review_token: impact.token,
       },
       expectedCode,
+    );
+    assert.equal(
+      (await currentBaseline(maintainer.client, categoryId))
+        .published_revision_id,
+      originalPublished,
+      `invalid ${description} cannot replace the previous published revision`,
     );
     await success(maintainer.client, 'metadata_draft_discard', {
       category_id: categoryId,
@@ -1983,6 +2065,175 @@ async function main() {
       },
     },
     'P1021',
+  );
+
+  const defaultsCategory = await category(
+    maintainer.client,
+    'Optional answers and initial values',
+  );
+  const preservedField = uid();
+  const unsetField = uid();
+  const unansweredFlag = uid();
+  const optionalFields = [
+    {
+      id: preservedField,
+      type: 'short_text',
+      label: 'Preserved note',
+      applies_to: ['quantity'],
+      required: false,
+      rules: {},
+      options: [],
+    },
+    {
+      id: unsetField,
+      type: 'long_text',
+      label: 'Removable note',
+      applies_to: ['quantity'],
+      required: false,
+      rules: {},
+      options: [],
+    },
+    {
+      id: unansweredFlag,
+      type: 'boolean',
+      label: 'Previously unanswered',
+      applies_to: ['quantity'],
+      required: false,
+      rules: {},
+      options: [],
+    },
+  ];
+  const optionalDefinition = {
+    fields: optionalFields,
+    layout: [
+      {
+        id: uid(),
+        label: 'Optional answers',
+        controls: [
+          { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
+          ...optionalFields.map((field) => ({
+            id: uid(),
+            kind: 'field',
+            field_id: field.id,
+            width: 'Auto',
+          })),
+        ],
+      },
+    ],
+  };
+  await save(maintainer.client, defaultsCategory, '0', optionalDefinition);
+  const optionalRevision = (await publish(maintainer.client, defaultsCategory))
+    .published_revision_id;
+  const optionalItem = await success(staff.client, 'quantity_create_v2', {
+    name: 'Existing optional answers',
+    category_id: defaultsCategory,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: optionalRevision,
+    custom_patch: {
+      set: {
+        [preservedField]: 'keep this answer',
+        [unsetField]: 'remove this answer',
+      },
+      unset: [],
+    },
+  });
+  const beforeInitialValues = (
+    await owner.query(
+      'select custom_values,version from public.quantity_items where id=$1',
+      [optionalItem.entity_id],
+    )
+  ).rows[0];
+  const initialValues = {
+    [preservedField]: 'initial note',
+    [unsetField]: 'initial paragraph',
+    [unansweredFlag]: true,
+  };
+  const withInitialValues = {
+    ...optionalDefinition,
+    fields: optionalFields.map((field) => ({
+      ...field,
+      default: initialValues[field.id],
+    })),
+  };
+  await save(maintainer.client, defaultsCategory, '0', withInitialValues);
+  const defaultsRevision = (await publish(maintainer.client, defaultsCategory))
+    .published_revision_id;
+  const afterInitialValues = (
+    await owner.query(
+      'select custom_values,version from public.quantity_items where id=$1',
+      [optionalItem.entity_id],
+    )
+  ).rows[0];
+  assert.deepEqual(
+    afterInitialValues,
+    beforeInitialValues,
+    'publishing defaults does not backfill existing answers or change their version',
+  );
+  await success(staff.client, 'quantity_update_v2', {
+    item_id: optionalItem.entity_id,
+    expected_version: optionalItem.version,
+    name: 'Optional answer explicitly cleared',
+    category_id: defaultsCategory,
+    expected_published_revision_id: defaultsRevision,
+    custom_patch: { set: {}, unset: [unsetField] },
+  });
+  const afterUnset = (
+    await owner.query(
+      'select custom_values from public.quantity_items where id=$1',
+      [optionalItem.entity_id],
+    )
+  ).rows[0].custom_values;
+  assert.deepEqual(
+    afterUnset,
+    { [preservedField]: beforeInitialValues.custom_values[preservedField] },
+    'unsetting an optional answer preserves unrelated values and provenance without applying defaults',
+  );
+  assert.equal(
+    Object.hasOwn(afterUnset, unansweredFlag),
+    false,
+    'editing an unanswered checkbox does not backfill its new true default',
+  );
+  const defaultCreateBase = {
+    category_id: defaultsCategory,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: defaultsRevision,
+  };
+  // Defaults are client-owned initial values, not a database patch fallback.
+  const clientInitialized = await success(staff.client, 'quantity_create_v2', {
+    ...defaultCreateBase,
+    name: 'New client-initialized answers',
+    custom_patch: { set: initialValues, unset: [] },
+  });
+  const initializedValues = (
+    await owner.query(
+      'select custom_values from public.quantity_items where id=$1',
+      [clientInitialized.entity_id],
+    )
+  ).rows[0].custom_values;
+  for (const [fieldId, value] of Object.entries(initialValues))
+    assert.deepEqual(
+      initializedValues[fieldId].value,
+      value,
+      'new-record initial values persist when explicitly submitted by the client',
+    );
+  const omittedDefaults = await success(staff.client, 'quantity_create_v2', {
+    ...defaultCreateBase,
+    name: 'New omitted optional answers',
+    custom_patch: { set: {}, unset: [] },
+  });
+  assert.deepEqual(
+    (
+      await owner.query(
+        'select custom_values from public.quantity_items where id=$1',
+        [omittedDefaults.entity_id],
+      )
+    ).rows[0].custom_values,
+    {},
+    'server does not invent optional answers when the client omits initial values',
   );
 
   const migrationSource = await category(maintainer.client, 'Legacy source');
