@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  sync:
+  sync_git:
     if: >-
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -23,4 +23,41 @@ jobs:
           TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error             --request PATCH             --header "Accept: application/vnd.github+json"             --header "Authorization: Bearer $GH_TOKEN"             --header "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/PHead2001/IT-Inventory-System/git/refs/heads/staging"             --data "{\"sha\":\"$TARGET_SHA\",\"force\":false}"
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/PHead2001/IT-Inventory-System/git/refs/heads/staging" \
+            --data "{\"sha\":\"$TARGET_SHA\",\"force\":false}"
+
+  sync_supabase:
+    needs: sync_git
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 5
+    environment: production-database
+    steps:
+      - name: Keep staging persistent and bound to the staging Git branch
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --header "Content-Type: application/json" \
+            "https://api.supabase.com/v1/branches/ileoembzjxwhxgtiypec" \
+            --data '{"persistent":true,"git_branch":"staging"}' \
+            >/dev/null
+      - name: Deploy current staging branch migrations and configuration
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --header "Content-Type: application/json" \
+            "https://api.supabase.com/v1/branches/ileoembzjxwhxgtiypec/push" \
+            --data '{}' \
+            >/dev/null
