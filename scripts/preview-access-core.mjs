@@ -347,7 +347,7 @@ export async function provisionPreview({
     display_name: 'Preview Staff',
     role: 'staff',
     active: true,
-    can_manage_configuration: false,
+    can_manage_configuration: true,
   });
   const signedIn = await target.signIn(
     keys.publishable,
@@ -364,7 +364,7 @@ export async function provisionPreview({
   if (
     member?.role !== 'staff' ||
     member?.active !== true ||
-    member?.can_manage_configuration !== false
+    member?.can_manage_configuration !== true
   )
     throw new Error('Fixture membership verification failed');
   return { branch: revision.childRef, pr: number, sha: revision.sha };

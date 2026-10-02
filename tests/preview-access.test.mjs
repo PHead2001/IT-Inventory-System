@@ -140,7 +140,7 @@ function fixture(overrides = {}) {
         user: { id: state.user.id },
         access_token: 'token',
       },
-    memberAsUser: async () => state.member,
+    memberAsUser: async () => overrides.memberAsUser ?? state.member,
   });
   const run = (options = {}) =>
     provisionPreview({
@@ -649,7 +649,7 @@ test('CLI prints only sanitized failure after bounded delayed-policy retries', (
 });
 
 test('creates a marked confirmed staff user, verifies sign-in, and reconciles password after reset', async () => {
-  const { run, writes } = fixture();
+  const { run, writes, state } = fixture();
   await run();
   assert.deepEqual(
     writes.map(([operation]) => operation),
@@ -660,13 +660,40 @@ test('creates a marked confirmed staff user, verifies sign-in, and reconciles pa
   assert.deepEqual(writes[1][1].app_metadata, {
     inventory_preview_fixture: true,
   });
-  assert.equal(writes[2][1].can_manage_configuration, false);
+  assert.deepEqual(writes[2][1], {
+    user_id: 'u1',
+    display_name: 'Preview Staff',
+    role: 'staff',
+    active: true,
+    can_manage_configuration: true,
+  });
+  state.member = { ...state.member, can_manage_configuration: false };
   await run();
   assert.deepEqual(
     writes.map(([operation]) => operation),
     ['policy', 'create', 'member', 'update', 'member'],
   );
   assert.equal(writes[3][1].ban_duration, 'none');
+  assert.deepEqual(writes[4][1], writes[2][1]);
+  assert.equal(state.member.can_manage_configuration, true);
+});
+
+test('requires caller-visible active staff configuration permission after provisioning', async (t) => {
+  const member = {
+    role: 'staff',
+    active: true,
+    can_manage_configuration: true,
+  };
+  for (const [name, change] of [
+    ['missing grant', { can_manage_configuration: false }],
+    ['absent grant', { can_manage_configuration: undefined }],
+    ['viewer', { role: 'viewer' }],
+    ['inactive staff', { active: false }],
+  ])
+    await t.test(name, async () => {
+      const { run } = fixture({ memberAsUser: { ...member, ...change } });
+      await assert.rejects(run(), /Fixture membership verification failed/);
+    });
 });
 
 test('supports a stacked same-repository PR and waits for its branch to appear', async () => {
