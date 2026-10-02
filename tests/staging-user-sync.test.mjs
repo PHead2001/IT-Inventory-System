@@ -166,3 +166,24 @@ test('sync fails closed on a staging email collision', async () => {
     /collides with a different user ID/,
   );
 });
+
+
+test('sync refuses to take over an unmarked staging user with the production UUID', async () => {
+  await assert.rejects(
+    syncStagingUsers({
+      source: {
+        users: async ({ offset }) => (offset === 0 ? [prodUser()] : []),
+      },
+      staging: {
+        users: async () => [
+          {
+            id: prodUser().id,
+            email: prodUser().email,
+            app_metadata: {},
+          },
+        ],
+      },
+    }),
+    /not owned by the production mirror/,
+  );
+});
