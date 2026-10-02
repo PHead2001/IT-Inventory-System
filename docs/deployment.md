@@ -18,6 +18,14 @@ Production migration delivery requires outbound public IPv4 connectivity to the 
 
 Development/CI use disposable local Supabase. Previews use the already-configured Supabase nonproduction/preview branching integration with fictional data. Production uses its own project and real inventory.
 
+### Persistent staging
+
+The permanent `staging` Git branch mirrors only a successfully released `main` SHA. After `Foundation CI` completes successfully for a main push, the trusted `Sync staging to released production` workflow fast-forwards `staging` to that exact SHA. This keeps staging application code aligned with the released production version rather than with an unverified main candidate.
+
+Supabase staging uses isolated branch project `ileoembzjxwhxgtiypec`, mapped by `[remotes.staging]` in `supabase/config.toml`. It must be kept as a persistent nonproduction branch. It carries the same repository migrations/schema/configuration contract as released production but must not contain copied production rows, production Auth users, or production Storage objects. Test agents may mutate fictional staging data freely; they are never authorized to target the production project.
+
+Vercel should deploy the permanent `staging` Git branch as a preview/custom staging target using staging-only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Do not set staging to the production Supabase URL. Keep PR previews separate; they remain disposable candidate environments used before merge.
+
 The optional trusted-branch [preview staff fixture workflow](preview-staff-access.md) provisions a marked active staff account with configuration-management permission only in verified GitHub-managed PR child branches after the matching Supabase deployment succeeds. It requires separate owner-managed `preview-access` environment secrets and does not run from PR code. The configuration grant takes effect on future reconciliation after this change reaches trusted `main`.
 
 Record the preview branch and applied repository migration revision when certifying a schema-changing preview. Do not reuse a production database or create replacement hosted projects.
