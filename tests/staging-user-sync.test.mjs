@@ -11,7 +11,8 @@ const prodUser = (overrides = {}) => ({
   id: '11111111-1111-4111-8111-111111111111',
   email: 'staff@example.com',
   phone: null,
-  password_hash: '$2a$10$abcdefghijklmnopqrstuv123456789012345678901234567890',
+  password_hash:
+    '$2a$10$abcdefghijklmnopqrstuv123456789012345678901234567890',
   email_confirmed: true,
   phone_confirmed: false,
   providers: ['email'],
@@ -85,14 +86,23 @@ test('sync creates missing mirrored users and preserves membership', async () =>
       users: async () => [],
       createUser: async (payload) => {
         calls.push(['create', payload]);
-        return { id: payload.id, email: payload.email, app_metadata: payload.app_metadata };
+        return {
+          id: payload.id,
+          email: payload.email,
+          app_metadata: payload.app_metadata,
+        };
       },
       updateUser: async () => assert.fail('unexpected update'),
       upsertMember: async (membership) => calls.push(['member', membership]),
       deactivateMember: async () => assert.fail('unexpected deactivate'),
     },
   });
-  assert.deepEqual(result, { source: 1, created: 1, updated: 0, deactivated: 0 });
+  assert.deepEqual(result, {
+    source: 1,
+    created: 1,
+    updated: 0,
+    deactivated: 0,
+  });
   assert.equal(calls[0][0], 'create');
   assert.equal(calls[0][1].app_metadata[MIRROR_MARKER], true);
   assert.deepEqual(calls[1], [
@@ -136,13 +146,23 @@ test('sync updates mirrored users and deactivates removed mirrored memberships o
       createUser: async () => assert.fail('unexpected create'),
       updateUser: async (id, payload) => {
         calls.push(['update', id, payload]);
-        return { id, email: payload.email, app_metadata: payload.app_metadata };
+        return {
+          id,
+          email: payload.email,
+          app_metadata: payload.app_metadata,
+        };
       },
-      upsertMember: async (membership) => calls.push(['member', membership.user_id]),
+      upsertMember: async (membership) =>
+        calls.push(['member', membership.user_id]),
       deactivateMember: async (id) => calls.push(['deactivate', id]),
     },
   });
-  assert.deepEqual(result, { source: 1, created: 0, updated: 1, deactivated: 1 });
+  assert.deepEqual(result, {
+    source: 1,
+    created: 0,
+    updated: 1,
+    deactivated: 1,
+  });
   assert.deepEqual(calls.at(-1), ['deactivate', removed]);
   assert.equal(calls.some((call) => call[1] === fixture), false);
 });
@@ -167,7 +187,6 @@ test('sync fails closed on a staging email collision', async () => {
   );
 });
 
-
 test('sync refuses to take over an unmarked staging user with the production UUID', async () => {
   await assert.rejects(
     syncStagingUsers({
@@ -187,7 +206,6 @@ test('sync refuses to take over an unmarked staging user with the production UUI
     /not owned by the production mirror/,
   );
 });
-
 
 test('invited production users can mirror before a password exists', async () => {
   const calls = [];
