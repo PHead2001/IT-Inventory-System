@@ -228,6 +228,7 @@ export default async function QuantityPage({
               >
                 <summary>Edit quantity metadata</summary>
                 <MetadataForm
+                  actorId={member.user_id}
                   kind="quantity"
                   item={item}
                   categories={categories}

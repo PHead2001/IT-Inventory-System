@@ -93,6 +93,15 @@ function mount() {
   );
 }
 
+function addField(name = 'New field') {
+  fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+  const dialog = screen.getByRole('dialog', { name: 'Add field' });
+  fireEvent.change(within(dialog).getByLabelText('Field name'), {
+    target: { value: name },
+  });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add to form' }));
+}
+
 describe('category form designer', () => {
   beforeEach(() => {
     clearAllDesignerRecovery();
@@ -101,6 +110,72 @@ describe('category form designer', () => {
     vi.mocked(saveMetadataForm).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({ ok: true });
+  });
+  it('cancels staged addition while preserving unrelated unsaved section edits and adds in one undo step', () => {
+    mount();
+    fireEvent.change(screen.getByLabelText('Section heading'), {
+      target: { value: 'Unsaved heading' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add field' });
+    fireEvent.change(within(dialog).getByLabelText('Field name'), {
+      target: { value: 'Canceled field' },
+    });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByLabelText('Section heading')).toHaveValue(
+      'Unsaved heading',
+    );
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(3);
+    expect(
+      screen.queryByRole('button', { name: 'Drag Canceled field' }),
+    ).not.toBeInTheDocument();
+    addField('Has USB-C?');
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(4);
+    expect(
+      screen.getByRole('heading', { name: /Has USB-C/ }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(document.querySelectorAll('[data-control-id]')).toHaveLength(3);
+    expect(screen.queryByLabelText('Field name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Section heading')).toHaveValue(
+      'Unsaved heading',
+    );
+  });
+  it('uses a real checkbox canvas with one configured question, description and unique IDs', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add field' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Checkbox' }));
+    fireEvent.change(within(dialog).getByLabelText('Field name'), {
+      target: { value: 'Has USB-C?' },
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText('Description shown below this field'),
+      { target: { value: 'Check the port before answering.' } },
+    );
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add to form' }),
+    );
+    const canvas = screen.getByTestId('designer-canvas');
+    const preview = canvas.querySelector(
+      '[data-control-id]:has(button[aria-label="Drag Has USB-C?"])',
+    )!;
+    const checkbox = preview.querySelector('input[type="checkbox"]')!;
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
+    expect(
+      within(preview as HTMLElement).getAllByText('Has USB-C?', {
+        exact: true,
+      }),
+    ).toHaveLength(1);
+    expect(
+      preview.querySelector(`#${checkbox.getAttribute('aria-describedby')}`),
+    ).toHaveTextContent('Check the port before answering.');
+    expect(within(canvas).queryByText('Yes / No')).not.toBeInTheDocument();
+    const ids = [...document.querySelectorAll('[id]')].map(
+      (element) => element.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
   });
   it('keeps library, canvas, and inspector as three panes with hidden controls inside the library', () => {
     const hiddenForm = structuredClone(form);
@@ -128,15 +203,13 @@ describe('category form designer', () => {
     expect(nameRow?.closest('[data-control-id]')).toContainElement(
       screen.getByRole('button', { name: 'Resize Name' }),
     );
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
-    expect(
-      within(library).getByText('Hidden controls (1)'),
-    ).toBeInTheDocument();
     fireEvent.click(
-      within(library).getByRole('button', { name: 'Restore Name' }),
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
     );
+    expect(within(library).getByText('Hidden fields (1)')).toBeInTheDocument();
+    fireEvent.click(within(library).getByRole('button', { name: 'Show Name' }));
     expect(
-      within(library).queryByRole('button', { name: 'Restore Name' }),
+      within(library).queryByRole('button', { name: 'Show Name' }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('navigation', { name: 'Designer panels' }),
@@ -158,14 +231,16 @@ describe('category form designer', () => {
     expect(
       within(name).getByTestId('designer-control-preview'),
     ).toHaveAttribute('aria-hidden', 'true');
-    expect(name.querySelector('input, select, textarea')).toBeNull();
+    expect(within(name).getByLabelText('Name preview')).toBeDisabled();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     fireEvent.focus(name);
     expect(name).toHaveAttribute('data-selected', 'true');
     expect(
       within(inspector).getByRole('region', { name: 'Name layout properties' }),
     ).toBeInTheDocument();
-    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+    expect(
+      within(inspector).getByRole('button', { name: 'Hide from form' }),
+    ).toBeDisabled();
     fireEvent.change(within(inspector).getByLabelText('Width'), {
       target: { value: '6' },
     });
@@ -182,18 +257,24 @@ describe('category form designer', () => {
         name: 'Category layout properties',
       }),
     ).toBeInTheDocument();
-    expect(within(inspector).getByLabelText('Show control')).toBeDisabled();
+    expect(
+      within(inspector).getByRole('button', { name: 'Hide from form' }),
+    ).toBeDisabled();
   });
   it('clears the previous field Inspector when inspecting or creating a section', () => {
     mount();
     const inspector = screen.getByTestId('designer-inspector');
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
-    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    expect(within(inspector).getByLabelText('Field name')).toHaveValue(
+      'Connector',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Inspect section' }));
-    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Field name'),
+    ).not.toBeInTheDocument();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     expect(within(inspector).getByText(/Section Details/)).toBeInTheDocument();
     fireEvent.click(
@@ -201,9 +282,13 @@ describe('category form designer', () => {
         .getByRole('button', { name: 'Drag Connector' })
         .closest('[data-control-id]')!,
     );
-    expect(within(inspector).getByLabelText('Label')).toHaveValue('Connector');
+    expect(within(inspector).getByLabelText('Field name')).toHaveValue(
+      'Connector',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
-    expect(within(inspector).queryByLabelText('Label')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Field name'),
+    ).not.toBeInTheDocument();
     expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
     expect(
       within(inspector).getByText(/Section New section/),
@@ -233,75 +318,80 @@ describe('category form designer', () => {
       />,
     );
     const library = screen.getByTestId('designer-library');
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
+    fireEvent.click(
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
+    );
     expect(
       within(library).getByText('Hidden sections (1)'),
     ).toBeInTheDocument();
-    expect(
-      within(library).getByText('Hidden controls (0)'),
-    ).toBeInTheDocument();
+    expect(within(library).getByText('Hidden fields (0)')).toBeInTheDocument();
     fireEvent.click(
       within(library).getByRole('button', {
         name: 'Restore section Archive details',
       }),
     );
-    expect(
-      within(library).getByText('Hidden controls (1)'),
-    ).toBeInTheDocument();
+    expect(within(library).getByText('Hidden fields (1)')).toBeInTheDocument();
     fireEvent.click(
-      within(library).getByRole('button', { name: 'Restore Description' }),
+      within(library).getByRole('button', { name: 'Show Description' }),
     );
     expect(within(library).getByText('No hidden fields')).toBeInTheDocument();
   });
   it('reports intrinsic kinds and places an unplaced standard control in a selected section', () => {
     mount();
     const library = screen.getByTestId('designer-library');
-    fireEvent.click(within(library).getByText(/Hidden & unplaced/));
+    fireEvent.click(
+      within(library).getByText(/Hidden fields/, { selector: 'summary' }),
+    );
     const itemCode = within(library)
-      .getByText(/Item Code · Standard control/)
+      .getByText(/Item Code · Standard field/)
       .closest('div')!;
     fireEvent.click(
-      within(itemCode).getByRole('button', { name: 'Place Item Code' }),
+      within(itemCode).getByRole('button', { name: 'Add Item Code to form' }),
     );
     const control = screen
       .getByRole('button', { name: 'Drag Item Code' })
       .closest('[data-control-id]')!;
     expect(
-      within(control as HTMLElement).getByTitle(
-        'Form types using this control',
-      ),
+      within(control as HTMLElement).getByTitle('Form types using this field'),
     ).toHaveTextContent('Quantity');
     fireEvent.click(
-      screen.getByText(/Live preview · open quantity or asset form/),
+      screen.getByText(/Try form · quantity items or serialized assets/),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Asset' }));
     expect(
       within(library).getByText('Excluded from Serialized preview (1)'),
     ).toBeInTheDocument();
   });
-  it('gives selected field headings a full-width row above inspector actions', () => {
+  it('keeps identity and retirement in Advanced and moves visible placements', () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    const heading = screen.getByRole('heading', {
-      name: 'Untitled field · Short Text',
-    });
-    expect(heading).toHaveClass('break-words');
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Field up' }),
-    );
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Field down' }),
-    );
-    expect(heading.nextElementSibling).toContainElement(
-      screen.getByRole('button', { name: 'Remove field' }),
-    );
+    addField('Connector');
+    const inspector = screen.getByTestId('designer-inspector');
+    expect(
+      within(inspector).queryByRole('button', { name: 'Field up' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByRole('button', { name: 'Remove field' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(inspector).getByRole('button', { name: 'Move up' }),
+    ).toBeEnabled();
+    fireEvent.click(within(inspector).getByText('Advanced'));
+    expect(within(inspector).getByText(/Stable ID:/)).toBeInTheDocument();
+    expect(
+      within(inspector).getByRole('button', {
+        name: 'Discard unpublished field',
+      }),
+    ).toBeInTheDocument();
   });
-  it('keeps stable IDs and prevents an invalid form from becoming active', async () => {
+  it('keeps stable IDs and prevents an invalid form from becoming active', () => {
     mount();
-    expect(screen.getByText('Shared live preview')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
     const stableId = screen.getByText(/Stable ID:/).textContent?.split(': ')[1];
     expect(stableId).toMatch(/^[0-9a-f-]{36}$/);
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: '' },
+    });
     expect(screen.getByRole('alert')).toHaveTextContent(
       'A field needs a label',
     );
@@ -313,8 +403,8 @@ describe('category form designer', () => {
     expect(screen.getByTestId('preview-order')).toHaveTextContent(
       'name,category_id,asset_tag',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector family' },
     });
     expect(screen.getByTestId('preview-fields')).toHaveTextContent(
@@ -388,8 +478,8 @@ describe('category form designer', () => {
         name: 'Move down',
       }),
     ).toHaveClass('min-h-11');
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    expect(screen.getByRole('button', { name: 'Field down' })).toHaveClass(
+    addField();
+    expect(screen.getByRole('button', { name: 'Move down' })).toHaveClass(
       'min-h-11',
     );
   });
@@ -489,7 +579,7 @@ describe('category form designer', () => {
       id(42),
     );
     expect(
-      within(moved).getByTitle('Form types using this control'),
+      within(moved).getByTitle('Form types using this field'),
     ).toHaveTextContent('Serialized');
     fireEvent.click(screen.getByText('Advanced JSON recovery'));
     fireEvent.click(
@@ -583,7 +673,7 @@ describe('category form designer', () => {
       ...document.querySelectorAll<HTMLElement>('[data-section-id]'),
     ].at(-1)!;
     fireEvent.click(
-      within(custom).getByRole('button', { name: 'Add help text' }),
+      within(custom).getByRole('button', { name: 'Add instructions' }),
     );
     expect(custom.querySelectorAll('[data-control-id]')).toHaveLength(1);
     fireEvent.click(
@@ -641,13 +731,13 @@ describe('category form designer', () => {
       value: MouseEvent,
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
       configurable: true,
       value: vi.fn(),
     });
     const resize = screen.getByRole('button', {
-      name: 'Resize Missing field',
+      name: 'Resize New field',
     });
     const width = screen
       .getAllByLabelText('Width', { selector: 'select' })
@@ -666,15 +756,15 @@ describe('category form designer', () => {
       message: 'Stale draft.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent('Stale draft.'),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
   });
   it('asks before dropping unsaved edits on category switch', () => {
@@ -689,7 +779,7 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form, [id(20)]: { ...form, category_id: id(20) } }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: id(20) },
     });
@@ -717,8 +807,8 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form, [id(20)]: { ...form, category_id: id(20) } }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -733,15 +823,15 @@ describe('category form designer', () => {
       ),
     );
     expect(category).toHaveValue(id(1));
-    expect(screen.getByLabelText('Label')).toHaveValue('Connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(
       vi.mocked(saveMetadataForm).mock.calls[0][0].payload.category_id,
     ).toBe(id(1));
   });
   it('offers explicit recovery after re-entry while retaining the original draft baseline', async () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Recovered connector' },
     });
     await waitFor(() =>
@@ -760,7 +850,9 @@ describe('category form designer', () => {
       screen.queryByDisplayValue('Recovered connector'),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
-    expect(screen.getByLabelText('Label')).toHaveValue('Recovered connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Recovered connector',
+    );
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
     vi.mocked(saveMetadataForm).mockResolvedValue({
       ok: false,
@@ -778,8 +870,8 @@ describe('category form designer', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     try {
       mount();
-      fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-      fireEvent.change(screen.getByLabelText('Label'), {
+      addField();
+      fireEvent.change(screen.getByLabelText('Field name'), {
         target: { value: 'Discard me' },
       });
       await waitFor(() =>
@@ -824,7 +916,7 @@ describe('category form designer', () => {
         />,
       );
     mountTwo();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
     );
@@ -871,13 +963,14 @@ describe('category form designer', () => {
         />,
       );
     mountSaved();
-    fireEvent.change(screen.getByLabelText('Label'), {
+    fireEvent.click(screen.getByRole('button', { name: /^Saved label/ }));
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Temporary' },
     });
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull(),
     );
-    fireEvent.change(screen.getByLabelText('Label'), {
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Saved label' },
     });
     await waitFor(() =>
@@ -901,8 +994,8 @@ describe('category form designer', () => {
       />
     );
     const { rerender } = render(view(id(50)));
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Member A private draft' },
     });
     await waitFor(() =>
@@ -919,22 +1012,21 @@ describe('category form designer', () => {
       readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
     ).toBe('Member A private draft');
   });
-  it('creates a new identity for a field type replacement', () => {
+  it('changes an unpublished type without creating a replacement identity', () => {
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField('Ports');
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
     const first = screen.getByText(/Stable ID:/).textContent;
-    fireEvent.change(screen.getByLabelText(/Replacement type for/), {
+    fireEvent.change(screen.getByLabelText('Field type'), {
       target: { value: 'integer' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add replacement' }));
-    const replacement = screen.getByText(/Stable ID:/).textContent;
-    expect(replacement).not.toBe(first);
+    expect(screen.getByText(/Stable ID:/).textContent).toBe(first);
     expect(
-      screen.getByRole('button', { name: /Untitled field · Short Text/ }),
+      screen.getByRole('heading', { name: 'Ports · Whole number' }),
     ).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Untitled field replacement · Integer/).length,
-    ).toBeGreaterThan(0);
+      screen.queryByRole('button', { name: 'Create replacement field' }),
+    ).not.toBeInTheDocument();
   });
   it('saves an ordinary edit directly against the exact baseline', async () => {
     vi.mocked(saveMetadataForm).mockResolvedValue({
@@ -950,8 +1042,8 @@ describe('category form designer', () => {
       },
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1017,8 +1109,8 @@ describe('category form designer', () => {
         },
       });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1156,8 +1248,8 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -1182,8 +1274,8 @@ describe('category form designer', () => {
       })
       .mockResolvedValue({ ok: true });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Retained connector' },
     });
     fireEvent.focus(window);
@@ -1192,7 +1284,9 @@ describe('category form designer', () => {
         screen.getByRole('button', { name: 'Retry access check' }),
       ).toBeVisible(),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Retained connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Retained connector',
+    );
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry access check' }));
     await waitFor(() =>
@@ -1200,7 +1294,9 @@ describe('category form designer', () => {
         screen.getByRole('button', { name: 'Save changes' }),
       ).toBeEnabled(),
     );
-    expect(screen.getByLabelText('Label')).toHaveValue('Retained connector');
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Retained connector',
+    );
     expect(vi.mocked(verifyMetadataDesignerIdentity)).toHaveBeenCalledTimes(2);
   });
   it('latches a terminal mismatch across later focus events and delayed verification success', async () => {
@@ -1219,8 +1315,8 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
-    fireEvent.change(screen.getByLabelText('Label'), {
+    addField();
+    fireEvent.change(screen.getByLabelText('Field name'), {
       target: { value: 'Private connector' },
     });
     fireEvent.focus(window);
@@ -1255,9 +1351,9 @@ describe('category form designer', () => {
       message: 'Actor changed.',
     });
     mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    addField();
     fireEvent.pointerDown(
-      screen.getByRole('button', { name: 'Resize Missing field' }),
+      screen.getByRole('button', { name: 'Resize New field' }),
       {
         pointerId: 4,
         clientX: 10,

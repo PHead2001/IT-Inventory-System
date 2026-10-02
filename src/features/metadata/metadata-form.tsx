@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useId, useRef, useState, useTransition } from 'react';
 import { fetchCategoryForm } from './form-fetch.actions';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,9 @@ import type {
 } from './contracts';
 import { controlLayoutStyle } from './control-layout';
 import { controlVisible } from './effective-controls';
+import { MetadataFieldInput } from './field-value-input';
+import { fieldValueError } from './field-value-validation';
+import { inventoryReturnPath } from '@/features/inventory/create-return';
 
 type Kind = 'quantity' | 'asset';
 type Props = {
@@ -40,6 +43,8 @@ type Props = {
   item?: QuantityItem;
   asset?: AssetItem;
   preview?: boolean;
+  returnTo?: string;
+  actorId?: string;
   openingSite?: { id: string; code: string; name: string };
 };
 const labels: Record<string, string> = {
@@ -111,7 +116,7 @@ export function buildCustomPatch(
     const hasValue = Object.hasOwn(current, field.id);
     const value = hasValue
       ? current[field.id]
-      : creating
+      : creating && !touchedIds.has(field.id)
         ? field.default
         : undefined;
     if (value === undefined) {
@@ -119,20 +124,6 @@ export function buildCustomPatch(
     } else set[field.id] = value;
   }
   return { set, unset };
-}
-function optionRows(options: MetadataDefinition['fields'][number]['options']) {
-  const byId = new Map(options.map((option) => [option.id, option]));
-  return options.map((option) => {
-    const path = [option.label];
-    const visited = new Set([option.id]);
-    let parent = option.parent_id ? byId.get(option.parent_id) : undefined;
-    while (parent && !visited.has(parent.id) && path.length < 64) {
-      path.unshift(parent.label);
-      visited.add(parent.id);
-      parent = parent.parent_id ? byId.get(parent.parent_id) : undefined;
-    }
-    return { ...option, path: path.join(' / ') };
-  });
 }
 function formChanges(
   previous: MetadataDefinition,
@@ -216,10 +207,24 @@ export function MetadataForm({
   asset,
   preview = false,
   openingSite,
+  returnTo,
+  actorId,
 }: Props) {
   const router = useRouter();
   const latest = item ?? asset;
   const creating = !latest;
+  const scopeId = useId();
+  const [formActor] = useState(actorId);
+  const actorStale = formActor !== actorId;
+  const [cleanCore, setCleanCore] = useState(() =>
+    initialCore(latest, categories),
+  );
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const dispatched = useRef(false);
+  const [answerErrors, setAnswerErrors] = useState<Record<string, string>>({});
   const [baseline, setBaseline] = useState(latest);
   const [core, setCore] = useState(() => initialCore(latest, categories));
   const [custom, setCustom] = useState<Record<string, unknown>>(() =>
@@ -344,6 +349,7 @@ export function MetadataForm({
     core.category_id !== baseline.categoryId &&
     Object.keys(baseline.customValues ?? {}).length > 0;
   const updateCore = (name: keyof typeof core, value: string) => {
+    if (uncertain || dispatched.current || actorStale) return;
     setCore((prior) => ({ ...prior, [name]: value }));
     if (name === 'reorder_threshold') setThresholdTouched(true);
     if (name === 'category_id' && forms[value])
@@ -353,6 +359,7 @@ export function MetadataForm({
     setState(null);
   };
   const updateCustom = (id: string, value: unknown) => {
+    if (uncertain || dispatched.current || actorStale) return;
     setCustom((prior) =>
       value === undefined
         ? Object.fromEntries(
@@ -379,199 +386,34 @@ export function MetadataForm({
     if (!config) return null;
     const value = Object.hasOwn(custom, id)
       ? custom[id]
-      : creating
+      : creating && !touched.includes(id)
         ? config.default
         : undefined;
-    const inputId = 'metadata-' + id;
-    const help = config.help ? (
-      <p className="break-words text-xs text-slate-400">{config.help}</p>
-    ) : null;
-    const type = config.type;
-    const rules = config.rules;
-    const common = {
-      id: inputId,
-      className: fieldClass,
-      'aria-describedby': config.help ? inputId + '-help' : undefined,
-    };
-    const clear = (config.type === 'boolean' || !config.required) &&
-      value !== undefined && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => updateCustom(id, undefined)}
-        >
-          Unset
-        </Button>
-      );
-    let control: React.ReactNode;
-    if (type === 'boolean') {
-      control = (
-        <div className="flex min-h-11 flex-wrap items-center gap-1">
-          <input
-            id={inputId}
-            type="checkbox"
-            className="h-11 w-11 shrink-0 accent-cyan-400"
-            aria-checked={value === undefined ? 'mixed' : value === true}
-            aria-describedby={config.help ? inputId + '-help' : undefined}
-            ref={(element) => {
-              if (element) element.indeterminate = value === undefined;
-            }}
-            checked={value === true}
-            onChange={(event) =>
-              updateCustom(
-                id,
-                value === undefined ? true : event.target.checked,
-              )
-            }
-          />
-          <span className="min-w-0 break-words text-xs text-slate-400">
-            {value === undefined ? 'Not set' : value === true ? 'Yes' : 'No'}
-          </span>
-        </div>
-      );
-    } else if (type === 'single_select' || type === 'hierarchical_select') {
-      const rows = optionRows(config.options);
-      const historicalValue =
-        typeof value === 'string' &&
-        value !== '' &&
-        !rows.some((option) => option.id === value)
-          ? value
-          : null;
-      const priorOption = historicalValue
-        ? optionRows(
-            priorDefinition?.fields.find((field) => field.id === id)?.options ??
-              [],
-          ).find((option) => option.id === historicalValue)
-        : undefined;
-      control = (
-        <select
-          {...common}
-          value={typeof value === 'string' ? value : ''}
-          onChange={(event) =>
-            updateCustom(id, event.target.value || undefined)
-          }
-        >
-          <option value="">Choose</option>
-          {historicalValue && (
-            <option value={historicalValue} disabled>
-              Retained historical choice: {priorOption?.path ?? historicalValue}
-            </option>
-          )}
-          {rows.map((option) => (
-            <option key={option.id} value={option.id} disabled={!option.active}>
-              {option.path}
-              {!option.active ? ' (retired)' : ''}
-            </option>
-          ))}
-        </select>
-      );
-    } else if (type === 'multi_select') {
-      const selected = Array.isArray(value) ? value.map(String) : [];
-      control = (
-        <div className="space-y-1">
-          {optionRows(config.options).map((option) => (
-            <label key={option.id} className="flex min-h-9 items-center gap-2">
-              <input
-                type="checkbox"
-                disabled={!option.active}
-                checked={selected.includes(option.id)}
-                onChange={(event) =>
-                  updateCustom(
-                    id,
-                    event.target.checked
-                      ? [...selected, option.id]
-                      : selected.filter((choice) => choice !== option.id),
-                  )
-                }
-              />
-              {option.path}
-              {!option.active ? ' (retired)' : ''}
-            </label>
-          ))}
-        </div>
-      );
-    } else if (type === 'currency') {
-      const amount =
-        value && typeof value === 'object' && 'amount' in value
-          ? String((value as { amount: unknown }).amount)
-          : '';
-      const currency =
-        typeof rules.currencyCode === 'string' ? rules.currencyCode : '';
-      control = (
-        <div className="flex items-center gap-2">
-          <Input
-            {...common}
-            inputMode="decimal"
-            value={amount}
-            onChange={(event) =>
-              updateCustom(
-                id,
-                event.target.value === ''
-                  ? undefined
-                  : { amount: event.target.value, currency },
-              )
-            }
-          />
-          <span>{currency}</span>
-        </div>
-      );
-    } else if (type === 'long_text') {
-      control = (
-        <textarea
-          {...common}
-          rows={4}
-          value={typeof value === 'string' ? value : ''}
-          onChange={(event) => updateCustom(id, event.target.value)}
-        />
-      );
-    } else {
-      const inputType =
-        type === 'date' ? 'date' : type === 'url' ? 'url' : 'text';
-      const text = value === undefined ? '' : String(value);
-      control = (
-        <Input
-          {...common}
-          type={inputType}
-          value={text}
-          inputMode={
-            type === 'integer' || type === 'decimal' ? 'decimal' : undefined
-          }
-          placeholder={
-            type === 'datetime' ? '2026-09-24T12:30:00-05:00' : undefined
-          }
-          onChange={(event) => {
-            const next = event.target.value;
-            updateCustom(
-              id,
-              type === 'integer' &&
-                /^(0|-[1-9]\d*|[1-9]\d*)$/.test(next) &&
-                Number.isSafeInteger(Number(next))
-                ? Number(next)
-                : next,
-            );
-          }}
-        />
-      );
-    }
     return (
-      <div className="min-w-0 space-y-2" key={id}>
-        <label htmlFor={inputId} className="break-words">
-          {config.label}
-          {config.required ? ' (required)' : ''}
-        </label>
-        {control}
-        {config.help && <div id={inputId + '-help'}>{help}</div>}
-        {clear}
-      </div>
+      <MetadataFieldInput
+        key={id}
+        id={`${scopeId}-metadata-${id}`}
+        field={config}
+        value={value}
+        onChange={(next) => updateCustom(id, next)}
+        previousOptions={
+          priorDefinition?.fields.find((field) => field.id === id)?.options
+        }
+        onValidityChange={(message) =>
+          setAnswerErrors((prior) =>
+            prior[id] === message ? prior : { ...prior, [id]: message },
+          )
+        }
+      />
     );
   };
   const builtin = (name: string) => {
     if (name === 'category_id')
       return (
         <div className="space-y-2" key={name}>
-          <label htmlFor="metadata-category">Category</label>
+          <label htmlFor={`${scopeId}-metadata-category`}>Category</label>
           <select
-            id="metadata-category"
+            id={`${scopeId}-metadata-category`}
             className={fieldClass}
             value={core.category_id}
             onChange={(event) => updateCore('category_id', event.target.value)}
@@ -592,9 +434,9 @@ export function MetadataForm({
     if (name === 'description')
       return (
         <div className="space-y-2" key={name}>
-          <label htmlFor="metadata-description">Description</label>
+          <label htmlFor={`${scopeId}-metadata-description`}>Description</label>
           <textarea
-            id="metadata-description"
+            id={`${scopeId}-metadata-description`}
             className={fieldClass}
             rows={3}
             maxLength={4000}
@@ -605,9 +447,11 @@ export function MetadataForm({
       );
     return (
       <div className="space-y-2" key={name}>
-        <label htmlFor={'metadata-' + name}>{labels[name] ?? name}</label>
+        <label htmlFor={scopeId + '-metadata-' + name}>
+          {labels[name] ?? name}
+        </label>
         <Input
-          id={'metadata-' + name}
+          id={scopeId + '-metadata-' + name}
           type={name === 'reorder_threshold' ? 'number' : 'text'}
           min={name === 'reorder_threshold' ? 0 : undefined}
           max={name === 'reorder_threshold' ? 2147483647 : undefined}
@@ -633,6 +477,74 @@ export function MetadataForm({
         )}
       </div>
     );
+  };
+  const visibleFields = applicable.filter((field) =>
+    definition?.layout.some((section) =>
+      section.controls.some(
+        (control) =>
+          control.kind === 'field' &&
+          control.field_id === field.id &&
+          controlVisible(definition, section, control, kind),
+      ),
+    ),
+  );
+  const invalidAnswers = visibleFields.some((field) => {
+    if (!creating && !touched.includes(field.id)) return false;
+    const value = Object.hasOwn(custom, field.id)
+      ? custom[field.id]
+      : creating && !touched.includes(field.id)
+        ? field.default
+        : undefined;
+    if (
+      !creating &&
+      core.category_id === baseline?.categoryId &&
+      Object.hasOwn(baseline?.customValues ?? {}, field.id) &&
+      JSON.stringify(value) ===
+        JSON.stringify(baseline?.customValues?.[field.id]?.value)
+    )
+      return false;
+    return !!fieldValueError(field, value) || !!answerErrors[field.id];
+  });
+  const dirty =
+    JSON.stringify(core) !== JSON.stringify(cleanCore) ||
+    openingQuantity !== '1' ||
+    openingReason !== '' ||
+    openingReference !== '' ||
+    touched.some((id) => {
+      const field = definition?.fields.find((field) => field.id === id);
+      const original = creating
+        ? field?.default
+        : baseline?.customValues?.[id]?.value;
+      return JSON.stringify(custom[id]) !== JSON.stringify(original);
+    });
+  const cancelPath = creating
+    ? inventoryReturnPath(
+        returnTo,
+        openingSite
+          ? `/sites/${encodeURIComponent(openingSite.code)}`
+          : '/inventory',
+      )
+    : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
+  const cancel = () => {
+    if (pending || uncertain || dispatched.current) return;
+    if (dirty) setDiscardOpen(true);
+    else router.push(cancelPath);
+  };
+  useEffect(() => {
+    if (discardOpen) keepRef.current?.focus();
+  }, [discardOpen]);
+  useEffect(() => {
+    if (preview || !(dirty || uncertain || pending)) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, uncertain, pending, preview]);
+  const keepEditing = () => {
+    setDiscardOpen(false);
+    cancelRef.current?.focus();
   };
   const payload = () => {
     if (!definition || !form || invalidItemCode) return null;
@@ -684,7 +596,18 @@ export function MetadataForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!form || schemaStale || itemStale || invalidItemCode || pending) return;
+    if (
+      actorStale ||
+      (!uncertain &&
+        (!form ||
+          schemaStale ||
+          itemStale ||
+          invalidItemCode ||
+          invalidAnswers)) ||
+      pending ||
+      dispatched.current
+    )
+      return;
     if (!review) {
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
@@ -707,32 +630,65 @@ export function MetadataForm({
       return;
     }
     if (legacyMigration && !ackLegacy) return;
-    const commandPayload = payload();
-    if (!commandPayload) return;
-    const operation =
+    let commandPayload = payload();
+    let operation =
       openingSite && creating
         ? (`${kind}_site_open` as const)
         : (`${kind}_${creating ? 'create' : 'update'}_v2` as const);
+    if (uncertain && receipt)
+      [operation, commandPayload] = JSON.parse(receipt.key) as [
+        typeof operation,
+        Record<string, unknown>,
+      ];
+    if (!commandPayload) return;
     const key = JSON.stringify([operation, commandPayload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
+    dispatched.current = true;
     startTransition(async () => {
-      const result =
-        openingSite && creating
-          ? await submitCustody({
-              operation,
-              requestId,
-              payload: commandPayload,
-            })
-          : await submitInventory({
-              operation,
-              requestId,
-              payload: commandPayload,
-            });
+      let result: MutationState | CustodyState;
+      try {
+        result =
+          openingSite && creating
+            ? await submitCustody({
+                operation,
+                requestId,
+                expectedActorId: formActor,
+                payload: commandPayload,
+              })
+            : await submitInventory({
+                operation,
+                requestId,
+                expectedActorId: formActor,
+                payload: commandPayload,
+              });
+      } catch {
+        result = {
+          ok: false,
+          code: 'unexpected',
+          message:
+            'The result could not be confirmed. Retry the same submission to safely check it.',
+        };
+      }
+      dispatched.current = false;
+      setUncertain(
+        !result.ok &&
+          (result.code === 'unexpected' ||
+            (uncertain &&
+              [
+                'forbidden',
+                'P1001',
+                'idempotency_conflict',
+                'P1009',
+                'actor_changed',
+              ].includes(result.code))),
+      );
       setState(result);
       if (result.ok) {
         setReview(false);
         setReceipt(null);
+        setCleanCore(core);
+        setTouched([]);
         if (creating)
           router.push(
             '/inventory/' +
@@ -744,7 +700,8 @@ export function MetadataForm({
       } else if (
         result.code === 'P1024' ||
         result.code === 'stale_schema' ||
-        result.code === 'stale_version'
+        result.code === 'stale_version' ||
+        result.code === 'actor_changed'
       ) {
         if (result.code === 'P1024' || result.code === 'stale_schema')
           void refreshConflict(core.category_id);
@@ -766,6 +723,15 @@ export function MetadataForm({
       }
       onSubmit={preview ? (event) => event.preventDefault() : submit}
     >
+      {actorStale && (
+        <p
+          role="alert"
+          className="rounded border border-amber-700 p-3 text-amber-100"
+        >
+          The signed-in staff member changed. Your entries and original save
+          request are retained. Return to the original account to continue.
+        </p>
+      )}
       {schemaStale && (
         <div
           className="rounded border border-amber-600 p-3 text-amber-100"
@@ -785,6 +751,7 @@ export function MetadataForm({
             type="button"
             variant="outline"
             className="ml-2"
+            disabled={pending || uncertain}
             onClick={() => {
               setPriorForms((prior) => ({
                 ...prior,
@@ -845,6 +812,7 @@ export function MetadataForm({
             type="button"
             variant="outline"
             className="ml-2"
+            disabled={pending || uncertain}
             onClick={() => {
               setBaseline(latest);
               setReview(false);
@@ -881,6 +849,8 @@ export function MetadataForm({
       <fieldset
         disabled={
           pending ||
+          uncertain ||
+          actorStale ||
           schemaStale ||
           schemaConflictPending ||
           !!schemaRefreshError ||
@@ -944,9 +914,11 @@ export function MetadataForm({
           ))}
         {creating && !preview && !openingSite && kind === 'quantity' && (
           <div className="space-y-3">
-            <label htmlFor="metadata-initial-quantity">Initial quantity</label>
+            <label htmlFor={`${scopeId}-metadata-initial-quantity`}>
+              Initial quantity
+            </label>
             <Input
-              id="metadata-initial-quantity"
+              id={`${scopeId}-metadata-initial-quantity`}
               type="number"
               min={0}
               max={2147483647}
@@ -958,7 +930,7 @@ export function MetadataForm({
             />
             {Number(core.initial_quantity) > 0 && (
               <LocationPicker
-                id="metadata-initial-location"
+                id={`${scopeId}-metadata-initial-location`}
                 label="Initial location"
                 locations={locations}
                 mode="destination"
@@ -973,7 +945,7 @@ export function MetadataForm({
         )}
         {creating && !preview && !openingSite && kind === 'asset' && (
           <LocationPicker
-            id="metadata-location"
+            id={`${scopeId}-metadata-location`}
             label="Current location"
             locations={locations}
             mode="destination"
@@ -1049,6 +1021,7 @@ export function MetadataForm({
             <label className="mt-2 flex items-start gap-2">
               <input
                 type="checkbox"
+                disabled={pending || uncertain}
                 checked={ackLegacy}
                 onChange={(event) => setAckLegacy(event.target.checked)}
               />
@@ -1078,31 +1051,107 @@ export function MetadataForm({
         </p>
       )}
       {!preview && state?.ok && <p role="status">Metadata saved.</p>}
+      {!preview && !uncertain && invalidAnswers && (
+        <p className="text-sm text-amber-200">
+          Complete the required fields and correct highlighted answers before
+          reviewing.
+        </p>
+      )}
       {!preview && (
-        <div className="flex gap-2">
+        <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 rounded bg-slate-950/95 py-3">
           <Button
             disabled={
               pending ||
-              !form ||
-              schemaStale ||
-              schemaConflictPending ||
-              !!schemaRefreshError ||
-              invalidItemCode ||
-              itemStale ||
+              actorStale ||
+              (!uncertain &&
+                (!form ||
+                  schemaStale ||
+                  schemaConflictPending ||
+                  !!schemaRefreshError ||
+                  invalidItemCode ||
+                  invalidAnswers ||
+                  itemStale)) ||
               (review && legacyMigration && !ackLegacy)
             }
           >
-            {review ? 'Confirm save' : 'Review metadata'}
+            {uncertain
+              ? 'Retry same save'
+              : review
+                ? 'Confirm save'
+                : 'Review metadata'}
+          </Button>
+          <Button
+            ref={cancelRef}
+            type="button"
+            variant="outline"
+            disabled={pending || uncertain}
+            onClick={cancel}
+          >
+            Cancel
           </Button>
           {review && (
             <Button
               type="button"
               variant="outline"
+              disabled={pending || uncertain}
               onClick={() => setReview(false)}
             >
               Edit values
             </Button>
           )}
+        </div>
+      )}
+      {uncertain && (
+        <p role="status">
+          This save may have completed. Editing and Cancel are paused until
+          retry confirms the outcome.
+        </p>
+      )}
+      {discardOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Discard changes?"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              keepEditing();
+            }
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              if (document.activeElement === keepRef.current)
+                event.currentTarget
+                  .querySelector<HTMLButtonElement>('[data-discard]')
+                  ?.focus();
+              else keepRef.current?.focus();
+            }
+          }}
+        >
+          <div className="max-w-md space-y-4 rounded border border-cyan-100/20 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold">Discard changes?</h2>
+            <p>Your entries have not been saved.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                ref={keepRef}
+                onClick={keepEditing}
+              >
+                Keep editing
+              </Button>
+              <Button
+                type="button"
+                data-discard
+                onClick={() => {
+                  setDiscardOpen(false);
+                  router.push(cancelPath);
+                }}
+              >
+                Discard changes
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </form>

@@ -59,6 +59,7 @@ export default async function SiteOpeningPage({
       </p>
       <div className={panel + ' max-w-5xl'}>
         <MetadataForm
+          actorId={member.user_id}
           kind={kind}
           categories={categories}
           locations={locations}

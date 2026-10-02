@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { MetadataDefinition } from './contracts';
 import { builtins, newId } from './designer-model';
+import { placementName } from './field-authoring-model';
 import {
   compatibleSections,
   controlKinds,
@@ -88,12 +89,7 @@ export function RecoveryLibrary({
           .map((control) => ({ section, control })),
   );
   const nameOf = (control: Control) =>
-    control.kind === 'field'
-      ? definition.fields.find((field) => field.id === control.field_id)
-          ?.label || 'Untitled field'
-      : control.kind === 'builtin'
-        ? title(control.builtin ?? '')
-        : 'Help text';
+    placementName(control, definition.fields);
   const place = (
     key: string,
     control: Control,
@@ -122,7 +118,7 @@ export function RecoveryLibrary({
     >
       {candidates.map((section) => (
         <option key={section.id} value={section.id}>
-          {section.label || 'Untitled section'} · {section.id.slice(-8)}
+          {section.label || 'Untitled section'}
         </option>
       ))}
     </select>
@@ -130,7 +126,7 @@ export function RecoveryLibrary({
   return (
     <details className="rounded-lg border border-slate-700 bg-slate-950/40 p-3 text-sm">
       <summary className="min-h-10 cursor-pointer font-semibold text-cyan-100">
-        Hidden &amp; unplaced ·{' '}
+        Hidden fields ·{' '}
         {hiddenSections.length + hiddenControls.length + unplaced.length}
       </summary>
       <div className="space-y-4 pt-3">
@@ -149,7 +145,7 @@ export function RecoveryLibrary({
             >
               <p>
                 {section.label || 'Untitled section'} ·{' '}
-                {section.controls.length} controls
+                {section.controls.length} fields
               </p>
               <Button
                 type="button"
@@ -172,7 +168,7 @@ export function RecoveryLibrary({
         </div>
         <div>
           <h4 className="font-medium">
-            Hidden controls ({hiddenControls.length})
+            Hidden fields ({hiddenControls.length})
           </h4>
           {hiddenControls.length === 0 && (
             <p className="text-slate-400">No hidden fields</p>
@@ -190,7 +186,7 @@ export function RecoveryLibrary({
                 {kinds.length === 0 ? (
                   <p className="text-xs text-amber-200">
                     Its scope excludes both form types. Adjust the section,
-                    control, or field applicability before restoring.
+                    placement, or field restrictions before restoring.
                   </p>
                 ) : (
                   <Button
@@ -214,7 +210,7 @@ export function RecoveryLibrary({
                       })
                     }
                   >
-                    Restore {nameOf(control)}
+                    Show {nameOf(control)}
                   </Button>
                 )}
               </div>
@@ -223,7 +219,7 @@ export function RecoveryLibrary({
         </div>
         <div>
           <h4 className="font-medium">
-            Unplaced fields and standard controls ({unplaced.length})
+            Unplaced fields and standard fields ({unplaced.length})
           </h4>
           {unplaced.length === 0 && (
             <p className="text-slate-400">Everything is placed</p>
@@ -237,9 +233,7 @@ export function RecoveryLibrary({
               >
                 <p>
                   {name} ·{' '}
-                  {control.kind === 'field'
-                    ? 'Custom field'
-                    : 'Standard control'}
+                  {control.kind === 'field' ? 'Custom field' : 'Standard field'}
                 </p>
                 {candidates.length ? (
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -249,7 +243,7 @@ export function RecoveryLibrary({
                       variant="outline"
                       onClick={() => place(id, control, candidates)}
                     >
-                      Place {name}
+                      Add {name} to form
                     </Button>
                   </div>
                 ) : (

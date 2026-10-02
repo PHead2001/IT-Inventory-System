@@ -7,7 +7,12 @@ import { MetadataForm } from '@/features/metadata/metadata-form';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { panel } from '@/features/inventory/components/read-ui';
 import Link from 'next/link';
-export default async function NewAssetPage() {
+export default async function NewAssetPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
+  const returnTo = (await searchParams)?.returnTo;
   const { member } = await requireMember();
   if (member.role !== 'staff')
     return (
@@ -40,10 +45,12 @@ export default async function NewAssetPage() {
       </p>
       <div className={`${panel} max-w-5xl`}>
         <MetadataForm
+          actorId={member.user_id}
           kind="asset"
           categories={categories}
           locations={locations}
           forms={forms}
+          returnTo={typeof returnTo === 'string' ? returnTo : undefined}
         />
       </div>
     </>

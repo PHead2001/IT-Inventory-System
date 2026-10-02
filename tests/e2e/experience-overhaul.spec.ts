@@ -443,10 +443,12 @@ test('a newly required field requests targeted confirmation before changing the 
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });
-  await designer.getByRole('button', { name: 'Add field' }).click();
   await designer
-    .getByLabel('Label', { exact: true })
-    .fill('Review required value');
+    .getByRole('button', { name: 'Add field', exact: true })
+    .click();
+  const addition = designer.getByRole('dialog', { name: 'Add field' });
+  await addition.getByLabel('Field name').fill('Review required value');
+  await addition.getByRole('button', { name: 'Add to form' }).click();
   await designer.getByRole('checkbox', { name: 'Required' }).check();
   await designer.getByRole('button', { name: 'Save changes' }).click();
   const impact = designer.getByRole('region', { name: 'Form save impact' });

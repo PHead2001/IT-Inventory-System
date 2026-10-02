@@ -88,3 +88,52 @@
 :global(html[data-motion='reduced']) .control {
   transition: none;
 }
+
+.addDialog {
+  width: min(70rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  color: #e2e8f0;
+  background: #0f172a;
+  border: 1px solid #22d3ee;
+  border-radius: 0.8rem;
+}
+.addDialog::backdrop {
+  background: rgb(2 6 23 / 75%);
+}
+.typePicker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.5rem;
+}
+.typeChoice {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  text-align: left;
+  border: 1px solid #475569;
+  border-radius: 0.5rem;
+}
+.typeChoice[aria-pressed='true'] {
+  border-color: #22d3ee;
+  background: #164e63;
+}
+.typeChoice span {
+  font-size: 0.85rem;
+}
+.typeChoice small {
+  color: #cbd5e1;
+}
+.addConfiguration {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .addConfiguration {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.canvasField {
+  pointer-events: none;
+}

@@ -15,7 +15,6 @@ import { DragDropProvider, DragOverlay, useDroppable } from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
 import { move as sortableMove } from '@dnd-kit/helpers';
 import {
-  fieldTypes,
   metadataDefinition,
   type FieldType,
   type MetadataDefinition,
@@ -31,7 +30,15 @@ import { RecoveryLibrary } from './recovery-library';
 import { controlKinds, kindLabel } from './effective-controls';
 import styles from './designer.module.css';
 import { controlLayoutStyle } from './control-layout';
-import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
+import { FieldSettings, makeField } from './field-settings';
+import { AddFieldDialog } from './add-field-dialog';
+import { MetadataFieldInput } from './field-value-input';
+import {
+  fieldName,
+  fieldTypeInfo,
+  placementName,
+  scopeRestriction,
+} from './field-authoring-model';
 import {
   clearDesignerRecovery,
   readDesignerRecovery,
@@ -39,15 +46,16 @@ import {
   type DesignerRecovery,
 } from './designer-recovery';
 import {
-  builtins,
+  addFieldToSection,
+  hidePlacement,
   controlMoveBlockReason,
   designerIssues,
   initialDefinition,
   moveControl,
   removeSection,
   sectionHasProtectedControls,
+  sectionEditBlockReason,
   newId,
-  selectTypes,
   widths,
   type Control,
   type Field,
@@ -64,291 +72,6 @@ const source = (form?: MetadataForm) =>
   form?.draft_definition ??
   form?.published_definition ?? { fields: [], layout: [] };
 const copy = <T,>(value: T): T => structuredClone(value);
-function newField(type: FieldType, name = ''): Field {
-  return {
-    id: newId(),
-    type,
-    label: name,
-    applies_to: ['quantity', 'asset'],
-    required: false,
-    rules: type === 'currency' ? { currencyCode: 'USD', precision: 2 } : {},
-    options: [],
-  };
-}
-
-function FieldPanel({
-  field,
-  change,
-  remove,
-  replace,
-  lockedCurrency,
-  moveUp,
-  moveDown,
-}: {
-  field: Field;
-  change: (field: Field) => void;
-  remove: () => void;
-  replace: (type: FieldType) => void;
-  lockedCurrency: boolean;
-  moveUp: () => void;
-  moveDown: () => void;
-}) {
-  const [replacement, setReplacement] = useState<FieldType>(field.type);
-  const selection = selectTypes.includes(field.type);
-  const ruleKeys = ['short_text', 'long_text'].includes(field.type)
-    ? ['minLength', 'maxLength']
-    : ['integer', 'decimal', 'currency', 'date', 'datetime'].includes(
-          field.type,
-        )
-      ? ['min', 'max']
-      : field.type === 'multi_select'
-        ? ['maxSelections']
-        : [];
-  const setRule = (key: string, raw: string) => {
-    const rules = { ...field.rules };
-    if (raw === '') delete rules[key];
-    else
-      rules[key] = [
-        'minLength',
-        'maxLength',
-        'maxSelections',
-        'precision',
-      ].includes(key)
-        ? Number(raw)
-        : raw;
-    change({ ...field, rules });
-  };
-  const defaultText =
-    field.default === undefined
-      ? ''
-      : field.type === 'currency' &&
-          field.default &&
-          typeof field.default === 'object' &&
-          'amount' in field.default
-        ? String(field.default.amount)
-        : String(field.default);
-  const setDefault = (raw: string) => {
-    let value: unknown =
-      raw ||
-      (['short_text', 'long_text'].includes(field.type) ? '' : undefined);
-    if (raw) {
-      if (field.type === 'boolean') value = raw === 'true';
-      else if (field.type === 'integer') value = Number(raw);
-      else if (field.type === 'currency')
-        value = { amount: raw, currency: field.rules.currencyCode };
-    }
-    change({ ...field, default: value });
-  };
-  return (
-    <div
-      className="min-w-0 space-y-3 rounded border border-slate-700 p-3"
-      data-testid={`field-${field.id}`}
-    >
-      <h4 className="min-w-0 break-words font-semibold [overflow-wrap:anywhere]">
-        {field.label || 'Untitled field'} · {label(field.type)}
-      </h4>
-      <div className="flex flex-wrap gap-x-3 gap-y-1">
-        <button
-          type="button"
-          className="min-h-11 px-2 underline"
-          onClick={moveUp}
-        >
-          Field up
-        </button>
-        <button
-          type="button"
-          className="min-h-11 px-2 underline"
-          onClick={moveDown}
-        >
-          Field down
-        </button>
-        <button
-          type="button"
-          className="min-h-11 px-2 text-rose-300 underline"
-          onClick={remove}
-        >
-          Remove field
-        </button>
-      </div>
-      <p className="break-all text-xs text-slate-400">Stable ID: {field.id}</p>
-      <label className="block text-sm">
-        Label
-        <input
-          className={input}
-          maxLength={200}
-          value={field.label}
-          onChange={(event) => change({ ...field, label: event.target.value })}
-        />
-      </label>
-      <label className="block text-sm">
-        Help text
-        <textarea
-          className={input}
-          rows={2}
-          maxLength={2000}
-          value={field.help ?? ''}
-          onChange={(event) => change({ ...field, help: event.target.value })}
-        />
-      </label>
-      <div className="flex flex-wrap gap-4 text-sm">
-        {(['quantity', 'asset'] as const).map((kind) => (
-          <label key={kind}>
-            <input
-              type="checkbox"
-              checked={field.applies_to.includes(kind)}
-              onChange={(event) =>
-                change({
-                  ...field,
-                  applies_to: event.target.checked
-                    ? [...new Set([...field.applies_to, kind])]
-                    : field.applies_to.filter((item) => item !== kind),
-                })
-              }
-            />{' '}
-            {label(kind)}
-          </label>
-        ))}
-        <label>
-          <input
-            type="checkbox"
-            checked={field.required}
-            onChange={(event) =>
-              change({ ...field, required: event.target.checked })
-            }
-          />{' '}
-          Required
-        </label>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {ruleKeys.map((key) => (
-          <label key={key} className="text-xs">
-            {label(key)}
-            <input
-              className={input}
-              type={
-                ['minLength', 'maxLength', 'maxSelections'].includes(key)
-                  ? 'number'
-                  : field.type === 'date'
-                    ? 'date'
-                    : 'text'
-              }
-              value={String(field.rules[key] ?? '')}
-              onChange={(event) => setRule(key, event.target.value)}
-            />
-          </label>
-        ))}
-        {['decimal', 'currency'].includes(field.type) && (
-          <label className="text-xs">
-            Precision
-            <select
-              className={input}
-              disabled={lockedCurrency}
-              value={String(field.rules.precision ?? '')}
-              onChange={(event) => setRule('precision', event.target.value)}
-            >
-              {field.type === 'decimal' && (
-                <option value="">Default (6)</option>
-              )}
-              {Array.from(
-                { length: field.type === 'currency' ? 5 : 7 },
-                (_, index) => (
-                  <option key={index} value={index}>
-                    {index}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-        )}
-        {field.type === 'currency' && (
-          <label className="text-xs">
-            ISO 4217 code
-            <input
-              className={input}
-              disabled={lockedCurrency}
-              maxLength={3}
-              value={String(field.rules.currencyCode ?? '')}
-              onChange={(event) =>
-                setRule('currencyCode', event.target.value.toUpperCase())
-              }
-            />
-          </label>
-        )}
-      </div>
-      {selection && <OptionTreeEditor field={field} change={change} />}
-      {selection ? (
-        <ChoiceDefaultEditor field={field} change={change} />
-      ) : (
-        <label className="block text-sm">
-          Default (optional)
-          {field.type === 'boolean' ? (
-            <select
-              className={input}
-              value={defaultText}
-              onChange={(event) => setDefault(event.target.value)}
-            >
-              <option value="">Unset</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          ) : (
-            <input
-              className={input}
-              type={
-                field.type === 'date'
-                  ? 'date'
-                  : field.type === 'url'
-                    ? 'url'
-                    : 'text'
-              }
-              value={defaultText}
-              onChange={(event) => setDefault(event.target.value)}
-            />
-          )}
-        </label>
-      )}
-      {!selection && field.default !== undefined && (
-        <button
-          type="button"
-          className="text-xs underline"
-          onClick={() => change({ ...field, default: undefined })}
-        >
-          Unset default
-        </button>
-      )}
-      <div className="rounded border border-amber-800 p-2 text-xs">
-        <p>
-          Type and currency meaning cannot change for this field ID. A
-          replacement receives a new ID; old values remain in history.
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <select
-            aria-label={`Replacement type for ${field.label}`}
-            className={input + ' max-w-48'}
-            value={replacement}
-            onChange={(event) =>
-              setReplacement(event.target.value as FieldType)
-            }
-          >
-            {fieldTypes.map((type) => (
-              <option key={type} value={type}>
-                {label(type)}
-              </option>
-            ))}
-          </select>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => replace(replacement)}
-          >
-            Add replacement
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ControlShape({
   control,
   field,
@@ -358,50 +81,58 @@ function ControlShape({
   field?: Field;
   categoryName: string;
 }) {
-  const type = field?.type;
+  if (field)
+    return (
+      <div
+        data-testid="designer-control-preview"
+        aria-hidden="true"
+        className={styles.canvasField}
+        inert
+      >
+        <MetadataFieldInput
+          id={`canvas-${control.id}`}
+          field={field}
+          value={field.default}
+          onChange={() => {}}
+          readOnly
+        />
+      </div>
+    );
   if (control.kind === 'help')
     return (
       <p
         data-testid="designer-control-preview"
-        className="min-h-10 text-sm text-slate-400"
+        className="min-h-10 whitespace-pre-wrap text-sm text-slate-400"
       >
-        {control.help || 'Add helpful instructions…'}
+        {control.help || 'Add instructions·'}
       </p>
     );
-  const multiline = type === 'long_text' || control.builtin === 'description';
-  const choice =
-    (type && selectTypes.includes(type)) || control.builtin === 'category_id';
   return (
-    <div
-      data-testid="designer-control-preview"
-      aria-hidden="true"
-      className={`${styles.fieldShape} ${multiline ? styles.multilineShape : ''} ${type === 'boolean' ? styles.booleanShape : ''}`}
-    >
-      {type === 'boolean' ? (
-        <>
-          <span className={styles.checkboxShape} />
-          Yes / No
-        </>
+    <div data-testid="designer-control-preview" aria-hidden="true" inert>
+      {control.kind === 'field' ? (
+        <p className="text-rose-300">Missing field reference</p>
+      ) : control.builtin === 'category_id' ? (
+        <select className={input} disabled aria-label="Category preview">
+          <option>{categoryName}</option>
+        </select>
+      ) : control.builtin === 'description' ? (
+        <textarea
+          className={input}
+          rows={3}
+          disabled
+          aria-label="Description preview"
+          placeholder="Enter a description"
+        />
       ) : (
-        <>
-          <span className="truncate">
-            {control.builtin === 'category_id'
-              ? categoryName
-              : choice
-                ? 'Choose an option…'
-                : type === 'date'
-                  ? 'mm / dd / yyyy'
-                  : type === 'datetime'
-                    ? 'Date and time'
-                    : type === 'integer' ||
-                        type === 'decimal' ||
-                        type === 'currency' ||
-                        control.builtin === 'reorder_threshold'
-                      ? '0'
-                      : 'Enter a value…'}
-          </span>
-          {choice && <span>⌄</span>}
-        </>
+        <input
+          className={input}
+          disabled
+          aria-label={`${builtinLabel(control.builtin ?? '')} preview`}
+          type={control.builtin === 'reorder_threshold' ? 'number' : 'text'}
+          placeholder={
+            control.builtin === 'reorder_threshold' ? '0' : 'Enter a value'
+          }
+        />
       )}
     </div>
   );
@@ -414,6 +145,7 @@ function ControlProperties({
   updateControl,
   move,
   edit,
+  appearanceOnly = false,
 }: {
   definition: MetadataDefinition;
   section: MetadataDefinition['layout'][number];
@@ -421,210 +153,229 @@ function ControlProperties({
   updateControl: (id: string, patch: Partial<Control>) => void;
   move: (id: string, sectionId: string, index: number) => void;
   edit: (next: MetadataDefinition) => void;
+  appearanceOnly?: boolean;
 }) {
   const index = section.controls.indexOf(control);
   const field = definition.fields.find((item) => item.id === control.field_id);
-  const name =
-    control.kind === 'field'
-      ? field?.label || 'Missing field'
-      : control.kind === 'builtin'
-        ? builtinLabel(control.builtin ?? '')
-        : 'Help text';
-  return (
-    <section
-      aria-label={`${name} layout properties`}
-      className="rounded-lg border border-slate-700 bg-slate-900/60 p-3"
-    >
-      <h4 className="font-medium">{name}</h4>
-      <p className="mt-1 text-xs text-slate-400">
-        {kindLabel(controlKinds(definition, section, control))} · Layout
-        properties
-      </p>
+  const name = placementName(control, definition.fields);
+  const protectedField =
+    control.kind === 'builtin' &&
+    ['name', 'category_id', 'asset_tag'].includes(control.builtin ?? '');
+  const contents = (
+    <div className="space-y-3">
       {section.visible === false && (
-        <p className="mt-2 text-xs text-amber-200">
-          Hidden by its section. Restore the section in Hidden &amp; unplaced to
-          show this control.
+        <p className="text-sm text-amber-200">
+          Hidden by its section. Show the section in Hidden fields to restore
+          this field.
         </p>
       )}
-      <div className="space-y-2 pb-2 pt-1">
-        {control.kind === 'help' && (
-          <label className="block">
-            Help text
-            <textarea
-              className={input}
-              rows={2}
-              value={control.help ?? ''}
-              onChange={(event) =>
-                updateControl(control.id, {
-                  help: event.target.value,
-                })
-              }
-            />
-          </label>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-xs">
-            <input
-              type="checkbox"
-              checked={control.visible !== false}
-              disabled={
-                control.kind === 'builtin' &&
-                ['name', 'category_id', 'asset_tag'].includes(
-                  control.builtin ?? '',
-                )
-              }
-              onChange={(event) =>
-                updateControl(control.id, {
-                  visible: event.target.checked,
-                })
-              }
-            />{' '}
-            Show control
-          </label>
-          <select
-            aria-label={`Applies to ${name}`}
+      {control.kind === 'help' && (
+        <label className="block text-sm">
+          Instructions
+          <textarea
+            rows={3}
             className={input}
-            value={controlKinds(definition, section, control).join(',')}
-            disabled={
-              control.kind === 'builtin' &&
-              ['name', 'category_id', 'asset_tag'].includes(
-                control.builtin ?? '',
-              )
-            }
+            value={control.help ?? ''}
             onChange={(event) =>
-              updateControl(control.id, {
-                applies_to: event.target.value.split(',') as (
-                  'quantity' | 'asset'
-                )[],
-              })
+              updateControl(control.id, { help: event.target.value })
             }
-          >
-            {controlKinds(definition, section, control).length === 0 && (
-              <option value="" disabled>
-                No form type
+          />
+        </label>
+      )}
+      {!appearanceOnly && (
+        <p className="text-xs text-slate-400">
+          Show on: {kindLabel(controlKinds(definition, section, control))}.
+          Standard field and section restrictions apply.
+        </p>
+      )}
+      <label className="block text-sm">
+        Section
+        <select
+          className={input}
+          value={section.id}
+          onChange={(event) =>
+            move(
+              control.id,
+              event.target.value,
+              definition.layout.find((item) => item.id === event.target.value)
+                ?.controls.length ?? 0,
+            )
+          }
+        >
+          {definition.layout.map((item) => {
+            const reason = controlMoveBlockReason(
+              definition,
+              control.id,
+              item.id,
+            );
+            return (
+              <option key={item.id} value={item.id} disabled={Boolean(reason)}>
+                {item.label || 'Untitled section'}
+                {reason ? ` · ${reason}` : ''}
               </option>
-            )}
-            {controlKinds(definition, section, {
-              ...control,
-              applies_to: ['quantity', 'asset'],
-            }).length === 2 && <option value="quantity,asset">Both</option>}
-            {controlKinds(definition, section, {
-              ...control,
-              applies_to: ['quantity', 'asset'],
-            }).includes('quantity') && (
-              <option value="quantity">Quantity</option>
-            )}
-            {controlKinds(definition, section, {
-              ...control,
-              applies_to: ['quantity', 'asset'],
-            }).includes('asset') && <option value="asset">Serialized</option>}
-          </select>
-          <p className="col-span-2 text-xs text-slate-400">
-            Effective form types also follow this section, the field definition,
-            and standard control restrictions.
-          </p>
-          <label className="text-xs">
-            Section
+            );
+          })}
+        </select>
+      </label>
+      <label className="block text-sm">
+        Width
+        <select
+          className={input}
+          value={control.width}
+          onChange={(event) =>
+            updateControl(control.id, {
+              width:
+                event.target.value === 'Auto'
+                  ? 'Auto'
+                  : (Number(event.target.value) as Control['width']),
+            })
+          }
+        >
+          {widths.map((width) => (
+            <option key={width} value={width}>
+              {width === 'Auto'
+                ? 'Automatic'
+                : width === 12
+                  ? 'Full width'
+                  : width === 9
+                    ? 'Three quarters'
+                    : width === 8
+                      ? 'Two thirds'
+                      : width === 6
+                        ? 'Half width'
+                        : width === 4
+                          ? 'One third'
+                          : width === 3
+                            ? 'One quarter'
+                            : `${(width / 12) * 100}% width`}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={index === 0}
+          onClick={() => move(control.id, section.id, index - 1)}
+        >
+          Move up
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={index === section.controls.length - 1}
+          onClick={() => move(control.id, section.id, index + 2)}
+        >
+          Move down
+        </Button>
+      </div>
+      {control.visible === false ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => updateControl(control.id, { visible: true })}
+        >
+          Show on form
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          disabled={protectedField}
+          onClick={() => {
+            if (
+              field?.required &&
+              !window.confirm(
+                'Make this field optional before hiding it? Existing values are retained.',
+              )
+            )
+              return;
+            edit(
+              hidePlacement(definition, control.id, Boolean(field?.required)),
+            );
+          }}
+        >
+          Hide from form
+        </Button>
+      )}
+      <p className="text-xs text-slate-400">
+        {protectedField
+          ? 'This standard field must remain visible.'
+          : field?.required
+            ? 'Make this field optional before hiding it. Hiding retains stored values and can be reversed in Hidden fields.'
+            : 'Hiding retains stored values. Restore this field in Hidden fields.'}
+      </p>
+      {control.kind === 'field' && !field && (
+        <p role="alert" className="text-sm text-rose-300">
+          This placement refers to a missing field. Hide it, then use Add field
+          to place an existing definition.
+        </p>
+      )}
+    </div>
+  );
+  return appearanceOnly ? (
+    contents
+  ) : (
+    <section
+      aria-label={`${name} layout properties`}
+      className="rounded border border-slate-700 p-3"
+    >
+      <h4 className="font-semibold">{name}</h4>
+      {contents}
+    </section>
+  );
+}
+
+function FieldAdvanced({
+  field,
+  published,
+  replace,
+  retire,
+}: {
+  field: Field;
+  published: boolean;
+  replace: (type: FieldType) => void;
+  retire: () => void;
+}) {
+  const [type, setType] = useState<FieldType>(field.type);
+  return (
+    <>
+      <p className="text-xs text-slate-400">
+        {published
+          ? 'Published type and currency meaning stay fixed. A replacement is a new field; earlier values and revisions remain in history.'
+          : 'This field has not been published. Change its type in Basics.'}
+      </p>
+      {published && (
+        <>
+          <label className="block text-sm">
+            Replacement type
             <select
               className={input}
-              value={section.id}
-              onChange={(event) =>
-                move(
-                  control.id,
-                  event.target.value,
-                  definition.layout.find(
-                    (item) => item.id === event.target.value,
-                  )?.controls.length ?? 0,
-                )
-              }
+              value={type}
+              onChange={(event) => setType(event.target.value as FieldType)}
             >
-              {definition.layout.map((item) => {
-                const reason = controlMoveBlockReason(
-                  definition,
-                  control.id,
-                  item.id,
-                );
-                return (
-                  <option
-                    key={item.id}
-                    value={item.id}
-                    disabled={Boolean(reason)}
-                  >
-                    {item.label || 'Untitled'} · {item.id.slice(-8)}
-                    {reason ? ` — unavailable: ${reason}` : ''}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-          {definition.layout.some((item) =>
-            controlMoveBlockReason(definition, control.id, item.id),
-          ) && (
-            <p className="col-span-2 text-xs text-amber-200">
-              Unavailable sections are hidden, exclude this control’s form
-              types, or cannot preserve its scope.
-            </p>
-          )}
-          <label className="text-xs">
-            Width
-            <select
-              className={input}
-              value={control.width}
-              onChange={(event) =>
-                updateControl(control.id, {
-                  width:
-                    event.target.value === 'Auto'
-                      ? 'Auto'
-                      : (Number(event.target.value) as Control['width']),
-                })
-              }
-            >
-              {widths.map((width) => (
-                <option key={width} value={width}>
-                  {width === 'Auto' ? 'Auto' : `${width}/12`}
+              {Object.entries(fieldTypeInfo).map(([value, info]) => (
+                <option key={value} value={value}>
+                  {info.name}
                 </option>
               ))}
             </select>
           </label>
-        </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            className="min-h-11 px-2 underline"
-            disabled={index === 0}
-            onClick={() => move(control.id, section.id, index - 1)}
-          >
-            Move up
-          </button>
-          <button
-            type="button"
-            className="min-h-11 px-2 underline"
-            disabled={index === section.controls.length - 1}
-            onClick={() => move(control.id, section.id, index + 2)}
-          >
-            Move down
-          </button>
-          <button
-            type="button"
-            className="min-h-11 px-2 text-rose-300 underline"
-            disabled={control.kind === 'builtin'}
-            onClick={() =>
-              edit({
-                ...definition,
-                layout: definition.layout.map((item) => ({
-                  ...item,
-                  controls: item.controls.filter(
-                    (candidate) => candidate.id !== control.id,
-                  ),
-                })),
-              })
-            }
-          >
-            Remove control
-          </button>
-        </div>
-      </div>
-    </section>
+          <Button type="button" variant="outline" onClick={() => replace(type)}>
+            Create replacement field
+          </Button>
+        </>
+      )}
+      <Button type="button" variant="outline" onClick={retire}>
+        {published ? 'Retire field' : 'Discard unpublished field'}
+      </Button>
+      <p className="text-xs text-slate-400">
+        {published
+          ? 'Retirement removes the field from the new revision. Save reviews its impact and preserves historical values.'
+          : 'Discard removes only this unpublished definition and its placement from your local edits.'}
+      </p>
+    </>
   );
 }
 
@@ -821,7 +572,12 @@ export function MetadataSettings({
   const [history, setHistory] = useState<MetadataDefinition[]>([]);
   const [advancedJson, setAdvancedJson] = useState('');
   const [advancedError, setAdvancedError] = useState('');
-  const [fieldType, setFieldType] = useState<FieldType>('short_text');
+  const [addition, setAddition] = useState<{
+    sectionId: string;
+    field?: Field;
+  } | null>(null);
+  const [configErrors, setConfigErrors] = useState<Record<string, string>>({});
+  const [scopeMessage, setScopeMessage] = useState('');
   const [previewKind, setPreviewKind] = useState<'quantity' | 'asset'>(
     'quantity',
   );
@@ -838,9 +594,7 @@ export function MetadataSettings({
   const [removeSectionId, setRemoveSectionId] = useState<string | null>(null);
   const [removeDestinationId, setRemoveDestinationId] = useState('');
   const removeDialogRef = useRef<HTMLDialogElement>(null);
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(
-    selected?.published_definition.fields[0]?.id ?? null,
-  );
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const dndBaseline = useRef<MetadataDefinition | null>(null);
   const [draggingControlId, setDraggingControlId] = useState<string | null>(
     null,
@@ -875,6 +629,9 @@ export function MetadataSettings({
     setSelectedControlId(null);
     setSelectedSectionId(null);
     setRemoveSectionId(null);
+    setAddition(null);
+    setConfigErrors({});
+    setScopeMessage('');
     clearDesignerRecovery(memberId, categoryId);
     setIdentityStatus('blocked');
   }, [memberId, categoryId]);
@@ -898,7 +655,13 @@ export function MetadataSettings({
   const dirty = definition !== null && JSON.stringify(definition) !== saved;
   const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
-    ? designerIssues(definition)
+    ? [
+        ...designerIssues(definition),
+        ...Object.entries(configErrors)
+          .filter(([id]) => definition.fields.some((field) => field.id === id))
+          .map(([, message]) => message)
+          .filter(Boolean),
+      ]
     : [
         'This draft has an unsupported structure. Discard it to return to the published form.',
       ];
@@ -1055,6 +818,9 @@ export function MetadataSettings({
     setAdvancedJson('');
     setAdvancedError('');
     setRemoveSectionId(null);
+    setAddition(null);
+    setConfigErrors({});
+    setScopeMessage('');
     setMessage('');
   };
   useEffect(() => {
@@ -1257,57 +1023,58 @@ export function MetadataSettings({
         })),
       });
   };
-  const addField = (type: FieldType, name = '') => {
-    if (!definition || definition.fields.length >= 100) return;
-    const field = newField(type, name);
-    const first =
-      definition.layout.find((section) => section.id === selectedSectionId) ??
-      definition.layout[0];
-    const controlId = newId();
-    edit({
-      fields: [...definition.fields, field],
-      layout: first
-        ? definition.layout.map((section) =>
-            section.id === first.id
-              ? {
-                  ...section,
-                  controls: [
-                    ...section.controls,
-                    {
-                      id: controlId,
-                      kind: 'field',
-                      field_id: field.id,
-                      width: 'Auto',
-                    },
-                  ],
-                }
-              : section,
-          )
-        : [
-            {
-              id: newId(),
-              label: 'Details',
-              controls: [
-                {
-                  id: controlId,
-                  kind: 'field',
-                  field_id: field.id,
-                  width: 'Auto',
-                },
-              ],
-            },
-          ],
+  const openAddition = (sectionId?: string, field?: Field) => {
+    if (!definition) return;
+    setAddition({
+      sectionId:
+        sectionId ??
+        definition.layout.find(
+          (section) =>
+            section.id === selectedSectionId && section.visible !== false,
+        )?.id ??
+        definition.layout.find((section) => section.visible !== false)?.id ??
+        newId(),
+      field,
     });
+  };
+  const selectPlacement = (controlId: string, next = definition) => {
+    const section = next?.layout.find((item) =>
+      item.controls.some((control) => control.id === controlId),
+    );
+    const control = section?.controls.find((item) => item.id === controlId);
     setSelectedControlId(controlId);
-    setSelectedFieldId(field.id);
-    setSelectedSectionId(first?.id ?? null);
+    setSelectedSectionId(section?.id ?? null);
+    setSelectedFieldId(control?.field_id ?? null);
     setMobilePanel('inspector');
+    requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(
+        `[data-control-id="${controlId}"]`,
+      );
+      element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+      element?.focus();
+    });
+  };
+  const addField = (field: Field, sectionId: string) => {
+    if (!definition) return;
+    const next = addFieldToSection(definition, field, sectionId);
+    if (next === definition) return;
+    edit(next);
+    setAddition(null);
+    const control = next.layout
+      .flatMap((section) => section.controls)
+      .find((item) => item.field_id === field.id)!;
+    selectPlacement(control.id, next);
+    setMessage(
+      `Added ${fieldName(field)} to ${next.layout.find((section) => section.id === sectionId)?.label || 'Details'}.`,
+    );
   };
   const removeField = (id: string) => {
     if (
       definition &&
       window.confirm(
-        'Remove this field from the new revision? Existing values remain in history.',
+        selected?.published_definition.fields.some((field) => field.id === id)
+          ? 'Retire this field from the new revision? Earlier revisions and stored values are preserved. Save changes will review the impact.'
+          : 'Discard this unpublished field and its placement from your local edits?',
       )
     )
       edit({
@@ -1330,6 +1097,19 @@ export function MetadataSettings({
             : section,
         ),
       });
+    selectPlacement(
+      control.id,
+      definition
+        ? {
+            ...definition,
+            layout: definition.layout.map((section) =>
+              section.id === sectionId
+                ? { ...section, controls: [...section.controls, control] }
+                : section,
+            ),
+          }
+        : definition,
+    );
   };
   const move = (id: string, sectionId: string, index: number) => {
     if (definition) edit(moveControl(definition, id, sectionId, index));
@@ -1440,8 +1220,6 @@ export function MetadataSettings({
   const selectedField = definition?.fields.find(
     (field) => field.id === selectedFieldId,
   );
-  const selectedFieldIndex =
-    selectedField && definition ? definition.fields.indexOf(selectedField) : -1;
   const selectedControlSection = definition?.layout.find((section) =>
     section.controls.some((control) => control.id === selectedControlId),
   );
@@ -1863,55 +1641,48 @@ export function MetadataSettings({
                     className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
                   >
                     <h3 className="font-semibold">Field library</h3>
-                    <div className="flex flex-wrap gap-2">
-                      <select
-                        aria-label="New field type"
-                        className={input + ' max-w-52'}
-                        value={fieldType}
-                        onChange={(event) =>
-                          setFieldType(event.target.value as FieldType)
-                        }
-                      >
-                        {fieldTypes.map((type) => (
-                          <option key={type} value={type}>
-                            {label(type)}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={definition.fields.length >= 100}
-                        onClick={() => addField(fieldType)}
-                      >
-                        Add field
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => openAddition()}
+                    >
+                      Add field
+                    </Button>
                     <div className="grid gap-2">
-                      {definition.fields.map((field) => (
-                        <button
-                          type="button"
-                          key={field.id}
-                          className="min-h-11 rounded border border-slate-600 p-2 text-left"
-                          onClick={() => {
-                            setSelectedFieldId(field.id);
-                            setSelectedControlId(null);
-                            setMobilePanel('inspector');
-                          }}
-                        >
-                          {field.label || 'Untitled field'} ·{' '}
-                          {label(field.type)}{' '}
-                          <span className="block text-xs text-slate-400">
-                            {definition.layout.some((section) =>
-                              section.controls.some(
-                                (control) => control.field_id === field.id,
-                              ),
-                            )
-                              ? 'Placed'
-                              : 'Unplaced'}
-                          </span>
-                        </button>
-                      ))}
+                      {definition.fields.map((field) => {
+                        const parent = definition.layout.find((section) =>
+                          section.controls.some(
+                            (control) => control.field_id === field.id,
+                          ),
+                        );
+                        const placed = parent?.controls.find(
+                          (control) => control.field_id === field.id,
+                        );
+                        return (
+                          <button
+                            type="button"
+                            key={field.id}
+                            className="min-h-11 rounded border border-slate-600 p-2 text-left"
+                            onClick={() => {
+                              if (placed) selectPlacement(placed.id);
+                              else {
+                                setSelectedFieldId(field.id);
+                                setSelectedControlId(null);
+                                setSelectedSectionId(null);
+                                setMobilePanel('inspector');
+                              }
+                            }}
+                          >
+                            {fieldName(field)} ·{' '}
+                            {fieldTypeInfo[field.type].name}
+                            <span className="block text-xs text-slate-400">
+                              {placed
+                                ? `${parent?.visible === false || placed.visible === false ? 'Hidden' : 'Shown'} in ${parent?.label || 'Untitled section'}`
+                                : 'Not yet placed'}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                     <RecoveryLibrary
                       definition={definition}
@@ -2012,10 +1783,26 @@ export function MetadataSettings({
                                     <input
                                       type="checkbox"
                                       checked={section.visible !== false}
-                                      disabled={sectionHasProtectedControls(
-                                        section,
-                                      )}
-                                      onChange={(event) =>
+                                      disabled={
+                                        sectionHasProtectedControls(section) ||
+                                        Boolean(
+                                          sectionEditBlockReason(
+                                            definition,
+                                            section.id,
+                                            { visible: false },
+                                          ),
+                                        )
+                                      }
+                                      onChange={(event) => {
+                                        const reason = sectionEditBlockReason(
+                                          definition,
+                                          section.id,
+                                          { visible: event.target.checked },
+                                        );
+                                        if (reason) {
+                                          setMessage(reason);
+                                          return;
+                                        }
                                         edit({
                                           ...definition,
                                           layout: definition.layout.map(
@@ -2028,11 +1815,24 @@ export function MetadataSettings({
                                                   }
                                                 : item,
                                           ),
-                                        })
-                                      }
+                                        });
+                                      }}
                                     />{' '}
                                     Show section
                                   </label>
+                                  {sectionEditBlockReason(
+                                    definition,
+                                    section.id,
+                                    { visible: false },
+                                  ) && (
+                                    <p className="text-xs text-amber-200">
+                                      {sectionEditBlockReason(
+                                        definition,
+                                        section.id,
+                                        { visible: false },
+                                      )}
+                                    </p>
+                                  )}
                                   <select
                                     aria-label={`Applies to ${section.label}`}
                                     className={input + ' max-w-36'}
@@ -2045,22 +1845,28 @@ export function MetadataSettings({
                                     disabled={sectionHasProtectedControls(
                                       section,
                                     )}
-                                    onChange={(event) =>
+                                    onChange={(event) => {
+                                      const kinds = event.target.value.split(
+                                        ',',
+                                      ) as Field['applies_to'];
+                                      const reason = sectionEditBlockReason(
+                                        definition,
+                                        section.id,
+                                        { applies_to: kinds },
+                                      );
+                                      if (reason) {
+                                        setMessage(reason);
+                                        return;
+                                      }
                                       edit({
                                         ...definition,
                                         layout: definition.layout.map((item) =>
                                           item.id === section.id
-                                            ? {
-                                                ...item,
-                                                applies_to:
-                                                  event.target.value.split(
-                                                    ',',
-                                                  ) as ('quantity' | 'asset')[],
-                                              }
+                                            ? { ...item, applies_to: kinds }
                                             : item,
                                         ),
-                                      })
-                                    }
+                                      });
+                                    }}
                                   >
                                     <option value="quantity,asset">Both</option>
                                     <option value="quantity">Quantity</option>
@@ -2140,10 +1946,10 @@ export function MetadataSettings({
                                 );
                                 const name =
                                   control.kind === 'field'
-                                    ? field?.label || 'Missing field'
+                                    ? fieldName(field)
                                     : control.kind === 'builtin'
                                       ? builtinLabel(control.builtin ?? '')
-                                      : 'Help text';
+                                      : 'Instructions';
                                 return (
                                   <SortableControl
                                     key={control.id}
@@ -2181,10 +1987,11 @@ export function MetadataSettings({
                                           <div className="flex min-w-0 items-start justify-between gap-2">
                                             <span
                                               data-testid="designer-control-name"
-                                              className="block min-w-0 break-words font-medium [overflow-wrap:anywhere]"
+                                              aria-hidden={Boolean(field)}
+                                              className={`${field ? 'sr-only' : ''} block min-w-0 break-words font-medium [overflow-wrap:anywhere]`}
                                             >
-                                              {name}
-                                              {field?.required ||
+                                              {field ? null : name}
+                                              {!field &&
                                               ['name', 'category_id'].includes(
                                                 control.builtin ?? '',
                                               )
@@ -2196,7 +2003,7 @@ export function MetadataSettings({
                                                 : ''}
                                             </span>
                                             <span
-                                              title="Form types using this control"
+                                              title="Form types using this field"
                                               className="shrink-0 text-[10px] text-slate-400"
                                             >
                                               {kindLabel(
@@ -2272,6 +2079,13 @@ export function MetadataSettings({
                               <Button
                                 type="button"
                                 variant="outline"
+                                onClick={() => openAddition(section.id)}
+                              >
+                                Add field to {section.label || 'section'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
                                 onClick={() =>
                                   addControl(section.id, {
                                     id: newId(),
@@ -2281,73 +2095,8 @@ export function MetadataSettings({
                                   })
                                 }
                               >
-                                Add help text
+                                Add instructions
                               </Button>
-                              <select
-                                aria-label={`Add existing field to ${section.label}`}
-                                className={input + ' max-w-56'}
-                                defaultValue=""
-                                onChange={(event) => {
-                                  if (event.target.value)
-                                    addControl(section.id, {
-                                      id: newId(),
-                                      kind: 'field',
-                                      field_id: event.target.value,
-                                      width: 'Auto',
-                                    });
-                                  event.target.value = '';
-                                }}
-                              >
-                                <option value="">Add field control…</option>
-                                {definition.fields
-                                  .filter(
-                                    (field) =>
-                                      !definition.layout.some((item) =>
-                                        item.controls.some(
-                                          (control) =>
-                                            control.field_id === field.id,
-                                        ),
-                                      ),
-                                  )
-                                  .map((field) => (
-                                    <option key={field.id} value={field.id}>
-                                      {field.label || 'Untitled field'}
-                                    </option>
-                                  ))}
-                              </select>
-                              <select
-                                aria-label={`Add standard control to ${section.label}`}
-                                className={input + ' max-w-56'}
-                                defaultValue=""
-                                onChange={(event) => {
-                                  if (event.target.value)
-                                    addControl(section.id, {
-                                      id: newId(),
-                                      kind: 'builtin',
-                                      builtin: event.target.value,
-                                      width: 'Auto',
-                                    });
-                                  event.target.value = '';
-                                }}
-                              >
-                                <option value="">Add standard control…</option>
-                                {builtins
-                                  .filter(
-                                    (name) =>
-                                      !definition.layout.some((item) =>
-                                        item.controls.some(
-                                          (control) =>
-                                            control.kind === 'builtin' &&
-                                            control.builtin === name,
-                                        ),
-                                      ),
-                                  )
-                                  .map((name) => (
-                                    <option key={name} value={name}>
-                                      {label(name)}
-                                    </option>
-                                  ))}
-                              </select>
                             </div>
                           </>
                         )}
@@ -2360,7 +2109,153 @@ export function MetadataSettings({
                     aria-label="Designer inspector"
                   >
                     <h3 className="font-semibold">Inspector</h3>
-                    {selectedControl && selectedControlSection && (
+                    {selectedField ? (
+                      <section
+                        aria-label={`${fieldName(selectedField)} field settings`}
+                        className="rounded-lg border border-cyan-800 p-3"
+                      >
+                        <h3 className="mb-3 font-semibold">
+                          {fieldName(selectedField)} ·{' '}
+                          {fieldTypeInfo[selectedField.type].name}
+                        </h3>
+                        <FieldSettings
+                          key={selectedField.id}
+                          field={selectedField}
+                          change={updateField}
+                          published={Boolean(
+                            selected?.published_definition.fields.some(
+                              (item) => item.id === selectedField.id,
+                            ),
+                          )}
+                          onValidityChange={(message) =>
+                            setConfigErrors((prior) => ({
+                              ...prior,
+                              [selectedField.id]: message,
+                            }))
+                          }
+                          basics={
+                            <>
+                              <label className="block text-sm">
+                                Show on
+                                <select
+                                  className={input}
+                                  value={(selectedControl &&
+                                  selectedControlSection
+                                    ? controlKinds(
+                                        definition,
+                                        selectedControlSection,
+                                        selectedControl,
+                                      )
+                                    : selectedField.applies_to
+                                  ).join(',')}
+                                  onChange={(event) => {
+                                    const kinds = event.target.value.split(
+                                      ',',
+                                    ) as Field['applies_to'];
+                                    const reason = scopeRestriction(
+                                      definition,
+                                      selectedField,
+                                      kinds,
+                                    );
+                                    setScopeMessage(reason ?? '');
+                                    if (!reason)
+                                      updateField({
+                                        ...selectedField,
+                                        applies_to: kinds,
+                                      });
+                                  }}
+                                >
+                                  <option value="quantity,asset">Both</option>
+                                  <option value="quantity">
+                                    Quantity items
+                                  </option>
+                                  <option value="asset">
+                                    Serialized assets
+                                  </option>
+                                  {selectedControl &&
+                                    selectedControlSection &&
+                                    !controlKinds(
+                                      definition,
+                                      selectedControlSection,
+                                      selectedControl,
+                                    ).length && (
+                                      <option value="" disabled>
+                                        No form type
+                                      </option>
+                                    )}
+                                </select>
+                              </label>
+                              {scopeMessage && (
+                                <p
+                                  role="status"
+                                  className="text-sm text-amber-200"
+                                >
+                                  {scopeMessage}
+                                </p>
+                              )}
+                            </>
+                          }
+                          appearance={
+                            selectedControl && selectedControlSection ? (
+                              <ControlProperties
+                                definition={definition}
+                                section={selectedControlSection}
+                                control={selectedControl}
+                                updateControl={updateControl}
+                                move={move}
+                                edit={edit}
+                                appearanceOnly
+                              />
+                            ) : (
+                              <>
+                                <p className="text-sm">
+                                  This field is not yet placed. Add it through
+                                  Use existing field.
+                                </p>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => openAddition()}
+                                >
+                                  Add existing field to form
+                                </Button>
+                              </>
+                            )
+                          }
+                          advanced={
+                            <>
+                              <FieldAdvanced
+                                field={selectedField}
+                                published={Boolean(
+                                  selected?.published_definition.fields.some(
+                                    (item) => item.id === selectedField.id,
+                                  ),
+                                )}
+                                replace={(type) =>
+                                  openAddition(
+                                    selectedControlSection?.id,
+                                    makeField(
+                                      type,
+                                      `${fieldName(selectedField)} replacement`,
+                                    ),
+                                  )
+                                }
+                                retire={() => removeField(selectedField.id)}
+                              />
+                              {selectedControl && (
+                                <p className="break-all text-xs text-slate-400">
+                                  Placement ID: {selectedControl.id}. Placement
+                                  scope:{' '}
+                                  {selectedControl.applies_to?.join(', ') ||
+                                    'Both'}
+                                  .
+                                </p>
+                              )}
+                            </>
+                          }
+                        />
+                      </section>
+                    ) : selectedControl && selectedControlSection ? (
                       <ControlProperties
                         definition={definition}
                         section={selectedControlSection}
@@ -2369,68 +2264,11 @@ export function MetadataSettings({
                         move={move}
                         edit={edit}
                       />
-                    )}
-                    {selectedField ? (
-                      <FieldPanel
-                        key={selectedField.id}
-                        field={selectedField}
-                        change={updateField}
-                        remove={() => removeField(selectedField.id)}
-                        replace={(type) =>
-                          addField(
-                            type,
-                            (selectedField.label || 'Untitled field') +
-                              ' replacement',
-                          )
-                        }
-                        lockedCurrency={
-                          selectedField.type === 'currency' &&
-                          !!selected?.published_definition.fields.some(
-                            (published) => published.id === selectedField.id,
-                          )
-                        }
-                        moveUp={() => {
-                          if (selectedFieldIndex < 1) return;
-                          const fields = [...definition.fields];
-                          [
-                            fields[selectedFieldIndex - 1],
-                            fields[selectedFieldIndex],
-                          ] = [
-                            fields[selectedFieldIndex],
-                            fields[selectedFieldIndex - 1],
-                          ];
-                          edit({ ...definition, fields });
-                        }}
-                        moveDown={() => {
-                          if (
-                            selectedFieldIndex >=
-                            definition.fields.length - 1
-                          )
-                            return;
-                          const fields = [...definition.fields];
-                          [
-                            fields[selectedFieldIndex + 1],
-                            fields[selectedFieldIndex],
-                          ] = [
-                            fields[selectedFieldIndex],
-                            fields[selectedFieldIndex + 1],
-                          ];
-                          edit({ ...definition, fields });
-                        }}
-                      />
-                    ) : selectedControl ? null : selectedSectionId ? (
-                      <p className="text-sm text-slate-400">
-                        Section{' '}
-                        {
-                          definition.layout.find(
-                            (section) => section.id === selectedSectionId,
-                          )?.label
-                        }
-                        . Choose a control or field to inspect its settings.
-                      </p>
                     ) : (
                       <p className="text-sm text-slate-400">
-                        Select a section, control, or field to inspect it.
+                        {selectedSectionId
+                          ? `Section ${definition.layout.find((section) => section.id === selectedSectionId)?.label}. Choose a field to inspect its settings.`
+                          : 'Select a section or field to inspect it.'}
                       </p>
                     )}
                   </aside>
@@ -2462,7 +2300,7 @@ export function MetadataSettings({
                                 ? definition.fields.find(
                                     (field) => field.id === control.field_id,
                                   )?.label
-                                : 'Help text';
+                                : 'Instructions';
                           })()}
                     </motion.div>
                   )}
@@ -2500,8 +2338,8 @@ export function MetadataSettings({
                           Remove {section.label || 'Untitled section'}?
                         </h3>
                         <p className="text-sm text-slate-300">
-                          Choose where its {section.controls.length} controls
-                          go. Duplicate section names are distinguished by ID.
+                          Choose where its {section.controls.length} fields go.
+                          Duplicate section names are distinguished by ID.
                           Definitions and stored values stay intact. You can
                           undo this edit.
                         </p>
@@ -2513,8 +2351,9 @@ export function MetadataSettings({
                             ),
                         ) && (
                           <p className="text-sm text-amber-200">
-                            Protected controls must move to a visible section
-                            that keeps them available to the correct form type.
+                            Protected standard fields must move to a visible
+                            section that keeps them available to the correct
+                            form type.
                           </p>
                         )}
                         <label className="block space-y-2 text-sm">
@@ -2534,7 +2373,7 @@ export function MetadataSettings({
                             ))}
                             {canUnplace && (
                               <option value="">
-                                Unplace controls; keep definitions and values
+                                Unplace fields; keep definitions and values
                               </option>
                             )}
                           </select>
@@ -2542,8 +2381,8 @@ export function MetadataSettings({
                         {!valid.length && !canUnplace && (
                           <p role="alert" className="text-sm text-amber-200">
                             No valid destination preserves required and
-                            protected controls. Add or restore a compatible
-                            section first.
+                            protected standard fields. Add or restore a
+                            compatible section first.
                           </p>
                         )}
                         <div className="flex flex-wrap gap-2">
@@ -2573,9 +2412,33 @@ export function MetadataSettings({
                     );
                   })()}
               </dialog>
+              {addition && (
+                <AddFieldDialog
+                  definition={
+                    definition.layout.length
+                      ? definition
+                      : {
+                          ...definition,
+                          layout: [
+                            {
+                              id: addition.sectionId,
+                              label: 'Details',
+                              controls: [],
+                            },
+                          ],
+                        }
+                  }
+                  sectionId={addition.sectionId}
+                  initialField={addition.field}
+                  onCancel={() => setAddition(null)}
+                  onAdd={addField}
+                  onChange={edit}
+                  onGo={(id, next) => selectPlacement(id, next ?? definition)}
+                />
+              )}
               <details className="rounded-xl border border-slate-700 bg-slate-950/30">
                 <summary className="min-h-11 cursor-pointer px-3 py-2 font-semibold text-cyan-100">
-                  Live preview · open quantity or asset form
+                  Try form · quantity items or serialized assets
                 </summary>
                 <div className="space-y-3 pt-3">
                   <div className="flex flex-wrap gap-2">

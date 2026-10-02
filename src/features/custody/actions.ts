@@ -31,6 +31,13 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
       error: authError,
     } = await supabase.auth.getUser();
     if (authError || !user) return custodyError('P1001');
+    if (parsed.data.expectedActorId && parsed.data.expectedActorId !== user.id)
+      return {
+        ok: false,
+        code: 'actor_changed',
+        message:
+          'The signed-in staff member changed. Return to the original account before saving these entries.',
+      };
     const { data: member, error: memberError } = await supabase
       .from('app_members')
       .select('user_id,display_name,role,active,can_manage_configuration')
