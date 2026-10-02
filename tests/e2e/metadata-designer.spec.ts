@@ -292,6 +292,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   const targets = checks.map((check) =>
     check.locator('xpath=ancestor::label[1]'),
   );
+  await targets[0].scrollIntoViewIfNeeded();
   const boxes = await Promise.all(
     targets.map((target) => target.boundingBox()),
   );
@@ -313,12 +314,21 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     y: boxes[0]!.y + boxes[0]!.height - 3,
   };
   expect(paddingPoint.y).toBeGreaterThan(glyph!.y + glyph!.height);
+  expect(paddingPoint.y).toBeLessThan(page.viewportSize()!.height);
+  expect(paddingPoint.y).toBeGreaterThanOrEqual(0);
+  await test.info().attach('boolean-touch-targets', {
+    body: JSON.stringify({ labels: boxes, glyph, paddingPoint }),
+    contentType: 'application/json',
+  });
   await page.mouse.click(paddingPoint.x, paddingPoint.y);
   await expect(checks[0]).toBeChecked();
   await expect(checks[1]).not.toBeChecked();
   await checks[0].focus();
   await page.keyboard.press('Space');
   await expect(checks[0]).not.toBeChecked();
+  await page.screenshot({
+    path: test.info().outputPath('phone-checkbox-targets.png'),
+  });
   await checks[0].check();
   await checks[0].uncheck();
   await expect(checks[0]).toHaveAttribute('aria-checked', 'false');
@@ -351,7 +361,14 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     .getByRole('checkbox', { name: 'Use minimum characters' })
     .check();
   await designer.getByLabel('Minimum characters', { exact: true }).fill('501');
-  const issue = designer.getByRole('alert');
+  await expect(
+    designer.getByRole('alert').filter({
+      hasText: 'Minimum characters must be a whole number from 0 to 500.',
+    }),
+  ).toBeVisible();
+  const issue = designer
+    .getByRole('alert')
+    .filter({ hasText: 'Resolve before saving:' });
   await expect(issue).toContainText(`${longLabel} has invalid text bounds`);
   expect(
     await issue.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
@@ -359,6 +376,15 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   await designer
     .getByRole('checkbox', { name: 'Use minimum characters' })
     .uncheck();
+
+  const inspectorHeading = designer
+    .getByTestId('designer-inspector')
+    .getByRole('heading', { level: 3, name: new RegExp(longLabel) });
+  expect(
+    await inspectorHeading.evaluate(
+      (node) => node.scrollWidth <= node.clientWidth + 1,
+    ),
+  ).toBe(true);
 
   expect(
     await page.evaluate(

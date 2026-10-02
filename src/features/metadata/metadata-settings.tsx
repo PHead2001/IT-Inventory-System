@@ -2168,7 +2168,7 @@ export function MetadataSettings({
                         aria-label={`${fieldName(selectedField)} field settings`}
                         className="rounded-lg border border-cyan-800 p-3"
                       >
-                        <h3 className="mb-3 font-semibold">
+                        <h3 className="mb-3 min-w-0 font-semibold [overflow-wrap:anywhere]">
                           {fieldName(selectedField)} ·{' '}
                           {fieldTypeInfo[selectedField.type].name}
                         </h3>
@@ -2387,7 +2387,7 @@ export function MetadataSettings({
                       <div className="space-y-4">
                         <h3
                           id="remove-section-title"
-                          className="text-lg font-semibold"
+                          className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]"
                         >
                           Remove {section.label || 'Untitled section'}?
                         </h3>

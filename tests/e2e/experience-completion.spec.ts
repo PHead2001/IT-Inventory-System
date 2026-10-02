@@ -356,8 +356,8 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await expect(edit.getByLabel('Empty note')).toHaveValue('');
   await edit
     .locator('div')
-    .filter({ has: edit.getByLabel('Cleared note') })
-    .filter({ has: edit.getByRole('button', { name: 'Clear answer' }) })
+    .filter({ has: page.getByLabel('Cleared note') })
+    .filter({ has: page.getByRole('button', { name: 'Clear answer' }) })
     .last()
     .getByRole('button', { name: 'Clear answer' })
     .click();
@@ -420,7 +420,10 @@ test('designer hide and restore retain false, zero and empty values while an uns
     await expect(hiddenEdit.getByLabel(field.name)).toHaveCount(0);
 
   designer = await openDesigner(page, category);
-  await designer.getByText(/Hidden fields/).click();
+  await designer
+    .locator('summary')
+    .filter({ hasText: /Hidden fields/ })
+    .click();
   for (const field of fields)
     await designer.getByRole('button', { name: `Show ${field.name}` }).click();
   await saveDesigner(designer);
