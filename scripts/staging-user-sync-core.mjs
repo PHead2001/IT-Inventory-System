@@ -132,6 +132,8 @@ export async function syncStagingUsers({ source, staging }) {
       throw new Error('Staging Auth email collides with a different user ID');
     let result;
     if (existingById) {
+      if (existingById.app_metadata?.[MIRROR_MARKER] !== true)
+        throw new Error('Staging Auth user ID is not owned by the production mirror');
       result = await staging.updateUser(
         user.id,
         stagingUserPayload(user, false),
