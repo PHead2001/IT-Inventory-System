@@ -6,6 +6,7 @@ try {
     'format:check',
     'test',
     'test:preview-access',
+    'test:staging-user-sync',
     'test:local-storage',
     'test:export:memory',
     'test:file:inspection',
