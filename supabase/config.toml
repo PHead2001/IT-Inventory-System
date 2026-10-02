@@ -53,3 +53,9 @@ subject = "Reset your IT Inventory password"
 content_path = "./supabase/templates/recovery.html"
 [analytics]
 enabled = false
+
+[remotes.staging]
+project_id = "ileoembzjxwhxgtiypec"
+
+[remotes.staging.db.seed]
+enabled = false
