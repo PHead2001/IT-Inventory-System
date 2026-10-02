@@ -1,0 +1,26 @@
+name: Sync staging to released production
+
+on:
+  workflow_run:
+    workflows: ['Foundation CI']
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 2
+    steps:
+      - name: Fast-forward staging to the released main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error             --request PATCH             --header "Accept: application/vnd.github+json"             --header "Authorization: Bearer $GH_TOKEN"             --header "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/PHead2001/IT-Inventory-System/git/refs/heads/staging"             --data "{\"sha\":\"$TARGET_SHA\",\"force\":false}"
