@@ -9,13 +9,15 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function assertStagingBranch(branches) {
-  if (!Array.isArray(branches)) throw new Error('Staging branch listing is invalid');
+  if (!Array.isArray(branches))
+    throw new Error('Staging branch listing is invalid');
   const matches = branches.filter(
     (branch) =>
       branch?.project_ref === STAGING_REF &&
       branch?.name === STAGING_BRANCH,
   );
-  if (matches.length !== 1) throw new Error('Staging branch identity is ambiguous');
+  if (matches.length !== 1)
+    throw new Error('Staging branch identity is ambiguous');
   const branch = matches[0];
   if (
     branch.parent_project_ref !== PRODUCTION_REF ||
@@ -25,7 +27,9 @@ export function assertStagingBranch(branches) {
     (branch.status !== 'ACTIVE_HEALTHY' &&
       branch.preview_project_status !== 'ACTIVE_HEALTHY')
   )
-    throw new Error('Staging branch is not the healthy persistent production child');
+    throw new Error(
+      'Staging branch is not the healthy persistent production child',
+    );
   return branch;
 }
 
@@ -60,7 +64,9 @@ export function normalizeSourceUser(row) {
     typeof row.member_active !== 'boolean' ||
     typeof row.can_manage_configuration !== 'boolean'
   )
-    throw new Error('Production user is outside the supported staging mirror contract');
+    throw new Error(
+      'Production user is outside the supported staging mirror contract',
+    );
   return {
     id: row.id,
     email: row.email,
@@ -137,7 +143,9 @@ export async function syncStagingUsers({ source, staging }) {
     let result;
     if (existingById) {
       if (existingById.app_metadata?.[MIRROR_MARKER] !== true)
-        throw new Error('Staging Auth user ID is not owned by the production mirror');
+        throw new Error(
+          'Staging Auth user ID is not owned by the production mirror',
+        );
       result = await staging.updateUser(
         user.id,
         stagingUserPayload(user, false),
