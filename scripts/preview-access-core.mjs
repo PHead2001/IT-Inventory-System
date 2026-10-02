@@ -4,6 +4,7 @@ export const FIXTURE_EMAIL = 'test@gmail.com';
 export const CHECK_NAME = 'Supabase Preview';
 export const CHECK_APP = 'supabase';
 export const MAX_CHECK_RUNS = 100;
+export const MAX_AUTH_POLICY_ATTEMPTS = 4;
 
 const refPattern = /^[a-z0-9]{20}$/;
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -252,17 +253,30 @@ export async function provisionPreview({
       await pause();
     }
   }
+  const revision = {
+    sha: pr.head.sha,
+    headRef: pr.head.ref,
+    baseRef: pr.base.ref,
+    childRef: branch.project_ref,
+  };
+  if (pr.number !== number) throw new Error('Preview PR identity changed');
   const revalidate = async () => {
     const freshPr = assertPullRequest(
       await github.pull(number),
       repository,
-      pr.head.sha,
+      revision.sha,
     );
+    if (
+      freshPr.number !== number ||
+      freshPr.head.ref !== revision.headRef ||
+      freshPr.base.ref !== revision.baseRef
+    )
+      throw new Error('Preview PR identity changed');
     const freshBranch = selectPreviewBranch(
       await management.branches(PARENT_REF),
       freshPr,
     );
-    if (freshBranch.project_ref !== branch.project_ref)
+    if (freshBranch.project_ref !== revision.childRef)
       throw new Error('Preview branch identity changed');
     assertReady(
       freshBranch,
@@ -271,30 +285,59 @@ export async function provisionPreview({
     );
   };
   await revalidate();
-  const target = project(branch.project_ref);
-  const keys = selectKeys(await management.keys(branch.project_ref));
-  const users = await target.listUsers(keys.secret);
-  let user = findFixture(users);
-  const config = await management.authConfig(branch.project_ref);
+  const target = project(revision.childRef);
+  const keys = selectKeys(await management.keys(revision.childRef));
+  let user = findFixture(await target.listUsers(keys.secret));
+  const config = { ...(await management.authConfig(revision.childRef)) };
   const patch = authPolicyPatch(config, password, allowMinimumReduction);
   if (Object.keys(patch).length) {
     await revalidate();
-    await management.patchAuthConfig(branch.project_ref, patch);
+    await management.patchAuthConfig(revision.childRef, patch);
   }
-  await revalidate();
-  if (user) {
-    user = await target.updateUser(keys.secret, user.id, {
-      password,
-      email_confirm: true,
-      ban_duration: 'none',
-    });
-  } else {
-    user = await target.createUser(keys.secret, {
-      email: FIXTURE_EMAIL,
-      password,
-      email_confirm: true,
-      app_metadata: { inventory_preview_fixture: true },
-    });
+  for (let attempt = 0; attempt < MAX_AUTH_POLICY_ATTEMPTS; attempt += 1) {
+    await revalidate();
+    if (attempt > 0) {
+      const current = await management.authConfig(revision.childRef);
+      authPolicyPatch(current, password, false);
+      if (
+        current.password_min_length !== patch.password_min_length ||
+        current.password_required_characters !==
+          config.password_required_characters ||
+        current.password_hibp_enabled !== config.password_hibp_enabled
+      )
+        throw new Error('Preview Auth password policy changed');
+    }
+    const freshUser = findFixture(await target.listUsers(keys.secret));
+    if (user && freshUser?.id !== user.id)
+      throw new Error('Preview fixture identity changed');
+    user = freshUser;
+    try {
+      if (user) {
+        user = await target.updateUser(keys.secret, user.id, {
+          password,
+          email_confirm: true,
+          ban_duration: 'none',
+        });
+      } else {
+        user = await target.createUser(keys.secret, {
+          email: FIXTURE_EMAIL,
+          password,
+          email_confirm: true,
+          app_metadata: { inventory_preview_fixture: true },
+        });
+      }
+      break;
+    } catch (error) {
+      // Auth rejects password strength before mutation. Only a length rejection
+      // after this invocation's accepted minimum patch can be propagation delay.
+      if (
+        patch.password_min_length === undefined ||
+        error?.code !== 'AUTH_PASSWORD_LENGTH_PENDING' ||
+        attempt === MAX_AUTH_POLICY_ATTEMPTS - 1
+      )
+        throw error;
+      await pause();
+    }
   }
   if (user?.app_metadata?.inventory_preview_fixture !== true || !user.id)
     throw new Error('Auth did not return the marked fixture user');
@@ -324,5 +367,5 @@ export async function provisionPreview({
     member?.can_manage_configuration !== false
   )
     throw new Error('Fixture membership verification failed');
-  return { branch: branch.project_ref, pr: number, sha: pr.head.sha };
+  return { branch: revision.childRef, pr: number, sha: revision.sha };
 }
