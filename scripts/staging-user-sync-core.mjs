@@ -37,9 +37,13 @@ export function normalizeSourceUser(row) {
     typeof row.email !== 'string' ||
     !row.email.includes('@') ||
     row.phone != null ||
-    typeof row.password_hash !== 'string' ||
-    row.password_hash.length < 20 ||
-    row.password_hash.length > 1024 ||
+    !(
+      row.password_hash == null ||
+      row.password_hash === '' ||
+      (typeof row.password_hash === 'string' &&
+        row.password_hash.length >= 20 &&
+        row.password_hash.length <= 1024)
+    ) ||
     typeof row.email_confirmed !== 'boolean' ||
     typeof row.phone_confirmed !== 'boolean' ||
     !Array.isArray(row.providers) ||
@@ -60,7 +64,7 @@ export function normalizeSourceUser(row) {
   return {
     id: row.id,
     email: row.email,
-    passwordHash: row.password_hash,
+    passwordHash: row.password_hash || null,
     emailConfirmed: row.email_confirmed,
     userMetadata: row.user_metadata,
     appMetadata: row.app_metadata,
@@ -77,7 +81,6 @@ export function normalizeSourceUser(row) {
 export function stagingUserPayload(source, includeId) {
   const payload = {
     email: source.email,
-    password_hash: source.passwordHash,
     email_confirm: source.emailConfirmed,
     user_metadata: source.userMetadata,
     app_metadata: {
@@ -85,6 +88,7 @@ export function stagingUserPayload(source, includeId) {
       [MIRROR_MARKER]: true,
     },
   };
+  if (source.passwordHash) payload.password_hash = source.passwordHash;
   if (includeId) payload.id = source.id;
   return payload;
 }
