@@ -132,11 +132,6 @@ export async function syncStagingUsers({ source, staging }) {
       throw new Error('Staging Auth email collides with a different user ID');
     let result;
     if (existingById) {
-      if (
-        typeof existingById.email === 'string' &&
-        existingById.email.toLowerCase() !== user.email.toLowerCase()
-      )
-        throw new Error('Staging Auth user ID collides with a different email');
       result = await staging.updateUser(
         user.id,
         stagingUserPayload(user, false),
