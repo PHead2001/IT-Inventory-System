@@ -187,3 +187,39 @@ test('sync refuses to take over an unmarked staging user with the production UUI
     /not owned by the production mirror/,
   );
 });
+
+
+test('invited production users can mirror before a password exists', async () => {
+  const calls = [];
+  const invited = prodUser({
+    password_hash: '',
+    email_confirmed: false,
+  });
+  const result = await syncStagingUsers({
+    source: {
+      users: async ({ offset }) => (offset === 0 ? [invited] : []),
+    },
+    staging: {
+      users: async () => [],
+      createUser: async (payload) => {
+        calls.push(payload);
+        return {
+          id: payload.id,
+          email: payload.email,
+          app_metadata: payload.app_metadata,
+        };
+      },
+      updateUser: async () => assert.fail('unexpected update'),
+      upsertMember: async () => {},
+      deactivateMember: async () => assert.fail('unexpected deactivate'),
+    },
+  });
+  assert.deepEqual(result, {
+    source: 1,
+    created: 1,
+    updated: 0,
+    deactivated: 0,
+  });
+  assert.equal('password_hash' in calls[0], false);
+  assert.equal(calls[0].email_confirm, false);
+});
