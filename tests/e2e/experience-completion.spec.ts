@@ -20,8 +20,17 @@ async function reviewMetadata(form: Locator) {
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
   await form.getByRole('button', { name: 'Confirm save' }).click();
-  if ((await form.getAttribute('aria-label')) === 'Edit quantity metadata')
-    await expect(form.getByRole('status')).toContainText('Metadata saved.');
+  if ((await form.getAttribute('aria-label')) === 'Edit quantity metadata') {
+    await expect(
+      form.getByRole('status').filter({ hasText: /^Metadata saved\.$/ }),
+    ).toBeVisible();
+    await expect(
+      form.getByRole('button', { name: 'Review metadata', exact: true }),
+    ).toBeEnabled();
+    await expect(
+      form.getByRole('button', { name: 'Retry saved record refresh' }),
+    ).toHaveCount(0);
+  }
 }
 
 async function reviewStock(form: Locator, action: string) {

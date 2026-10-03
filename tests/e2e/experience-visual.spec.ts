@@ -395,24 +395,17 @@ test('configuration, site custody, and location browsing remain legible at deskt
     const siteLayout = await page.evaluate(() => {
       const heading = document.querySelector('main h1')!;
       const hero = heading.closest('header')!;
-      const management = [...document.querySelectorAll('main details')].find(
-        (element) => element.textContent?.includes('Manage site settings'),
-      )!;
       const metrics = document
         .querySelector('#activity-heading')!
         .closest('section')!
         .querySelectorAll('dl > div');
       return {
         heroPadding: Number.parseFloat(getComputedStyle(hero).paddingLeft),
-        managementPadding: Number.parseFloat(
-          getComputedStyle(management).paddingLeft,
-        ),
         firstMetric: metrics[0].getBoundingClientRect().toJSON(),
         secondMetric: metrics[1].getBoundingClientRect().toJSON(),
       };
     });
     expect(siteLayout.heroPadding).toBeGreaterThanOrEqual(20);
-    expect(siteLayout.managementPadding).toBeGreaterThanOrEqual(16);
     if (viewport.width === 390) {
       expect(siteLayout.secondMetric.y).toBeCloseTo(
         siteLayout.firstMetric.y,
@@ -425,6 +418,30 @@ test('configuration, site custody, and location browsing remain legible at deskt
     await noHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath(`site-detail-${viewport.suffix}.png`),
+      fullPage: true,
+    });
+
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Manage site \/ Archive or restore$/ })
+      .click();
+    const management = page.locator('form').filter({
+      has: page.getByRole('heading', { level: 2, name: /^Manage / }),
+    });
+    await expect(
+      management.getByRole('textbox', { name: 'Name', exact: true }),
+    ).toBeVisible();
+    await expect(
+      management.getByRole('button', { name: 'Archive site', exact: true }),
+    ).toBeVisible();
+    expect(
+      await management.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingLeft),
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`site-management-${viewport.suffix}.png`),
       fullPage: true,
     });
 

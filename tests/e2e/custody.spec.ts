@@ -373,7 +373,28 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('heading', { name: 'Manage serialized asset' }),
   ).toHaveCount(0);
   await page.goto('/settings/locations');
-  await expect(page.getByText('Location settings are read-only')).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      name: 'Manage logical locations',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
+  await page
+    .getByRole('link', {
+      name: `Fictional overflow cabinet renamed (${locationCode})`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText('This location is read-only for your account.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('textbox', { name: 'Name', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
   await noHorizontalOverflow(page);
 });
 
@@ -633,7 +654,9 @@ test('empty property archive and restore are discoverable and keep identity', as
   ).toBeVisible();
   await page.goto('/sites');
   await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
-  await page.getByLabel('Status', { exact: true }).selectOption('archived');
+  await page
+    .getByRole('combobox', { name: 'Status', exact: true })
+    .selectOption('archived');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await page.getByRole('link', { name, exact: true }).click();
   await page
