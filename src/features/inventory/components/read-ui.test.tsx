@@ -276,7 +276,7 @@ it('renders historical custody labels and quantity on the full item history page
     screen.getByText('Custody: Old closet label → Old site label'),
   ).toBeVisible();
   expect(screen.getByText('Custody quantity: 3 units')).toBeVisible();
-  expect(screen.getByText('Reference: Ticket 001')).toBeVisible();
+  expect(screen.getByText('Ticket number reference: Ticket 001')).toBeVisible();
   expect(
     screen.getByText('Custody: Old closet label → Old site label'),
   ).toHaveClass('[overflow-wrap:anywhere]');

@@ -1,4 +1,9 @@
-import { metadataDefinition, type MetadataDefinition } from './contracts';
+import { z } from 'zod';
+import {
+  metadataDefinition,
+  metadataField,
+  type MetadataDefinition,
+} from './contracts';
 
 const PREFIX = 'it-inventory:form-designer:v1:';
 const MAX_BYTES = 300_000;
@@ -16,7 +21,20 @@ export type DesignerRecovery = {
   expectedDraftId: string | null;
   expectedDraftVersion: string;
   expectedPublishedRevisionId: string;
+  addition?: PendingFieldAddition;
+  receipt?: { key: string; id: string };
+  uncertainSave?: boolean;
+  discardAfterCategoryId?: string;
 };
+export const pendingFieldAddition = z.object({
+  sectionId: z.string(),
+  field: metadataField.optional(),
+  tab: z.enum(['new', 'existing', 'standard']).optional(),
+  datetimeDraft: z
+    .object({ wall: z.string().max(100), zone: z.string().max(100) })
+    .optional(),
+});
+export type PendingFieldAddition = z.infer<typeof pendingFieldAddition>;
 
 function key(memberId: string, categoryId: string) {
   const environment = `${window.location.origin}|${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}`;
@@ -35,10 +53,25 @@ export function readDesignerRecovery(
       return { available: true, item: null };
     const entry = candidate as Partial<DesignerRecovery>;
     const definition = metadataDefinition.safeParse(entry.definition);
+    const addition =
+      entry.addition === undefined
+        ? undefined
+        : pendingFieldAddition.safeParse(entry.addition);
+    const receipt =
+      entry.receipt === undefined
+        ? undefined
+        : z.object({ key: z.string(), id: z.uuid() }).safeParse(entry.receipt);
     if (
       entry.memberId !== memberId ||
       entry.categoryId !== categoryId ||
       !definition.success ||
+      (entry.discardAfterCategoryId !== undefined &&
+        !z.uuid().safeParse(entry.discardAfterCategoryId).success) ||
+      (entry.uncertainSave !== undefined &&
+        typeof entry.uncertainSave !== 'boolean') ||
+      (entry.uncertainSave === true && (!receipt || !receipt.success)) ||
+      (addition && !addition.success) ||
+      (receipt && !receipt.success) ||
       typeof entry.savedDefinition !== 'string' ||
       (entry.expectedDraftId !== null &&
         typeof entry.expectedDraftId !== 'string') ||
@@ -80,6 +113,29 @@ export function clearDesignerRecovery(
     sessionStorage.removeItem(key(memberId, categoryId));
   } catch {
     /* Storage may be disabled. */
+  }
+}
+
+/** A successful authorized target designer mount completes an explicit discard switch. */
+export function completeDesignerNavigation(
+  memberId: string,
+  categoryId: string,
+): void {
+  try {
+    const prefix = key(memberId, '');
+    const remove: string[] = [];
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const candidate = sessionStorage.key(index);
+      if (!candidate?.startsWith(prefix)) continue;
+      const sourceCategoryId = candidate.slice(prefix.length);
+      if (sourceCategoryId === categoryId) continue;
+      const entry = readDesignerRecovery(memberId, sourceCategoryId).item;
+      if (entry?.discardAfterCategoryId === categoryId && !entry.uncertainSave)
+        remove.push(candidate);
+    }
+    for (const candidate of remove) sessionStorage.removeItem(candidate);
+  } catch {
+    /* Keep recovery when storage is unavailable. */
   }
 }
 

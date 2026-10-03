@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -16,6 +17,7 @@ import {
 } from './actions';
 import type { MetadataDefinition, MetadataForm } from './contracts';
 import { moveControl } from './designer-model';
+import { fetchCategoryForm } from './form-fetch.actions';
 import {
   clearAllDesignerRecovery,
   designerInstanceKey,
@@ -23,7 +25,9 @@ import {
   writeDesignerRecovery,
 } from './designer-recovery';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
+vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./actions', () => ({
   submitMetadataDraft: vi.fn(),
   reviewMetadataPublish: vi.fn(),
@@ -103,7 +107,11 @@ function addField(name = 'New field') {
 }
 
 describe('category form designer', () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
+    router.push.mockReset();
+    vi.mocked(fetchCategoryForm).mockReset();
+    vi.mocked(fetchCategoryForm).mockResolvedValue({ ok: true, form: null });
     clearAllDesignerRecovery();
     vi.mocked(saveMetadataForm).mockReset();
     vi.mocked(reviewMetadataPublish).mockReset();
@@ -508,7 +516,7 @@ describe('category form designer', () => {
     expect(within(inspector).getByLabelText('Field name')).toHaveValue(
       'Connector',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect section' }));
+    fireEvent.focus(screen.getByLabelText('Section heading'));
     expect(
       within(inspector).queryByLabelText('Field name'),
     ).not.toBeInTheDocument();
@@ -1028,6 +1036,403 @@ describe('category form designer', () => {
     expect(screen.getByText(/Unsaved changes/)).toBeInTheDocument();
     confirm.mockRestore();
   });
+  it('routes the designer selector without adopting an absent category payload', async () => {
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        selectedCategoryId={id(1)}
+        categories={[
+          { id: id(20), name: 'Adapters', active: true },
+          { id: id(1), name: 'Cables', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    expect(screen.getByLabelText('Category')).toHaveValue(id(1));
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith(`/settings/forms/${id(20)}`),
+    );
+    expect(fetchCategoryForm).toHaveBeenCalledWith(id(20));
+    expect(screen.getByLabelText('Category')).toHaveValue(id(1));
+    expect(saveMetadataForm).not.toHaveBeenCalled();
+  });
+  it('preserves entered edits when a selected form fails to load, then permits retry', async () => {
+    vi.mocked(fetchCategoryForm).mockResolvedValueOnce({
+      ok: false,
+      message: 'Form could not be loaded. Retry.',
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    addField('Keep this input');
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Form could not be loaded',
+      ),
+    );
+    expect(screen.getByLabelText('Field name')).toHaveValue('Keep this input');
+    expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull();
+    expect(router.push).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
+    confirm.mockRestore();
+  });
+  it('ignores an old category load after a rapid switch back to the current route', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
+    vi.mocked(fetchCategoryForm).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(1) },
+    });
+    finish({ ok: true, form: null });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Category')).toHaveValue(id(1)),
+    );
+    expect(router.push).not.toHaveBeenCalled();
+  });
+  it('keeps an earlier category load valid when a newer dirty switch is cancelled', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
+    vi.mocked(fetchCategoryForm).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const confirm = vi
+      .spyOn(window, 'confirm')
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+          { id: id(21), name: 'Computers', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    addField('Keep after cancellation');
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(21) },
+    });
+    expect(fetchCategoryForm).toHaveBeenCalledTimes(1);
+    finish({ ok: false, message: 'Adapters failed to open.' });
+    await waitFor(() =>
+      expect(
+        screen.getByText('Adapters failed to open.', {
+          selector: '[role="status"]',
+        }),
+      ).toBeInTheDocument(),
+    );
+    const link = document.createElement('a');
+    link.href = '/settings';
+    document.body.append(link);
+    // No invalidated target remains to silently block ordinary navigation.
+    expect(fireEvent.click(link)).toBe(true);
+    expect(confirm).toHaveBeenLastCalledWith(
+      expect.stringContaining('Leave this page?'),
+    );
+    link.remove();
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(21) },
+    });
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith(`/settings/forms/${id(21)}`),
+    );
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Keep after cancellation',
+    );
+    confirm.mockRestore();
+  });
+  it('freezes the reviewed outgoing editor until the target route actually mounts', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const categories = [
+      { id: id(1), name: 'Cables', active: true },
+      { id: id(20), name: 'Adapters', active: true },
+    ];
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={categories}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    addField('Reviewed input');
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText('Category')).toBeDisabled();
+    expect(screen.getByLabelText('Field name')).toBeDisabled();
+    for (const name of [
+      'Save changes',
+      'Discard unsaved edits',
+      'Undo edit',
+      'Refresh from server',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Too late' },
+    });
+    expect(screen.getByLabelText('Field name')).toHaveValue('Reviewed input');
+    const reviewed = readDesignerRecovery(id(50), id(1)).item?.definition;
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Resize Reviewed input' }),
+      { pointerId: 2, clientX: 10 },
+    );
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 500 });
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 500 });
+    expect(readDesignerRecovery(id(50), id(1)).item?.definition).toEqual(
+      reviewed,
+    );
+    expect(
+      readDesignerRecovery(id(50), id(1)).item?.discardAfterCategoryId,
+    ).toBe(id(20));
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        selectedCategoryId={id(20)}
+        categories={categories}
+        forms={{ [id(20)]: { ...form, category_id: id(20) } }}
+      />,
+    );
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
+    );
+    expect(screen.getByLabelText('Category')).toBeEnabled();
+    expect(saveMetadataForm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+  it('removes a discard marker before unlocking a route that never committed, preserving later edits on a late target mount', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    const categories = [
+      { id: id(1), name: 'Cables', active: true },
+      { id: id(20), name: 'Adapters', active: true },
+    ];
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={categories}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    addField('Original input');
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
+    const expire = timers.mock.calls
+      .filter(([, delay]) => delay === 15000)
+      .at(-1)![0];
+    expect(typeof expire).toBe('function');
+    act(() => {
+      if (typeof expire === 'function') expire();
+    });
+    expect(screen.getByLabelText('Field name')).toBeEnabled();
+    expect(
+      readDesignerRecovery(id(50), id(1)).item?.discardAfterCategoryId,
+    ).toBeUndefined();
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Fresh retained input' },
+    });
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        selectedCategoryId={id(20)}
+        categories={categories}
+        forms={{ [id(20)]: { ...form, category_id: id(20) } }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Category')).toHaveValue(id(20)),
+    );
+    expect(
+      readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
+    ).toBe('Fresh retained input');
+    cleanup();
+    mount();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Recover edits' }),
+      ).toBeVisible(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Fresh retained input',
+    );
+    timers.mockRestore();
+    confirm.mockRestore();
+  });
+  it('keeps the outgoing editor frozen when storage cannot remove a timed-out discard marker', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    addField('Protected reviewed input');
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
+    const expire = timers.mock.calls
+      .filter(([, delay]) => delay === 15000)
+      .at(-1)![0];
+    const write = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('storage blocked');
+      });
+    const remove = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(() => {
+        throw new Error('storage blocked');
+      });
+    act(() => {
+      if (typeof expire === 'function') expire();
+    });
+    expect(
+      screen.getByText(/editing is paused to protect the reviewed draft/, {
+        selector: '[role="status"]',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Field name')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Unsafe edit' },
+    });
+    expect(screen.getByLabelText('Field name')).toHaveValue(
+      'Protected reviewed input',
+    );
+    expect(
+      readDesignerRecovery(id(50), id(1)).item?.discardAfterCategoryId,
+    ).toBe(id(20));
+    write.mockRestore();
+    remove.mockRestore();
+    timers.mockRestore();
+    confirm.mockRestore();
+  });
+  it('treats a pending field addition as unsaved and recovers it only in its original context', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    fireEvent.change(
+      within(screen.getByRole('dialog')).getByLabelText('Field name'),
+      { target: { value: 'Unadded field' } },
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      'Discard unsaved edits and switch category?',
+    );
+    expect(router.push).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        readDesignerRecovery(id(50), id(1)).item?.addition?.field?.label,
+      ).toBe('Unadded field'),
+    );
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        selectedCategoryId={id(20)}
+        categories={[{ id: id(20), name: 'Adapters', active: true }]}
+        forms={{ [id(20)]: { ...form, category_id: id(20) } }}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('region', { name: 'Recover unsaved form edits' }),
+      ).not.toBeInTheDocument(),
+    );
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Recover edits' }),
+      ).toBeVisible(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
+    expect(
+      within(screen.getByRole('dialog')).getByLabelText('Field name'),
+    ).toHaveValue('Unadded field');
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: /^Cancel$/,
+      }),
+    );
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
+    );
+    confirm.mockRestore();
+  });
   it('locks the category during an in-flight draft save and binds its response to the original category', async () => {
     let finish!: (result: Awaited<ReturnType<typeof saveMetadataForm>>) => void;
     vi.mocked(saveMetadataForm).mockImplementation(
@@ -1057,15 +1462,156 @@ describe('category form designer', () => {
     expect(category).toHaveValue(id(1));
     finish({ ok: true, data: { version: '1', draft_id: id(11) } });
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Saved active form revision 1',
-      ),
+      expect(screen.getByText('Saved active form revision 1.')).toBeVisible(),
     );
     expect(category).toHaveValue(id(1));
     expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(
       vi.mocked(saveMetadataForm).mock.calls[0][0].payload.category_id,
     ).toBe(id(1));
+  });
+  it('retains the same request after an uncertain save and recovery re-entry', async () => {
+    vi.mocked(saveMetadataForm).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    mount();
+    addField('Uncertain field');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/save outcome could not be confirmed/),
+      ).toBeVisible(),
+    );
+    const original = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item?.receipt?.id).toBe(
+        original.requestId,
+      ),
+    );
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(50)}
+        categories={[
+          { id: id(1), name: 'Cables', active: true },
+          { id: id(20), name: 'Adapters', active: true },
+        ]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Recover edits' }),
+      ).toBeVisible(),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Discard recovered edits' }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText('Category')).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Discard recovered edits' }),
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: id(20) },
+    });
+    expect(readDesignerRecovery(id(50), id(1)).item?.receipt?.id).toBe(
+      original.requestId,
+    );
+    expect(fetchCategoryForm).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+    const link = document.createElement('a');
+    link.href = '/settings';
+    document.body.append(link);
+    expect(fireEvent.click(link)).toBe(false);
+    link.remove();
+    fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: false,
+      code: 'unexpected',
+      message: 'Still uncertain.',
+    });
+    expect(screen.getByLabelText('Field name')).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Discard unsaved edits' }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(original);
+  });
+  it('ignores a successful old save after leaving its category and preserves its retry receipt', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof saveMetadataForm>>) => void;
+    vi.mocked(saveMetadataForm).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    mount();
+    addField('Old context');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(readDesignerRecovery(id(50), id(1)).item?.receipt).toBeDefined(),
+    );
+    cleanup();
+    finish({ ok: true, data: { version: '2', published_revision_id: id(22) } });
+    await Promise.resolve();
+    expect(readDesignerRecovery(id(50), id(1)).item?.receipt).toBeDefined();
+    expect(
+      readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
+    ).toBe('Old context');
+  });
+  it('replays an uncertain confirmed save including its review token after category re-entry', async () => {
+    const definition = structuredClone(form.published_definition);
+    definition.layout[0].label = 'Reviewed layout';
+    const payload = {
+      expected_actor_id: id(50),
+      category_id: id(1),
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: id(2),
+      definition,
+      review_token: id(80),
+    };
+    writeDesignerRecovery({
+      memberId: id(50),
+      categoryId: id(1),
+      definition,
+      savedDefinition: JSON.stringify(form.published_definition),
+      expectedDraftId: null,
+      expectedDraftVersion: '0',
+      expectedPublishedRevisionId: id(2),
+      uncertainSave: true,
+      receipt: {
+        key: JSON.stringify(['metadata_form_save', payload]),
+        id: id(81),
+      },
+    });
+    mount();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Recover edits' }),
+      ).toBeVisible(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Recover edits' }));
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: false,
+      code: 'P1017',
+      message: 'Review expired.',
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledOnce());
+    expect(saveMetadataForm).toHaveBeenCalledWith({
+      requestId: id(81),
+      expectedActorId: id(50),
+      payload,
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Section heading')).not.toBeDisabled(),
+    );
   });
   it('offers explicit recovery after re-entry while retaining the original draft baseline', async () => {
     mount();

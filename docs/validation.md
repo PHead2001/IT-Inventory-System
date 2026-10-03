@@ -115,3 +115,18 @@ Focused tests check the Vercel-only explicit opt-in, exact route and URL allowli
 ## Configuration acceptance
 
 `npm run validate:db` now runs `tests/integration/configuration.ts` after pgTAP and the existing integration suites. The configuration suite uses real authenticated Data API clients and independent PostgreSQL connections to test maintainer-only writes, member reads, direct-write denial and no self-escalation; normalized receipts and decimal-string versions; current category labels in exports; archived/retired reassignment; historical-only inventory references requiring a replacement and retained tombstone; hard deletion of truly unused categories, including the last active category; exact impact staleness after a new reference or version change; no partial update after a later-row failure; shared/exclusive catalog races; and fresh isolation rejection with completed replay. It checks that category reassignment adds metadata events without stock lines. Browser acceptance covers phone-width Settings forms, impact review/cancel/confirm, empty-catalog guidance, viewer controls and shared defaults on Print labels. A delayed Data API call must establish that PostgREST hoists the five-second RPC timeout before execution; checking only `pg_proc.proconfig` is insufficient.
+
+## Navigation management proof
+
+`supabase/tests/navigation_management.test.sql` verifies maintainer-only name edits,
+legacy structural RPC privilege denial, strict narrow payloads, stale/no-op/replay
+semantics, unchanged structural fields/stock/history, rollback on audit failure,
+reasoned site lifecycle, legacy metadata compatibility and authorization before old
+receipt replay. The canonical custody integration suite adds independent PostgreSQL
+connections for duplicate rename serialization and both orderings of site archive
+versus quantity issue and serialized transfer. These tests require the real local
+Supabase stack; source and component checks alone do not establish the DB boundary.
+The custody browser suite uses loopback-only trusted storage fixtures and checks
+name-only controls, stable QR/location identity, blocked archive, and discoverable
+empty-site archive/restore. Generated database types must be regenerated from the
+applied migration and checked through the existing database gate.

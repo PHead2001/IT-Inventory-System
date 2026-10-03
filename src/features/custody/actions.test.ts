@@ -87,3 +87,29 @@ describe('custody action actor consistency', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });
+
+it('gives legacy lifecycle callers an actionable reasoned-action upgrade', async () => {
+  mocks.rpc.mockResolvedValue({
+    data: null,
+    error: { code: 'P1012', message: 'use_site_lifecycle' },
+  });
+  expect(
+    await submitCustody({
+      operation: 'site_update',
+      requestId,
+      expectedActorId: actor,
+      payload: {
+        site_id: other,
+        expected_version: '1',
+        name: 'Property',
+        notes: null,
+        active: false,
+      },
+    }),
+  ).toMatchObject({
+    ok: false,
+    code: 'P1012',
+    message:
+      'Use Archive site or Restore site to change site availability and record a reason.',
+  });
+});

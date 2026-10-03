@@ -14,7 +14,8 @@ export default async function SitesPage({
   const query = (params.q ?? '').trim().toLocaleLowerCase().slice(0, 100);
   const rows = sites.filter(
     (site) =>
-      (params.status === 'all' || site.active) &&
+      (params.status === 'all' ||
+        (params.status === 'archived' ? !site.active : site.active)) &&
       (!query ||
         `${site.name} ${site.code} ${site.notes ?? ''}`
           .toLocaleLowerCase()
@@ -50,10 +51,15 @@ export default async function SitesPage({
           Status
           <select
             name="status"
-            defaultValue={params.status === 'all' ? 'all' : 'active'}
+            defaultValue={
+              params.status === 'all' || params.status === 'archived'
+                ? params.status
+                : 'active'
+            }
             className={field}
           >
             <option value="active">Active</option>
+            <option value="archived">Archived</option>
             <option value="all">All, including archived</option>
           </select>
         </label>

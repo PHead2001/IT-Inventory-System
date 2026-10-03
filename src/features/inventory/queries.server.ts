@@ -75,8 +75,8 @@ function requireData<T>(data: T | null, error: unknown, message: string): T {
   if (error || data === null) throw new Error(message);
   return data;
 }
-export async function getLocations() {
-  const { supabase } = await requireMember();
+type MemberContext = Awaited<ReturnType<typeof requireMember>>;
+async function readLocations({ supabase }: MemberContext) {
   const { data, error } = await supabase
     .from('inventory_locations')
     .select(
@@ -93,6 +93,23 @@ export async function getLocations() {
     ...location,
     spaceRootCode: containingSpace(locations, location.code)?.rootCode ?? null,
   }));
+}
+export async function getLocations() {
+  return readLocations(await requireMember());
+}
+
+/** A handler-local read scope. React's render cache does not coalesce calls in
+ * Route Handlers. Every scope authenticates anew; nothing survives its caller. */
+export async function createInventoryReadScope() {
+  const context = await requireMember();
+  let locations: ReturnType<typeof readLocations> | undefined;
+  const getScopedLocations = () => (locations ??= readLocations(context));
+  return {
+    member: context.member,
+    getLocations: getScopedLocations,
+    getInventory: (input: Record<string, string | undefined> = {}) =>
+      readInventory(context, input, getScopedLocations),
+  };
 }
 export async function getLocation(code: string) {
   const locations = await getLocations();
@@ -112,7 +129,13 @@ export async function getCategories(): Promise<CategoryRef[]> {
 export async function getInventory(
   input: Record<string, string | undefined> = {},
 ): Promise<PageResult<InventoryResult>> {
-  const { supabase } = await requireMember();
+  return readInventory(await requireMember(), input, getLocations);
+}
+async function readInventory(
+  { supabase }: MemberContext,
+  input: Record<string, string | undefined>,
+  locationRead: () => ReturnType<typeof readLocations>,
+): Promise<PageResult<InventoryResult>> {
   const filter = readFilters(input);
   const [{ data, error }, locations] = await Promise.all([
     supabase.rpc('inventory_search_v3', {
@@ -126,7 +149,7 @@ export async function getInventory(
       p_page_size: pageSize,
       p_low_stock: filter.lowStock,
     }),
-    getLocations(),
+    locationRead(),
   ]);
   const result = searchPage.parse(
     requireData(data, error, 'Inventory could not be loaded.'),

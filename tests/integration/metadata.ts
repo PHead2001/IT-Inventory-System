@@ -5,6 +5,13 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
 
+import {
+  initialCore,
+  initialCustom,
+  reconcileMetadata,
+  type RecordMetadata,
+} from '../../src/features/metadata/reconciliation';
+import { metadataDefinition } from '../../src/features/metadata/contracts';
 function local(value: string | undefined, port: number) {
   assert.ok(value);
   const url = new URL(value);
@@ -241,6 +248,249 @@ async function observeRowWait(holderPid: number, description: string) {
     await delay(25);
   }
   assert.fail(`${description}: expected a real independent row-lock waiter`);
+}
+
+async function reconciliationCasProof(
+  maintainer: { id: string; client: SupabaseClient },
+  staff: { id: string; client: SupabaseClient },
+) {
+  const categoryId = await category(maintainer.client, 'Three-way save');
+  const flag = uid(),
+    note = uid();
+  const definition = metadataDefinition.parse({
+    fields: [
+      {
+        id: flag,
+        type: 'boolean',
+        label: 'Inspected',
+        applies_to: ['quantity'],
+        required: false,
+        rules: {},
+        options: [],
+      },
+      {
+        id: note,
+        type: 'short_text',
+        label: 'Note',
+        applies_to: ['quantity'],
+        required: false,
+        rules: {},
+        options: [],
+      },
+    ],
+    layout: [
+      {
+        id: uid(),
+        label: 'Details',
+        controls: [
+          { id: uid(), kind: 'builtin', builtin: 'name', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'category_id', width: 12 },
+          { id: uid(), kind: 'builtin', builtin: 'asset_tag', width: 6 },
+          { id: uid(), kind: 'field', field_id: flag, width: 12 },
+          { id: uid(), kind: 'field', field_id: note, width: 12 },
+        ],
+      },
+    ],
+  });
+  await save(maintainer.client, categoryId, '0', definition);
+  const revision = (await publish(maintainer.client, categoryId))
+    .published_revision_id as string;
+  const created = await success(staff.client, 'quantity_create_v2', {
+    name: 'Reconciliation cable',
+    category_id: categoryId,
+    initial_quantity: 0,
+    initial_location_id: null,
+    expected_published_revision_id: revision,
+    custom_patch: { set: { [flag]: false, [note]: '' }, unset: [] },
+  });
+  const id = created.entity_id as string;
+  const read = async (): Promise<RecordMetadata> => {
+    const { data, error } = await staff.client
+      .from('quantity_items')
+      .select('*')
+      .eq('id', id)
+      .single();
+    assert.equal(error, null);
+    assert.ok(data);
+    return {
+      id: data.id,
+      name: data.name,
+      description: data.description,
+      categoryId: data.category_id,
+      categoryName: 'Reconciliation category',
+      manufacturer: data.manufacturer,
+      model: data.model,
+      version: data.version,
+      archived: data.archived,
+      itemCode: data.item_code,
+      reorderThreshold: data.reorder_threshold,
+      customValues: data.custom_values as RecordMetadata['customValues'],
+    };
+  };
+  const payload = (
+    record: RecordMetadata,
+    values = initialCore(record, []),
+    patch = { set: {} as Record<string, unknown>, unset: [] as string[] },
+  ) => ({
+    item_id: id,
+    expected_version: record.version,
+    expected_published_revision_id: revision,
+    name: values.name,
+    category_id: values.category_id,
+    description: values.description || null,
+    manufacturer: values.manufacturer || null,
+    model: values.model || null,
+    item_code: values.item_code || null,
+    custom_patch: patch,
+  });
+  const baseline = await read();
+  const mine = { ...initialCore(baseline, []), name: 'My cable' };
+  const answers = initialCustom(baseline.customValues);
+  delete answers[note]; // Explicit clear differs from the stored empty string.
+  const holder = new Client({
+    connectionString: db,
+    application_name: 'metadata-reconciliation-cas',
+  });
+  await holder.connect();
+  try {
+    await holder.query('begin');
+    const pid = (await holder.query('select pg_backend_pid() pid')).rows[0]
+      .pid as number;
+    await holder.query('set local role authenticated');
+    await holder.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+    ]);
+    await holder.query('select public.quantity_update_v2($1,$2::jsonb)', [
+      uid(),
+      JSON.stringify(
+        payload(
+          baseline,
+          { ...initialCore(baseline, []), manufacturer: 'Concurrent maker' },
+          { set: { [flag]: true }, unset: [] },
+        ),
+      ),
+    ]);
+    const pendingStale = rpc(
+      staff.client,
+      'quantity_update_v2',
+      payload(baseline, mine, { set: {}, unset: [note] }),
+    );
+    await observeRowWait(
+      pid,
+      'metadata reconciliation CAS stale full-object writer',
+    );
+    await holder.query('commit');
+    assert.equal((await pendingStale).error?.code, 'P1002');
+  } finally {
+    await holder.query('rollback').catch(() => undefined);
+    await holder.end();
+  }
+  const latest = await read();
+  const merged = reconcileMetadata(baseline, mine, answers, latest, definition);
+  assert.deepEqual(merged.conflicts, []);
+  assert.equal(merged.core.manufacturer, 'Concurrent maker');
+  assert.equal(merged.custom[flag], true);
+  assert.deepEqual(merged.touched, [note]);
+  const patch = {
+    set: Object.fromEntries(
+      merged.touched
+        .filter((key) => Object.hasOwn(merged.custom, key))
+        .map((key) => [key, merged.custom[key]]),
+    ),
+    unset: merged.touched.filter((key) => !Object.hasOwn(merged.custom, key)),
+  };
+  const revised = payload(latest, merged.core, patch),
+    requestId = uid();
+  const saved = await success(
+    staff.client,
+    'quantity_update_v2',
+    revised,
+    requestId,
+  );
+  const canonical = await read();
+  assert.equal(canonical.name, 'My cable');
+  assert.equal(canonical.manufacturer, 'Concurrent maker');
+  assert.equal(canonical.customValues?.[flag]?.value, true);
+  assert.equal(Object.hasOwn(canonical.customValues ?? {}, note), false);
+  assert.equal(canonical.version, 3);
+  const anotherWriter = await success(
+    staff.client,
+    'quantity_update_v2',
+    payload(canonical, {
+      ...initialCore(canonical, []),
+      name: 'New overlapping name',
+    }),
+  );
+  assert.equal(anotherWriter.version, 4);
+  // Simulated lost response: exact receipt replay succeeds after a later real write,
+  // and authorization still precedes receipt lookup.
+  assert.deepEqual(
+    await success(staff.client, 'quantity_update_v2', revised, requestId),
+    saved,
+  );
+  assert.equal((await read()).version, 4);
+  await owner.query(
+    'update public.app_members set active=false where user_id=$1',
+    [staff.id],
+  );
+  try {
+    const replay = await rpc(
+      staff.client,
+      'quantity_update_v2',
+      revised,
+      requestId,
+    );
+    assert.equal(replay.error?.code, 'P1001');
+  } finally {
+    await owner.query(
+      'update public.app_members set active=true where user_id=$1',
+      [staff.id],
+    );
+  }
+  await failure(
+    staff.client,
+    'quantity_update_v2',
+    payload(canonical, {
+      ...initialCore(canonical, []),
+      name: 'My second edit',
+    }),
+    'P1002',
+  );
+  const overlapLatest = await read();
+  const overlap = reconcileMetadata(
+    canonical,
+    { ...initialCore(canonical, []), name: 'My second edit' },
+    initialCustom(canonical.customValues),
+    overlapLatest,
+    definition,
+  );
+  assert.deepEqual(
+    overlap.conflicts.map((conflict) => conflict.key),
+    ['name'],
+  );
+  const resolved = reconcileMetadata(
+    canonical,
+    { ...initialCore(canonical, []), name: 'My second edit' },
+    initialCustom(canonical.customValues),
+    overlapLatest,
+    definition,
+    { name: 'mine' },
+  );
+  await success(
+    staff.client,
+    'quantity_update_v2',
+    payload(overlapLatest, resolved.core),
+  );
+  assert.equal((await read()).name, 'My second edit');
+  const events = await owner.query(
+    'select count(*)::int n from public.quantity_events where item_id=$1',
+    [id],
+  );
+  assert.equal(
+    events.rows[0].n,
+    5,
+    'CAS failures and duplicate receipt replay create no history',
+  );
 }
 
 async function main() {
@@ -3158,8 +3408,9 @@ async function main() {
     await snapshotReader.end();
     await snapshotWriter.end();
   }
+  await reconciliationCasProof(maintainer, staff);
   console.log(
-    'Published metadata authorization, draft validation, value evolution, ABA baselines, item create/update and category removal/publication races, stable export snapshot, isolation, REST timeout and bounded export checks passed.',
+    'Published metadata reconciliation CAS, authorization, draft validation, value evolution, ABA baselines, item create/update and category removal/publication races, stable export snapshot, isolation, REST timeout and bounded export checks passed.',
   );
 }
 main()

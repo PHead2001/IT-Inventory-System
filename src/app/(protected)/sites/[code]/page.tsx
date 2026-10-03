@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
-import { getSite, getSiteDetail } from '@/features/custody/queries.server';
+import {
+  getSite,
+  getSiteDetail,
+  getSiteArchiveReview,
+} from '@/features/custody/queries.server';
 import {
   field,
   panel,
@@ -28,7 +32,12 @@ export default async function SitePage({
   const site = await getSite(code);
   if (!site) notFound();
   const filters = await searchParams;
-  const detail = await getSiteDetail(site.id, filters);
+  const [detail, archiveReview] = await Promise.all([
+    getSiteDetail(site.id, filters),
+    member.role === 'staff' && member.can_manage_configuration
+      ? getSiteArchiveReview(site.id)
+      : Promise.resolve({ holdings: [], total: 0 }),
+  ]);
   return (
     <>
       <Link
@@ -124,7 +133,7 @@ export default async function SitePage({
           </p>
         )}
       </section>
-      <section aria-labelledby="holdings-heading">
+      <section id="site-holdings" aria-labelledby="holdings-heading">
         <h2 id="holdings-heading" className="mb-3 text-xl font-semibold">
           Current holdings
         </h2>
@@ -325,7 +334,7 @@ export default async function SitePage({
                 )}
                 {event.reference && (
                   <p className="mt-1 break-all text-sm">
-                    Reference: {event.reference}
+                    Ticket number reference: {event.reference}
                   </p>
                 )}
                 <Link
@@ -349,12 +358,15 @@ export default async function SitePage({
       {member.role === 'staff' && member.can_manage_configuration && (
         <details className="experience-surface my-8 p-4">
           <summary className="min-h-11 cursor-pointer py-2 font-medium text-cyan-200">
-            Manage site settings
+            Manage site / Archive or restore
           </summary>
           <div className="mt-4">
             <SiteManagementForm
-              key={`${site.id}:${site.version}`}
+              key={`${member.user_id}:${site.id}`}
+              actorId={member.user_id}
               site={site}
+              holdings={archiveReview.holdings}
+              holdingTotal={archiveReview.total}
             />
           </div>
         </details>

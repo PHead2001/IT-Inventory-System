@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { setLocalReducedMotion } from './motion-settings';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -132,19 +133,12 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   await page.screenshot({
     path: testInfo.outputPath('overview-phone-390-viewport.png'),
   });
-  const motionToggle = page.getByRole('button', {
-    name: 'Reduce motion locally',
-  });
-  await expect(motionToggle).toBeVisible();
-  const motionBounds = await motionToggle.boundingBox();
-  const headingBounds = await page
-    .getByRole('heading', { name: 'Low-stock overview' })
-    .boundingBox();
-  expect(motionBounds).not.toBeNull();
-  expect(headingBounds).not.toBeNull();
-  expect(motionBounds!.y + motionBounds!.height).toBeLessThanOrEqual(
-    headingBounds!.y,
-  );
+  await expect(
+    page.getByRole('button', { name: 'Reduce motion locally' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Low-stock overview' }),
+  ).toBeVisible();
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   await menu.focus();
   await page.keyboard.press('Enter');
@@ -209,18 +203,14 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('asset-detail-edit-open-phone-390.png'),
     fullPage: true,
   });
-  const motion = page.getByRole('button', { name: 'Reduce motion locally' });
   await expect(
     page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
   ).resolves.toBe(true);
-  await motion.click();
-  await expect(
-    page.getByRole('button', { name: 'Use system motion setting' }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await setLocalReducedMotion(page, true);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await page.getByRole('button', { name: 'Use system motion setting' }).click();
+  await setLocalReducedMotion(page, false);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
@@ -301,6 +291,7 @@ test('the first styled paint is reduced before hydration and the saved preferenc
         'data-motion',
         saved ? 'reduced' : 'full',
       );
+      await probe.goto('/settings');
       await expect(
         probe.getByRole('button', {
           name: saved ? 'Use system motion setting' : 'Reduce motion locally',
@@ -316,7 +307,7 @@ test('the first styled paint is reduced before hydration and the saved preferenc
   await inspect(false);
 });
 
-test('desktop navigation and motion control stay separate and operable after long-page scrolling', async ({
+test('desktop navigation reaches personal motion Settings after long-page scrolling', async ({
   page,
 }) => {
   await signIn(page);
@@ -331,16 +322,17 @@ test('desktop navigation and motion control stay separate and operable after lon
     const settings = page
       .getByRole('navigation', { name: 'Main navigation' })
       .getByRole('link', { name: 'Settings' });
-    const toggle = page.getByRole('button', {
-      name: 'Reduce motion locally',
-    });
     const settingsBox = await settings.boundingBox();
-    const toggleBox = await toggle.boundingBox();
     expect(settingsBox).toBeTruthy();
+    await expect(
+      page.getByRole('button', { name: 'Reduce motion locally' }),
+    ).toHaveCount(0);
+    await settings.click();
+    await expect(page).toHaveURL(/\/settings$/);
+    const toggle = page.getByRole('button', { name: 'Reduce motion locally' });
+    await toggle.scrollIntoViewIfNeeded();
+    const toggleBox = await toggle.boundingBox();
     expect(toggleBox).toBeTruthy();
-    expect(toggleBox!.y).toBeGreaterThanOrEqual(
-      settingsBox!.y + settingsBox!.height,
-    );
     expect(toggleBox!.y + toggleBox!.height).toBeLessThanOrEqual(height);
     expect(
       await toggle.evaluate((button) => {
@@ -355,8 +347,6 @@ test('desktop navigation and motion control stay separate and operable after lon
     ).toBe(true);
     await toggle.focus();
     await expect(toggle).toBeFocused();
-    await settings.click();
-    await expect(page).toHaveURL(/\/settings$/);
   }
 });
 

@@ -1,8 +1,6 @@
 'use client';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
-import QRCode from 'qrcode';
-import JsBarcode from 'jsbarcode';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { barcodeCompatibleTag } from '@/features/scan/targets';
@@ -12,15 +10,19 @@ function qrImage(url: string): Promise<string> {
   const cached = qrCache.get(url);
   if (cached) return cached;
   if (qrCache.size >= 500) qrCache.clear();
-  const rendered = QRCode.toDataURL(url, {
-    errorCorrectionLevel: 'M',
-    margin: 4,
-    width: 320,
-    color: { dark: '#000000', light: '#ffffff' },
-  }).catch((error: unknown) => {
-    qrCache.delete(url);
-    throw error;
-  });
+  const rendered = import('qrcode')
+    .then(({ default: QRCode }) =>
+      QRCode.toDataURL(url, {
+        errorCorrectionLevel: 'M',
+        margin: 4,
+        width: 320,
+        color: { dark: '#000000', light: '#ffffff' },
+      }),
+    )
+    .catch((error: unknown) => {
+      qrCache.delete(url);
+      throw error;
+    });
   qrCache.set(url, rendered);
   return rendered;
 }
@@ -218,35 +220,44 @@ function LabelCard({
   useEffect(() => {
     const element = svg.current;
     if (!element || !payload || format !== 'code128') return;
-    try {
-      JsBarcode(element, payload, {
-        format: 'CODE128',
-        displayValue: false,
-        width: 1,
-        height: 80,
-        margin: 0,
-        marginLeft: 10,
-        marginRight: 10,
-        lineColor: '#000000',
-        background: '#ffffff',
+    let current = true;
+    void import('jsbarcode')
+      .then(({ default: JsBarcode }) => {
+        if (!current) return;
+        JsBarcode(element, payload, {
+          format: 'CODE128',
+          displayValue: false,
+          width: 1,
+          height: 80,
+          margin: 0,
+          marginLeft: 10,
+          marginRight: 10,
+          lineColor: '#000000',
+          background: '#ffffff',
+        });
+        // JsBarcode creates pixel-sized paths without a viewBox. Scale those paths,
+        // including the ten-module quiet zones, to the declared physical size.
+        const modules = Number.parseFloat(element.getAttribute('width') ?? '');
+        const svgHeight = Number.parseFloat(
+          element.getAttribute('height') ?? '',
+        );
+        if (!Number.isFinite(modules) || !Number.isFinite(svgHeight))
+          throw new Error('Invalid barcode dimensions');
+        element.setAttribute('viewBox', `0 0 ${modules} ${svgHeight}`);
+        element.setAttribute('preserveAspectRatio', 'none');
+        // Each horizontal SVG unit renders at 0.3 mm; never shrink modules to fit.
+        const physicalWidth = modules * 0.3;
+        setBarcodeResult({
+          key: barcodeKey,
+          width: physicalWidth <= width - 8 ? physicalWidth : null,
+        });
+      })
+      .catch(() => {
+        if (current) setBarcodeResult({ key: barcodeKey, width: null });
       });
-      // JsBarcode creates pixel-sized paths without a viewBox. Scale those paths,
-      // including the ten-module quiet zones, to the declared physical size.
-      const modules = Number.parseFloat(element.getAttribute('width') ?? '');
-      const svgHeight = Number.parseFloat(element.getAttribute('height') ?? '');
-      if (!Number.isFinite(modules) || !Number.isFinite(svgHeight))
-        throw new Error('Invalid barcode dimensions');
-      element.setAttribute('viewBox', `0 0 ${modules} ${svgHeight}`);
-      element.setAttribute('preserveAspectRatio', 'none');
-      // Each horizontal SVG unit renders at 0.3 mm; never shrink modules to fit.
-      const physicalWidth = modules * 0.3;
-      setBarcodeResult({
-        key: barcodeKey,
-        width: physicalWidth <= width - 8 ? physicalWidth : null,
-      });
-    } catch {
-      setBarcodeResult({ key: barcodeKey, width: null });
-    }
+    return () => {
+      current = false;
+    };
   }, [payload, format, width, barcodeKey]);
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
   const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);

@@ -135,6 +135,22 @@ export async function getManagedLocations(): Promise<ManagedLocation[]> {
   if (error) throw new Error('Location configuration could not be loaded.');
   return z.array(location).parse(data);
 }
+export async function getSiteArchiveReview(siteId: string) {
+  if (!id.safeParse(siteId).success) throw new Error('Invalid site.');
+  const { supabase } = await requireMember();
+  const { data, error, count } = await supabase
+    .from('site_current_holdings')
+    .select(
+      'site_id,site_code,site_name,site_active,inventory_kind,entity_id,name,category_name,manufacturer,model,quantity,asset_tag,serial_number',
+      { count: 'exact' },
+    )
+    .eq('site_id', siteId)
+    .order('name')
+    .order('entity_id')
+    .range(0, 24);
+  if (error) throw new Error('Site holdings could not be loaded.');
+  return { holdings: z.array(holding).parse(data), total: count ?? 0 };
+}
 export async function getSiteDetail(
   siteId: string,
   input: {

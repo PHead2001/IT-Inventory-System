@@ -90,13 +90,33 @@
 }
 
 .addDialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(70rem, calc(100vw - 2rem));
+  height: fit-content;
   max-height: calc(100dvh - 2rem);
   overflow: auto;
   color: #e2e8f0;
   background: #0f172a;
   border: 1px solid #22d3ee;
   border-radius: 0.8rem;
+}
+.addDialogHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 1rem;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+}
+.addDialogFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 1rem;
+  background: #0f172a;
+  border-top: 1px solid #334155;
 }
 .addDialog::backdrop {
   background: rgb(2 6 23 / 75%);

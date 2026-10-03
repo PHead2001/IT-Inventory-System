@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { fieldTypes, type MetadataDefinition } from './contracts';
 import {
@@ -18,29 +18,45 @@ import { controlKinds, intrinsicKinds } from './effective-controls';
 import { FieldSettings, makeField } from './field-settings';
 import { MetadataFieldInput } from './field-value-input';
 import styles from './designer.module.css';
+import type { PendingFieldAddition } from './designer-recovery';
+import type { DateTimeDraft } from './field-value-input';
 
 export function AddFieldDialog({
   definition,
   sectionId,
   initialField,
+  initialTab = 'new',
+  onDraftChange,
+  initialDateTimeDraft,
   onCancel,
   onAdd,
   onChange,
   onGo,
+  onRestoreFocus,
 }: {
   definition: MetadataDefinition;
   sectionId: string;
   initialField?: Field;
+  initialTab?: 'new' | 'existing' | 'standard';
+  onDraftChange?: (draft: PendingFieldAddition) => void;
+  initialDateTimeDraft?: DateTimeDraft;
   onCancel: () => void;
   onAdd: (field: Field, sectionId: string) => void;
   onChange: (definition: MetadataDefinition) => void;
   onGo: (controlId: string, next?: MetadataDefinition) => void;
+  onRestoreFocus?: () => void;
 }) {
-  const [tab, setTab] = useState<'new' | 'existing' | 'standard'>('new');
+  const [tab, setTab] = useState<'new' | 'existing' | 'standard'>(initialTab);
   const [field, setField] = useState(
     () => initialField ?? makeField('short_text'),
   );
   const [submitted, setSubmitted] = useState(false);
+  const [datetimeDraft, setDatetimeDraft] = useState(initialDateTimeDraft);
+  const stageDatetime = useCallback((next: DateTimeDraft) => {
+    setDatetimeDraft((prior) =>
+      prior?.wall === next.wall && prior.zone === next.zone ? prior : next,
+    );
+  }, []);
   const [inputError, setInputError] = useState('');
   const prefix = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -50,12 +66,23 @@ export function AddFieldDialog({
   const [destination, setDestination] = useState(sectionId);
   const section = definition.layout.find((item) => item.id === destination);
   useEffect(() => {
+    onDraftChange?.({
+      sectionId: destination,
+      field,
+      tab,
+      ...(datetimeDraft && field.type === 'datetime' ? { datetimeDraft } : {}),
+    });
+  }, [destination, field, tab, datetimeDraft, onDraftChange]);
+  useEffect(() => {
     const element = dialog.current;
     if (element?.showModal) element.showModal();
     else element?.setAttribute('open', '');
     element?.querySelector<HTMLInputElement>('input')?.focus();
-    return () => focusBefore?.focus();
-  }, [focusBefore]);
+    return () => {
+      if (focusBefore?.isConnected) focusBefore.focus();
+      else onRestoreFocus?.();
+    };
+  }, [focusBefore, onRestoreFocus]);
   const restriction = additionRestriction(section, field.applies_to);
   const validation = designerIssues({
     fields: [{ ...field, required: false }],
@@ -214,15 +241,15 @@ export function AddFieldDialog({
         }
       }}
     >
+      <div className={`${styles.addDialogHeader} flex justify-between gap-3`}>
+        <h3 id={`${prefix}-title`} className="text-lg font-semibold">
+          Add field
+        </h3>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
       <div className="space-y-4 p-4">
-        <div className="flex justify-between gap-3">
-          <h3 id={`${prefix}-title`} className="text-lg font-semibold">
-            Add field
-          </h3>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
         <label className="block text-sm">
           Add to section
           <select
@@ -280,6 +307,7 @@ export function AddFieldDialog({
                   onClick={() => {
                     if (type !== field.type) {
                       setInputError('');
+                      setDatetimeDraft(undefined);
                       setField({
                         ...makeField(type),
                         id: field.id,
@@ -308,6 +336,8 @@ export function AddFieldDialog({
                 showTypeChooser={false}
                 change={setField}
                 onValidityChange={setInputError}
+                initialDateTimeDraft={initialDateTimeDraft}
+                onDateTimeDraftChange={stageDatetime}
                 basics={
                   <label className="block text-sm">
                     Show on
@@ -356,17 +386,6 @@ export function AddFieldDialog({
             {restriction && (
               <p className="text-sm text-amber-200">{restriction}</p>
             )}
-            <Button
-              type="button"
-              onClick={() => {
-                setSubmitted(true);
-                if (!issues.length && definition.fields.length < 100)
-                  onAdd({ ...field, label: field.label.trim() }, destination);
-              }}
-              disabled={definition.fields.length >= 100}
-            >
-              Add to form
-            </Button>
             {definition.fields.length >= 100 && (
               <p role="alert">
                 This form already has the maximum 100 custom fields.
@@ -409,6 +428,24 @@ export function AddFieldDialog({
           </div>
         )}
       </div>
+      {tab === 'new' && (
+        <div className={`${styles.addDialogFooter} flex justify-end gap-3`}>
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel field addition
+          </Button>
+          <Button
+            type="button"
+            disabled={definition.fields.length >= 100}
+            onClick={() => {
+              setSubmitted(true);
+              if (!issues.length && definition.fields.length < 100)
+                onAdd({ ...field, label: field.label.trim() }, destination);
+            }}
+          >
+            Add to form
+          </Button>
+        </div>
+      )}
     </dialog>
   );
 }

@@ -9,6 +9,7 @@ import {
 } from '@zxing/library';
 import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { setLocalReducedMotion } from './motion-settings';
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -853,7 +854,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
     await viewer.getAttribute('data-focus-count'),
   );
   await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.getByRole('button', { name: 'Reduce motion locally' }).click();
+  await setLocalReducedMotion(page, true);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await expect
     .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
@@ -866,7 +867,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).toBe(settled);
 
-  await page.getByRole('button', { name: 'Use system motion setting' }).click();
+  await setLocalReducedMotion(page, false);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();

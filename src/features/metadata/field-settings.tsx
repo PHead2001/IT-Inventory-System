@@ -13,6 +13,7 @@ import {
   settingRuleLabel,
 } from './field-authoring-model';
 import { MetadataFieldInput } from './field-value-input';
+import type { DateTimeDraft } from './field-value-input';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 
 const input =
@@ -38,11 +39,15 @@ export function FieldSettings({
   advanced,
   onValidityChange,
   showTypeChooser = true,
+  initialDateTimeDraft,
+  onDateTimeDraftChange,
 }: {
   field: Field;
   change: (field: Field) => void;
   published?: boolean;
   showTypeChooser?: boolean;
+  initialDateTimeDraft?: DateTimeDraft;
+  onDateTimeDraftChange?: (draft: DateTimeDraft) => void;
   basics?: ReactNode;
   appearance?: ReactNode;
   advanced?: ReactNode;
@@ -247,6 +252,8 @@ export function FieldSettings({
               value={field.default}
               onChange={(value) => change({ ...field, default: value })}
               onValidityChange={(message) => report('default', message)}
+              initialDateTimeDraft={initialDateTimeDraft}
+              onDateTimeDraftChange={onDateTimeDraftChange}
             />
           )}
           {['decimal', 'currency'].includes(field.type) && (

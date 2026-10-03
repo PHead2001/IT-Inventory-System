@@ -46,6 +46,7 @@ import styles from '../room-visual.module.css';
 
 export type RoomSceneProps = {
   room: RoomDefinition;
+  locationNames?: Record<string, string>;
   bindings: RoomBinding[];
   selectedCode: string | null;
   highlightedCodes: string[];
@@ -280,12 +281,14 @@ function CameraFacingLabel({
   size,
   selected,
   prioritySelected,
+  label,
   onSelect,
 }: {
   node: RoomNode;
   size: [number, number, number];
   selected: boolean;
   prioritySelected: boolean;
+  label: string;
   onSelect: (code: string) => void;
 }) {
   const { camera, invalidate } = useThree();
@@ -364,7 +367,7 @@ function CameraFacingLabel({
               type="button"
               data-location-code={node.locationCode}
               data-room-label-code={node.locationCode}
-              aria-label={`Select ${node.interaction!.label} (${node.locationCode})`}
+              aria-label={`Select ${label} (${node.locationCode})`}
               aria-pressed={prioritySelected}
               onClick={(event) => {
                 event.stopPropagation();
@@ -385,7 +388,7 @@ function CameraFacingLabel({
                 pointerEvents: 'auto',
               }}
             >
-              {node.interaction!.label}
+              {label}
             </button>
           </div>
         </Html>
@@ -395,6 +398,7 @@ function CameraFacingLabel({
 }
 function NodeVisual({
   node,
+  locationNames,
   selectedCode,
   highlighted,
   onSelect,
@@ -402,6 +406,7 @@ function NodeVisual({
   showAllLabels,
   hoveredCode,
 }: {
+  locationNames?: Record<string, string>;
   profiles: RoomDefinition['rackFaceProfiles'];
   node: RoomNode;
   selectedCode: string | null;
@@ -410,6 +415,11 @@ function NodeVisual({
   showAllLabels: boolean;
   hoveredCode: string | null;
 }) {
+  const label =
+    (node.locationCode && locationNames?.[node.locationCode]) ||
+    node.interaction?.label ||
+    node.locationCode ||
+    node.id;
   const selected =
     !!node.locationCode &&
     (node.locationCode === selectedCode || highlighted.has(node.locationCode));
@@ -430,7 +440,7 @@ function NodeVisual({
               ? {
                   roomHoverTarget: {
                     code: node.locationCode,
-                    label: node.interaction!.label,
+                    label,
                   },
                 }
               : undefined
@@ -528,6 +538,7 @@ function NodeVisual({
           {interactive && showAllLabels && (
             <CameraFacingLabel
               node={node}
+              label={label}
               size={node.size}
               selected={selected}
               prioritySelected={node.locationCode === selectedCode}
@@ -540,6 +551,7 @@ function NodeVisual({
         <NodeVisual
           key={child.id}
           node={child}
+          locationNames={locationNames}
           selectedCode={selectedCode}
           highlighted={highlighted}
           onSelect={onSelect}
@@ -1163,6 +1175,7 @@ export default function RoomScene(props: RoomSceneProps) {
   const showAllLabels =
     labelPreference.room === props.room && labelPreference.showAll;
   const selectedLabel =
+    (props.selectedCode ? props.locationNames?.[props.selectedCode] : null) ??
     selectedSceneLabel(props.room.nodes, props.selectedCode) ??
     props.selectedCode;
   const [suppressedLabels, setSuppressedLabels] = useState(0);
@@ -1348,6 +1361,7 @@ export default function RoomScene(props: RoomSceneProps) {
               <NodeVisual
                 key={node.id}
                 node={node}
+                locationNames={props.locationNames}
                 selectedCode={props.selectedCode}
                 highlighted={highlighted}
                 onSelect={props.onSelect}
@@ -1376,7 +1390,7 @@ export default function RoomScene(props: RoomSceneProps) {
             type="button"
             data-hover-tooltip="true"
             data-location-code={activeHover.target.code}
-            aria-label={`Select ${activeHover.target.label} (${activeHover.target.code})`}
+            aria-label={`Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})`}
             aria-pressed={props.selectedCode === activeHover.target.code}
             onPointerEnter={() => {
               labelPointer.current = true;
@@ -1401,7 +1415,8 @@ export default function RoomScene(props: RoomSceneProps) {
               overflowWrap: 'anywhere',
             }}
           >
-            {activeHover.target.label}
+            {props.locationNames?.[activeHover.target.code] ??
+              activeHover.target.label}
           </button>
         )}
       </div>

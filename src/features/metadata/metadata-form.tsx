@@ -1,6 +1,25 @@
 'use client';
-import { useEffect, useId, useRef, useState, useTransition } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { fetchCategoryForm } from './form-fetch.actions';
+import { refreshMetadataRecord } from './record-refresh.actions';
+import {
+  initialCore,
+  initialCustom,
+  metadataLabels as labels,
+  reconcileMetadata,
+  compatibleSchema,
+  sameAnswer,
+  equalValue,
+  type CoreValues,
+  type RecordMetadata,
+} from './reconciliation';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,11 +42,7 @@ import {
   normalizeItemCode,
   itemCodeValid,
 } from '@/features/inventory/contracts';
-import type {
-  MetadataDefinition,
-  MetadataForm,
-  StoredCustomValues,
-} from './contracts';
+import type { MetadataDefinition, MetadataForm } from './contracts';
 import { controlLayoutStyle } from './control-layout';
 import { controlVisible } from './effective-controls';
 import { MetadataFieldInput } from './field-value-input';
@@ -47,47 +62,6 @@ type Props = {
   actorId?: string;
   openingSite?: { id: string; code: string; name: string };
 };
-const labels: Record<string, string> = {
-  name: 'Name',
-  category_id: 'Category',
-  description: 'Description',
-  manufacturer: 'Manufacturer',
-  model: 'Model',
-  reorder_threshold: 'Reorder threshold (optional)',
-  item_code: 'Item code (SKU)',
-  asset_tag: 'Asset tag',
-  serial_number: 'Serial number',
-};
-const initialCore = (
-  entity: QuantityItem | AssetItem | undefined,
-  categories: CategoryRef[],
-) => ({
-  name: entity?.name ?? '',
-  description: entity?.description ?? '',
-  category_id:
-    entity?.categoryId ??
-    categories.find((category) => category.active)?.id ??
-    '',
-  manufacturer: entity?.manufacturer ?? '',
-  model: entity?.model ?? '',
-  reorder_threshold:
-    entity && 'reorderThreshold' in entity && entity.reorderThreshold !== null
-      ? String(entity.reorderThreshold)
-      : '',
-  item_code:
-    entity && 'itemCode' in entity ? String(entity.itemCode ?? '') : '',
-  asset_tag: entity && 'assetTag' in entity ? (entity.assetTag ?? '') : '',
-  serial_number:
-    entity && 'serialNumber' in entity ? (entity.serialNumber ?? '') : '',
-  initial_quantity: '0',
-  initial_location_id: '',
-  location_id: '',
-});
-function initialCustom(values: StoredCustomValues | undefined) {
-  return Object.fromEntries(
-    Object.entries(values ?? {}).map(([id, entry]) => [id, entry.value]),
-  );
-}
 export function buildCustomPatch(
   definition: MetadataDefinition,
   kind: Kind,
@@ -110,7 +84,9 @@ export function buildCustomPatch(
     ),
   );
   for (const field of definition.fields.filter(
-    (value) => value.applies_to.includes(kind) && visibleFields.has(value.id),
+    (value) =>
+      value.applies_to.includes(kind) &&
+      (visibleFields.has(value.id) || (!creating && touchedIds.has(value.id))),
   )) {
     if (!creating && !touchedIds.has(field.id)) continue;
     const hasValue = Object.hasOwn(current, field.id);
@@ -145,6 +121,10 @@ function formChanges(
     }
     if (field.label !== current.label)
       changes.push(`${field.label}: label changed to ${current.label}.`);
+    if (field.type !== current.type)
+      changes.push(`${current.label}: answer type changed.`);
+    if (JSON.stringify(field.applies_to) !== JSON.stringify(current.applies_to))
+      changes.push(`${current.label}: applicable inventory types changed.`);
     if (field.required !== current.required)
       changes.push(
         `${current.label}: ${current.required ? 'now required' : 'no longer required'}.`,
@@ -167,36 +147,43 @@ function formChanges(
     changes.push('The section or control layout changed.');
   return changes;
 }
-function displayComparisonValue(value: unknown) {
-  if (value === undefined) return '(missing)';
-  const rendered = JSON.stringify(value) ?? String(value);
-  return rendered.length > 160 ? `${rendered.slice(0, 160)}…` : rendered;
-}
-function itemChanges(
-  previous: QuantityItem | AssetItem,
-  next: QuantityItem | AssetItem,
+function displayComparisonValue(
+  value: unknown,
+  definition: MetadataDefinition | undefined,
+  categories: CategoryRef[],
+  key: string,
+  display?: RecordMetadata['customDisplay'],
+  previousDefinition?: MetadataDefinition,
 ) {
-  const changes: { label: string; before: unknown; after: unknown }[] = [];
-  const oldCore = initialCore(previous, []);
-  const newCore = initialCore(next, []);
-  for (const name of Object.keys(oldCore) as (keyof typeof oldCore)[])
-    if (oldCore[name] !== newCore[name])
-      changes.push({
-        label: labels[name] ?? name,
-        before: oldCore[name],
-        after: newCore[name],
-      });
-  const ids = new Set([
-    ...Object.keys(previous.customValues ?? {}),
-    ...Object.keys(next.customValues ?? {}),
-  ]);
-  for (const id of ids) {
-    const before = previous.customValues?.[id]?.value;
-    const after = next.customValues?.[id]?.value;
-    if (JSON.stringify(before) !== JSON.stringify(after))
-      changes.push({ label: `Custom field ${id}`, before, after });
-  }
-  return changes;
+  if (value === undefined) return 'Not recorded';
+  if (key === 'category_id')
+    return (
+      categories.find((category) => category.id === value)?.name ??
+      'Current category'
+    );
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  const displayed = display?.[key.replace(/^custom:/, '')];
+  if (
+    displayed &&
+    equalValue(displayed.value, value) &&
+    displayed.option_paths.length
+  )
+    return displayed.option_paths.map((path) => path.join(' / ')).join('; ');
+  const field = definition?.fields.find(
+    (candidate) => `custom:${candidate.id}` === key,
+  );
+  const readable = (entry: unknown) =>
+    field?.options.find((option) => option.id === entry)?.label ??
+    previousDefinition?.fields
+      .find((field) => `custom:${field.id}` === key)
+      ?.options.find((option) => option.id === entry)?.label ??
+    (typeof entry === 'string' && /^[0-9a-f-]{36}$/.test(entry)
+      ? 'Unavailable choice'
+      : String(entry));
+  if (Array.isArray(value))
+    return value.map(readable).join(', ') || 'No choices';
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return readable(value) || '(empty)';
 }
 export function MetadataForm({
   kind,
@@ -211,7 +198,22 @@ export function MetadataForm({
   actorId,
 }: Props) {
   const router = useRouter();
-  const latest = item ?? asset;
+  const incoming = item ?? asset;
+  const [observed, setObserved] = useState<RecordMetadata | undefined>(
+    incoming,
+  );
+  const latest =
+    incoming && (!observed || incoming.version >= observed.version)
+      ? incoming
+      : observed;
+  const [choices, setChoices] = useState<Record<string, 'latest' | 'mine'>>({});
+  const [choiceSnapshot, setChoiceSnapshot] = useState<string | null>(null);
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
+  const [recordRefreshError, setRecordRefreshError] = useState('');
+  const mountedActor = useRef(actorId);
+  useLayoutEffect(() => {
+    mountedActor.current = actorId;
+  }, [actorId]);
   const creating = !latest;
   const scopeId = useId();
   const [formActor] = useState(actorId);
@@ -233,7 +235,7 @@ export function MetadataForm({
     initialCustom(latest?.customValues),
   );
   const [touched, setTouched] = useState<string[]>([]);
-  const [thresholdTouched, setThresholdTouched] = useState(false);
+  const rebaseUsed = useRef(false);
   const [reviewedForms, setReviewedForms] = useState(() => forms);
   const [loadedForms, setLoadedForms] = useState<Record<string, MetadataForm>>(
     {},
@@ -346,14 +348,108 @@ export function MetadataForm({
     form.published_revision_id !== currentForm.published_revision_id;
   const itemStale =
     !!latest && !!baseline && latest.version !== baseline.version;
+  const latestRouteForm = latest && forms[latest.categoryId];
+  const latestLoadedForm = latest && loadedForms[latest.categoryId];
+  const latestCategoryForm =
+    latestRouteForm && latestLoadedForm
+      ? BigInt(latestRouteForm.published_number) >
+        BigInt(latestLoadedForm.published_number)
+        ? latestRouteForm
+        : latestLoadedForm
+      : (latestRouteForm ?? latestLoadedForm);
+  const snapshotKey = latest
+    ? `${latest.id}:${latest.version}:${latest.categoryId}:${currentForm?.published_revision_id}:${latestCategoryForm?.published_revision_id}`
+    : '';
+  const reconciliation =
+    latest && baseline && definition
+      ? reconcileMetadata(
+          baseline,
+          core,
+          custom,
+          latest,
+          definition,
+          snapshotKey === choiceSnapshot ? choices : {},
+        )
+      : null;
+  const recordBlocked =
+    itemStale &&
+    (!!reconciliation?.conflicts.length || !!reconciliation?.lifecycleChanged);
+  const lifecycleBlocked = !!reconciliation?.lifecycleChanged;
+  const untouched =
+    !!baseline &&
+    equalValue(core, initialCore(baseline, categories)) &&
+    equalValue(custom, initialCustom(baseline.customValues));
+  const schemaCompatible =
+    !!definition &&
+    !!currentForm &&
+    compatibleSchema(definition, currentForm.published_definition);
+  const adopt = (
+    record: RecordMetadata,
+    values: CoreValues,
+    answers: Record<string, unknown>,
+    dirtyIds: string[],
+    resetInputs = false,
+  ) => {
+    setBaseline(record);
+    setObserved(record);
+    setCleanCore(initialCore(record, categories));
+    setCore(values);
+    setCustom(answers);
+    setTouched(dirtyIds);
+
+    setChoices({});
+    if (resetInputs) {
+      setAnswerErrors({});
+      setInputGeneration((value) => value + 1);
+    }
+    setReview(false);
+    setAckLegacy(false);
+    setReceipt(null);
+  };
+  useEffect(() => {
+    if (
+      pending ||
+      uncertain ||
+      dispatched.current ||
+      actorStale ||
+      refreshNeeded
+    )
+      return;
+    // Adopt complete untouched snapshots and proven independent edits together.
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (schemaStale && (schemaCompatible || untouched) && currentForm)
+        setReviewedForms((prior) => ({
+          ...prior,
+          [core.category_id]: currentForm,
+        }));
+      if (
+        itemStale &&
+        latest &&
+        reconciliation &&
+        !recordBlocked &&
+        (!schemaStale || schemaCompatible)
+      )
+        adopt(
+          latest,
+          reconciliation.core,
+          reconciliation.custom,
+          reconciliation.touched,
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
   const legacyMigration =
     !!baseline &&
     core.category_id !== baseline.categoryId &&
     Object.keys(baseline.customValues ?? {}).length > 0;
   const updateCore = (name: keyof typeof core, value: string) => {
-    if (uncertain || dispatched.current || actorStale) return;
+    if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
     setCore((prior) => ({ ...prior, [name]: value }));
-    if (name === 'reorder_threshold') setThresholdTouched(true);
+    rebaseUsed.current = false;
     if (name === 'category_id' && forms[value])
       setReviewedForms((prior) => ({ ...prior, [value]: forms[value] }));
     setReview(false);
@@ -361,7 +457,7 @@ export function MetadataForm({
     setState(null);
   };
   const updateCustom = (id: string, value: unknown) => {
-    if (uncertain || dispatched.current || actorStale) return;
+    if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
     setCustom((prior) =>
       value === undefined
         ? Object.fromEntries(
@@ -370,6 +466,7 @@ export function MetadataForm({
         : { ...prior, [id]: value },
     );
     setTouched((prior) => (prior.includes(id) ? prior : [...prior, id]));
+    rebaseUsed.current = false;
     setReview(false);
     setAckLegacy(false);
     setState(null);
@@ -381,8 +478,30 @@ export function MetadataForm({
     schemaStale && currentForm && definition
       ? formChanges(definition, currentForm.published_definition, kind)
       : [];
-  const changedItemValues =
-    itemStale && baseline && latest ? itemChanges(baseline, latest) : [];
+
+  const comparison = (value: unknown, key: string, side: 'latest' | 'mine') =>
+    displayComparisonValue(
+      value,
+      definition,
+      [
+        ...categories,
+        ...(latest
+          ? [{ id: latest.categoryId, name: latest.categoryName, active: true }]
+          : []),
+        ...(baseline
+          ? [
+              {
+                id: baseline.categoryId,
+                name: baseline.categoryName,
+                active: true,
+              },
+            ]
+          : []),
+      ],
+      key,
+      side === 'latest' ? latest?.customDisplay : baseline?.customDisplay,
+      priorDefinition,
+    );
   const customControl = (id: string) => {
     const config = applicable.find((candidate) => candidate.id === id);
     if (!config) return null;
@@ -529,6 +648,14 @@ export function MetadataForm({
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
   const discard = () => {
     if (pending || uncertain || dispatched.current) return;
+    if (refreshNeeded) {
+      const details = formRef.current?.closest('details');
+      if (details) {
+        details.open = false;
+        details.querySelector('summary')?.focus();
+      }
+      return;
+    }
     setDiscardOpen(false);
     if (creating) {
       router.push(cancelPath);
@@ -542,7 +669,7 @@ export function MetadataForm({
     setBaseline(latest);
     setCustom(initialCustom(latest?.customValues));
     setTouched([]);
-    setThresholdTouched(false);
+    rebaseUsed.current = false;
     setAnswerErrors({});
     setInputGeneration((generation) => generation + 1);
     setReviewedForms({});
@@ -558,6 +685,9 @@ export function MetadataForm({
     setAckLegacy(false);
     setState(null);
     setReceipt(null);
+    setChoices({});
+    setRefreshNeeded(false);
+    setRecordRefreshError('');
     setDuplicates([]);
     const details = formRef.current?.closest('details');
     if (details) {
@@ -567,7 +697,7 @@ export function MetadataForm({
   };
   const cancel = () => {
     if (pending || uncertain || dispatched.current) return;
-    if (dirty) setDiscardOpen(true);
+    if (dirty && !refreshNeeded) setDiscardOpen(true);
     else discard();
   };
   useEffect(() => {
@@ -586,43 +716,62 @@ export function MetadataForm({
     setDiscardOpen(false);
     cancelRef.current?.focus();
   };
-  const payload = () => {
-    if (!definition || !form || invalidItemCode) return null;
+  const payload = (
+    values = core,
+    answers = custom,
+    dirtyIds = touched,
+    record = baseline,
+    selectedForm = form,
+  ) => {
+    if (!definition || !selectedForm || invalidItemCode) return null;
     const result: Record<string, unknown> = {
-      name: core.name,
-      description: core.description || null,
-      category_id: core.category_id,
-      manufacturer: core.manufacturer || null,
-      model: core.model || null,
-      expected_published_revision_id: form.published_revision_id,
+      name: values.name,
+      description: values.description || null,
+      category_id: values.category_id,
+      manufacturer: values.manufacturer || null,
+      model: values.model || null,
+      expected_published_revision_id: selectedForm.published_revision_id,
       custom_patch: buildCustomPatch(
-        definition,
+        selectedForm.published_definition,
         kind,
-        custom,
-        touched,
+        answers,
+        creating
+          ? dirtyIds
+          : dirtyIds.filter(
+              (id) =>
+                !sameAnswer(answers, initialCustom(record?.customValues), id),
+            ),
         creating,
       ),
     };
     if (kind === 'quantity') {
-      result.item_code = normalizeItemCode(core.item_code);
-      if (creating || thresholdTouched)
+      result.item_code = normalizeItemCode(values.item_code);
+      if (
+        creating ||
+        values.reorder_threshold !==
+          initialCore(record, categories).reorder_threshold
+      )
         result.reorder_threshold =
-          core.reorder_threshold === '' ? null : Number(core.reorder_threshold);
+          values.reorder_threshold === ''
+            ? null
+            : Number(values.reorder_threshold);
       if (creating && !openingSite) {
-        result.initial_quantity = Number(core.initial_quantity);
+        result.initial_quantity = Number(values.initial_quantity);
         result.initial_location_id =
-          Number(core.initial_quantity) > 0 ? core.initial_location_id : null;
+          Number(values.initial_quantity) > 0
+            ? values.initial_location_id
+            : null;
       } else if (!creating) {
-        result.item_id = baseline?.id;
-        result.expected_version = baseline?.version;
+        result.item_id = record?.id;
+        result.expected_version = record?.version;
       }
     } else {
-      result.asset_tag = core.asset_tag || null;
-      result.serial_number = core.serial_number || null;
-      if (creating && !openingSite) result.location_id = core.location_id;
+      result.asset_tag = values.asset_tag || null;
+      result.serial_number = values.serial_number || null;
+      if (creating && !openingSite) result.location_id = values.location_id;
       else if (!creating) {
-        result.asset_id = baseline?.id;
-        result.expected_version = baseline?.version;
+        result.asset_id = record?.id;
+        result.expected_version = record?.version;
       }
     }
     if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
@@ -634,6 +783,38 @@ export function MetadataForm({
     }
     return result;
   };
+  const reloadSaved = async () => {
+    if (!baseline || mountedActor.current !== formActor) return;
+    setRecordRefreshError('');
+    try {
+      const fresh = await refreshMetadataRecord(kind, baseline.id, formActor);
+      if (mountedActor.current !== formActor) return;
+      if (!fresh.ok) {
+        setRecordRefreshError(fresh.message);
+        return;
+      }
+      adopt(
+        fresh.record,
+        initialCore(fresh.record, categories),
+        initialCustom(fresh.record.customValues),
+        [],
+        true,
+      );
+      setLoadedForms((prior) => ({
+        ...prior,
+        [fresh.record.categoryId]: fresh.form,
+      }));
+      setReviewedForms((prior) => ({
+        ...prior,
+        [fresh.record.categoryId]: fresh.form,
+      }));
+      setRefreshNeeded(false);
+    } catch {
+      setRecordRefreshError(
+        'The saved record could not be refreshed. Retry loading it.',
+      );
+    }
+  };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
@@ -641,14 +822,15 @@ export function MetadataForm({
       (!uncertain &&
         (!form ||
           schemaStale ||
-          itemStale ||
+          recordBlocked ||
+          refreshNeeded ||
           invalidItemCode ||
           invalidAnswers)) ||
       pending ||
       dispatched.current
     )
       return;
-    if (!review) {
+    if (!review && !uncertain) {
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
         startTransition(async () => {
@@ -682,7 +864,7 @@ export function MetadataForm({
       ];
     if (!commandPayload) return;
     const key = JSON.stringify([operation, commandPayload]);
-    const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
+    let requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
     dispatched.current = true;
     startTransition(async () => {
@@ -702,6 +884,77 @@ export function MetadataForm({
                 expectedActorId: formActor,
                 payload: commandPayload,
               });
+        if (
+          !creating &&
+          baseline &&
+          !result.ok &&
+          ['stale_version', 'stale_schema', 'P1024'].includes(result.code)
+        ) {
+          // A definitive CAS rejection permits ONE revised operation. Unknown outcomes replay first.
+          const fresh = await refreshMetadataRecord(
+            kind,
+            baseline.id,
+            formActor,
+            core.category_id,
+          ).catch(() => ({
+            ok: false as const,
+            message:
+              'The current record could not be loaded. Retry reviewing your save.',
+          }));
+          if (mountedActor.current === formActor && fresh.ok) {
+            setObserved(fresh.record);
+            setLoadedForms((prior) => ({
+              ...prior,
+              [fresh.record.categoryId]: fresh.form,
+              [core.category_id]: fresh.draftForm,
+            }));
+            const merged = reconcileMetadata(
+              baseline,
+              core,
+              custom,
+              fresh.record,
+              definition!,
+            );
+            const revisedForm =
+              merged.core.category_id === fresh.record.categoryId
+                ? fresh.form
+                : fresh.draftForm;
+            if (
+              !rebaseUsed.current &&
+              !merged.conflicts.length &&
+              !merged.lifecycleChanged &&
+              compatibleSchema(definition!, revisedForm.published_definition)
+            ) {
+              const revised = payload(
+                merged.core,
+                merged.custom,
+                merged.touched,
+                fresh.record,
+                revisedForm,
+              );
+              if (revised) {
+                adopt(fresh.record, merged.core, merged.custom, merged.touched);
+                setReviewedForms((prior) => ({
+                  ...prior,
+                  [merged.core.category_id]: revisedForm,
+                }));
+                rebaseUsed.current = true;
+                commandPayload = revised;
+                requestId = crypto.randomUUID();
+                setReceipt({
+                  key: JSON.stringify([operation, revised]),
+                  id: requestId,
+                });
+                result = await submitInventory({
+                  operation,
+                  requestId,
+                  expectedActorId: formActor,
+                  payload: revised,
+                });
+              }
+            } else setReview(false);
+          } else if (!fresh.ok) setRecordRefreshError(fresh.message);
+        }
       } catch {
         result = {
           ok: false,
@@ -729,6 +982,42 @@ export function MetadataForm({
         setReceipt(null);
         setCleanCore(core);
         setTouched([]);
+        if (!creating) {
+          setRefreshNeeded(true);
+          // Commit is already confirmed. A failed read is a saved/refresh state, never uncertainty.
+          try {
+            const fresh = await refreshMetadataRecord(
+              kind,
+              result.entityId,
+              formActor,
+            );
+            if (mountedActor.current === formActor && fresh.ok) {
+              adopt(
+                fresh.record,
+                initialCore(fresh.record, categories),
+                initialCustom(fresh.record.customValues),
+                [],
+                true,
+              );
+              setLoadedForms((prior) => ({
+                ...prior,
+                [fresh.record.categoryId]: fresh.form,
+              }));
+              setReviewedForms((prior) => ({
+                ...prior,
+                [fresh.record.categoryId]: fresh.form,
+              }));
+              setRefreshNeeded(false);
+            } else if (!fresh.ok) setRecordRefreshError(fresh.message);
+          } catch {
+            setRecordRefreshError(
+              'The saved record could not be refreshed. Retry loading it.',
+            );
+          }
+        } else {
+          setCleanCore(core);
+          setTouched([]);
+        }
         if (creating)
           router.push(
             '/inventory/' +
@@ -778,9 +1067,8 @@ export function MetadataForm({
           className="rounded border border-amber-600 p-3 text-amber-100"
           role="alert"
         >
-          The published form changed from revision {form.published_number} to{' '}
-          {currentForm.published_number}. Your entered values and original form
-          remain visible until you review the new revision.
+          The category form changed. Review its requirements and retained
+          answers before continuing.
           {schemaChanges.length > 0 && (
             <ul className="mt-2 list-disc pl-5">
               {schemaChanges.map((change, index) => (
@@ -807,7 +1095,7 @@ export function MetadataForm({
               setState(null);
             }}
           >
-            Use reviewed form revision
+            Review updated fields
           </Button>
         </div>
       )}
@@ -829,41 +1117,87 @@ export function MetadataForm({
           </Button>
         </div>
       )}
-      {itemStale && (
-        <div
-          className="rounded border border-amber-600 p-3 text-amber-100"
-          role="alert"
-        >
-          This record changed from version {baseline?.version} to{' '}
-          {latest?.version}. Your entered values are still here. Review the
-          latest record before using its new version. Saving your entered values
-          may replace these newer values.
-          {changedItemValues.length > 0 && (
-            <ul className="mt-2 list-disc pl-5">
-              {changedItemValues.map((change) => (
-                <li key={change.label}>
-                  {change.label}: previous{' '}
-                  {displayComparisonValue(change.before)}; latest{' '}
-                  {displayComparisonValue(change.after)}.
-                </li>
-              ))}
-            </ul>
-          )}
+      {itemStale &&
+        reconciliation?.conflicts.map((conflict) => (
+          <div
+            key={conflict.key}
+            role="alert"
+            className="rounded border border-amber-600 p-3 text-amber-100"
+          >
+            <p>
+              {conflict.label} was changed elsewhere. Latest:{' '}
+              {comparison(conflict.latest, conflict.key, 'latest')}. My edit:{' '}
+              {comparison(conflict.mine, conflict.key, 'mine')}.
+            </p>
+            {conflict.dependency && (
+              <p>
+                Category and custom answers must be reviewed together. Retained
+                values remain available; untouched answers keep the latest
+                value. The selected form still validates required answers.
+              </p>
+            )}
+            {!!conflict.details?.length && (
+              <ul className="list-disc pl-5">
+                {conflict.details.map((detail) => (
+                  <li key={detail.key}>
+                    {detail.label}: latest{' '}
+                    {comparison(detail.latest, detail.key, 'latest')}; my answer{' '}
+                    {comparison(detail.mine, detail.key, 'mine')}.
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || uncertain || actorStale}
+              onClick={() => {
+                setChoiceSnapshot(snapshotKey);
+                setChoices((prior) => ({
+                  ...(choiceSnapshot === snapshotKey ? prior : {}),
+                  [conflict.key]: 'latest',
+                }));
+              }}
+            >
+              Keep latest {conflict.label}
+            </Button>{' '}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || uncertain || actorStale}
+              onClick={() => {
+                setChoiceSnapshot(snapshotKey);
+                setChoices((prior) => ({
+                  ...(choiceSnapshot === snapshotKey ? prior : {}),
+                  [conflict.key]: 'mine',
+                }));
+              }}
+            >
+              Use my {conflict.label} edit
+            </Button>
+          </div>
+        ))}
+      {lifecycleBlocked && (
+        <p role="alert">
+          The record&apos;s archive or retirement state changed. Cancel this
+          edit and review its current status before making another change.
+        </p>
+      )}
+      {refreshNeeded && (
+        <div role="status">
+          Metadata saved. {recordRefreshError || 'Loading the saved record...'}{' '}
           <Button
             type="button"
             variant="outline"
-            className="ml-2"
-            disabled={pending || uncertain}
-            onClick={() => {
-              setBaseline(latest);
-              setReview(false);
-              setAckLegacy(false);
-              setState(null);
-            }}
+            disabled={pending || actorStale}
+            onClick={() => void reloadSaved()}
           >
-            Use reviewed record version
+            Retry saved record refresh
           </Button>
         </div>
+      )}
+      {!refreshNeeded && recordRefreshError && (
+        <p role="alert">{recordRefreshError}</p>
       )}
       {baseline?.needsMetadata && (
         <p className="rounded border border-amber-700 p-3 text-amber-100">
@@ -895,7 +1229,8 @@ export function MetadataForm({
           schemaStale ||
           schemaConflictPending ||
           !!schemaRefreshError ||
-          itemStale
+          recordBlocked ||
+          refreshNeeded
         }
         className="min-w-0 w-full max-w-full space-y-5"
       >
@@ -1056,7 +1391,6 @@ export function MetadataForm({
           <p>
             Review {core.name || 'this record'} in{' '}
             {categories.find((value) => value.id === core.category_id)?.name}.
-            Published form revision {form?.published_number}.
           </p>
           {legacyMigration && (
             <label className="mt-2 flex items-start gap-2">
@@ -1079,7 +1413,7 @@ export function MetadataForm({
           <p className="text-sm text-slate-400">
             {openingSite
               ? 'Opening details, custom values and site custody save together as one version and event.'
-              : 'Custom values and core details save together as one record version and history event.'}
+              : 'Custom values and core details save together with history.'}
           </p>
         </div>
       )}
@@ -1111,7 +1445,8 @@ export function MetadataForm({
                   !!schemaRefreshError ||
                   invalidItemCode ||
                   invalidAnswers ||
-                  itemStale)) ||
+                  recordBlocked ||
+                  refreshNeeded)) ||
               (review && legacyMigration && !ackLegacy)
             }
           >

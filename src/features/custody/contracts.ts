@@ -9,24 +9,6 @@ const code = z
   .string()
   .regex(/^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$/)
   .max(100);
-const locationKind = z.enum([
-  'room',
-  'storage_group',
-  'storage_area',
-  'shelf',
-  'shelf_section',
-  'drawer',
-  'rack',
-  'container',
-]);
-const locationShape = {
-  name: text(200).min(1),
-  parent_id: id.nullable(),
-  kind: locationKind,
-  can_hold_inventory: z.boolean(),
-  active: z.boolean(),
-  sort_order: count,
-};
 const siteShape = { name: text(200).min(1), notes: note.nullable() };
 const custodyBase = {
   expected_version: version,
@@ -53,11 +35,16 @@ const published = {
 };
 
 export const custodySchemas = {
-  location_create: z.strictObject({ code, ...locationShape }),
-  location_update: z.strictObject({
+  location_rename: z.strictObject({
     location_id: id,
     expected_version: version,
-    ...locationShape,
+    name: text(200).min(1),
+  }),
+  site_set_active: z.strictObject({
+    site_id: id,
+    expected_version: version,
+    active: z.boolean(),
+    reason: note.min(1),
   }),
   site_create: z.strictObject({ code, ...siteShape }),
   site_update: z.strictObject({

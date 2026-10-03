@@ -27,9 +27,9 @@ export default async function ManageLocationPage({
       <h1 className="experience-heading mb-5 break-words">{location.name}</h1>
       {member.role === 'staff' && member.can_manage_configuration ? (
         <LocationManagementForm
-          key={`${location.id}:${location.version}`}
+          key={`${member.user_id}:${location.id}`}
           location={location}
-          locations={locations}
+          actorId={member.user_id}
         />
       ) : (
         <p className={panel}>This location is read-only for your account.</p>

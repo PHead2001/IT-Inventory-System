@@ -524,12 +524,12 @@ async function main() {
       .pid as number;
     const issuingPid = (await issuing.query('select pg_backend_pid() as pid'))
       .rows[0].pid as number;
-    await topology.query('select public.site_update($1,$2::jsonb)', [
+    await topology.query('select public.site_set_active($1,$2::jsonb)', [
       uuid(),
       JSON.stringify({
         site_id: secondSite.entity_id,
         expected_version: '1',
-        name: 'Fictional empty site',
+        reason: 'Fictional property closure',
         active: false,
       }),
     ]);
@@ -569,16 +569,19 @@ async function main() {
   const officeRoom = (
     await owner.query("select id from public.locations where code='ITO'")
   ).rows[0].id as string;
-  const raceLocation = await succeeds('location_create', {
-    code: 'TEST-PLACE-' + uuid().replaceAll('-', '').slice(0, 12).toUpperCase(),
-    name: 'Fictional race storage',
-    parent_id: officeRoom,
-    kind: 'storage_area',
-    can_hold_inventory: true,
-    active: true,
-    sort_order: 0,
-  });
-  const locationTopology = await connection(actor);
+  const insertedLocation = await owner.query(
+    `insert into public.locations(code,name,parent_id,kind,can_hold_inventory,active,sort_order)
+     values($1,'Fictional race storage',$2,'storage_area',true,true,0) returning id`,
+    [
+      'TEST-PLACE-' + uuid().replaceAll('-', '').slice(0, 12).toUpperCase(),
+      officeRoom,
+    ],
+  );
+  const raceLocation = { entity_id: insertedLocation.rows[0].id as string };
+  // Trusted code-managed topology fixture: ordinary clients cannot do this.
+  const locationTopology = new Client({ connectionString: db });
+  await locationTopology.connect();
+  await locationTopology.query('begin');
   const receiving = await connection(actor);
   try {
     const topologyPid = (
@@ -588,20 +591,8 @@ async function main() {
       await receiving.query('select pg_backend_pid() as pid')
     ).rows[0].pid as number;
     await locationTopology.query(
-      'select public.location_update($1,$2::jsonb)',
-      [
-        uuid(),
-        JSON.stringify({
-          location_id: raceLocation.entity_id,
-          expected_version: '1',
-          name: 'Fictional race storage',
-          parent_id: officeRoom,
-          kind: 'storage_area',
-          can_hold_inventory: true,
-          active: false,
-          sort_order: 0,
-        }),
-      ],
+      'update public.locations set active=false,version=version+1 where id=$1',
+      [raceLocation.entity_id],
     );
     const attempt = receiving
       .query('select public.quantity_receive($1,$2::jsonb)', [
@@ -632,6 +623,147 @@ async function main() {
       receiving.query('rollback'),
     ]);
     await Promise.allSettled([locationTopology.end(), receiving.end()]);
+  }
+
+  // Concurrent name-only requests serialize by the existing receipt/placement
+  // order; a later fresh stale request fails without changing structure/stock.
+  const renameBefore = (
+    await owner.query(
+      'select to_jsonb(l) as state from public.locations l where id=$1',
+      [raceLocation.entity_id],
+    )
+  ).rows[0].state as Record<string, unknown>;
+  const renameCommand = {
+    location_id: raceLocation.entity_id,
+    expected_version: String(renameBefore.version),
+    name: 'Fictional renamed storage',
+  };
+  const renameRequest = uuid();
+  const renamer = await connection(actor);
+  const duplicateRenamer = await connection(actor);
+  try {
+    const firstPid = (await renamer.query('select pg_backend_pid() as pid'))
+      .rows[0].pid as number;
+    const secondPid = (
+      await duplicateRenamer.query('select pg_backend_pid() as pid')
+    ).rows[0].pid as number;
+    const first = await renamer.query(
+      'select public.location_rename($1,$2::jsonb) as result',
+      [renameRequest, JSON.stringify(renameCommand)],
+    );
+    const duplicate = duplicateRenamer.query(
+      'select public.location_rename($1,$2::jsonb) as result',
+      [renameRequest, JSON.stringify(renameCommand)],
+    );
+    await blockedBy(secondPid, firstPid);
+    await renamer.query('commit');
+    assert.deepEqual(
+      (await duplicate).rows,
+      first.rows,
+      'concurrent duplicate rename returns one receipt',
+    );
+    await duplicateRenamer.query('commit');
+  } finally {
+    await Promise.allSettled([
+      renamer.query('rollback'),
+      duplicateRenamer.query('rollback'),
+    ]);
+    await Promise.allSettled([renamer.end(), duplicateRenamer.end()]);
+  }
+  await fails(
+    'location_rename',
+    { ...renameCommand, name: 'Fresh stale name' },
+    'P1002',
+  );
+  const renameAfter = (
+    await owner.query(
+      'select to_jsonb(l) as state from public.locations l where id=$1',
+      [raceLocation.entity_id],
+    )
+  ).rows[0].state as Record<string, unknown>;
+  for (const key of ['name', 'version', 'updated_at']) {
+    delete renameBefore[key];
+    delete renameAfter[key];
+  }
+  assert.deepEqual(
+    renameAfter,
+    renameBefore,
+    'rename preserves all structural fields and stable identity',
+  );
+  assert.equal(
+    (
+      await owner.query(
+        'select count(*)::integer as n from public.location_configuration_events where location_id=$1',
+        [raceLocation.entity_id],
+      )
+    ).rows[0].n,
+    1,
+    'one configuration event for duplicate rename',
+  );
+
+  // Quantity assignment wins first: the exclusive archive waits for its shared
+  // placement lock and then sees committed holdings in a fresh statement.
+  const quantityTarget = await succeeds('site_create', {
+    code:
+      'SITE-QUANTITY-' + uuid().replaceAll('-', '').slice(0, 10).toUpperCase(),
+    name: 'Fictional quantity race site',
+  });
+  const quantityAssignment = await connection(actor);
+  const quantityArchive = await connection(actor);
+  try {
+    const assignmentPid = (
+      await quantityAssignment.query('select pg_backend_pid() as pid')
+    ).rows[0].pid as number;
+    const archivePid = (
+      await quantityArchive.query('select pg_backend_pid() as pid')
+    ).rows[0].pid as number;
+    await quantityAssignment.query(
+      'select public.quantity_site_change($1,$2::jsonb)',
+      [
+        uuid(),
+        JSON.stringify({
+          action: 'issue',
+          item_id: item.entity_id,
+          expected_version: '3',
+          source_location_id: office.rows[0].id,
+          destination_site_id: quantityTarget.entity_id,
+          quantity: 1,
+        }),
+      ],
+    );
+    const attempt = quantityArchive
+      .query('select public.site_set_active($1,$2::jsonb)', [
+        uuid(),
+        JSON.stringify({
+          site_id: quantityTarget.entity_id,
+          expected_version: '1',
+          active: false,
+          reason: 'Fictional quantity closure race',
+        }),
+      ])
+      .then(
+        () => null,
+        (error: { code?: string }) => error,
+      );
+    await blockedBy(archivePid, assignmentPid);
+    await quantityAssignment.query('commit');
+    assert.equal(
+      (await attempt)?.code,
+      'P1008',
+      'archive observes racing quantity holdings',
+    );
+    const current = await owner.query(
+      'select s.active,h.quantity from public.sites s join public.site_quantity_holdings h on h.site_id=s.id where s.id=$1 and h.item_id=$2',
+      [quantityTarget.entity_id, item.entity_id],
+    );
+    assert.equal(current.rows[0].active, true);
+    assert.equal(current.rows[0].quantity, 1);
+  } finally {
+    await Promise.allSettled([
+      quantityAssignment.query('rollback'),
+      quantityArchive.query('rollback'),
+    ]);
+    await Promise.allSettled([quantityAssignment.end(), quantityArchive.end()]);
   }
 
   const assetCategory = await owner.query(
@@ -707,6 +839,98 @@ async function main() {
     0,
     'failed asset operation leaves no completed receipt',
   );
+
+  // Both orderings of serialized transfer versus site archival use independent
+  // connections. A winning archive rejects transfer; a winning transfer blocks
+  // archive atomically without returning/deleting the assigned equipment.
+  for (const archiveFirst of [true, false]) {
+    const target = await succeeds('site_create', {
+      code:
+        'SITE-ASSET-' + uuid().replaceAll('-', '').slice(0, 10).toUpperCase(),
+      name: 'Fictional serialized race site',
+    });
+    const lifecycle = await connection(actor);
+    const assignment = await connection(actor);
+    try {
+      const lifecyclePid = (
+        await lifecycle.query('select pg_backend_pid() as pid')
+      ).rows[0].pid as number;
+      const assignmentPid = (
+        await assignment.query('select pg_backend_pid() as pid')
+      ).rows[0].pid as number;
+      const transfer = {
+        action: 'transfer',
+        asset_id: asset.entity_id,
+        expected_version: '2',
+        source_site_id: site.entity_id,
+        destination_site_id: target.entity_id,
+      };
+      const archive = {
+        site_id: target.entity_id,
+        expected_version: '1',
+        active: false,
+        reason: 'Fictional closure race',
+      };
+      if (archiveFirst) {
+        await lifecycle.query('select public.site_set_active($1,$2::jsonb)', [
+          uuid(),
+          JSON.stringify(archive),
+        ]);
+        const attempt = assignment
+          .query('select public.asset_site_change($1,$2::jsonb)', [
+            uuid(),
+            JSON.stringify(transfer),
+          ])
+          .then(
+            () => null,
+            (error: { code?: string }) => error,
+          );
+        await blockedBy(assignmentPid, lifecyclePid);
+        await lifecycle.query('commit');
+        assert.equal(
+          (await attempt)?.code,
+          'P1004',
+          'asset transfer observes archived destination',
+        );
+      } else {
+        await assignment.query(
+          'select public.asset_site_change($1,$2::jsonb)',
+          [uuid(), JSON.stringify(transfer)],
+        );
+        const attempt = lifecycle
+          .query('select public.site_set_active($1,$2::jsonb)', [
+            uuid(),
+            JSON.stringify(archive),
+          ])
+          .then(
+            () => null,
+            (error: { code?: string }) => error,
+          );
+        await blockedBy(lifecyclePid, assignmentPid);
+        await assignment.query('commit');
+        assert.equal(
+          (await attempt)?.code,
+          'P1008',
+          'archive observes racing active assigned asset',
+        );
+        const current = await owner.query(
+          'select s.active,a.site_id from public.sites s join public.serialized_assets a on a.site_id=s.id where s.id=$1 and a.id=$2',
+          [target.entity_id, asset.entity_id],
+        );
+        assert.equal(
+          current.rows[0].active,
+          true,
+          'rejected archive leaves assignment and active site intact',
+        );
+      }
+    } finally {
+      await Promise.allSettled([
+        lifecycle.query('rollback'),
+        assignment.query('rollback'),
+      ]);
+      await Promise.allSettled([lifecycle.end(), assignment.end()]);
+    }
+  }
 
   const isolation = new Client({ connectionString: db });
   await isolation.connect();

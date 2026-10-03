@@ -1,13 +1,11 @@
 import Link from 'next/link';
 import { requireMember } from '@/lib/auth/session.server';
 import { getManagedLocations } from '@/features/custody/queries.server';
-import { LocationManagementForm } from '@/features/custody/management-form';
 import { panel } from '@/features/inventory/components/read-ui';
 
 export default async function ManageLocationsPage() {
-  const { member } = await requireMember();
+  await requireMember();
   const locations = await getManagedLocations();
-  const canManage = member.role === 'staff' && member.can_manage_configuration;
   return (
     <>
       <Link
@@ -19,18 +17,15 @@ export default async function ManageLocationsPage() {
       <p className="experience-eyebrow mt-3">Configuration / Locations</p>
       <h1 className="experience-heading mb-3">Manage logical locations</h1>
       <p className="mb-5 max-w-3xl text-sm leading-6 text-slate-300">
-        Add actual storage destinations as they are confirmed. IT Office /
-        General Storage / Unsorted is a provisional software location, not a
-        measured shelf. Permanent codes and history are retained.
+        IT Office / General Storage / Unsorted is a provisional software
+        location, not a measured shelf. Existing locations, permanent codes and
+        history are retained.
       </p>
-      {canManage ? (
-        <LocationManagementForm locations={locations} />
-      ) : (
-        <p className={panel}>
-          Location settings are read-only. An active staff configuration
-          maintainer can create or edit locations.
-        </p>
-      )}
+      <p className={panel}>
+        Configuration maintainers can rename display labels. Storage structure,
+        permanent codes and room bindings are maintained with reviewed room
+        code.
+      </p>
       <ul className="experience-surface mt-5 divide-y divide-slate-700/70 overflow-hidden p-0">
         {locations.map((location) => (
           <li

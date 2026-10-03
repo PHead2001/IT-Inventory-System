@@ -7,8 +7,8 @@ software labels, not measured furniture. The Git room model remains bound only t
 its stable closet codes. Location and site UUIDs/codes are immutable and never
 recycled; names and notes can change without changing inventory identity.
 
-Active staff with `can_manage_configuration=true` can call `location_create`,
-`location_update`, `site_create`, and `site_update`. An active staff member can
+Active staff with `can_manage_configuration=true` can call `location_rename`,
+`site_create`, `site_update` (metadata only), and `site_set_active`. An active staff member can
 change custody. Active members read locations, sites, holdings and history under
 RLS. Ordinary authenticated roles cannot write any of those tables directly.
 The owner provisions configuration maintainers using a verified Auth UUID and a
@@ -37,7 +37,7 @@ and positive `quantity`; transfer names two distinct site IDs and positive
 without inventing a past storage issue or requiring newly published descriptive
 fields on an otherwise unchanged definition. Correction names one `source_site_id`, nonnegative
 `observed_quantity`, and a reason. Write-off names `source_site_id`, positive
-`quantity`, and a reason. Optional `reference` is a concise external work-order
+`quantity`, and a reason. Optional `reference` is a concise external ticket number
 reference. A correction is visibly distinct from physical movement. No browser
 loop performs partial operations: one RPC updates all involved holdings, bumps
 the definition version once, appends a quantity event, storage/site delta lines,
@@ -73,16 +73,40 @@ report never sums unlike product units into an unexplained equipment count.
 
 ## Lifecycle and lock order
 
-Managed locations can be renamed, reordered and safely reparented according to
-the hierarchy; `storage_area` is valid under a room or storage group. The modeled
-closet nodes keep their Git geometry parent/kind/capability; safe name/order
-changes remain possible. Destinations require active ancestry. Deactivating or
-making a stocked subtree incapable fails without silently moving stock. Inactive
-sources remain evacuable. Site archival requires no positive quantity holdings
-and no active assets. Legacy storage-only asset moves/retirement cannot silently
-clear a site assignment. Both legacy quantity archive RPCs reject outstanding
-site holdings; archive-and-clear continues to clear storage only after site
-obligations have been explicitly resolved.
+Storage structure is maintained through reviewed room/reference-data code and
+repository migrations. Settings offers only a display-name rename. There are no
+ordinary-client create, reparent, reorder, kind, capability, active-state or delete
+controls, including for existing unmodeled locations. Legacy `location_create` and
+`location_update` RPC execution is revoked from PUBLIC, anon, authenticated and
+service_role; trusted SQL fixture/migration tooling maintains structure directly.
+`location_rename` accepts only location ID, captured expected version and name. It
+checks active configuration membership before replay, takes the exclusive placement
+lock before the row lock, and commits a versioned configuration event and receipt
+atomically. UUID, code, parent, kind, capability, active state, order, holdings and
+historical snapshots stay intact. Current authorized location names override static
+scene label text, accessible labels and hover tooltips by stable location code.
+Geometry and camera bindings remain static. The office placeholders remain valid.
+
+Sites retain their separate lifecycle. Manage sites is reachable from the site list
+and site detail offers explicit Archive site / Restore site actions. Confirmation
+names the property, retains identity/history, requires a reason, and links current
+holdings to their inventory records. `site_set_active` sends only site ID, captured
+expected version, requested active state and reason. Existing topology triggers and
+the exclusive/shared placement barrier atomically reject archives with holdings or
+racing assignments. No equipment is moved, written off or deleted automatically.
+Archived sites are omitted from ordinary destinations and active lists; archived/all
+filters and historical links retain access. Restore does not recreate assignments.
+New legacy `site_update` requests may edit metadata only when active is unchanged;
+changed-active payloads return `use_site_lifecycle` so callers upgrade to the reasoned
+operation. Previously completed requests still replay after current authorization.
+Old event rows retain null reasons rather than invented history.
+
+Management drafts retain the baseline captured with their values. Clean refreshes
+adopt values and baseline together; dirty settings cannot acquire a newer version
+without discarding edits explicitly with Cancel. A confirmed save establishes its
+matching saved baseline immediately. An uncertain result freezes edits and retries
+the exact command and request ID even if a refresh arrives. Synchronous duplicate
+submissions are suppressed, and routes scope drafts to actor plus record identity.
 
 Fresh mutations use READ COMMITTED. The order is active membership row,
 normalized receipt, catalog guard when applicable, placement guard, then

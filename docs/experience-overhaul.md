@@ -44,7 +44,7 @@ never invented metrics or decorative charts.
   waiting for exit animations. Stable route identity prevents query updates from
   replaying entrances. Drag owns its transform wrapper; surrounding layout motion
   uses a separate wrapper. Print disables decorative motion.
-- OS reduced-motion and a local motion toggle preserve static visual quality.
+- OS reduced-motion and a browser-personal motion control in Settings → Appearance & preferences preserve static visual quality. All active members, including viewers, can change it. The shell still applies the existing preference before motion starts; no sidebar, sign-in or access-denied control is repeated. Existing local storage, cross-tab updates, storage-failure fallback and system precedence remain.
   Continuous ambient motion pauses when hidden/offscreen, uses compositor-friendly
   effects and never drives React state each frame. No fullscreen blur stacks,
   cursor hijacking, flashing or parallax behind working forms.

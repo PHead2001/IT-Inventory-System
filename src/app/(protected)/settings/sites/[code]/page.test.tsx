@@ -10,6 +10,7 @@ vi.mock('@/lib/auth/session.server', () => ({ requireMember: mocks.member }));
 vi.mock('@/features/custody/queries.server', () => ({
   getSite: mocks.site,
   getSites: mocks.sites,
+  getSiteArchiveReview: vi.fn(async () => ({ holdings: [], total: 0 })),
 }));
 vi.mock('@/features/custody/management-form', () => ({
   SiteManagementForm: ({ site }: { site?: { code: string } }) => (

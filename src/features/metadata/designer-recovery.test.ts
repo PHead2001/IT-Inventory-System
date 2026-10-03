@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearAllDesignerRecovery,
   clearDesignerRecovery,
+  completeDesignerNavigation,
   readDesignerRecovery,
   writeDesignerRecovery,
 } from './designer-recovery';
@@ -28,6 +29,14 @@ describe('designer session recovery', () => {
     expect(readDesignerRecovery(id(4), id(2)).item).toBeNull();
     expect(readDesignerRecovery(id(1), id(5)).item).toBeNull();
     clearDesignerRecovery(id(1), id(2));
+    expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
+  });
+  it('completes an explicit discard only after the intended target mounts for the same actor', () => {
+    writeDesignerRecovery({ ...entry, discardAfterCategoryId: id(8) });
+    completeDesignerNavigation(id(4), id(8));
+    completeDesignerNavigation(id(1), id(7));
+    expect(readDesignerRecovery(id(1), id(2)).item).not.toBeNull();
+    completeDesignerNavigation(id(1), id(8));
     expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
   });
   it('clears only designer keys on signout', () => {
@@ -60,5 +69,29 @@ describe('designer session recovery', () => {
     const recovered = readDesignerRecovery(id(1), id(2)).item;
     expect(recovered?.expectedDraftId).toBe(id(9));
     expect(recovered?.expectedDraftVersion).toBe('3');
+  });
+  it('retains staged additions and the immutable uncertain-save receipt in the scoped snapshot', () => {
+    const staged = {
+      ...entry,
+      addition: {
+        sectionId: id(8),
+        tab: 'new' as const,
+        datetimeDraft: { wall: '2026-03-08T02:30:00', zone: 'America/Chicago' },
+        field: {
+          id: id(7),
+          type: 'datetime' as const,
+          label: 'Unadded appointment',
+          applies_to: ['asset' as const],
+          required: false,
+          rules: {},
+          options: [],
+          default: '2026-03-08T02:30:00',
+        },
+      },
+      receipt: { key: 'original immutable payload', id: id(10) },
+    };
+    expect(writeDesignerRecovery(staged)).toBe(true);
+    expect(readDesignerRecovery(id(1), id(2)).item).toEqual(staged);
+    expect(readDesignerRecovery(id(4), id(2)).item).toBeNull();
   });
 });

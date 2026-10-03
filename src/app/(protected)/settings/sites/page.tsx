@@ -18,7 +18,7 @@ export default async function ManageSitesPage() {
       <p className="experience-eyebrow mt-3">Configuration / Sites</p>
       <h1 className="experience-heading mb-5">Manage sites</h1>
       {member.role === 'staff' && member.can_manage_configuration ? (
-        <SiteManagementForm />
+        <SiteManagementForm key={member.user_id} actorId={member.user_id} />
       ) : (
         <p className={panel}>
           Site settings are read-only. An active staff configuration maintainer

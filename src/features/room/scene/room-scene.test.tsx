@@ -118,3 +118,14 @@ describe('room scene controls', () => {
     );
   });
 });
+
+it('shows the live authorized display name for a bound location without changing geometry', () => {
+  const props = sceneProps({
+    selectedCode: 'ITC-S1A',
+    locationNames: { 'ITC-S1A': 'Adapters shelf' },
+  });
+  const room = props.room;
+  render(<RoomScene {...props} />);
+  expect(screen.getByText(/Selected location: Adapters shelf/)).toBeVisible();
+  expect(props.room).toBe(room);
+});
