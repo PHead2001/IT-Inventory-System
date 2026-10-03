@@ -238,13 +238,37 @@ and [Playwright extension testing](https://playwright.dev/docs/chrome-extensions
 
 Foundation CI run `37117250606` passed on `c97133b`. Fresh Codex review of that SHA
 completed clean at 2026-10-03 10:48:25 UTC (comment 5968435201); the evidence reply
-and original P1 resolution are recorded above. The final documentation commit SHA,
-its exact-SHA CI and review, and the final unresolved-thread query are pending. The
-owned Supabase stack is stopped and Docker reports zero containers; graceful
-`rdctl` shutdown restored its initial state. Memory use was 8.68 GiB, below the
-10 GiB guard. Runner health could not be verified without administrator access.
-Final preview smoke and deactivation of the three temporary actors remain pending;
-domain fixture cleanup is complete. Final SHA, CI/review/thread status, preview
-smoke and actor final state will be recorded in the PR28 final evidence comment,
-not by recursively committing post-commit facts to this ledger. This does not
-claim zero unresolved issues or final acceptance.
+and original P1 resolution are recorded above. On documentation SHA
+`77b6f17801982fda6dec961048c27870c3be449a`, Codex review was clean (comment
+5968729005), the unresolved-thread query returned zero, and strict preview smoke
+passed. Its CI failed as described below, so acceptance of the test-repair SHA
+remains pending.
+
+The documentation SHA `77b6f17801982fda6dec961048c27870c3be449a` CI run
+`37119474308` reported 110 E2E passes and one E2E failure, caused by failed
+database job `111192640079`. The timeout was in the initial explicit-focus
+identity probe waiting for `requestfinished`: the
+Flight response was 200 with the expected actor payload, while stream receipt
+remained unfinished after the UI had completed. This does not establish a product
+defect. The test-only repair removes response-finish/body barriers and the
+browser-level overclaim while retaining failed/delayed transport, dirty-input,
+save and database-readback coverage. Metadata component coverage now defers both
+fetch and identity completion and checks that stale completion does not navigate
+or replace the original dirty, editable category-A form before save. A mutation
+removing only the success epoch guard fails the `router.push` assertion; the
+application source was restored byte-for-byte. The independently reviewed test
+blobs are E2E `eea8a9c7c86750efe8cd755784f2f3e91de1a315` and RTL
+`ed1ae217190134f1865698c6b40c9be47d07d66e`. On this test-repair working tree,
+focused `CI=true` Preview E2E passed 5/5 with zero retries, metadata components
+passed 66/66, full Vitest passed 927 tests across 94 files, and build, typecheck,
+lint and format checks passed. Logs are under ignored `test-results/navigation-ci-77b6/`.
+These results do not replace final exact-SHA CI.
+
+The owned stack cleanup completed: `npm run db:stop` and `rdctl` shutdown exited
+successfully, Docker has zero containers, and both Rancher WSL distributions are
+stopped. Ports 3000, 54321 and 54322 have no listeners. Domain fixture cleanup is
+complete, but the three temporary actors still need deactivation. Runner health
+could not be verified without administrator access. Final test-repair-SHA CI,
+review, thread status and actor final state will be recorded in the PR28 final
+evidence comment, not by recursively committing post-commit facts to this ledger.
+This does not claim zero unresolved issues or final acceptance.

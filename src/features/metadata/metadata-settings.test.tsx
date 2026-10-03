@@ -1110,13 +1110,25 @@ describe('category form designer', () => {
     confirm.mockRestore();
   });
   it('ignores an old category load after a rapid switch back to the current route', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;
-    vi.mocked(fetchCategoryForm).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
+    let finishFetch!: (
+      value: Awaited<ReturnType<typeof fetchCategoryForm>>,
+    ) => void;
+    const fetched = new Promise<Awaited<ReturnType<typeof fetchCategoryForm>>>(
+      (resolve) => {
+        finishFetch = resolve;
+      },
     );
+    let finishIdentity!: (
+      value: Awaited<ReturnType<typeof verifyMetadataDesignerIdentity>>,
+    ) => void;
+    const verified = new Promise<
+      Awaited<ReturnType<typeof verifyMetadataDesignerIdentity>>
+    >((resolve) => {
+      finishIdentity = resolve;
+    });
+    vi.mocked(fetchCategoryForm).mockReturnValue(fetched);
+    vi.mocked(verifyMetadataDesignerIdentity).mockReturnValue(verified);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(
       <MetadataSettings
         memberId={id(50)}
@@ -1127,6 +1139,11 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form }}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+    const heading = screen.getAllByLabelText('Section heading').at(-1)!;
+    fireEvent.change(heading, {
+      target: { value: 'Original category local section' },
+    });
     fireEvent.change(
       screen.getByLabelText('Designer category', { exact: true }),
       {
@@ -1139,13 +1156,34 @@ describe('category form designer', () => {
         target: { value: id(1) },
       },
     );
-    finish({ ok: true, form: null });
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText('Designer category', { exact: true }),
-      ).toHaveValue(id(1)),
+    expect(fetchCategoryForm).toHaveBeenCalledExactlyOnceWith(id(20));
+    // Await both application promises, including the identity continuation.
+    // Selector A alone is already observable before either promise settles.
+    await act(async () => {
+      finishFetch({ ok: true, form: null });
+      await fetched;
+    });
+    expect(verifyMetadataDesignerIdentity).toHaveBeenCalledExactlyOnceWith(
+      id(50),
     );
     expect(router.push).not.toHaveBeenCalled();
+    await act(async () => {
+      finishIdentity({ ok: true });
+      await verified;
+    });
+    expect(router.push).not.toHaveBeenCalled();
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toHaveValue(id(1));
+    expect(heading).toHaveValue('Original category local section');
+    expect(
+      screen.getByRole('button', { name: /^Save changes$/ }),
+    ).toBeEnabled();
+    expect(saveMetadataForm).not.toHaveBeenCalled();
+    fireEvent.change(heading, {
+      target: { value: 'Still editable after the old load completed' },
+    });
+    expect(heading).toHaveValue('Still editable after the old load completed');
   });
   it('keeps an earlier category load valid when a newer dirty switch is cancelled', async () => {
     let finish!: (value: Awaited<ReturnType<typeof fetchCategoryForm>>) => void;

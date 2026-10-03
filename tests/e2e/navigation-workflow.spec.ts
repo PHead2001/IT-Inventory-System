@@ -34,15 +34,6 @@ async function staffProofClient() {
   return { client, actorId: signed.data.user!.id };
 }
 
-async function finishBrowserTasks(page: Page) {
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  );
-}
-
 async function createCategories(page: Page, prefix: string) {
   const names = ['A', 'B'].map(
     (letter) => `${prefix} ${letter} ${crypto.randomUUID()}`,
@@ -66,7 +57,7 @@ async function createCategories(page: Page, prefix: string) {
   return names;
 }
 
-test('failed and delayed category requests retain dirty and pending input, reject late navigation and save the original category', async ({
+test('failed and delayed category requests retain dirty and pending input and save the original category', async ({
   page,
 }, testInfo) => {
   test.setTimeout(120_000);
@@ -75,15 +66,8 @@ test('failed and delayed category requests retain dirty and pending input, rejec
   const actorId = proof.actorId;
   await proof.client.auth.signOut({ scope: 'local' });
   const identityPayload = JSON.stringify([actorId]);
-  const pendingIdentity = new Set<Request>();
   const isIdentity = (request: Request) =>
     request.method() === 'POST' && request.postData() === identityPayload;
-  page.on('request', (request) => {
-    if (isIdentity(request)) pendingIdentity.add(request);
-  });
-  const identityEnded = (request: Request) => pendingIdentity.delete(request);
-  page.on('requestfinished', identityEnded);
-  page.on('requestfailed', identityEnded);
   const names = await createCategories(page, 'Category request');
   const routeA = page.url();
   const designer = page.getByRole('region', { name: 'Forms and fields' });
@@ -142,27 +126,16 @@ test('failed and delayed category requests retain dirty and pending input, rejec
   });
   await page.keyboard.press('Escape');
   await page.unroute('**/settings/forms/**');
-  // Drain any initial focus verification, then explicitly verify once to learn
-  // the actual action identity and exact Next JSON argument encoding.
-  await Promise.all(
-    [...pendingIdentity].map(async (request) =>
-      (await request.response())?.finished(),
-    ),
-  );
-  await finishBrowserTasks(page);
-  const verified = page.waitForEvent('requestfinished', {
-    predicate: isIdentity,
-  });
+  // Learn the real action header from the exact actor argument. Flight stream
+  // closure is not an action-result barrier: CI can leave a successful stream
+  // open after the application has consumed its result.
+  const identityProbe = page.waitForRequest(isIdentity);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  const verifiedRequest = await verified;
-  expect(verifiedRequest.postData()).toBe(identityPayload);
-  const identityAction = verifiedRequest.headers()['next-action'];
+  const probeRequest = await identityProbe;
+  expect(probeRequest.postData()).toBe(identityPayload);
+  const identityAction = probeRequest.headers()['next-action'];
   expect(identityAction).toBeTruthy();
-  expect(await (await verifiedRequest.response())!.text()).toContain(
-    '"ok":true',
-  );
-  await finishBrowserTasks(page);
-  expect(pendingIdentity.size).toBe(0);
+  expect((await probeRequest.response())?.ok()).toBe(true);
   await page.evaluate(() => {
     const proofWindow = window as Window & {
       navigationProofTriggers?: string[];
@@ -201,9 +174,10 @@ test('failed and delayed category requests retain dirty and pending input, rejec
       result.request().method() === 'POST' &&
       !!result.request().postData()?.includes(categoryB!),
   );
-  // A successful preflight performs its identity action before the epoch check.
-  // Wait for that complete response body, then for browser render tasks, so a
-  // save's busy guard cannot accidentally hide a stale navigation continuation.
+  // The new identity request proves the browser consumed the real B preflight
+  // result. It does not prove the identity result or epoch callback has settled.
+  // The deferred fetch + identity RTL regression proves that callback completes
+  // without pushing B while A is still dirty/editable, before any Save occurs.
   await selector.selectOption({ label: names[0] });
   // Only a newly started exact identity action after release can complete this
   // barrier. An old in-flight check, metadata save or unrelated POST cannot.
@@ -213,13 +187,10 @@ test('failed and delayed category requests retain dirty and pending input, rejec
       request.headers()['next-action'] === identityAction,
   );
   releaseDelayed();
-  await (await response).finished();
+  expect((await response).ok()).toBe(true);
   const continuation = await identityStarted;
   const identityResponse = await continuation.response();
-  expect(await identityResponse!.finished()).toBeNull();
   expect(identityResponse?.ok()).toBe(true);
-  expect(await identityResponse!.text()).toContain('"ok":true');
-  await finishBrowserTasks(page);
   expect(
     await page.evaluate(
       () =>
@@ -227,7 +198,6 @@ test('failed and delayed category requests retain dirty and pending input, rejec
           .navigationProofTriggers,
     ),
   ).toEqual([]);
-  expect(pendingIdentity.size).toBe(0);
   await expect(page).toHaveURL(routeA);
   await expect(selector).toHaveValue(
     new URL(routeA).pathname.split('/').at(-1)!,
