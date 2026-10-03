@@ -3,6 +3,7 @@ import {
   clearAllDesignerRecovery,
   clearDesignerRecovery,
   completeDesignerNavigation,
+  hasUnresolvedDesignerRecovery,
   readDesignerRecovery,
   writeDesignerRecovery,
 } from './designer-recovery';
@@ -21,6 +22,7 @@ const entry = {
 
 describe('designer session recovery', () => {
   beforeEach(() => {
+    clearAllDesignerRecovery();
     sessionStorage.clear();
   });
   it('scopes entries by member and category and keeps original version baselines', () => {
@@ -93,5 +95,78 @@ describe('designer session recovery', () => {
     expect(writeDesignerRecovery(staged)).toBe(true);
     expect(readDesignerRecovery(id(1), id(2)).item).toEqual(staged);
     expect(readDesignerRecovery(id(4), id(2)).item).toBeNull();
+  });
+  it('preserves an already durable original command when redundant storage writes fail', () => {
+    const pending = {
+      ...entry,
+      uncertainSave: true,
+      receipt: { key: 'exact reviewed command', id: id(10) },
+    };
+    expect(writeDesignerRecovery(pending)).toBe(true);
+    const write = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota');
+      });
+    expect(
+      writeDesignerRecovery({ ...pending, savedDefinition: 'changed' }),
+    ).toBe(true);
+    expect(
+      writeDesignerRecovery({
+        ...entry,
+        savedDefinition: 'stale passive draft',
+      }),
+    ).toBe(true);
+    expect(readDesignerRecovery(id(1), id(2))).toEqual({
+      available: true,
+      item: pending,
+    });
+    expect(hasUnresolvedDesignerRecovery()).toBe(true);
+    write.mockRestore();
+  });
+  it('detects durable unknown commands before any designer mount even beside malformed recovery', () => {
+    const snapshot = {
+      ...entry,
+      uncertainSave: true,
+      receipt: { key: 'original command', id: id(10) },
+    };
+    writeDesignerRecovery(snapshot);
+    const storageKey = sessionStorage.key(0)!;
+    clearAllDesignerRecovery();
+    sessionStorage.setItem('it-inventory:form-designer:v1:malformed', '{');
+    sessionStorage.setItem(storageKey, JSON.stringify(snapshot));
+    expect(hasUnresolvedDesignerRecovery()).toBe(true);
+    clearAllDesignerRecovery();
+    expect(hasUnresolvedDesignerRecovery()).toBe(false);
+  });
+  it('keeps a non-durable command immutable in memory and isolated by actor and environment', () => {
+    const pending = {
+      ...entry,
+      uncertainSave: true,
+      receipt: { key: 'exact payload including review_token', id: id(10) },
+    };
+    const write = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota');
+      });
+    expect(writeDesignerRecovery(pending)).toBe(false);
+    pending.receipt.key = 'caller changed its copy';
+    expect(readDesignerRecovery(id(1), id(2))).toMatchObject({
+      available: false,
+      item: { receipt: { key: 'exact payload including review_token' } },
+    });
+    expect(readDesignerRecovery(id(4), id(2)).item).toBeNull();
+    const oldEnvironment = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://other-environment.example';
+    expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
+    if (oldEnvironment === undefined)
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = oldEnvironment;
+    expect(hasUnresolvedDesignerRecovery()).toBe(true);
+    clearAllDesignerRecovery();
+    expect(hasUnresolvedDesignerRecovery()).toBe(false);
+    expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
+    write.mockRestore();
   });
 });

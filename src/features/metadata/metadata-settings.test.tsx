@@ -1470,6 +1470,244 @@ describe('category form designer', () => {
       vi.mocked(saveMetadataForm).mock.calls[0][0].payload.category_id,
     ).toBe(id(1));
   });
+  it('retains exact reviewed replay after a lost response and pre-RPC authorization denial', async () => {
+    const definition = structuredClone(form.published_definition);
+    const payload = {
+      expected_actor_id: id(50),
+      category_id: id(1),
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: id(2),
+      definition,
+      review_token: 'original-review-token',
+    };
+    const receipt = {
+      key: JSON.stringify(['metadata_form_save', payload]),
+      id: id(60),
+    };
+    writeDesignerRecovery({
+      memberId: id(50),
+      categoryId: id(1),
+      definition,
+      savedDefinition: JSON.stringify(definition),
+      expectedDraftId: null,
+      expectedDraftVersion: '0',
+      expectedPublishedRevisionId: id(2),
+      receipt,
+      uncertainSave: true,
+    });
+    vi.mocked(saveMetadataForm).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    mount();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await screen.findByText(/save outcome could not be confirmed/);
+    const original = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    expect(original).toEqual({
+      requestId: id(60),
+      expectedActorId: id(50),
+      payload,
+    });
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: false,
+      code: 'P1001',
+      message: 'Actor no longer authorized.',
+    });
+    // The outcome message can render before the React transition releases its
+    // pending lock. A user can retry only after the actual button is enabled.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry original save' }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    expect(saveMetadataForm).toHaveBeenCalledTimes(2);
+    await screen.findByText(/Configuration access changed/);
+    expect(
+      screen.queryByRole('button', { name: 'Retry original save' }),
+    ).not.toBeInTheDocument();
+    expect(readDesignerRecovery(id(50), id(1)).item?.receipt).toEqual(receipt);
+    cleanup();
+    render(
+      <MetadataSettings
+        memberId={id(51)}
+        categories={[{ id: id(1), name: 'Cables', active: true }]}
+        forms={{ [id(1)]: form }}
+      />,
+    );
+    await act(async () => {});
+    expect(
+      screen.queryByRole('button', { name: 'Recover edits' }),
+    ).not.toBeInTheDocument();
+    expect(readDesignerRecovery(id(50), id(1)).item?.receipt).toEqual(receipt);
+    cleanup();
+    mount();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'saved', version: '2', published_revision_id: id(22) },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await screen.findByText('Saved active form revision 2.');
+    expect(vi.mocked(saveMetadataForm).mock.calls[2][0]).toEqual(original);
+    expect(readDesignerRecovery(id(50), id(1)).item?.uncertainSave).not.toBe(
+      true,
+    );
+  });
+  it('captures an in-flight command before passive effects and ignores late success after focus denial', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof saveMetadataForm>>) => void;
+    vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({
+      ok: false,
+      code: 'P1001',
+      message: 'Access removed.',
+    });
+    vi.mocked(saveMetadataForm).mockImplementation((input) => {
+      expect(readDesignerRecovery(id(50), id(1)).item?.receipt).toEqual({
+        id: input.requestId,
+        key: JSON.stringify(['metadata_form_save', input.payload]),
+      });
+      fireEvent.focus(window);
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    mount();
+    addField('Private in-flight field');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/Configuration access changed/);
+    const original = readDesignerRecovery(id(50), id(1)).item;
+    expect(original?.uncertainSave).toBe(true);
+    expect(
+      screen.queryByText('Private in-flight field'),
+    ).not.toBeInTheDocument();
+    await act(async () => {
+      finish({
+        ok: true,
+        data: { status: 'saved', version: '2', published_revision_id: id(22) },
+      });
+    });
+    expect(readDesignerRecovery(id(50), id(1)).item).toEqual(original);
+    expect(
+      screen.queryByText('Saved active form revision 2.'),
+    ).not.toBeInTheDocument();
+    cleanup();
+    mount();
+    expect(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    ).toBeVisible();
+  });
+  it('preserves an unresolved snapshot when focus denial happens before Recover edits', async () => {
+    const definition = structuredClone(form.published_definition);
+    const snapshot = {
+      memberId: id(50),
+      categoryId: id(1),
+      definition,
+      savedDefinition: JSON.stringify(definition),
+      expectedDraftId: null,
+      expectedDraftVersion: '0',
+      expectedPublishedRevisionId: id(2),
+      receipt: { key: 'untouched original command', id: id(60) },
+      uncertainSave: true,
+    };
+    writeDesignerRecovery(snapshot);
+    vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({
+      ok: false,
+      code: 'P1001',
+      message: 'Access removed.',
+    });
+    mount();
+    fireEvent.focus(window);
+    await screen.findByText(/Configuration access changed/);
+    expect(readDesignerRecovery(id(50), id(1)).item).toEqual(snapshot);
+    cleanup();
+    mount();
+    expect(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    ).toBeVisible();
+  });
+  it('keeps a non-durable original command in memory and does not advertise safe reload on denial', async () => {
+    vi.mocked(saveMetadataForm).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    mount();
+    addField('Memory-only command');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/save outcome could not be confirmed/);
+    const original = readDesignerRecovery(id(50), id(1)).item;
+    vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({
+      ok: false,
+      code: 'P1001',
+      message: 'Access removed.',
+    });
+    fireEvent.focus(window);
+    await screen.findByText(/Do not reload or close it/);
+    expect(
+      screen.queryByRole('button', { name: 'Refresh access' }),
+    ).not.toBeInTheDocument();
+    expect(readDesignerRecovery(id(50), id(1))).toEqual({
+      available: false,
+      item: original,
+    });
+    // A different actor or unavailable identity cannot release the mask.
+    fireEvent.click(screen.getByRole('button', { name: 'Retry access' }));
+    await screen.findByText(/configuration access could not be verified/);
+    expect(
+      screen.queryByRole('button', { name: 'Recover edits' }),
+    ).not.toBeInTheDocument();
+    vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValueOnce({
+      ok: false,
+      code: 'identity_unverified',
+      message: 'Unavailable.',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry access' }));
+    await waitFor(() =>
+      expect(verifyMetadataDesignerIdentity).toHaveBeenCalledTimes(3),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry access' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Recover edits' }),
+    ).not.toBeInTheDocument();
+    // A fresh successful original-actor check enables same-page recovery, even
+    // when a reload would destroy the only exact receipt.
+    vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValueOnce({
+      ok: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry access' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'saved', version: '3', published_revision_id: id(23) },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await screen.findByText('Saved active form revision 3.');
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(
+      vi.mocked(saveMetadataForm).mock.calls[0][0],
+    );
+    expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
+    cleanup();
+  });
   it('retains the same request after an uncertain save and recovery re-entry', async () => {
     vi.mocked(saveMetadataForm).mockRejectedValueOnce(
       new Error('lost response'),

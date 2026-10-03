@@ -16,6 +16,7 @@ import {
   assertCommittedPerformanceSource,
   performanceBuildBinding,
   assertPerformanceBuildReuse,
+  installNavigationFeedbackObserver,
 } from './navigation-performance-contract.mjs';
 
 const options = Object.fromEntries(
@@ -309,36 +310,10 @@ async function measure(page, route, mode, sample) {
     });
   };
   page.on('requestfinished', requestDone);
-  await page.evaluate((heading) => {
-    window.__navMeasure = {
-      start: performance.now(),
-      feedbackMs: null,
-      longTasks: [],
-    };
-    const observer = new MutationObserver(() => {
-      const state = window.__navMeasure;
-      if (state.feedbackMs !== null) return;
-      const targetVisible =
-        heading &&
-        Array.from(document.querySelectorAll('#main-content h1')).some(
-          (node) => node.textContent.trim() === heading,
-        );
-      if (
-        document.querySelector(
-          '[data-navigation-pending="true"], [data-route-loading]',
-        ) ||
-        targetVisible
-      )
-        state.feedbackMs = performance.now() - state.start;
-    });
-    if (document.body)
-      observer.observe(document.body, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-      });
-    window.__navObserver = observer;
-  }, route[2]);
+  await page.evaluate(installNavigationFeedbackObserver, {
+    heading: route[2],
+    category: route[0] === 'category-form',
+  });
   const start = performance.now();
   if (mode === 'deep-link')
     await page.goto(`http://localhost:3000${route[1]}`, {
@@ -428,9 +403,9 @@ const provenance = {
   usableDefinition:
     'route URL + conventional heading/control visible + two painted frames; Labels additionally waits for loaded search results; renderer readiness separately unproven',
   feedbackDefinition:
-    'pending indicator/loading boundary or target heading DOM observed; deep-link feedback approximated by document TTFB',
+    'pending indicator/loading boundary, category navigation status or target heading DOM observed; deep-link feedback unavailable after document replacement, documentTtfbMs recorded separately',
   categoryBaselineLimitation:
-    'one-option selector cannot switch; equivalent destination reached with ordinary route link',
+    'frozen baseline one-option selector cannot switch and uses an ordinary route link; candidate uses its actual category selector; baseline clicks are not comparable',
   fixtures: fixtureCounts,
 };
 try {

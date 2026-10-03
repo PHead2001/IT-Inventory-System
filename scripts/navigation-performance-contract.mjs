@@ -1,6 +1,48 @@
 // Numeric-only fixture provenance. Audit tables also have to be empty so a
 // previous integration run cannot silently change History/configuration work.
 import { createHash } from 'node:crypto';
+
+// Self-contained so Playwright can serialize this into the measured document.
+// Do not count an already-present designer status as navigation feedback.
+export function installNavigationFeedbackObserver({ heading, category }) {
+  window.__navMeasure = {
+    start: performance.now(),
+    feedbackMs: null,
+    longTasks: [],
+  };
+  const observer = new MutationObserver(() => {
+    const state = window.__navMeasure;
+    if (state.feedbackMs !== null) return;
+    const targetVisible =
+      heading &&
+      Array.from(document.querySelectorAll('#main-content h1')).some(
+        (node) => node.textContent.trim() === heading,
+      );
+    const categoryPending =
+      category &&
+      Array.from(
+        document.querySelectorAll('#main-content [role="status"]'),
+      ).some((node) =>
+        /^(Loading|Opening) selected category…/.test(node.textContent.trim()),
+      );
+    if (
+      document.querySelector(
+        '[data-navigation-pending="true"], [data-route-loading]',
+      ) ||
+      targetVisible ||
+      categoryPending
+    )
+      state.feedbackMs = performance.now() - state.start;
+  });
+  if (document.body)
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+    });
+  window.__navObserver = observer;
+}
+
 export const performanceTables = [
   'quantity_items',
   'serialized_assets',

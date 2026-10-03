@@ -582,6 +582,11 @@ export function MetadataSettings({
     null,
   );
   const [uncertainSave, setUncertainSave] = useState(false);
+  const unresolvedCommand = useRef<DesignerRecovery | null>(null);
+  const [blockedRecovery, setBlockedRecovery] = useState<
+    'none' | 'durable' | 'memory'
+  >('none');
+  const [blockedAccessMessage, setBlockedAccessMessage] = useState('');
   const [pending, startTransition] = useTransition();
   const [operationPending, setOperationPending] = useState(false);
   const [recovery, setRecovery] = useState<DesignerRecovery | null>(null);
@@ -677,6 +682,20 @@ export function MetadataSettings({
     if (terminalDenied.current) return;
     terminalDenied.current = true;
     identityCheck.current += 1;
+    // An authorization check runs before RPC replay and cannot settle an
+    // earlier command. Capture it before masking the privileged draft.
+    const pendingCommand =
+      unresolvedCommand.current ??
+      readDesignerRecovery(memberId, categoryId).item;
+    const unresolved = pendingCommand?.uncertainSave ? pendingCommand : null;
+    unresolvedCommand.current = unresolved;
+    setBlockedRecovery(
+      unresolved
+        ? writeDesignerRecovery(unresolved)
+          ? 'durable'
+          : 'memory'
+        : 'none',
+    );
     gesture.current = null;
     dndBaseline.current = null;
     setDraggingControlId(null);
@@ -694,12 +713,52 @@ export function MetadataSettings({
     setSelectedSectionId(null);
     setRemoveSectionId(null);
     setAddition(null);
-    setUncertainSave(false);
+    setUncertainSave(unresolved !== null);
     setConfigErrors({});
     setScopeMessage('');
-    clearDesignerRecovery(memberId, categoryId);
+    if (!unresolved) clearDesignerRecovery(memberId, categoryId);
     setIdentityStatus('blocked');
   }, [memberId, categoryId]);
+  const retryDeniedAccess = async () => {
+    if (!terminalDenied.current || busy.current || identityInFlight.current)
+      return;
+    busy.current = true;
+    identityInFlight.current = true;
+    setOperationPending(true);
+    setBlockedAccessMessage('Verifying the original actor’s access…');
+    const check = ++identityCheck.current;
+    try {
+      const result = await verifyMetadataDesignerIdentity(memberId);
+      if (check !== identityCheck.current) return;
+      if (!result.ok) {
+        setBlockedAccessMessage(
+          'The original actor’s configuration access could not be verified. Keep this page open and retry after access is restored.',
+        );
+        return;
+      }
+      const command = unresolvedCommand.current;
+      if (!command) return;
+      // Only this fresh server verification may release the terminal mask.
+      // The original command stays locked until explicitly recovered/replayed.
+      terminalDenied.current = false;
+      setDefinition(command.definition);
+      definitionRef.current = command.definition;
+      setRecovery(command);
+      setUncertainSave(true);
+      setIdentityStatus('verified');
+      setBlockedAccessMessage('');
+      setMessage('Access restored. Recover edits and retry the original save.');
+    } catch {
+      if (check === identityCheck.current)
+        setBlockedAccessMessage(
+          'Access verification was interrupted. Keep this page open and retry.',
+        );
+    } finally {
+      identityInFlight.current = false;
+      busy.current = false;
+      setOperationPending(false);
+    }
+  };
   useEffect(() => {
     definitionRef.current = definition;
   }, [definition]);
@@ -778,6 +837,7 @@ export function MetadataSettings({
     let active = true;
     completeDesignerNavigation(memberId, categoryId);
     const result = readDesignerRecovery(memberId, categoryId);
+    if (result.item?.uncertainSave) unresolvedCommand.current = result.item;
     queueMicrotask(() => {
       if (!active || terminalDenied.current) return;
       setRecovery(result.item);
@@ -796,6 +856,9 @@ export function MetadataSettings({
     // Wait for the entry read before clearing anything: an older unsaved draft
     // must remain available for explicit recovery on a fresh mount.
     if (recoveryLoadedScope !== recoveryScope || terminalDenied.current) return;
+    // The command is captured synchronously before dispatch. Do not reconstruct
+    // it from passive state effects that may still contain an older receipt.
+    if (unresolvedCommand.current) return;
     // A pending original request belongs to recovery until it is explicitly adopted.
     if (recovery?.uncertainSave) return;
     if (!unsaved || !definition) {
@@ -1215,6 +1278,25 @@ export function MetadataSettings({
     }
     const key = JSON.stringify(['metadata_form_save', payload]);
     const requestId = receipt?.key === key ? receipt.id : newId();
+    const wasUncertain = uncertainSave;
+    const command: DesignerRecovery = JSON.parse(
+      JSON.stringify({
+        memberId,
+        categoryId,
+        definition,
+        savedDefinition: saved,
+        expectedDraftId: draftId,
+        expectedDraftVersion: draftVersion,
+        expectedPublishedRevisionId: publishedBaseline,
+        receipt: { key, id: requestId },
+        uncertainSave: true,
+      }),
+    );
+    unresolvedCommand.current = command;
+    if (!writeDesignerRecovery(command))
+      setStorageWarning(
+        'The original save is retained only while this page stays open. Browser recovery is unavailable; do not reload until its outcome is resolved.',
+      );
     setReceipt({ key, id: requestId });
     setUncertainSave(true);
     busy.current = true;
@@ -1236,9 +1318,18 @@ export function MetadataSettings({
         )
           return;
         if (!result.ok) {
-          setUncertainSave(
-            !/^P\d{4}$/.test(result.code) && !/^[2345]\d{4}$/.test(result.code),
-          );
+          // P1001 is returned before replay by the action's actor check. It
+          // definitively denies a first attempt, but says nothing about an
+          // earlier attempt whose response was lost.
+          const unresolved =
+            (wasUncertain && result.code === 'P1001') ||
+            (!/^P\d{4}$/.test(result.code) &&
+              !/^[2345]\d{4}$/.test(result.code));
+          setUncertainSave(unresolved);
+          if (!unresolved) {
+            unresolvedCommand.current = null;
+            clearDesignerRecovery(memberId, categoryId);
+          }
           if (result.code === 'P1001') denyIdentity();
           else if (result.code === 'identity_unverified')
             setIdentityStatus('retry');
@@ -1250,6 +1341,8 @@ export function MetadataSettings({
           return;
         }
         setUncertainSave(false);
+        unresolvedCommand.current = null;
+        clearDesignerRecovery(memberId, categoryId);
         if (result.data.status === 'confirmation_required') {
           setSaveReview(result.data);
           setSavePayload(payload);
@@ -1570,8 +1663,13 @@ export function MetadataSettings({
           role="status"
           className="rounded border border-amber-700 p-3 text-sm"
         >
-          Configuration access changed. Refresh this page to continue.
-          {identityStatus === 'blocked' && (
+          Configuration access changed.{' '}
+          {blockedRecovery === 'memory'
+            ? 'The save outcome is still unknown and its original request is retained only in this open page. Do not reload or close it; restore the original actor’s access before retrying.'
+            : blockedRecovery === 'durable'
+              ? 'The save outcome is still unknown. The original request is retained for recovery and exact replay when the same actor has configuration access again.'
+              : 'Refresh this page to continue.'}
+          {blockedRecovery !== 'memory' && (
             <Button
               type="button"
               variant="outline"
@@ -1580,6 +1678,17 @@ export function MetadataSettings({
               Refresh access
             </Button>
           )}
+          {blockedRecovery !== 'none' && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={operationPending}
+              onClick={() => void retryDeniedAccess()}
+            >
+              Retry access
+            </Button>
+          )}
+          {blockedAccessMessage && <p>{blockedAccessMessage}</p>}
         </div>
       ) : active.length === 0 ? (
         <p>No active category is available.</p>
@@ -1690,6 +1799,9 @@ export function MetadataSettings({
                     setDraftId(recovery.expectedDraftId);
                     setPublishedBaseline(recovery.expectedPublishedRevisionId);
                     setReceipt(recovery.receipt ?? null);
+                    unresolvedCommand.current = recovery.uncertainSave
+                      ? recovery
+                      : null;
                     setUncertainSave(recovery.uncertainSave ?? false);
                     setHistory([]);
                     setAddition(recovery.addition ?? null);

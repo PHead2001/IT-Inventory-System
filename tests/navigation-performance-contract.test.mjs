@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 import {
   performanceTables,
   assertFreshPerformanceDataset,
@@ -7,9 +8,59 @@ import {
   assertCommittedPerformanceSource,
   performanceBuildBinding,
   assertPerformanceBuildReuse,
+  installNavigationFeedbackObserver,
 } from '../scripts/navigation-performance-contract.mjs';
 const empty = () =>
   Object.fromEntries(performanceTables.map((table) => [table, 0]));
+
+test('category feedback measures the switch status rather than the idle editor status', async () => {
+  const dom = new JSDOM(
+    '<main id="main-content"><span role="status">All changes saved</span></main>',
+    { runScripts: 'outside-only' },
+  );
+  try {
+    dom.window.eval(
+      `(${installNavigationFeedbackObserver.toString()})({heading:null,category:true})`,
+    );
+    const status = dom.window.document.querySelector('[role="status"]');
+    status.textContent = 'Ready to save';
+    await Promise.resolve();
+    assert.equal(dom.window.__navMeasure.feedbackMs, null);
+    status.textContent =
+      'Loading selected category… Your current edits remain here until it opens.';
+    await Promise.resolve();
+    assert.ok(dom.window.__navMeasure.feedbackMs >= 0);
+    const first = dom.window.__navMeasure.feedbackMs;
+    status.textContent =
+      'Opening selected category… Your current editor is paused until it opens.';
+    await Promise.resolve();
+    assert.equal(dom.window.__navMeasure.feedbackMs, first);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('pending Link feedback is observed before the destination heading arrives', async () => {
+  const dom = new JSDOM('<main id="main-content"><h1>Inventory</h1></main>', {
+    runScripts: 'outside-only',
+  });
+  try {
+    dom.window.eval(
+      `(${installNavigationFeedbackObserver.toString()})({heading:"Properties and sites",category:false})`,
+    );
+    const pending = dom.window.document.createElement('span');
+    pending.dataset.navigationPending = 'true';
+    dom.window.document.body.append(pending);
+    await Promise.resolve();
+    assert.ok(dom.window.__navMeasure.feedbackMs >= 0);
+    assert.equal(
+      dom.window.document.querySelector('h1').textContent,
+      'Inventory',
+    );
+  } finally {
+    dom.window.close();
+  }
+});
 
 test('both measurement datasets require an empty fixture and audit state', () => {
   assert.doesNotThrow(() => assertFreshPerformanceDataset(empty()));
