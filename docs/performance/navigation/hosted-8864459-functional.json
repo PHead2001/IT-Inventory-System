@@ -1,0 +1,353 @@
+{
+  "sha": "88644591c2e756a37e3db4ffb1a0a59075e22808",
+  "sourceTree": "1c67559b80ba73f9e4df8823f29cf54c197d4a1b",
+  "deployment": "dpl_89YKJL82LDxJYJpJMr4azsNb2a8E",
+  "isolatedBackend": "wkqkidojpicdtytswmje",
+  "roles": ["configuration maintainer", "ordinary staff", "viewer"],
+  "draftChecks": [
+    {
+      "name": "personal-motion-viewer",
+      "pass": true,
+      "keyboard": true,
+      "persistsAcrossRoutes": true,
+      "systemPrecedence": true
+    },
+    {
+      "name": "personal-motion-staff",
+      "pass": true,
+      "keyboard": true,
+      "persistsAcrossRoutes": true,
+      "systemPrecedence": true
+    },
+    {
+      "name": "native-dialog-1440x900",
+      "pass": true,
+      "dimensions": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1,
+        "scale": 1
+      },
+      "box": {
+        "x": 160,
+        "y": 16,
+        "width": 1120,
+        "height": 868
+      },
+      "scrollY": 1270,
+      "activeTransformTest": true,
+      "nativeFocusTrapAndReturn": true
+    },
+    {
+      "name": "native-dialog-390x480",
+      "pass": true,
+      "dimensions": {
+        "width": 390,
+        "height": 480,
+        "dpr": 1,
+        "scale": 1
+      },
+      "box": {
+        "x": 19,
+        "y": 16,
+        "width": 352,
+        "height": 448
+      },
+      "scrollY": 1895,
+      "activeTransformTest": true,
+      "nativeFocusTrapAndReturn": true
+    },
+    {
+      "name": "native-dialog-1440x330",
+      "pass": true,
+      "dimensions": {
+        "width": 1440,
+        "height": 330,
+        "dpr": 1,
+        "scale": 1
+      },
+      "box": {
+        "x": 160,
+        "y": 16,
+        "width": 1120,
+        "height": 298
+      },
+      "scrollY": 1479,
+      "activeTransformTest": true,
+      "nativeFocusTrapAndReturn": true
+    },
+    {
+      "name": "actual-native-browser-200-percent",
+      "pass": true,
+      "before": {
+        "dpr": 1,
+        "width": 1418,
+        "height": 802,
+        "scale": 1
+      },
+      "after": {
+        "dpr": 2,
+        "width": 709,
+        "height": 401,
+        "scale": 1,
+        "cssZoom": "1"
+      },
+      "zoom": {
+        "factor": 2,
+        "settings": {
+          "defaultZoomFactor": 1,
+          "mode": "automatic",
+          "scope": "per-tab"
+        }
+      },
+      "method": "Official chrome.tabs.setZoom in disposable extension/profile; no CSS/pinch/device override"
+    },
+    {
+      "name": "native-dialog-native-200-percent",
+      "pass": true,
+      "dimensions": {
+        "width": 709,
+        "height": 401,
+        "dpr": 2,
+        "scale": 1
+      },
+      "box": {
+        "x": 19,
+        "y": 16,
+        "width": 671,
+        "height": 369
+      },
+      "scrollY": 1603,
+      "activeTransformTest": true,
+      "nativeFocusTrapAndReturn": true
+    },
+    {
+      "name": "real-category-selector-A-B-A",
+      "pass": true,
+      "timings": [
+        {
+          "category": "[record-id]",
+          "usableMs": 863.4192000000039
+        },
+        {
+          "category": "[record-id]",
+          "usableMs": 1360.2041000000027
+        }
+      ],
+      "matchedFormListMetric": false
+    },
+    {
+      "name": "pending-invalid-datetime-Back-Forward",
+      "pass": true,
+      "categoryScoped": true,
+      "typedValuesRestored": true
+    }
+  ],
+  "preservationChecks": [
+    {
+      "name": "ordinary browser storage event synchronizes Settings motion across tabs",
+      "passed": true
+    },
+    {
+      "name": "blocked preference storage preserves usable volatile preference across client routes",
+      "passed": true
+    },
+    {
+      "name": "twelve field authoring types retain live preview and staged Cancel",
+      "passed": true
+    },
+    {
+      "name": "real pointer updates semantic placement span; normal Undo restores original basis and clean state",
+      "passed": true
+    }
+  ],
+  "persistedChecks": [
+    {
+      "name": "own save/category/next edit establishes full fresh baseline",
+      "passed": true
+    },
+    {
+      "name": "stale disjoint edits reconcile without lost untouched values",
+      "passed": true
+    },
+    {
+      "name": "overlap shows latest/mine choices before exact-record save",
+      "passed": true
+    },
+    {
+      "name": "uncertain outcome freezes editing and replays exact action bytes once",
+      "passed": true,
+      "postProof": [
+        {
+          "sha256": "c95926d0400e56c7dfa338274d19a78b3469b431eb59f5e0a99d7c1987f55669",
+          "requestIds": ["[record-id]"]
+        },
+        {
+          "sha256": "c95926d0400e56c7dfa338274d19a78b3469b431eb59f5e0a99d7c1987f55669",
+          "requestIds": ["[record-id]"]
+        }
+      ]
+    },
+    {
+      "name": "discoverable archive/archived lookup/restore retain site identity desktop+narrow",
+      "passed": true
+    },
+    {
+      "name": "stale settings retain typed note, block outdated save, Cancel adopts latest",
+      "passed": true
+    },
+    {
+      "name": "location name-only UI preserves UUID/code/structure/stock and restores original",
+      "passed": true
+    },
+    {
+      "name": "viewer and ordinary staff configuration writes denied at UI and RPC",
+      "passed": true
+    },
+    {
+      "name": "legacy structural location RPC execute revoked for maintainer",
+      "passed": true
+    },
+    {
+      "name": "ordinary staff normal Ticket issue confirmed once through exact scoped readback",
+      "passed": true
+    },
+    {
+      "name": "quantity holding blocks site archive; Ticket wording keeps stored leading-zero reference",
+      "passed": true
+    },
+    {
+      "name": "assignment/archive concurrency preserves active destination invariant",
+      "passed": true,
+      "winner": "assignment"
+    }
+  ],
+  "activeArrival": {
+    "controlledCondition": "Actual application PageArrival keyframes intercepted only to stretch duration230ms→30000ms; effects remain enabled; real mouse coordinates bypass locator stability waiting; not normal performance timing",
+    "before": {
+      "running": true,
+      "currentTime": 66.60100003749503,
+      "duration": 30000,
+      "transform": "matrix(1, 0, 0, 1, 0, 11.8933)",
+      "opacity": "0.554",
+      "containsDialog": false,
+      "keyframes": [
+        {
+          "transform": "translateY(12px)",
+          "opacity": "0.55"
+        },
+        {
+          "transform": "translateY(0px)",
+          "opacity": "1"
+        }
+      ]
+    },
+    "after": {
+      "running": true,
+      "currentTime": 83.33500003749505,
+      "duration": 30000,
+      "transform": "matrix(1, 0, 0, 1, 0, 11.8665)",
+      "opacity": "0.555006",
+      "containsDialog": true,
+      "keyframes": [
+        {
+          "transform": "translateY(12px)",
+          "opacity": "0.55"
+        },
+        {
+          "transform": "translateY(0px)",
+          "opacity": "1"
+        }
+      ]
+    },
+    "geometry": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "dpr": 1
+      },
+      "bounds": {
+        "x": 160,
+        "y": 16,
+        "width": 1120,
+        "height": 868
+      }
+    },
+    "focusTrapAndReturn": true,
+    "leadVisualReview": "Accepted by parent Astra on2026-10-03"
+  },
+  "requestOutcomes": [
+    {
+      "actor": "maintainer",
+      "operation": "site_update",
+      "confirmed": true,
+      "code": null
+    },
+    {
+      "actor": "viewer",
+      "operation": "location_rename",
+      "confirmed": false,
+      "code": "P1001"
+    },
+    {
+      "actor": "viewer",
+      "operation": "site_set_active",
+      "confirmed": false,
+      "code": "P1001"
+    },
+    {
+      "actor": "staff",
+      "operation": "location_rename",
+      "confirmed": false,
+      "code": "P1001"
+    },
+    {
+      "actor": "staff",
+      "operation": "site_set_active",
+      "confirmed": false,
+      "code": "P1001"
+    },
+    {
+      "actor": "maintainer",
+      "operation": "location_create",
+      "confirmed": false,
+      "code": "42501"
+    },
+    {
+      "actor": "maintainer",
+      "operation": "location_update",
+      "confirmed": false,
+      "code": "42501"
+    },
+    {
+      "actor": "staff",
+      "operation": "quantity_site_change",
+      "confirmed": true,
+      "code": null
+    },
+    {
+      "actor": "staff",
+      "operation": "asset_site_change",
+      "confirmed": true,
+      "code": null
+    },
+    {
+      "actor": "maintainer",
+      "operation": "site_set_active",
+      "confirmed": false,
+      "code": "P1008"
+    },
+    {
+      "actor": "staff",
+      "operation": "asset_site_change",
+      "confirmed": true,
+      "code": null
+    }
+  ],
+  "cleanup": "Own actors retained for final tests/docs-only HEAD smoke; record cleanup reported separately",
+  "limitations": [
+    "Hosted ordinary concurrent request race supplements deterministic local database integration tests",
+    "No production or permanent staging writes",
+    "Native200/dialog pending-datetime proof remains separately stamped5c, relevant UI unchanged except selector aria label"
+  ]
+}

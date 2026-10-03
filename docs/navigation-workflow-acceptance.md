@@ -7,23 +7,28 @@ certification report.
 Baseline: `b8bc0d2437d0204dd09c79ae1b69334540a2a62e` (released feature baseline,
 before this milestone). A separate detached baseline worktree preserves that
 revision for production-build comparisons. The latest committed application
-checkpoint is `88644591c2e756a37e3db4ffb1a0a59075e22808` (source tree
+checkpoint is `c97133b3a177209b9a236eaea42f05a43220a964` (source tree
 `1c67559b80ba73f9e4df8823f29cf54c197d4a1b`). Candidate branch:
 `assist/navigation-workflow-fixes`. No production changes are authorized.
 
-| Requirement                                  | Required proof                                                                                                                                                                                | Current evidence                                                                                                                                                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Add field placement and section selection | Desktop, scrolled/arrival-transform opening, 390px, 200% zoom and short viewport; native focus/Escape/return; staged cancellation, targeting, drag/resize and undo                            | Hosted `5c6e0b4` draft proof covers dialog geometry, focus/Escape/return at 1440×900, 390×480, 1440×330 and native 200% zoom. Active-transform opening, remaining designer interactions and final-SHA browser proof are pending. |
-| 2. Category form navigation                  | Lightweight references and selected-only form read; route/heading/save/recovery agreement; A/B/A, Back/Forward, dirty and pending addition, failed loading, late responses and in-flight save | Source/focused checks and selected hosted selector/history cases are recorded below; full navigation-state matrix and final-SHA browser proof remain pending.                                                                    |
-| 3. Site archive and restore                  | Discoverable maintainer action, reason and holdings links; independent-connection assignment/archive races; stale/duplicate/permission denial; identity/history retained                      | Source, focused checks, DB gate and independent source review passed; hosted persisted workflow and cleanup proof remain pending.                                                                                                |
-| 4. Metadata reconciliation                   | Own-save baseline, untouched refresh, disjoint/converged/overlapping edits, dependency groups, second race, uncertain exact replay and explicit clears/legacy values                          | Source, focused checks, DB gate and independent integrity source review passed; hosted persisted workflow and cleanup proof remain pending.                                                                                      |
-| 5. Code-managed location structure           | Name-only audited CAS RPC; old structural RPC denial; privileged fixture path; existing placeholders, hierarchy, balances, QR codes and history retained; live names in room/picker/details   | Source, focused checks, DB gate, generated types and independent source review passed; hosted persisted workflow and cleanup proof remain pending.                                                                               |
-| 6. First-visit navigation                    | Matched baseline/candidate matrix for all routes below; normal visuals, authenticated production builds, empty/populated fixtures, direct/unvisited/repeat paths and raw provenance           | Matched local `5c6e0b4` matrix and hosted `886` empty-route observations are recorded below; hosted populated matrix and final Labels remeasurement remain pending.                                                              |
-| 7. Ticket wording and motion preference      | Text values and API/export keys preserved; Settings control for active viewers/staff; persisted preference, OS precedence, camera/ambient/print behavior                                      | Source/focused checks and hosted viewer/staff preference, persistence, keyboard and OS-precedence proof on `5c6e0b4` are recorded below; final-SHA and remaining behavior proof are pending.                                     |
+| Requirement                                  | Required proof                                                                                                                                                                                | Current evidence                                                                                                                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Add field placement and section selection | Desktop, scrolled/arrival-transform opening, 390px, 200% zoom and short viewport; native focus/Escape/return; staged cancellation, targeting, drag/resize and undo                            | Hosted `886` proof covers actual page arrival and coordinate click during the stretched transform, with nonidentity matrices before/after; modal geometry/focus proof is recorded below. Required functional proof is complete; final preview smoke is pending. |
+| 2. Category form navigation                  | Lightweight references and selected-only form read; route/heading/save/recovery agreement; A/B/A, Back/Forward, dirty and pending addition, failed loading, late responses and in-flight save | Hosted `886` checks cover category A/B/A, Back/Forward, invalid pending DST retention, category next-edit, metadata own-save/disjoint/overlap/exact-unknown replay. Required functional proof is complete; final preview smoke is pending.                      |
+| 3. Site archive and restore                  | Discoverable maintainer action, reason and holdings links; independent-connection assignment/archive races; stale/duplicate/permission denial; identity/history retained                      | Hosted occupied-site archive denial, normal return, and assignment/archive race (one valid winner, then return/restore) passed; viewer/staff UI and RPC denials passed. Domain fixture cleanup is complete; temporary actors remain.                            |
+| 4. Metadata reconciliation                   | Own-save baseline, untouched refresh, disjoint/converged/overlapping edits, dependency groups, second race, uncertain exact replay and explicit clears/legacy values                          | Hosted own-save, category next-edit, disjoint/overlapping edits and exact unknown replay passed. Required functional proof is complete; final preview smoke is pending.                                                                                         |
+| 5. Code-managed location structure           | Name-only audited CAS RPC; old structural RPC denial; privileged fixture path; existing placeholders, hierarchy, balances, QR codes and history retained; live names in room/picker/details   | Hosted rename preserved UUID, code, structure and all 30 owned balances; original 1A was restored. Viewer/staff UI and RPC writes were denied; maintainer legacy structural RPC was revoked. Domain fixture cleanup is complete.                                |
+| 6. First-visit navigation                    | Matched baseline/candidate matrix for all routes below; normal visuals, authenticated production builds, empty/populated fixtures, direct/unvisited/repeat paths and raw provenance           | Local `c97133b` comparison and hosted `886` matched matrices are complete. Detailed report and raw artifacts are linked below; final preview smoke is pending.                                                                                                  |
+| 7. Ticket wording and motion preference      | Text values and API/export keys preserved; Settings control for active viewers/staff; persisted preference, OS precedence, camera/ambient/print behavior                                      | Hosted `886` viewer/staff Motion preference, modal desktop/narrow/short/native-200% behavior, and category selector/history cases are recorded below; remaining preview smoke is pending.                                                                       |
 
-These are partial evidence records, not acceptance. Hosted functional matrices,
-fixture cleanup and exact-final-SHA certification remain pending; see the row
-details and final gates below.
+All 25 required hosted functional checks and controlled active-transform proof
+passed. Domain fixture cleanup is complete: 30 quantity records are archived at
+zero stock, 30 assets are retired, eight sites are archived, original 1A is
+restored, history is retained, and active owned inventory/site records are zero.
+Three temporary actors remain until final documentation-SHA preview smoke, then
+they will be deactivated. Their account cleanup is not yet claimed. The final
+documentation commit and its exact-SHA CI, review, preview smoke and actor final
+state remain pending; see the final gates below.
 
 ## Performance comparison contract
 
@@ -137,26 +142,26 @@ does not establish hosted security controls or replace remote Codex review.
 
 Frozen-baseline evidence and the complete matched local matrix are in
 `docs/performance/navigation/`. The matrix compares the frozen baseline with
-committed `5c6e0b4` across empty and populated fixtures, 90 route observations per
-dataset, with separate room-handler samples and redacted fetch traces. The latest
-Labels hydration/scope fix is committed at `8864459`; its final remeasurement is
-pending. Local timings do not reproduce the reported multi-second hosted delay.
+committed `c97133b` across empty and populated fixtures, 180 route observations
+overall and six room samples. The fresh manifest records BUILD_ID
+`rxD8jPbyfi-TV4L69xpYQ`; raw artifacts and the [comparison](performance/navigation/comparison-c97133b.md)
+retain all mixed and slower results. Labels used one search over 18 visits, with
+349 ms repeat median versus 354 ms baseline. Room timing changed from 572 to
+430 ms. Local timings do not reproduce the reported multi-second hosted delay.
 
 ## Latest source, browser and review evidence
 
 The local Supabase gate passed against the unchanged schema: 529 pgTAP assertions,
 all integration suites, real Storage (276 checks), generated-type comparison and
-the security advisor. The full application gate passed on `5c6e0b4`: two Vitest
-runs (922 tests each), preview access (127), staging sync (7), local Storage (4),
+the security advisor. `npm run validate:app` passed on `c97133b`: 927 Vitest tests
+across 94 files, preview access (127), staging sync (7), local Storage (4),
 performance contracts (8), export-memory checks, real file inspection (27),
-browser-test discovery (109 tests in 19 files) and production build. These results
-are source-revision-specific and do not certify `8864459` or the final working
-tree.
+browser-test discovery (111 tests in 19 files) and production build, exit code 0.
 
-The `8864459` Labels correction waits for hydrated session filters, scopes work to
-the workspace, actor and origin, and cancels obsolete requests. It passed 49 focused
-tests across five suites, typecheck, lint and formatting; independent Astra source
-review was clean. A separate Designer category accessible-name fix passed 66
+The Labels correction introduced at `8864459` waits for hydrated session filters,
+scopes work to the workspace, actor and origin, and cancels obsolete requests. It
+passed 49 focused tests across five suites, typecheck, lint and formatting;
+independent Astra source review was clean. A separate Designer category accessible-name fix passed 66
 component tests. The local unfiltered 111-test E2E run first completed with 103
 passes and eight failures tied to obsolete expectations or test locators. Seven
 test files were revised. Focused navigation (4) and visual (7) tests passed; an
@@ -165,23 +170,25 @@ navigation-barrier findings. The final `npm run test:e2e` run passed all 111 tes
 across 19 files in 10.1 minutes with exit code 0 and a fresh production build. The
 run log is `test-results/navigation-browser/full-e2e-final.log`. Seven frozen E2E
 digests and 260 application source/configuration/asset hashes remained unchanged
-through the run. Evidence is for application HEAD
+through the run. It ran against application HEAD
 `88644591c2e756a37e3db4ffb1a0a59075e22808` and source tree
-`1c67559b80ba73f9e4df8823f29cf54c197d4a1b`; test changes remain in the working
-tree until the root commits them.
+`1c67559b80ba73f9e4df8823f29cf54c197d4a1b`. Those exact test contents are now
+committed at `c97133b`, but the earlier E2E run is not relabeled as having run on
+that commit.
 
-The local modal tests do not establish active-transform opening behavior: locator
-stability waits on that transform. Separate hosted proof of active-transform
-opening remains required.
+The local modal tests did not establish active-transform opening behavior because
+locator stability waits on that transform. Hosted `886` proof subsequently
+established actual page arrival at 230 ms, stretched the transform to 30 seconds,
+and used a real coordinate click while confirming nonidentity transform matrices
+before and after the click. The modal was centered within 1440×900 bounds at
+160,16 to 1120,868, with focus, Escape and focus return verified.
 
-The matched local post-loading-boundary-removal matrix is complete at `5c6e0b4`;
-results are in [the comparison](performance/navigation/comparison-5c6e0b4.md).
-It records both datasets, all route conditions, room-content requests and remaining
-Labels repeat/deep-link slowdown. The initial `51ed5b4` candidate remains a rejected
-tradeoff because it improved feedback while regressing usable content on several
-routes. The `5c6e0b4` measurements show that broad-fallback regression was removed.
-The subsequent `8864459` Labels correction still needs its own committed-revision
-remeasurement.
+The matched local post-loading-boundary-removal matrix at `5c6e0b4` is retained in
+[its comparison](performance/navigation/comparison-5c6e0b4.md). The initial
+`51ed5b4` candidate remains a rejected tradeoff because it improved feedback while
+regressing usable content on several routes. The `5c6e0b4` measurements showed that
+the broad-fallback regression was removed; the completed `c97133b` remeasurement
+is linked above.
 
 Hosted `5c6e0b4` draft proof includes viewer/staff Motion preference persistence,
 keyboard operation and OS precedence; dialog geometry, focus, Escape and focus
@@ -191,23 +198,35 @@ time while retaining Date, Time and zone values. No hosted domain writes were ma
 before timing. For native zoom, the actual CDP surface image was visually inspected;
 the ordinary Playwright screenshot was blank and was not treated as evidence.
 
-Hosted `8864459` empty-route observations are complete (90 observations) and
-include the actual selector exercised three times A/B/A across six records. Hosted
-populated matrices, persisted functional workflows and fixture cleanup remain
-pending. These are draft preview observations, not final-SHA acceptance. Browser
-discovery and the passing local E2E run do not substitute for the remaining hosted
-proof.
+The hosted report is complete: [summary](performance/navigation/hosted-8864459.md),
+[route metrics](performance/navigation/hosted-8864459-metrics.json), [functional
+checks](performance/navigation/hosted-8864459-functional.json), and [cleanup
+record](performance/navigation/hosted-8864459-cleanup.json). It records 360 matched
+route records and 12 actual selector actions across all nine routes, empty and
+populated fixtures, and three first/repeat/deep-link samples. Mixed and slower
+results remain visible in the report. All 25 required functional checks passed,
+including metadata own-save, category next-edit, disjoint/overlapping edits, exact
+unknown replay, site archive/restore and stale settings. Viewer/staff Motion
+preference and modal checks passed at desktop, narrow, short and native 200% zoom;
+category A/B/A and Back/Forward with invalid pending DST preserved Date/Time/zone
+values. The location/custody/permission batch passed: name-only rename preserved
+UUID, code, structure and 30 owned balances, with original 1A restored; viewer/staff
+UI and RPC writes were denied and the maintainer legacy structural RPC was revoked;
+`TKT-0000123` was stored once; occupied-site archive was blocked; normal return
+worked; and the assignment/archive race had one valid winner followed by
+return/restore. Controlled active-transform proof passed. Browser discovery and the
+passing local E2E run remain distinct evidence from the hosted checks.
 
-The hosted empty-route click/usable timings remain valid, but its finished-only
-request observer omitted some streaming requests, so request counts are incomplete.
-The raw capture is preserved. Populated captures used the corrected observer for
+Hosted empty-route click/usable timings remain valid, but its finished-only request
+observer omitted some streaming requests, so request counts are incomplete. The
+raw capture is preserved. Populated captures used the corrected observer for
 started, finished and outstanding requests.
 
-The remote P1 concerns recovery after authorization denial during an uncertain
+The remote P1 concerned recovery after authorization denial during an uncertain
 Designer save. `5c6e0b4` masks the UI while retaining the exact actor/category/
 environment-scoped command; the freshly authorized original actor can recover and
-replay it. Independent Astra source review was clean. The remote thread remains
-unresolved pending exact-CI evidence and an evidence reply.
+replay it. Independent Astra source review was clean. The root posted the evidence
+reply (4172926029) on original thread `PRRT_kwDOUOtXZs6ols47` and resolved it.
 
 Native zoom was verified through a disposable Chromium extension using the official
 Tabs API after two unsuccessful worker preference-based probes. `getZoom` was 2;
@@ -217,7 +236,15 @@ captured through CDP and visually inspected; the blank Playwright screenshot was
 not accepted. See the [Chromium Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-setZoom)
 and [Playwright extension testing](https://playwright.dev/docs/chrome-extensions).
 
-Fresh Codex review completed at 2026-10-03 10:10 UTC with no new findings. The older
-CI is pending, the worktree contains test changes, and the final SHA is not yet
-known. The exact-final-SHA, clean-worktree and zero-unresolved-thread gates remain
-open; this ledger does not report the code ready.
+Foundation CI run `37117250606` passed on `c97133b`. Fresh Codex review of that SHA
+completed clean at 2026-10-03 10:48:25 UTC (comment 5968435201); the evidence reply
+and original P1 resolution are recorded above. The final documentation commit SHA,
+its exact-SHA CI and review, and the final unresolved-thread query are pending. The
+owned Supabase stack is stopped and Docker reports zero containers; graceful
+`rdctl` shutdown restored its initial state. Memory use was 8.68 GiB, below the
+10 GiB guard. Runner health could not be verified without administrator access.
+Final preview smoke and deactivation of the three temporary actors remain pending;
+domain fixture cleanup is complete. Final SHA, CI/review/thread status, preview
+smoke and actor final state will be recorded in the PR28 final evidence comment,
+not by recursively committing post-commit facts to this ledger. This does not
+claim zero unresolved issues or final acceptance.
