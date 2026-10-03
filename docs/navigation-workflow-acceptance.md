@@ -264,11 +264,27 @@ passed 66/66, full Vitest passed 927 tests across 94 files, and build, typecheck
 lint and format checks passed. Logs are under ignored `test-results/navigation-ci-77b6/`.
 These results do not replace final exact-SHA CI.
 
+Foundation CI run `37123054097` on `bf82d6ae9e3c16b944e93139715bc32d765a098f`
+passed its application and database jobs. Codex then reported a P2
+(`PRRT_kwDOUOtXZs6onmYo`, comment `4173192474`) for date/time draft restoration
+when the add-field dialog remounts. Passing the current `datetimeDraft` as
+`initialDateTimeDraft` fixes the stale-value path. Three component regressions
+fail with the old prop and pass with the fix; reverting the fix makes all three
+fail again. The independent Sol review was clean (source blob
+`1326f7ac42c2406f4da0a4193e13de3c6cb431e5`, test blob
+`04b391520ed7987b97495f2db8f0dcf6b6fd6c09`). On the fix working tree,
+`npm run validate:app` passed: 930 tests across 94 files, typecheck, zero-warning
+lint, format, auxiliary gates, discovery of 111 E2E tests and production build
+(BUILD_ID `1vMGhOyxXjOAsxjrWlo8y`). This app gate does not include a database or
+browser E2E rerun for the one-prop fix. Final exact-SHA CI, review, preview and
+hosted cleanup remain pending.
+
 The owned stack cleanup completed: `npm run db:stop` and `rdctl` shutdown exited
 successfully, Docker has zero containers, and both Rancher WSL distributions are
 stopped. Ports 3000, 54321 and 54322 have no listeners. Domain fixture cleanup is
-complete, but the three temporary actors still need deactivation. Runner health
-could not be verified without administrator access. Final test-repair-SHA CI,
-review, thread status and actor final state will be recorded in the PR28 final
-evidence comment, not by recursively committing post-commit facts to this ledger.
-This does not claim zero unresolved issues or final acceptance.
+complete; the three hosted actors remain retained pending new-SHA verification
+and final cleanup. Runner health could not be verified without administrator
+access. Final fix-SHA CI, review, thread status and actor final state will
+be recorded in the PR28 final evidence comment, not by recursively committing
+post-commit facts to this ledger. This does not claim zero unresolved issues or
+final acceptance.

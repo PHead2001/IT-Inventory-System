@@ -336,7 +336,7 @@ export function AddFieldDialog({
                 showTypeChooser={false}
                 change={setField}
                 onValidityChange={setInputError}
-                initialDateTimeDraft={initialDateTimeDraft}
+                initialDateTimeDraft={datetimeDraft}
                 onDateTimeDraftChange={stageDatetime}
                 basics={
                   <label className="block text-sm">

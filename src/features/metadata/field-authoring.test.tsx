@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { AddFieldDialog } from './add-field-dialog';
 import { FieldSettings, makeField } from './field-settings';
+import type { DateTimeDraft } from './field-value-input';
+import * as datetimeAdapter from './datetime-adapter';
 import {
   fieldTypes,
   type FieldType,
@@ -40,10 +42,15 @@ const definition = (): MetadataDefinition => ({
     },
   ],
 });
-function openPicker(initialField?: Field, document = definition()) {
+function openPicker(
+  initialField?: Field,
+  document = definition(),
+  initialDateTimeDraft?: DateTimeDraft,
+) {
   const add = vi.fn(),
     change = vi.fn(),
-    go = vi.fn();
+    go = vi.fn(),
+    stage = vi.fn();
   function Harness() {
     const [open, setOpen] = useState(false);
     return (
@@ -56,6 +63,8 @@ function openPicker(initialField?: Field, document = definition()) {
             definition={document}
             sectionId={id(1)}
             initialField={initialField}
+            initialDateTimeDraft={initialDateTimeDraft}
+            onDraftChange={stage}
             onCancel={() => setOpen(false)}
             onAdd={add}
             onChange={change}
@@ -73,11 +82,161 @@ function openPicker(initialField?: Field, document = definition()) {
     add,
     change,
     go,
+    stage,
     trigger,
     dialog: screen.getByRole('dialog', { name: 'Add field' }),
   };
 }
 describe('staged field authoring', () => {
+  it.each([
+    {
+      name: 'invalid DST gap',
+      wall: '2026-03-08T02:30:00',
+      value: '2026-03-08T02:30:00',
+      invalid: true,
+    },
+    {
+      name: 'valid instant',
+      wall: '2026-03-08T03:30:00',
+      value: '2026-03-08T07:30:00Z',
+      invalid: false,
+    },
+  ])(
+    'recovers $name datetime default but clears it after a deliberate type cycle',
+    ({ wall, value, invalid }) => {
+      const timezone = vi
+        .spyOn(datetimeAdapter, 'browserTimeZone')
+        .mockReturnValue('UTC');
+      try {
+        const recovered = {
+          ...makeField('datetime', 'Recovered pending time'),
+          default: value,
+        };
+        const { add, stage, dialog } = openPicker(recovered, definition(), {
+          wall,
+          zone: 'America/New_York',
+        });
+        const defaults = () =>
+          within(dialog).getByRole('group', {
+            name: 'Starts with (optional)',
+          });
+        const openRules = () =>
+          fireEvent.click(
+            within(dialog).getByText('Optional rules', {
+              selector: 'summary',
+            }),
+          );
+        openRules();
+        expect(within(defaults()).getByLabelText('Date')).toHaveValue(
+          '2026-03-08',
+        );
+        expect(within(defaults()).getByLabelText('Time')).toHaveValue(
+          wall.split('T')[1],
+        );
+        expect(
+          within(defaults()).getByLabelText('Display timezone'),
+        ).toHaveValue('America/New_York');
+        // Re-selecting the current type preserves ordinary pending recovery.
+        fireEvent.click(
+          within(dialog).getByRole('button', { name: 'Date & time' }),
+        );
+        expect(stage.mock.lastCall?.[0]).toMatchObject({
+          field: { id: recovered.id, default: value },
+          datetimeDraft: { wall, zone: 'America/New_York' },
+        });
+        if (invalid) {
+          fireEvent.click(
+            within(dialog).getByRole('button', { name: 'Add to form' }),
+          );
+          expect(add).not.toHaveBeenCalled();
+          expect(within(defaults()).getByRole('alert')).toHaveTextContent(
+            'does not exist in this timezone',
+          );
+        }
+        fireEvent.click(
+          within(dialog).getByRole('button', { name: 'Short text' }),
+        );
+        expect(stage.mock.lastCall?.[0].datetimeDraft).toBeUndefined();
+        fireEvent.click(
+          within(dialog).getByRole('button', { name: 'Date & time' }),
+        );
+        openRules();
+        expect(within(defaults()).getByLabelText('Date')).toHaveValue('');
+        expect(within(defaults()).getByLabelText('Time')).toHaveValue('');
+        expect(
+          within(defaults()).getByLabelText('Display timezone'),
+        ).toHaveValue('UTC');
+        expect(
+          within(dialog).queryByText(/does not exist in this timezone/),
+        ).not.toBeInTheDocument();
+        expect(stage.mock.lastCall?.[0]).toMatchObject({
+          field: { id: recovered.id, type: 'datetime' },
+          datetimeDraft: { wall: '', zone: 'UTC' },
+        });
+        fireEvent.click(
+          within(dialog).getByRole('button', { name: 'Add to form' }),
+        );
+        expect(add).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            id: recovered.id,
+            type: 'datetime',
+            label: 'Recovered pending time',
+          }),
+          id(1),
+        );
+        expect(add.mock.lastCall?.[0].default).toBeUndefined();
+      } finally {
+        timezone.mockRestore();
+      }
+    },
+  );
+  it('retains a corrected recovered datetime draft when the field-source tab remounts its settings', () => {
+    const recovered = {
+      ...makeField('datetime', 'Corrected pending time'),
+      default: '2026-03-08T02:30:00',
+    };
+    const { add, stage, dialog } = openPicker(recovered, definition(), {
+      wall: '2026-03-08T02:30:00',
+      zone: 'America/New_York',
+    });
+    const defaults = () =>
+      within(dialog).getByRole('group', { name: 'Starts with (optional)' });
+    const openRules = () =>
+      fireEvent.click(
+        within(dialog).getByText('Optional rules', { selector: 'summary' }),
+      );
+    openRules();
+    fireEvent.change(within(defaults()).getByLabelText('Time'), {
+      target: { value: '03:30:00' },
+    });
+    fireEvent.change(within(defaults()).getByLabelText('Display timezone'), {
+      target: { value: 'UTC' },
+    });
+    const correctedValue = stage.mock.lastCall?.[0].field.default;
+    expect(correctedValue).toBe('2026-03-08T07:30:00Z');
+    fireEvent.click(
+      within(dialog).getByRole('tab', { name: 'Use existing field' }),
+    );
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'New field' }));
+    openRules();
+    expect(within(defaults()).getByLabelText('Date')).toHaveValue('2026-03-08');
+    expect(within(defaults()).getByLabelText('Time')).toHaveValue('07:30:00');
+    expect(within(defaults()).getByLabelText('Display timezone')).toHaveValue(
+      'UTC',
+    );
+    expect(within(defaults()).queryByRole('alert')).not.toBeInTheDocument();
+    expect(stage.mock.lastCall?.[0]).toMatchObject({
+      field: { id: recovered.id, default: correctedValue },
+      datetimeDraft: { wall: '2026-03-08T07:30:00', zone: 'UTC' },
+    });
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add to form' }),
+    );
+    expect(add).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: recovered.id, default: correctedValue }),
+      id(1),
+    );
+  });
   it.each(fieldTypes)(
     'configures and adds %s with a readable type, purpose and example',
     (type) => {
