@@ -1,99 +1,248 @@
 'use client';
-import { useState, useTransition } from 'react';
+import Link from 'next/link';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody } from './actions';
 import { suggestSiteCode } from './site-code';
-import type { ManagedLocation, Site } from './queries.server';
+import type { ManagedLocation, Site, SiteHolding } from './queries.server';
 import type { CustodyOperation, CustodyState } from './contracts';
 
-function useSubmission() {
+type Command = {
+  operation: CustodyOperation;
+  requestId: string;
+  expectedActorId?: string;
+  payload: Record<string, unknown>;
+};
+
+// Capture the exact operation for uncertain retry and close the synchronous
+// double-click window before React has rendered disabled controls.
+function useSubmission(actorId?: string) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const [state, setState] = useState<CustodyState | null>(null);
-  const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
-    null,
-  );
-  const submit = (
+  const [uncertain, setUncertain] = useState(false);
+  const [retryActor, setRetryActor] = useState<string | undefined>(actorId);
+  const command = useRef<Command | null>(null);
+  const running = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const actor = useRef(actorId);
+  useLayoutEffect(() => {
+    actor.current = actorId;
+  }, [actorId]);
+  const actorBlocked = uncertain && retryActor !== actorId;
+  const submit = async (
     operation: CustodyOperation,
     payload: Record<string, unknown>,
-    onSuccess?: (id: string) => void,
+    onSuccess: (
+      result: Extract<CustodyState, { ok: true }>,
+      payload: Record<string, unknown>,
+    ) => void,
   ) => {
-    const key = JSON.stringify([operation, payload]);
-    const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
-    setReceipt({ key, id: requestId });
-    startTransition(async () => {
-      const result = await submitCustody({ operation, requestId, payload });
-      setState(result);
-      if (result.ok) {
-        setReceipt(null);
-        onSuccess?.(result.entityId);
+    if (running.current) return;
+    const originalActor = actor.current;
+    if (command.current && command.current.expectedActorId !== originalActor)
+      return;
+    const attempt = command.current ?? {
+      operation,
+      payload: structuredClone(payload),
+      requestId: crypto.randomUUID(),
+      expectedActorId: originalActor,
+    };
+    command.current = attempt;
+    running.current = true;
+    setPending(true);
+    let result: CustodyState;
+    try {
+      result = await submitCustody(attempt);
+    } catch {
+      result = {
+        ok: false,
+        code: 'unexpected',
+        message:
+          'The result could not be confirmed. Retry this submission to safely check it.',
+      };
+    }
+    running.current = false;
+    if (!mounted.current) return;
+    setPending(false);
+    if (actor.current !== originalActor) {
+      // A context change cannot establish this draft's saved baseline. Keep the
+      // original actor/command so only that account can resolve it by replay.
+      setUncertain(true);
+      setRetryActor(attempt.expectedActorId);
+      setState({
+        ok: false,
+        code: 'actor_changed',
+        message:
+          'Return to the original signed-in account to retry this submission.',
+      });
+      return;
+    }
+    const nextUncertain =
+      !result.ok &&
+      (result.code === 'unexpected' ||
+        (uncertain &&
+          [
+            'forbidden',
+            'P1001',
+            'idempotency_conflict',
+            'P1009',
+            'actor_changed',
+          ].includes(result.code)));
+    setUncertain(nextUncertain);
+    if (nextUncertain) setRetryActor(attempt.expectedActorId);
+    setState(result);
+    if (result.ok) {
+      command.current = null;
+      onSuccess(result, attempt.payload);
+      router.refresh();
+    } else if (!nextUncertain) {
+      command.current = null;
+      if (
+        result.code === 'P1002' ||
+        (result.code === 'P1008' && attempt.operation === 'site_set_active')
+      )
         router.refresh();
-      }
-    });
+    }
   };
-  return { pending, state, setState, submit };
+  return { pending, uncertain, actorBlocked, state, setState, submit };
 }
 
-export function SiteManagementForm({ site }: { site?: Site }) {
-  const { pending, state, setState, submit } = useSubmission();
+function newer(current: string, baseline: string) {
+  return BigInt(current) > BigInt(baseline);
+}
+
+export function SiteManagementForm({
+  site,
+  actorId,
+  holdings = [],
+  holdingTotal = 0,
+}: {
+  site?: Site;
+  actorId?: string;
+  holdings?: SiteHolding[];
+  holdingTotal?: number;
+}) {
+  const { pending, uncertain, actorBlocked, state, setState, submit } =
+    useSubmission(actorId);
+  const [baseline, setBaseline] = useState(site);
   const [values, setValues] = useState({
     code: '',
     name: site?.name ?? '',
     notes: site?.notes ?? '',
-    active: site?.active ?? true,
   });
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const suggestedCode = site ? '' : suggestSiteCode(values.name);
-  const code = values.code || suggestedCode;
-  const update = (key: keyof typeof values, value: string | boolean) => {
+  const [lifecycle, setLifecycle] = useState<{
+    active: boolean;
+    version: string;
+  } | null>(null);
+  const [reason, setReason] = useState('');
+  const dirty =
+    values.name !== (baseline?.name ?? '') ||
+    values.notes !== (baseline?.notes ?? '') ||
+    !!values.code;
+  const stale = !!site && !!baseline && newer(site.version, baseline.version);
+  if (
+    site &&
+    baseline &&
+    newer(site.version, baseline.version) &&
+    !dirty &&
+    !pending &&
+    !uncertain &&
+    !lifecycle
+  ) {
+    setBaseline(site);
+    setValues({ code: '', name: site.name, notes: site.notes ?? '' });
+  }
+  const disabled = pending || uncertain;
+  const update = (key: keyof typeof values, value: string) => {
     setValues((old) => ({ ...old, [key]: value }));
     setState(null);
+  };
+  const save = () => {
+    if (stale && !uncertain) return;
+    if (lifecycle && !reason.trim()) return;
+    void submit(
+      lifecycle ? 'site_set_active' : baseline ? 'site_update' : 'site_create',
+      lifecycle
+        ? {
+            site_id: baseline!.id,
+            expected_version: lifecycle.version,
+            active: lifecycle.active,
+            reason,
+          }
+        : baseline
+          ? {
+              site_id: baseline.id,
+              expected_version: baseline.version,
+              name: values.name,
+              notes: values.notes || null,
+              active: baseline.active,
+            }
+          : {
+              code: values.code || suggestSiteCode(values.name),
+              name: values.name,
+              notes: values.notes || null,
+            },
+      (result, payload) => {
+        if (baseline) {
+          const saved = {
+            ...baseline,
+            version: result.version,
+            ...(payload.active !== undefined
+              ? { active: payload.active as boolean }
+              : {}),
+            ...(payload.name !== undefined
+              ? {
+                  name: (payload.name as string).trim(),
+                  notes: (payload.notes as string | null)?.trim() || null,
+                }
+              : {}),
+          };
+          setBaseline(saved);
+          setValues({ code: '', name: saved.name, notes: saved.notes ?? '' });
+        }
+        setLifecycle(null);
+        setReason('');
+      },
+    );
   };
   return (
     <form
       className={panel + ' max-w-4xl space-y-4'}
       onSubmit={(event) => {
         event.preventDefault();
-        if (site && !values.active && !confirmArchive) return;
-        submit(
-          site ? 'site_update' : 'site_create',
-          site
-            ? {
-                site_id: site.id,
-                expected_version: site.version,
-                name: values.name,
-                notes: values.notes || null,
-                active: values.active,
-              }
-            : {
-                code,
-                name: values.name,
-                notes: values.notes || null,
-              },
-        );
+        save();
       }}
     >
       <h2 className="break-words text-lg font-semibold">
-        {site ? `Manage ${site.name}` : 'Add property / site'}
+        {baseline ? `Manage ${baseline.name}` : 'Add property / site'}
       </h2>
       <label className="block space-y-2">
         Name
         <Input
+          disabled={disabled || !!lifecycle}
           value={values.name}
           maxLength={200}
           required
           onChange={(e) => update('name', e.target.value)}
         />
       </label>
-      {!site && (
+      {!baseline && (
         <div className="space-y-2">
           <label className="block space-y-2">
             Permanent code
             <Input
-              value={code}
+              disabled={disabled}
+              value={values.code || suggestSiteCode(values.name)}
               maxLength={100}
               required
               pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
@@ -111,35 +260,110 @@ export function SiteManagementForm({ site }: { site?: Site }) {
         Notes
         <textarea
           className={field}
+          disabled={disabled || !!lifecycle}
           value={values.notes}
           maxLength={2000}
           onChange={(e) => update('notes', e.target.value)}
         />
       </label>
-      {site && (
-        <label className="flex min-h-11 items-center gap-3">
-          <input
-            type="checkbox"
-            checked={values.active}
-            onChange={(e) => {
-              update('active', e.target.checked);
-              setConfirmArchive(false);
-            }}
-          />{' '}
-          Active site
-        </label>
+      {stale && !uncertain && (
+        <p role="alert">
+          Site settings changed elsewhere. Your entries are retained. Cancel to
+          load the latest settings before saving.
+        </p>
       )}
-      {site && !values.active && (
-        <label className="flex min-h-11 items-center gap-3 text-amber-200">
-          <input
-            type="checkbox"
-            required
-            checked={confirmArchive}
-            onChange={(e) => setConfirmArchive(e.target.checked)}
-          />{' '}
-          I have resolved every assigned holding. Archiving is blocked while any
-          remain.
-        </label>
+      {baseline && (
+        <>
+          <p className="text-sm text-slate-300">
+            {baseline.active ? 'Active site' : 'Archived site'} · Permanent
+            code: {baseline.code}
+          </p>
+          {!lifecycle && (
+            <Button
+              type="button"
+              disabled={disabled || dirty || stale}
+              onClick={() => {
+                setLifecycle({
+                  active: !baseline.active,
+                  version: baseline.version,
+                });
+                setState(null);
+              }}
+            >
+              {baseline.active ? 'Archive site' : 'Restore site'}
+            </Button>
+          )}
+          {dirty && (
+            <p className="text-sm text-slate-300">
+              Save or cancel your settings edits before changing site
+              availability.
+            </p>
+          )}
+          {lifecycle && (
+            <section
+              aria-label={
+                lifecycle.active
+                  ? 'Restore confirmation'
+                  : 'Archive confirmation'
+              }
+              className="space-y-3 rounded-lg border border-amber-300/40 p-4"
+            >
+              <p>
+                {lifecycle.active ? 'Restore' : 'Archive'} {baseline.name}?
+                History and its permanent code are retained.{' '}
+                {lifecycle.active
+                  ? 'Restoring does not recreate previous assignments.'
+                  : 'Archiving is blocked while any current assigned holdings remain. No gear is moved automatically.'}
+              </p>
+              {!lifecycle.active && (
+                <>
+                  <p>
+                    {holdingTotal} current holdings must be resolved before
+                    archiving.
+                  </p>
+                  <ul>
+                    {holdings.map((row) => (
+                      <li key={row.inventory_kind + row.entity_id}>
+                        <Link
+                          className="text-cyan-300 underline"
+                          href={`/inventory/${row.inventory_kind === 'asset' ? 'assets' : 'quantity'}/${row.entity_id}`}
+                        >
+                          {row.name} · {row.quantity}{' '}
+                          {row.inventory_kind === 'asset' ? 'asset' : 'units'}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    className="text-cyan-300 underline"
+                    href={`/sites/${encodeURIComponent(baseline.code)}#site-holdings`}
+                  >
+                    Review all site holdings
+                  </Link>
+                </>
+              )}
+              <label className="block space-y-2">
+                Reason
+                <textarea
+                  required
+                  maxLength={2000}
+                  className={field}
+                  disabled={disabled}
+                  value={reason}
+                  onChange={(e) => {
+                    setReason(e.target.value);
+                    setState(null);
+                  }}
+                />
+              </label>
+            </section>
+          )}
+        </>
+      )}
+      {actorBlocked && (
+        <p role="alert">
+          Return to the original signed-in account to retry this submission.
+        </p>
       )}
       {state && (
         <p
@@ -152,217 +376,123 @@ export function SiteManagementForm({ site }: { site?: Site }) {
             : state.message}
         </p>
       )}
-      <Button disabled={pending} type="submit">
-        {pending ? 'Saving…' : 'Save site'}
-      </Button>
-      {site && (
-        <p className="break-words text-xs text-slate-300">
-          Permanent code: {site.code}. Concurrent edits require a fresh review
-          before retry.
-        </p>
-      )}
+      <div className="flex flex-wrap gap-3">
+        <Button
+          disabled={
+            pending ||
+            actorBlocked ||
+            (!uncertain && stale) ||
+            (!!lifecycle && !reason.trim())
+          }
+          type="submit"
+        >
+          {pending
+            ? 'Saving…'
+            : uncertain
+              ? 'Retry submission'
+              : lifecycle
+                ? lifecycle.active
+                  ? 'Confirm restore site'
+                  : 'Confirm archive site'
+                : 'Save site'}
+        </Button>
+        {baseline && (
+          <Button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              const current =
+                site && newer(site.version, baseline.version) ? site : baseline;
+              setBaseline(current);
+              setValues({
+                code: '',
+                name: current.name,
+                notes: current.notes ?? '',
+              });
+              setLifecycle(null);
+              setReason('');
+              setState(null);
+            }}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
     </form>
   );
 }
 
-const kinds = [
-  ['room', 'Room'],
-  ['storage_group', 'Storage group'],
-  ['storage_area', 'Storage area'],
-  ['shelf', 'Shelf'],
-  ['shelf_section', 'Shelf section'],
-  ['drawer', 'Drawer'],
-  ['rack', 'Rack'],
-  ['container', 'Container'],
-] as const;
 export function LocationManagementForm({
   location,
-  locations,
+  actorId,
 }: {
-  location?: ManagedLocation;
-  locations: ManagedLocation[];
+  location: ManagedLocation;
+  actorId?: string;
 }) {
-  const { pending, state, setState, submit } = useSubmission();
-  const modeled =
-    !!location && (location.code === 'ITC' || location.code.startsWith('ITC-'));
-  const [values, setValues] = useState({
-    code: '',
-    name: location?.name ?? '',
-    parent_id: location?.parent_id ?? '',
-    kind: location?.kind ?? 'storage_area',
-    can_hold_inventory: location?.can_hold_inventory ?? true,
-    active: location?.active ?? true,
-    sort_order: String(location?.sort_order ?? 0),
-  });
-  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
-  const update = (key: keyof typeof values, value: string | boolean) => {
-    setValues((old) => ({ ...old, [key]: value }));
-    setState(null);
-  };
-  const descendants = new Set<string>();
-  if (location) {
-    const byParent = new Map<string, string[]>();
-    for (const row of locations)
-      if (row.parent_id)
-        byParent.set(row.parent_id, [
-          ...(byParent.get(row.parent_id) ?? []),
-          row.id,
-        ]);
-    const stack = [location.id];
-    while (stack.length) {
-      const id = stack.pop()!;
-      if (descendants.has(id)) continue;
-      descendants.add(id);
-      stack.push(...(byParent.get(id) ?? []));
-    }
+  const { pending, uncertain, actorBlocked, state, setState, submit } =
+    useSubmission(actorId);
+  const [baseline, setBaseline] = useState(location);
+  const [name, setName] = useState(location.name);
+  const dirty = name !== baseline.name;
+  const stale = newer(location.version, baseline.version);
+  if (stale && !dirty && !pending && !uncertain) {
+    setBaseline(location);
+    setName(location.name);
   }
   return (
     <form
       className={panel + ' max-w-4xl space-y-4'}
       onSubmit={(event) => {
         event.preventDefault();
-        if (location && !values.active && !confirmDeactivate) return;
-        const shape = {
-          name: values.name,
-          parent_id: values.parent_id || null,
-          kind: values.kind,
-          can_hold_inventory: values.can_hold_inventory,
-          active: values.active,
-          sort_order: Number(values.sort_order),
-        };
-        submit(
-          location ? 'location_update' : 'location_create',
-          location
-            ? {
-                location_id: location.id,
-                expected_version: location.version,
-                ...shape,
-              }
-            : { code: values.code, ...shape },
+        if (stale && !uncertain) return;
+        void submit(
+          'location_rename',
+          {
+            location_id: baseline.id,
+            expected_version: baseline.version,
+            name,
+          },
+          (result, payload) => {
+            const saved = {
+              ...baseline,
+              version: result.version,
+              name: (payload.name as string).trim(),
+            };
+            setBaseline(saved);
+            setName(saved.name);
+          },
         );
       }}
     >
       <h2 className="break-words text-lg font-semibold">
-        {location ? `Manage ${location.name}` : 'Add logical storage location'}
+        Rename {baseline.name}
       </h2>
-      {!location && (
-        <label className="block space-y-2">
-          Permanent code
-          <Input
-            required
-            value={values.code}
-            pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
-            maxLength={100}
-            onChange={(e) => update('code', e.target.value.toUpperCase())}
-          />
-        </label>
-      )}
+      <p className="text-sm text-slate-300">
+        Storage structure is maintained with reviewed room code. This action
+        changes only the display name. Permanent code: {baseline.code}.
+      </p>
       <label className="block space-y-2">
         Name
         <Input
+          value={name}
           required
           maxLength={200}
-          value={values.name}
-          onChange={(e) => update('name', e.target.value)}
-        />
-      </label>
-      <label className="block space-y-2">
-        Parent location
-        <select
-          className={field}
-          value={values.parent_id}
-          disabled={modeled}
-          required={values.kind !== 'room'}
-          onChange={(e) => update('parent_id', e.target.value)}
-        >
-          <option value="">No parent (room only)</option>
-          {locations
-            .filter(
-              (candidate) => !descendants.has(candidate.id) && candidate.active,
-            )
-            .map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name} ({candidate.code})
-              </option>
-            ))}
-        </select>
-      </label>
-      <label className="block space-y-2">
-        Kind
-        <select
-          className={field}
-          value={values.kind}
-          disabled={modeled}
+          disabled={pending || uncertain}
           onChange={(e) => {
-            update('kind', e.target.value);
-            if (e.target.value === 'room')
-              setValues((old) => ({
-                ...old,
-                kind: 'room',
-                parent_id: '',
-                can_hold_inventory: false,
-              }));
+            setName(e.target.value);
+            setState(null);
           }}
-        >
-          {kinds.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block space-y-2">
-        Sort order
-        <Input
-          type="number"
-          min={0}
-          max={2147483647}
-          step={1}
-          required
-          value={values.sort_order}
-          onChange={(e) => update('sort_order', e.target.value)}
         />
       </label>
-      <label className="flex min-h-11 items-center gap-3">
-        <input
-          type="checkbox"
-          disabled={modeled}
-          checked={values.can_hold_inventory}
-          onChange={(e) => update('can_hold_inventory', e.target.checked)}
-        />{' '}
-        Can hold inventory
-      </label>
-      {location && (
-        <label className="flex min-h-11 items-center gap-3">
-          <input
-            type="checkbox"
-            disabled={modeled}
-            checked={values.active}
-            onChange={(e) => {
-              update('active', e.target.checked);
-              setConfirmDeactivate(false);
-            }}
-          />{' '}
-          Active location
-        </label>
+      {stale && !uncertain && (
+        <p role="alert">
+          This location changed elsewhere. Your name edit is retained. Cancel to
+          load the latest name before saving.
+        </p>
       )}
-      {location && !values.active && (
-        <label className="flex min-h-11 items-center gap-3 text-amber-200">
-          <input
-            type="checkbox"
-            checked={confirmDeactivate}
-            required
-            onChange={(e) => setConfirmDeactivate(e.target.checked)}
-          />{' '}
-          All stock and assets have been moved from this subtree. Deactivation
-          is blocked until resolved.
-        </label>
-      )}
-      {modeled && (
-        <p className="text-sm text-slate-300">
-          This closet location is bound to Git room geometry. Its parent, kind,
-          active state, and destination capability are fixed here; its name and
-          order can be edited.
+      {actorBlocked && (
+        <p role="alert">
+          Return to the original signed-in account to retry this submission.
         </p>
       )}
       {state && (
@@ -372,19 +502,30 @@ export function LocationManagementForm({
           data-tone={state.ok ? 'success' : 'error'}
         >
           {state.ok
-            ? 'Location saved. Inventory history and permanent code remain intact.'
+            ? 'Location renamed. Structure, inventory and history remain intact.'
             : state.message}
         </p>
       )}
-      <Button type="submit" disabled={pending}>
-        {pending ? 'Saving…' : 'Save location'}
-      </Button>
-      {location && (
-        <p className="break-words text-xs text-slate-300">
-          Permanent code: {location.code}. Refresh and review after a stale
-          edit.
-        </p>
-      )}
+      <div className="flex flex-wrap gap-3">
+        <Button
+          type="submit"
+          disabled={pending || actorBlocked || (stale && !uncertain)}
+        >
+          {pending ? 'Saving…' : uncertain ? 'Retry submission' : 'Save name'}
+        </Button>
+        <Button
+          type="button"
+          disabled={pending || uncertain}
+          onClick={() => {
+            const current = stale ? location : baseline;
+            setBaseline(current);
+            setName(current.name);
+            setState(null);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

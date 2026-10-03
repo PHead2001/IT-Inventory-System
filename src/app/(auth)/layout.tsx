@@ -1,9 +1,6 @@
 import Link from 'next/link';
 import { Boxes } from 'lucide-react';
-import {
-  MotionPreference,
-  MotionToggle,
-} from '@/components/experience/motion-preference';
+import { MotionPreference } from '@/components/experience/motion-preference';
 import { AmbientLight } from '@/components/experience/ambient-light';
 
 export default function AuthLayout({
@@ -34,9 +31,6 @@ export default function AuthLayout({
             </span>
           </Link>
           {children}
-          <footer className="mt-7 border-t border-cyan-200/15 pt-4">
-            <MotionToggle />
-          </footer>
         </section>
       </main>
     </MotionPreference>

@@ -38,7 +38,10 @@ export default async function CategoryFormPage({
             ':' +
             categoryId
           }
-          categories={[category]}
+          selectedCategoryId={categoryId}
+          categories={categories
+            .filter((entry) => entry.active && !entry.removed_at)
+            .map(({ id, name, active }) => ({ id, name, active }))}
           forms={await getPublishedForms([categoryId])}
           memberId={memberId}
         />

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LocationRef } from '../inventory/contracts-ui';
 import {
+  availableSpaces,
   containingSpace,
   resolveSpace,
   spaceLocations,
@@ -89,4 +90,26 @@ describe('space registry', () => {
       )?.id,
     ).toBe('it-office');
   });
+});
+
+it('uses authorized live root names in space navigation while keeping code, model and descendants', () => {
+  const renamed = locations.map((location) =>
+    location.code === 'ITC'
+      ? { ...location, name: 'Equipment storage' }
+      : location,
+  );
+  const current = resolveSpace(renamed, 'it-closet', null)!;
+  expect(current.name).toBe('Equipment storage');
+  expect(current.rootCode).toBe('ITC');
+  expect(current.geometryId).toBe('it-closet');
+  expect(
+    availableSpaces(renamed).find((space) => space.id === 'it-closet')?.name,
+  ).toBe('Equipment storage');
+  expect(containingSpace(renamed, 'ITC-D01')?.name).toBe('Equipment storage');
+  expect(
+    spaceLocations(renamed, current).map((location) => location.id),
+  ).toEqual(['1', '2']);
+  expect(spaceRoom(current)).toEqual(
+    spaceRoom(resolveSpace(locations, 'it-closet', null)!),
+  );
 });

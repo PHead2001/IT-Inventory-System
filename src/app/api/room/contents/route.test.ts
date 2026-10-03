@@ -1,16 +1,12 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
 const mocks = vi.hoisted(() => ({
-  requireMember: vi.fn(),
+  createInventoryReadScope: vi.fn(),
   getLocations: vi.fn(),
   getInventory: vi.fn(),
 }));
-vi.mock('@/lib/auth/session.server', () => ({
-  requireMember: mocks.requireMember,
-}));
 vi.mock('@/features/inventory/queries.server', () => ({
-  getLocations: mocks.getLocations,
-  getInventory: mocks.getInventory,
+  createInventoryReadScope: mocks.createInventoryReadScope,
 }));
 import { NextRequest } from 'next/server';
 import { GET } from './route';
@@ -46,7 +42,11 @@ const locations: LocationRef[] = [
 ];
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.requireMember.mockResolvedValue({ member: { user_id: 'test' } });
+  mocks.createInventoryReadScope.mockResolvedValue({
+    member: { user_id: 'test' },
+    getLocations: mocks.getLocations,
+    getInventory: mocks.getInventory,
+  });
   mocks.getLocations.mockResolvedValue(locations);
   mocks.getInventory.mockResolvedValue({
     rows: [],
@@ -62,11 +62,12 @@ function request(query: string) {
 }
 
 it('requires membership before reading contents', async () => {
-  mocks.requireMember.mockRejectedValue(new Error('access denied'));
+  mocks.createInventoryReadScope.mockRejectedValue(new Error('access denied'));
   await expect(GET(request('location=ITC-D01'))).rejects.toThrow(
     'access denied',
   );
   expect(mocks.getInventory).not.toHaveBeenCalled();
+  expect(mocks.getLocations).not.toHaveBeenCalled();
 });
 it('rejects a location outside the chosen space', async () => {
   const result = await GET(request('space=it-office&location=ITC-D01'));
@@ -92,4 +93,31 @@ it('uses established aggregate inventory paging without response caching', async
     page: 2,
   });
   expect(body.result.page).toBe(2);
+  expect(mocks.createInventoryReadScope).toHaveBeenCalledOnce();
+  expect(mocks.getLocations).toHaveBeenCalledOnce();
+});
+
+it('constructs a fresh scope and response identity for each actor/request', async () => {
+  const secondRead = vi
+    .fn()
+    .mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
+  mocks.createInventoryReadScope
+    .mockResolvedValueOnce({
+      member: { user_id: 'first' },
+      getLocations: mocks.getLocations,
+      getInventory: mocks.getInventory,
+    })
+    .mockResolvedValueOnce({
+      member: { user_id: 'second' },
+      getLocations: vi.fn().mockResolvedValue(locations),
+      getInventory: secondRead,
+    });
+  const first = await GET(request('location=ITC-D01'));
+  const second = await GET(request('location=ITC-D01'));
+  expect((await first.json()).identity.userId).toBe('first');
+  expect((await second.json()).identity.userId).toBe('second');
+  expect(mocks.createInventoryReadScope).toHaveBeenCalledTimes(2);
+  expect(mocks.getInventory).toHaveBeenCalledOnce();
+  expect(secondRead).toHaveBeenCalledOnce();
+  expect(second.headers.get('Cache-Control')).toBe('private, no-store');
 });

@@ -31,10 +31,13 @@ async function main() {
   assert.equal(closetLocations.length, 35);
   const byCode = new Map(locations.map((l) => [l.code, l]));
   const byId = new Map(locations.map((l) => [l.id, l]));
-  for (const [code, name, parent, kind, cap, sort] of expectedLocations) {
+  for (const [code, , parent, kind, cap, sort] of expectedLocations) {
     const actual = byCode.get(code);
     assert.ok(actual, code);
-    assert.equal(actual.name, name);
+    assert.ok(
+      actual.name.trim().length > 0,
+      `current display label for ${code}`,
+    );
     assert.equal(actual.kind, kind);
     assert.equal(actual.can_hold_inventory, cap);
     assert.equal(actual.sort_order, sort);

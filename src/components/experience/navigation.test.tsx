@@ -52,16 +52,16 @@ describe('workspace navigation', () => {
     expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument();
   });
 
-  it('keeps navigation and motion controls together for sticky scrolling', () => {
+  it('keeps navigation and its menu together without a global motion control', () => {
     render(<Navigation />);
     const navigation = screen.getByRole('navigation', {
       name: 'Main navigation',
     });
     const stack = navigation.parentElement;
     expect(stack).toHaveClass('experience-nav-stack');
-    expect(stack).toContainElement(
-      screen.getByRole('button', { name: 'Reduce motion locally' }),
-    );
+    expect(
+      screen.queryByRole('button', { name: 'Reduce motion locally' }),
+    ).not.toBeInTheDocument();
     expect(stack).toContainElement(
       screen.getByRole('button', { name: 'Menu' }),
     );
@@ -72,15 +72,10 @@ describe('workspace navigation', () => {
     render(<Navigation />);
     const menu = screen.getByRole('button', { name: 'Menu' });
     expect(menu).toHaveAttribute('aria-expanded', 'false');
-    expect(
-      screen.getAllByRole('button', { name: 'Reduce motion locally' }),
-    ).toHaveLength(1);
-    await user.click(
-      screen.getByRole('button', { name: 'Reduce motion locally' }),
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
     );
-    expect(
-      screen.getByRole('button', { name: 'Use system motion setting' }),
-    ).toHaveAttribute('aria-pressed', 'true');
     await user.click(menu);
     expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute(
       'aria-expanded',

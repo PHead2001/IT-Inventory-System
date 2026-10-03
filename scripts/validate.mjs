@@ -8,6 +8,7 @@ try {
     'test:preview-access',
     'test:staging-user-sync',
     'test:local-storage',
+    'test:performance:contract',
     'test:export:memory',
     'test:file:inspection',
     'test:e2e:list',

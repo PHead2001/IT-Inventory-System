@@ -131,6 +131,16 @@ value/version baseline.
 
 PR3 adds the client-loaded room as a navigation layer over the existing inventory reads. Selection lives in `/room?location=CODE`; aggregate highlighting uses the database hierarchy. See [room navigation](room-navigation.md) for geometry, camera, lifecycle and application contracts.
 
+Logical storage structure is code-managed. Configuration maintainers can change a
+location's display name through the narrow, audited `location_rename` operation;
+ordinary clients cannot create, delete, reorder, reparent, or alter kind/capability/
+active state. Trusted reference-data/migration tooling keeps those structural
+responsibilities. Existing records and inventory-only office placeholders remain.
+Current authorized names take precedence over static room interaction label text
+and registered space names by stable location code; coordinates, geometry, binding
+identity and historical snapshots remain independent. See [custody and locations](custody-and-locations.md)
+for lifecycle, concurrency, replay and fixture contracts.
+
 Guided is the default camera mode, constraining both azimuth and elevation; returning from Free Orbit clamps both to their nearest allowed values. Free Orbit allows unrestricted horizontal rotation and viewing above or below the room, with a small pole epsilon to avoid the numerical singularity and no camera roll. Recenter restores the room overview target while preserving angle and zoom; Fit room reframes against the available canvas; Center selected follows the existing primary and aggregate focus bindings. Tilt up/down controls complement camera rotation. Location labels appear on hover by default, with a Show all labels toggle; touch selection remains available through the conventional location panel.
 
 ## Labels, scanning and low stock

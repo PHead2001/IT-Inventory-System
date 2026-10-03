@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
   BinaryBitmap,
@@ -9,6 +10,7 @@ import {
 } from '@zxing/library';
 import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { setLocalReducedMotion } from './motion-settings';
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -198,23 +200,41 @@ test('Spaces links follow location ancestry even when codes omit or spoof a root
   page,
 }) => {
   await signIn(page);
-  const makeLocation = async (code: string, parent: string) => {
-    await page.goto('/settings/locations');
-    const form = page.locator('form').filter({
-      has: page.getByRole('heading', {
-        name: 'Add logical storage location',
-      }),
-    });
-    await form.getByLabel('Permanent code', { exact: true }).fill(code);
-    await form.getByLabel('Name', { exact: true }).fill(code);
-    await form.getByLabel('Parent location').selectOption({ label: parent });
-    await form.getByLabel('Kind').selectOption('storage_area');
-    await form.getByRole('button', { name: 'Save location' }).click();
-    await expect(form.getByRole('status')).toContainText('Location saved');
+  // Code-managed structure is prepared only in the disposable loopback fixture.
+  const fixtureUrl = new URL(process.env.LOCAL_API_URL!);
+  expect(['localhost', '127.0.0.1']).toContain(fixtureUrl.hostname);
+  expect(fixtureUrl.port).toBe('54321');
+  const fixtureAdmin = createClient(
+    fixtureUrl.href,
+    process.env.LOCAL_SERVICE_ROLE_KEY!,
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+    },
+  );
+  const makeLocation = async (code: string, parentCode: string) => {
+    const parent = await fixtureAdmin
+      .from('locations')
+      .select('id')
+      .eq('code', parentCode)
+      .single();
+    expect(parent.error).toBeNull();
+    const inserted = await fixtureAdmin
+      .from('locations')
+      .insert({
+        code,
+        name: code,
+        parent_id: parent.data!.id,
+        kind: 'storage_area',
+        can_hold_inventory: true,
+      })
+      .select('id,parent_id,code')
+      .single();
+    expect(inserted.error).toBeNull();
+    expect(inserted.data).toMatchObject({ parent_id: parent.data!.id, code });
   };
   const suffix = randomUUID().slice(0, 8).toUpperCase();
   const staging = `STAGING-${suffix}`;
-  await makeLocation(staging, 'IT Office (ITO)');
+  await makeLocation(staging, 'ITO');
   await page.goto('/locations/' + staging);
   await expect(
     page.getByRole('link', { name: `Show ${staging} in Spaces` }),
@@ -232,7 +252,7 @@ test('Spaces links follow location ancestry even when codes omit or spoof a root
   ).toBeVisible();
   await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   const spoof = `ITO-SPOOF-${suffix}`;
-  await makeLocation(spoof, 'IT Closet (ITC)');
+  await makeLocation(spoof, 'ITC');
   await page.goto('/locations/' + spoof);
   await expect(
     page.getByRole('link', { name: `Show ${spoof} in Spaces` }),
@@ -853,7 +873,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
     await viewer.getAttribute('data-focus-count'),
   );
   await viewer.getByRole('button', { name: 'Center selected' }).click();
-  await page.getByRole('button', { name: 'Reduce motion locally' }).click();
+  await setLocalReducedMotion(page, true);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await expect
     .poll(async () => Number(await viewer.getAttribute('data-focus-count')))
@@ -866,7 +886,7 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).toBe(settled);
 
-  await page.getByRole('button', { name: 'Use system motion setting' }).click();
+  await setLocalReducedMotion(page, false);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   await viewer.getByRole('button', { name: 'Pan left' }).click();
   const fullPan = await view();

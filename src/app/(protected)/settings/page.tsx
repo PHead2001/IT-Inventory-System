@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { MotionToggle } from '@/components/experience/motion-preference';
 
 const sections = [
   {
@@ -54,6 +55,19 @@ export default async function SettingsPage({
           Choose the configuration area you need.
         </p>
       </div>
+      <section
+        aria-labelledby="appearance-heading"
+        className="experience-surface p-5 space-y-3"
+      >
+        <h2 id="appearance-heading" className="text-lg font-semibold">
+          Appearance & preferences
+        </h2>
+        <p className="experience-muted text-sm">
+          Motion is your personal preference for this browser. Your
+          system&apos;s reduced-motion preference always applies.
+        </p>
+        <MotionToggle />
+      </section>
       <ul className="grid gap-3 md:grid-cols-2">
         {sections.map((section) => (
           <li key={section.href}>

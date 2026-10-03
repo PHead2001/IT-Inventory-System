@@ -17,6 +17,33 @@ const field = (type: MetadataField['type']): MetadataField => ({
     { id: 'child', label: 'USB-C', parent_id: 'parent', active: true },
   ],
 });
+it('restores an unresolved date/time wall and display timezone without choosing an instant', () => {
+  const changed = vi.fn(),
+    draft = vi.fn();
+  render(
+    <MetadataFieldInput
+      field={field('datetime')}
+      value="2026-03-08T02:30:00"
+      onChange={changed}
+      initialDateTimeDraft={{
+        wall: '2026-03-08T02:30:00',
+        zone: 'America/Chicago',
+      }}
+      onDateTimeDraftChange={draft}
+    />,
+  );
+  expect(screen.getByLabelText('Date')).toHaveValue('2026-03-08');
+  expect(screen.getByLabelText('Time')).toHaveValue('02:30:00');
+  expect(screen.getByLabelText('Display timezone')).toHaveValue(
+    'America/Chicago',
+  );
+  expect(screen.getByText(/does not exist in this timezone/)).toBeVisible();
+  expect(changed).not.toHaveBeenCalled();
+  expect(draft).toHaveBeenCalledWith({
+    wall: '2026-03-08T02:30:00',
+    zone: 'America/Chicago',
+  });
+});
 function Harness({
   config,
   initial,

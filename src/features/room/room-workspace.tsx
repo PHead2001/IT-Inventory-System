@@ -170,6 +170,9 @@ export function RoomWorkspace({
               <SceneBoundary fallback={fallback} onFailure={onFailure}>
                 <RoomScene
                   room={stableRoom}
+                  locationNames={Object.fromEntries(
+                    locations.map((location) => [location.code, location.name]),
+                  )}
                   bindings={bindings}
                   selectedCode={selectedCode}
                   highlightedCodes={highlightedCodes}

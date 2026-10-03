@@ -234,12 +234,9 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await confirm(form, 'Correct physical count');
   await version(page, 5);
   form = await openForm(page, 'Edit quantity metadata');
-  await expect(form.getByRole('alert')).toContainText(
-    'This record changed from version 4 to 5',
-  );
-  await form
-    .getByRole('button', { name: 'Use reviewed record version' })
-    .click();
+  await expect(
+    form.getByRole('button', { name: 'Review metadata' }),
+  ).toBeEnabled();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
@@ -395,12 +392,9 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await confirm(form, 'Correct recorded location');
   await version(page, 3);
   form = await openForm(page, 'Edit asset metadata');
-  await expect(form.getByRole('alert')).toContainText(
-    'This record changed from version 1 to 3',
-  );
-  await form
-    .getByRole('button', { name: 'Use reviewed record version' })
-    .click();
+  await expect(
+    form.getByRole('button', { name: 'Review metadata' }),
+  ).toBeEnabled();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
@@ -455,11 +449,11 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
     page.getByRole('heading', { name: 'Asset retired', exact: true }),
   ).toBeVisible();
 });
-test('stale two-page edits require explicit re-review and viewers retain read-only access', async ({
+test('overlapping two-page edits renew field choices after further races and viewers retain read-only access', async ({
   page,
   context,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   await login(page);
   const name = 'Browser concurrency ' + crypto.randomUUID();
   await createQuantity(page, name);
@@ -474,25 +468,50 @@ test('stale two-page edits require explicit re-review and viewers retain read-on
     .fill(name + ' concurrent');
   await confirm(otherForm, 'Edit quantity metadata');
   await version(other, 2);
-  await other.close();
   await confirm(firstForm, 'Edit quantity metadata');
-  await expect(firstForm.getByRole('alert')).toContainText('changed');
+  await expect(
+    firstForm
+      .getByRole('alert')
+      .filter({ hasText: 'Name was changed elsewhere' }),
+  ).toContainText(name + ' concurrent');
   await expect(firstForm.getByLabel('Name', { exact: true })).toHaveValue(
     name + ' my edit',
   );
-  await firstForm
-    .getByRole('button', { name: 'Use reviewed record version' })
-    .click();
-  await version(page, 2);
+  await firstForm.getByRole('button', { name: 'Use my Name edit' }).click();
   await expect(
     firstForm.getByRole('button', { name: 'Review metadata' }),
   ).toBeEnabled();
+  // Each new overlapping commit invalidates the previous choice. A stale "mine"
+  // decision must never silently overwrite a subsequently observed value.
+  for (const nextVersion of [3, 4]) {
+    await otherForm
+      .getByLabel('Name', { exact: true })
+      .fill(name + ' concurrent ' + nextVersion);
+    await confirm(otherForm, 'Edit quantity metadata');
+    await version(other, nextVersion);
+    await confirm(firstForm, 'Edit quantity metadata');
+    const conflict = firstForm
+      .getByRole('alert')
+      .filter({ hasText: 'Name was changed elsewhere' });
+    await expect(conflict).toContainText(name + ' concurrent ' + nextVersion);
+    await expect(
+      firstForm.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
+    await expect(firstForm.getByLabel('Name', { exact: true })).toHaveValue(
+      name + ' my edit',
+    );
+    await firstForm.getByRole('button', { name: 'Use my Name edit' }).click();
+    await expect(
+      firstForm.getByRole('button', { name: 'Review metadata' }),
+    ).toBeEnabled();
+  }
+  await other.close();
   await firstForm.getByRole('button', { name: 'Review metadata' }).click();
   await expect(
     firstForm.getByRole('region', { name: 'Metadata review' }),
   ).toContainText(name + ' my edit');
   await firstForm.getByRole('button', { name: 'Confirm save' }).click();
-  await version(page, 3);
+  await version(page, 5);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await login(page, 'viewer');
   await page.goto(detailUrl);
@@ -505,7 +524,7 @@ test('stale two-page edits require explicit re-review and viewers retain read-on
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
     page.getByRole('heading', { name: 'Metadata edited', exact: true }),
-  ).toHaveCount(2);
+  ).toHaveCount(4);
   await page.goto('/inventory/quantity/new');
   await expect(page.getByText(/Read-only access/)).toBeVisible();
   await expect(

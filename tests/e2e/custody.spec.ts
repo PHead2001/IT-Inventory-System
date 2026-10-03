@@ -133,22 +133,66 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   const locationCode = code('ITO-E2E');
   const siteCode = code('E2E-SITE');
   const siteName = 'Fictional field office ' + siteCode;
+  // Future structure belongs to trusted loopback fixture/migration tooling.
+  const fixtureUrl = new URL(process.env.LOCAL_API_URL!);
+  expect(['127.0.0.1', 'localhost']).toContain(fixtureUrl.hostname);
+  const fixtureAdmin = createClient(
+    fixtureUrl.href,
+    process.env.LOCAL_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  );
+  const parent = await fixtureAdmin
+    .from('locations')
+    .select('id')
+    .eq('code', 'ITO')
+    .single();
+  expect(parent.error).toBeNull();
+  const inserted = await fixtureAdmin
+    .from('locations')
+    .insert({
+      code: locationCode,
+      name: 'Fictional overflow cabinet',
+      parent_id: parent.data!.id,
+      kind: 'storage_area',
+      can_hold_inventory: true,
+    })
+    .select('id')
+    .single();
+  expect(inserted.error).toBeNull();
   await page.goto('/settings/locations');
-  const locationForm = custodyForm(page, 'Add logical storage location');
-  await locationForm
-    .getByLabel('Permanent code', { exact: true })
-    .fill(locationCode);
+  await expect(
+    page.getByRole('heading', { name: 'Add logical storage location' }),
+  ).toHaveCount(0);
+  await page.goto('/settings/locations/' + locationCode);
+  const locationForm = page.locator('form');
+  await expect(
+    locationForm.getByRole('heading', {
+      name: 'Rename Fictional overflow cabinet',
+    }),
+  ).toBeVisible();
+  await expect(locationForm.getByLabel('Parent location')).toHaveCount(0);
   await locationForm
     .getByLabel('Name', { exact: true })
-    .fill('Fictional overflow cabinet');
-  await locationForm
-    .getByLabel('Parent location')
-    .selectOption({ label: 'IT Office (ITO)' });
-  await locationForm.getByLabel('Kind').selectOption('storage_area');
-  await locationForm.getByRole('button', { name: 'Save location' }).click();
+    .fill('Fictional overflow cabinet renamed');
+  await locationForm.getByRole('button', { name: 'Save name' }).click();
   await expect(locationForm.getByRole('status')).toContainText(
-    'Location saved',
+    'Location renamed',
   );
+  const current = await fixtureAdmin
+    .from('locations')
+    .select('id,code,parent_id,kind,can_hold_inventory,active,sort_order')
+    .eq('id', inserted.data!.id)
+    .single();
+  expect(current.error).toBeNull();
+  expect(current.data).toMatchObject({
+    id: inserted.data!.id,
+    code: locationCode,
+    parent_id: parent.data!.id,
+    kind: 'storage_area',
+    can_hold_inventory: true,
+    active: true,
+    sort_order: 0,
+  });
   await page.goto('/locations/' + locationCode);
   const officeSpace = page.getByRole('link', {
     name: `Show ${locationCode} in Spaces`,
@@ -166,7 +210,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Location inventory' }),
-  ).toContainText(`Fictional overflow cabinet (${locationCode})`);
+  ).toContainText(`Fictional overflow cabinet renamed (${locationCode})`);
   await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   await page.goto('/locations/' + locationCode);
   await expect(
@@ -329,7 +373,28 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('heading', { name: 'Manage serialized asset' }),
   ).toHaveCount(0);
   await page.goto('/settings/locations');
-  await expect(page.getByText('Location settings are read-only')).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      name: 'Manage logical locations',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
+  await page
+    .getByRole('link', {
+      name: `Fictional overflow cabinet renamed (${locationCode})`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText('This location is read-only for your account.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('textbox', { name: 'Name', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
   await noHorizontalOverflow(page);
 });
 
@@ -380,11 +445,16 @@ test('site movements distinguish available, assigned and recorded; dated activit
   );
   await page.goto('/settings/sites/' + aCode);
   const archiveSite = custodyForm(page, `Manage Fictional site ${aCode}`);
-  await archiveSite.getByLabel('Active site').uncheck();
   await archiveSite
-    .getByLabel(/I have resolved every assigned holding/)
-    .check();
-  await archiveSite.getByRole('button', { name: 'Save site' }).click();
+    .getByRole('button', { name: 'Archive site', exact: true })
+    .click();
+  await expect(
+    archiveSite.getByRole('link', { name: 'Review all site holdings' }),
+  ).toBeVisible();
+  await archiveSite.getByLabel('Reason').fill('Fictional closed property');
+  await archiveSite
+    .getByRole('button', { name: 'Confirm archive site' })
+    .click();
   await expect(archiveSite.getByRole('status')).toContainText(
     'Resolve current holdings',
   );
@@ -393,20 +463,9 @@ test('site movements distinguish available, assigned and recorded; dated activit
     page.getByText(`${aCode} · Active · No room model`),
   ).toBeVisible();
   await page.goto('/settings/locations/ITO-GENERAL');
-  const deactivateStorage = custodyForm(
-    page,
-    'Manage General Storage / Unsorted',
-  );
-  await deactivateStorage.getByLabel('Active location').uncheck();
-  await deactivateStorage
-    .getByLabel(/All stock and assets have been moved/)
-    .check();
-  await deactivateStorage
-    .getByRole('button', { name: 'Save location' })
-    .click();
-  await expect(deactivateStorage.getByRole('status')).toContainText(
-    'Resolve current holdings',
-  );
+  const fixedStorage = custodyForm(page, 'Rename General Storage / Unsorted');
+  await expect(fixedStorage.getByLabel('Active location')).toHaveCount(0);
+  await expect(fixedStorage.getByLabel('Can hold inventory')).toHaveCount(0);
   await page.goto('/locations/ITO-GENERAL');
   await expect(page.getByText('Inventory destination')).toBeVisible();
   await page.goto('/dashboard');
@@ -572,4 +631,45 @@ test('opening holdings and write-off retain history without inventing a closet i
   await expect(
     page.getByRole('link', { name: 'Record existing quantity holding' }),
   ).toHaveCount(0);
+});
+
+test('empty property archive and restore are discoverable and keep identity', async ({
+  page,
+}) => {
+  await signIn(page);
+  const siteCode = code('SITE-LIFECYCLE');
+  const name = 'Fictional empty property ' + siteCode;
+  await createSite(page, siteCode, name);
+  const id = await siteId(siteCode);
+  await page.goto('/settings/sites/' + siteCode);
+  const form = page.locator('form');
+  await form.getByRole('button', { name: 'Archive site', exact: true }).click();
+  await expect(
+    form.getByRole('region', { name: 'Archive confirmation' }),
+  ).toContainText(name);
+  await form.getByLabel('Reason').fill('Fictional property closed');
+  await form.getByRole('button', { name: 'Confirm archive site' }).click();
+  await expect(
+    form.getByRole('button', { name: 'Restore site', exact: true }),
+  ).toBeVisible();
+  await page.goto('/sites');
+  await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
+  await page
+    .getByRole('combobox', { name: 'Status', exact: true })
+    .selectOption('archived');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByRole('link', { name, exact: true }).click();
+  await page
+    .getByText('Manage site / Archive or restore', { exact: true })
+    .click();
+  const restore = custodyForm(page, 'Manage ' + name);
+  await restore
+    .getByRole('button', { name: 'Restore site', exact: true })
+    .click();
+  await restore.getByLabel('Reason').fill('Fictional property reopened');
+  await restore.getByRole('button', { name: 'Confirm restore site' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Archive site', exact: true }),
+  ).toBeVisible();
+  expect(await siteId(siteCode)).toBe(id);
 });

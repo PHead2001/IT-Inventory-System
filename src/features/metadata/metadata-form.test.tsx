@@ -9,6 +9,7 @@ import {
 import { submitInventory } from '@/features/inventory/actions';
 import { submitCustody } from '@/features/custody/actions';
 import { fetchCategoryForm } from './form-fetch.actions';
+import { refreshMetadataRecord } from './record-refresh.actions';
 import {
   MetadataForm,
   MetadataFormPreview,
@@ -27,6 +28,7 @@ vi.mock('@/features/inventory/actions', () => ({
 }));
 vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
+vi.mock('./record-refresh.actions', () => ({ refreshMetadataRecord: vi.fn() }));
 vi.mock('@/features/locations/location-picker', () => ({
   LocationPicker: () => <div>Location picker</div>,
 }));
@@ -109,6 +111,12 @@ const props = {
 describe('published metadata form', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: item,
+      form: form(),
+      draftForm: form(),
+    });
   });
   it('omits a section whose only control does not apply to an asset while keeping quantity item code', () => {
     const current = form();
@@ -362,7 +370,7 @@ describe('published metadata form', () => {
         [fieldId, sectionId],
         false,
       ),
-    ).toEqual({ set: { [sectionId]: 0 }, unset: [] });
+    ).toEqual({ set: { [fieldId]: false, [sectionId]: 0 }, unset: [] });
     const hiddenSection = {
       ...definition,
       layout: definition.layout.map((section) => ({
@@ -378,7 +386,7 @@ describe('published metadata form', () => {
         [fieldId],
         false,
       ),
-    ).toEqual({ set: {}, unset: [] });
+    ).toEqual({ set: { [fieldId]: false }, unset: [] });
   });
   it('records an opening site assignment with the same published custom form and no fictional storage source', async () => {
     vi.mocked(submitCustody).mockResolvedValue({
@@ -468,7 +476,7 @@ describe('published metadata form', () => {
     expect(command.payload).not.toHaveProperty('expected_version');
     expect(command.payload).not.toHaveProperty('location_id');
   });
-  it('keeps entered values and original item baseline until explicit schema and item review', () => {
+  it('keeps overlapping edits until a field-specific decision, automatically adopting compatible forms', async () => {
     const { rerender } = render(
       <MetadataForm {...props} forms={{ [categoryId]: form() }} />,
     );
@@ -487,28 +495,18 @@ describe('published metadata form', () => {
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
       'Edited cable',
     );
-    expect(
-      screen.getByText(/record changed from version 1 to 2/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/published form changed/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/previous "Cable"; latest "Updated elsewhere"/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
-    ).toBeDisabled();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use reviewed form revision' }),
+    expect(screen.getByText(/Name was changed elsewhere/)).toHaveTextContent(
+      'Latest: Updated elsewhere. My edit: Edited cable.',
     );
     expect(
       screen.getByRole('button', { name: 'Review metadata' }),
     ).toBeDisabled();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use reviewed record version' }),
+    fireEvent.click(screen.getByRole('button', { name: 'Use my Name edit' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review metadata' }),
+      ).toBeEnabled(),
     );
-    expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
-    ).toBeEnabled();
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
       'Edited cable',
     );
@@ -520,6 +518,13 @@ describe('published metadata form', () => {
   it('refetches a secondary category after a schema conflict without losing entered values', async () => {
     const secondary = { ...form(), category_id: otherCategory };
     const revised = { ...form(secondRevision), category_id: otherCategory };
+    revised.published_definition.fields[0].required = false;
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: item,
+      form: form(),
+      draftForm: revised,
+    });
     vi.mocked(fetchCategoryForm)
       .mockResolvedValueOnce({ ok: true, form: secondary })
       .mockResolvedValueOnce({ ok: true, form: revised });
@@ -564,12 +569,14 @@ describe('published metadata form', () => {
     });
     await waitFor(() => expect(fetchCategoryForm).toHaveBeenCalledTimes(2));
     await waitFor(() =>
-      expect(screen.getByText(/published form changed/i)).toBeInTheDocument(),
+      expect(screen.getByText(/category form changed/i)).toBeInTheDocument(),
     );
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
-    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
     fireEvent.click(
-      screen.getByRole('button', { name: 'Use reviewed form revision' }),
+      screen.getByRole('button', { name: 'Review updated fields' }),
     );
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
     expect(
@@ -619,7 +626,7 @@ describe('published metadata form', () => {
       screen.getByText(/available choices or choice labels changed/i),
     ).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: 'Use reviewed form revision' }),
+      screen.getByRole('button', { name: 'Review updated fields' }),
     );
     const newInput = screen.getByLabelText(
       'Revised choice',
@@ -628,6 +635,344 @@ describe('published metadata form', () => {
     expect(
       screen.getByText(/Original choice.*unavailable/),
     ).toBeInTheDocument();
+  });
+  it('adopts independent latest values before saving without resending stale metadata', async () => {
+    const current = form();
+    current.published_definition.layout[0].controls.push({
+      id: secondRevision,
+      kind: 'builtin',
+      builtin: 'manufacturer',
+      width: 12,
+    });
+    const { rerender } = render(
+      <MetadataForm {...props} forms={{ [categoryId]: current }} />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'My name' },
+    });
+    rerender(
+      <MetadataForm
+        {...props}
+        item={{ ...item, version: 2, manufacturer: 'Latest maker' }}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Manufacturer')).toHaveValue('Latest maker'),
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('My name');
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '3',
+      changed: true,
+    });
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: {
+        ...item,
+        version: 3,
+        name: 'My name',
+        manufacturer: 'Latest maker',
+      },
+      form: current,
+      draftForm: current,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      payload: {
+        expected_version: 2,
+        name: 'My name',
+        manufacturer: 'Latest maker',
+        custom_patch: { set: {}, unset: [] },
+      },
+    });
+  });
+  it('establishes a complete canonical baseline after its own category change and permits another edit', async () => {
+    const target = { ...form(secondRevision), category_id: otherCategory };
+    target.published_definition.fields = [];
+    target.published_definition.layout[0].controls =
+      target.published_definition.layout[0].controls.slice(0, 2);
+    const catalog = [
+      ...props.categories,
+      { id: otherCategory, name: 'Adapters', active: true },
+    ];
+    const forms = { [categoryId]: form(), [otherCategory]: target };
+    const saved = {
+      ...item,
+      categoryId: otherCategory,
+      categoryName: 'Adapters',
+      version: 2,
+      validatedFormRevisionId: secondRevision,
+    };
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '2',
+      changed: true,
+    });
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: saved,
+      form: target,
+      draftForm: target,
+    });
+    const { rerender } = render(
+      <MetadataForm {...props} categories={catalog} forms={forms} />,
+    );
+    fireEvent.change(screen.getByLabelText('Category'), {
+      target: { value: otherCategory },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review metadata' }),
+      ).toBeEnabled(),
+    );
+    rerender(
+      <MetadataForm
+        {...props}
+        item={saved}
+        categories={catalog}
+        forms={forms}
+      />,
+    );
+    expect(screen.queryByText(/was changed elsewhere/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Second edit' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
+      payload: {
+        expected_version: 2,
+        category_id: otherCategory,
+        name: 'Second edit',
+      },
+    });
+  });
+  it('rebases once after a definitive stale rejection with latest untouched fields and a new request ID', async () => {
+    vi.mocked(submitInventory)
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Stale',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '3',
+        changed: true,
+      });
+    const latest = { ...item, version: 2, manufacturer: 'Latest maker' };
+    vi.mocked(refreshMetadataRecord)
+      .mockResolvedValueOnce({
+        ok: true,
+        record: latest,
+        form: form(),
+        draftForm: form(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        record: { ...latest, version: 3, name: 'Mine' },
+        form: form(),
+        draftForm: form(),
+      });
+    render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Mine' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    const [first, second] = vi
+      .mocked(submitInventory)
+      .mock.calls.map(
+        ([command]) =>
+          command as { requestId: string; payload: Record<string, unknown> },
+      );
+    expect(first.requestId).not.toBe(second.requestId);
+    expect(second.payload).toMatchObject({
+      name: 'Mine',
+      manufacturer: 'Latest maker',
+      expected_version: 2,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review metadata' }),
+      ).toBeEnabled(),
+    );
+  });
+  it('stops after another intervening stale rejection instead of looping', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'stale_version',
+      message: 'Changed again; review your save.',
+    });
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: { ...item, version: 2, model: 'Other' },
+      form: form(),
+      draftForm: form(),
+    });
+    render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Mine' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Changed again'),
+    );
+    expect(submitInventory).toHaveBeenCalledTimes(2);
+    expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+  });
+  it('replays an uncertain revised payload exactly before any further reconciliation', async () => {
+    vi.mocked(submitInventory)
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Stale',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'unexpected',
+        code: 'unexpected',
+        message: 'Unknown outcome',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '3',
+        changed: true,
+      });
+    const latest = { ...item, version: 2, model: 'Updated model' };
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: latest,
+      form: form(),
+      draftForm: form(),
+    });
+    const { rerender } = render(
+      <MetadataForm {...props} forms={{ [categoryId]: form() }} />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Mine' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeEnabled(),
+    );
+    rerender(
+      <MetadataForm
+        {...props}
+        item={{ ...item, version: 4, name: 'Another user' }}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(submitInventory).mock.calls[2][0]).toEqual(
+      vi.mocked(submitInventory).mock.calls[1][0],
+    );
+  });
+  it('shows saved-refresh retry without replaying a confirmed commit', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '2',
+      changed: true,
+    });
+    vi.mocked(refreshMetadataRecord)
+      .mockResolvedValueOnce({ ok: false, message: 'Record read failed' })
+      .mockResolvedValueOnce({
+        ok: true,
+        record: { ...item, name: 'Saved name', version: 2 },
+        form: form(),
+        draftForm: form(),
+      });
+    render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Saved name' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry saved record refresh' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry same save' }),
+    ).toBeNull();
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry saved record refresh' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review metadata' }),
+      ).toBeEnabled(),
+    );
+    expect(submitInventory).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Name')).toHaveValue('Saved name');
+  });
+  it('does not reuse conflict choices after a newer concurrent edit', async () => {
+    const current = form();
+    current.published_definition.layout[0].controls.push({
+      id: secondRevision,
+      kind: 'builtin',
+      builtin: 'model',
+      width: 12,
+    });
+    const { rerender } = render(
+      <MetadataForm {...props} forms={{ [categoryId]: current }} />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Mine' },
+    });
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'My model' },
+    });
+    rerender(
+      <MetadataForm
+        {...props}
+        item={{ ...item, version: 2, name: 'Name 2', model: 'Model 2' }}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use my Name edit' }));
+    rerender(
+      <MetadataForm
+        {...props}
+        item={{ ...item, version: 3, name: 'Name 3', model: 'Model 3' }}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Use my Name edit' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Name was changed elsewhere/)).toHaveTextContent(
+      'Name 3',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use my Model edit' }));
+    expect(
+      screen.getByRole('button', { name: 'Use my Name edit' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
   });
   it('requires an explicit legacy-value acknowledgement when changing an item category', () => {
     const target = form(secondRevision);

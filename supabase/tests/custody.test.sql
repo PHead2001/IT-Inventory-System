@@ -26,19 +26,19 @@ insert into custody_sites
 select (public.site_create(gen_random_uuid(),'{"code":"SITE-SQL-B","name":"Fictional Site B"}'::jsonb)->>'entity_id')::uuid,'b';
 select is((select count(*)::integer from custody_sites),2,'maintainer creates distinct sites');
 
+-- Storage fixture setup is owner-only; never restore the retired application RPC.
 create temporary table custody_location as
-select (public.location_create(gen_random_uuid(),jsonb_build_object(
- 'code','ITO-SQL-BIN','name','Fictional office bin','parent_id',
- (select id from public.locations where code='ITO'),'kind','storage_area',
- 'can_hold_inventory',true,'active',true,'sort_order',1))->>'entity_id')::uuid as id;
-select ok((select id is not null from custody_location),'maintainer creates office storage');
+with inserted as (insert into public.locations(code,name,parent_id,kind,can_hold_inventory,active,sort_order)
+ select 'ITO-SQL-BIN','Fictional office bin',id,'storage_area',true,true,1 from public.locations where code='ITO'
+ returning id) select id from inserted;
+select ok((select id is not null from custody_location),'owner creates disposable office storage fixture');
 
 select set_config('request.jwt.claims',json_build_object('sub',
  (select id from custody_actors where kind='staff'),'role','authenticated')::text,true);
 select throws_ok($$select public.site_create(gen_random_uuid(),'{"code":"SITE-DENIED","name":"Denied"}'::jsonb)$$,
  'P1001','forbidden','ordinary staff cannot manage sites');
-select throws_ok($$select public.location_create(gen_random_uuid(),'{"code":"ITO-DENIED","name":"Denied","kind":"room","active":true,"can_hold_inventory":false}'::jsonb)$$,
- 'P1001','forbidden','ordinary staff cannot manage locations');
+select throws_ok($$select public.location_rename(gen_random_uuid(),'{"code":"ITO-DENIED","name":"Denied","kind":"room","active":true,"can_hold_inventory":false}'::jsonb)$$,
+ 'P1001','forbidden','ordinary staff cannot rename locations');
 
 create temporary table custody_items as
 select (public.quantity_create_v2(gen_random_uuid(),jsonb_build_object(
@@ -111,21 +111,20 @@ select set_config('request.jwt.claims',json_build_object('sub',
  (select id from custody_actors where kind='maintainer'),'role','authenticated')::text,true);
 create temporary table custody_inactive_site as
 select (public.site_create(gen_random_uuid(),'{"code":"SITE-SQL-EMPTY","name":"Fictional Empty Site"}'::jsonb)->>'entity_id')::uuid as id;
-select public.site_update(gen_random_uuid(),jsonb_build_object('site_id',
- (select id from custody_inactive_site),'expected_version','1','name','Fictional Empty Site',
+select public.site_set_active(gen_random_uuid(),jsonb_build_object('site_id',
+ (select id from custody_inactive_site),'expected_version','1','reason','Fictional archive',
  'active',false));
-select throws_ok(format('select public.site_update(%L::uuid,%L::jsonb)',gen_random_uuid(),
+select throws_ok(format('select public.site_set_active(%L::uuid,%L::jsonb)',gen_random_uuid(),
  jsonb_build_object('site_id',(select id from custody_sites where key='a'),'expected_version','1',
- 'name','Fictional Site A','active',false)::text),
+ 'reason','Fictional archive','active',false)::text),
  'P1008','site_has_inventory','site archive requires empty current holdings');
-select lives_ok(format('select public.location_update(%L::uuid,%L::jsonb)',gen_random_uuid(),
- (select jsonb_build_object('location_id',id,'expected_version','1','name',name,
-  'parent_id',parent_id,'kind',kind,'can_hold_inventory',can_hold_inventory,
-  'active',false,'sort_order',sort_order)::text
+select lives_ok(format('select public.location_rename(%L::uuid,%L::jsonb)',gen_random_uuid(),
+ (select jsonb_build_object('location_id',id,'expected_version','1','name','Renamed drawer')::text
   from public.locations where code='ITC-D12')),
- 'an empty modeled drawer may be deactivated without changing geometry capability');
-select ok((select not active and can_hold_inventory from public.locations where code='ITC-D12'),
- 'deactivation leaves the explicit capability flag and modeled binding intact');
+ 'an empty modeled drawer can change its display name');
+select ok((select active and can_hold_inventory and code='ITC-D12' from public.locations where code='ITC-D12'),
+ 'rename leaves active state, destination capability and stable binding intact');
+
 select set_config('request.jwt.claims',json_build_object('sub',
  (select id from custody_actors where kind='staff'),'role','authenticated')::text,true);
 select throws_ok(format('select public.quantity_site_change(%L::uuid,%L::jsonb)',gen_random_uuid(),

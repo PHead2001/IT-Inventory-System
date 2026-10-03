@@ -108,10 +108,8 @@ test('phone designer edits publish with one save and render in quantity and asse
     .getByLabel('Field name', { exact: true })
     .fill('Connector type');
   await panels.getByRole('button', { name: 'Canvas' }).click();
-  await designer
-    .getByRole('button', { name: 'Inspect section' })
-    .first()
-    .click();
+  await designer.getByLabel('Section heading').first().focus();
+  await panels.getByRole('button', { name: 'Inspector' }).click();
   await expect(
     designer
       .getByTestId('designer-inspector')

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   pathname: '/settings',
   redirect: vi.fn(),
   notFound: vi.fn(),
+  designer: vi.fn(),
 }));
 vi.mock('@/features/configuration/queries.server', () => ({
   getConfigurationCategories: mocks.categories,
@@ -22,7 +23,10 @@ vi.mock('@/features/metadata/queries.server', () => ({
   getPublishedForms: mocks.forms,
 }));
 vi.mock('@/features/metadata/metadata-settings', () => ({
-  MetadataSettings: () => <div>Selected form designer</div>,
+  MetadataSettings: (props: unknown) => {
+    mocks.designer(props);
+    return <div>Selected form designer</div>;
+  },
 }));
 vi.mock('@/features/configuration/settings-panel', () => ({
   SettingsPanel: () => <div>Configuration controls</div>,
@@ -84,11 +88,48 @@ it('keeps landing, form chooser and label defaults independent of form definitio
 });
 
 it('loads only the selected active category form for an editor', async () => {
+  mocks.categories.mockResolvedValue({
+    categories: [
+      category,
+      {
+        ...category,
+        id: '00000000-0000-4000-8000-000000000020',
+        name: 'Adapters',
+      },
+      { ...category, active: false, name: 'Archived' },
+    ],
+    canManage: true,
+    memberId: id,
+  });
   render(
     await CategoryFormPage({ params: Promise.resolve({ categoryId: id }) }),
   );
   expect(mocks.forms).toHaveBeenCalledExactlyOnceWith([id]);
   expect(screen.getByText('Selected form designer')).toBeVisible();
+  expect(mocks.designer).toHaveBeenCalledWith(
+    expect.objectContaining({
+      selectedCategoryId: id,
+      categories: [
+        { id, name: 'Tools', active: true },
+        {
+          id: '00000000-0000-4000-8000-000000000020',
+          name: 'Adapters',
+          active: true,
+        },
+      ],
+    }),
+  );
+});
+
+it('offers browser-personal motion preferences on the member Settings landing page', async () => {
+  render(await SettingsPage({}));
+  expect(
+    screen.getByRole('region', { name: 'Appearance & preferences' }),
+  ).toHaveTextContent('personal preference for this browser');
+  expect(
+    screen.getByRole('button', { name: 'Reduce motion locally' }),
+  ).toBeVisible();
+  expect(mocks.categories).not.toHaveBeenCalled();
 });
 
 it('does not fetch a form for viewers or inactive category links', async () => {

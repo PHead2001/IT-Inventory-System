@@ -64,10 +64,11 @@ async function publishDefinition(
     .published_revision_id;
 }
 
-test('published custom field creates and edits with explicit schema-stale review', async ({
+test('published custom fields preserve independent concurrent edits, refresh own saves and require targeted schema review', async ({
   page,
+  context,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const client = createClient(
     process.env.LOCAL_API_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -178,29 +179,107 @@ test('published custom field creates and edits with explicit schema-stale review
   await expect(page.getByText(/Version 2$/)).toBeVisible();
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 
-  await expect(editForm.getByRole('alert')).toContainText(
-    'This record changed from version 1 to 2',
-  );
-  await editForm
-    .getByRole('button', { name: 'Use reviewed record version' })
-    .click();
+  await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('world');
+  await expect(
+    editForm.getByRole('button', { name: 'Review metadata' }),
+  ).toBeEnabled();
+  await expect(editForm.getByText(/changed from version/)).toHaveCount(0);
+  await expect(
+    editForm.getByRole('button', { name: /Use reviewed .* version/ }),
+  ).toHaveCount(0);
+  // These pages begin with the same baseline but edit independent fields. The
+  // stale complete custom envelope must not overwrite the other page's answer.
+  const other = await context.newPage();
+  try {
+    await other.goto(detailUrl);
+    await other.getByText('Edit quantity metadata', { exact: true }).click();
+    const otherEdit = other.getByRole('form', {
+      name: 'Edit quantity metadata',
+    });
+    await editForm
+      .getByLabel('Name', { exact: true })
+      .fill('Independent ' + suffix);
+    await otherEdit.getByLabel(/Tracking note/).fill('newer');
+    await otherEdit.getByRole('button', { name: 'Review metadata' }).click();
+    await otherEdit.getByRole('button', { name: 'Confirm save' }).click();
+    await expect(other.getByText(/Version 3$/)).toBeVisible();
+    await editForm.getByRole('button', { name: 'Review metadata' }).click();
+    await editForm.getByRole('button', { name: 'Confirm save' }).click();
+    await expect(page.getByText(/Version 4$/)).toBeVisible();
+    await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
+    await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
+      'Independent ' + suffix,
+    );
+    await expect(
+      editForm.getByRole('button', { name: /Keep latest|Use my .* edit/ }),
+    ).toHaveCount(0);
+    await other.reload();
+    await other.getByText('Edit quantity metadata', { exact: true }).click();
+    const converged = 'Converged ' + suffix;
+    await editForm.getByLabel('Name', { exact: true }).fill(converged);
+    await otherEdit.getByLabel('Name', { exact: true }).fill(converged);
+    await otherEdit.getByRole('button', { name: 'Review metadata' }).click();
+    await otherEdit.getByRole('button', { name: 'Confirm save' }).click();
+    await expect(other.getByText(/Version 5$/)).toBeVisible();
+    await editForm.getByRole('button', { name: 'Review metadata' }).click();
+    await editForm.getByRole('button', { name: 'Confirm save' }).click();
+    await expect(page.getByText(/Version 6$/)).toBeVisible();
+    await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
+      converged,
+    );
+    await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
+    await expect(
+      editForm.getByRole('button', { name: /Keep latest|Use my .* edit/ }),
+    ).toHaveCount(0);
+  } finally {
+    await other.close();
+  }
   await editForm.getByLabel(/Tracking note/).fill('five5');
   const stricter = structuredClone(definition);
   stricter.fields[0].rules.maxLength = 4;
   await publishDefinition(client, actorId, categoryId, stricter);
   await editForm.getByRole('button', { name: 'Review metadata' }).click();
   await editForm.getByRole('button', { name: 'Confirm save' }).click();
-  await expect(editForm.getByRole('alert')).toContainText(
-    'published form changed',
-  );
+  await expect(
+    editForm
+      .getByRole('alert')
+      .filter({ hasText: 'The category form changed' }),
+  ).toContainText('validation rules changed');
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('five5');
-  await editForm
-    .getByRole('button', { name: 'Use reviewed form revision' })
-    .click();
+  await editForm.getByRole('button', { name: 'Review updated fields' }).click();
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('five5');
   await editForm.getByLabel(/Tracking note/).fill('okay');
   await editForm.getByRole('button', { name: 'Review metadata' }).click();
   await editForm.getByRole('button', { name: 'Confirm save' }).click();
-  await expect(page.getByText(/Version 3$/)).toBeVisible();
+  await expect(page.getByText(/Version 7$/)).toBeVisible();
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
+  // A successful category change establishes its own complete baseline too.
+  await editForm.getByLabel('Category').selectOption({ label: 'Cables' });
+  await editForm.getByRole('button', { name: 'Review metadata' }).click();
+  await editForm
+    .getByRole('checkbox', { name: /existing custom values.*legacy values/ })
+    .check();
+  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page.getByText(/Version 8$/)).toBeVisible();
+  await expect(
+    editForm.getByRole('button', { name: 'Review metadata' }),
+  ).toBeEnabled();
+  await editForm
+    .getByLabel('Name', { exact: true })
+    .fill('After category ' + suffix);
+  await editForm.getByRole('button', { name: 'Review metadata' }).click();
+  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page.getByText(/Version 9$/)).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('heading', {
+      name: 'After category ' + suffix,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText('okay', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'View all item history' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Metadata edited', exact: true }),
+  ).toHaveCount(8);
 });

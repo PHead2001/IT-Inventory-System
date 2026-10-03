@@ -1,0 +1,41 @@
+{
+  "sourceSha": "88644591c2e756a37e3db4ffb1a0a59075e22808",
+  "backend": "wkqkidojpicdtytswmje",
+  "completedAt": "2026-10-03T11:15:20.161Z",
+  "normalOperations": "quantity_archive_and_clear, asset_retire, site_set_active(false), with current version and ledgered immutable request IDs; caller-scoped owned maintainer",
+  "quantityArchived": 30,
+  "assetsRetired": 30,
+  "sitesArchived": 8,
+  "activeCounts": {
+    "quantity_items": 0,
+    "serialized_assets": 0,
+    "sites": 0
+  },
+  "retainedTableCounts": {
+    "quantity_items": 30,
+    "serialized_assets": 30,
+    "sites": 8,
+    "stock_balances": 30,
+    "quantity_events": 70,
+    "quantity_event_lines": 62,
+    "asset_events": 62,
+    "assignment_events": 4,
+    "site_quantity_holdings": 1,
+    "site_quantity_event_lines": 2,
+    "site_configuration_events": 21,
+    "location_configuration_events": 2,
+    "configuration_events": 0,
+    "form_publication_events": 0,
+    "inventory_files": 0,
+    "inventory_file_events": 0,
+    "inventory_file_collections": 0
+  },
+  "historyRetained": true,
+  "wholeSchemaReset": false,
+  "standingAccountTouched": false,
+  "ownThreeActorsRetainedForFinalHeadSmoke": true,
+  "requestCount": 69,
+  "successfulCleanupOperations": 68,
+  "definitivelyRejectedValidationAttempts": 1,
+  "validationRecovery": "One legacy asset_retire command with string version definitively rejected P1012 before receipt creation; original payload/ID retained and corrected numeric-version command used a new immutable ID."
+}

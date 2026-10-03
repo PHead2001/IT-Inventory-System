@@ -30,7 +30,10 @@ export type MetadataFieldInputProps = {
   disabled?: boolean;
   previousOptions?: MetadataField['options'];
   onValidityChange?(message: string): void;
+  initialDateTimeDraft?: DateTimeDraft;
+  onDateTimeDraftChange?(draft: DateTimeDraft): void;
 };
+export type DateTimeDraft = { wall: string; zone: string };
 const subscribeTimeZone = () => () => {};
 export function DateTimeInput({
   value,
@@ -39,6 +42,8 @@ export function DateTimeInput({
   describedBy,
   disabled,
   onValidityChange,
+  initialDraft,
+  onDraftChange,
 }: {
   value: unknown;
   onChange(value: unknown): void;
@@ -46,16 +51,20 @@ export function DateTimeInput({
   describedBy?: string;
   disabled?: boolean;
   onValidityChange?(message: string): void;
+  initialDraft?: DateTimeDraft;
+  onDraftChange?(draft: DateTimeDraft): void;
 }) {
   const localZone = useSyncExternalStore(
     subscribeTimeZone,
     browserTimeZone,
     () => 'UTC',
   );
-  const [chosenZone, setZone] = useState<string | null>(null);
+  const [chosenZone, setZone] = useState<string | null>(
+    initialDraft?.zone ?? null,
+  );
   const zone = chosenZone ?? localZone;
   const [draft, setDraft] = useState<{ wall: string; value: unknown } | null>(
-    null,
+    initialDraft ? { wall: initialDraft.wall, value } : null,
   );
   const wall =
     draft && draft.value === value
@@ -67,6 +76,9 @@ export function DateTimeInput({
     () => (wall ? resolveWallTime(wall, zone) : []),
     [wall, zone],
   );
+  useEffect(() => {
+    onDraftChange?.({ wall, zone });
+  }, [wall, zone, onDraftChange]);
   const unresolved =
     wall &&
     !choices.some(
@@ -235,6 +247,8 @@ export function MetadataFieldInput({
   disabled = false,
   previousOptions,
   onValidityChange,
+  initialDateTimeDraft,
+  onDateTimeDraftChange,
 }: MetadataFieldInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? `field-${generatedId}`;
@@ -318,6 +332,8 @@ export function MetadataFieldInput({
           describedBy={describedBy}
           disabled={locked}
           onValidityChange={setDatetimeError}
+          initialDraft={initialDateTimeDraft}
+          onDraftChange={onDateTimeDraftChange}
         />
       </div>
     );

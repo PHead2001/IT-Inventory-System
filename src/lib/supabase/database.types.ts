@@ -1409,6 +1409,7 @@ export type Database = {
           created_at: string
           id: string
           kind: string
+          reason: string | null
           site_id: string
           version: number
         }
@@ -1420,6 +1421,7 @@ export type Database = {
           created_at?: string
           id?: string
           kind: string
+          reason?: string | null
           site_id: string
           version: number
         }
@@ -1431,6 +1433,7 @@ export type Database = {
           created_at?: string
           id?: string
           kind?: string
+          reason?: string | null
           site_id?: string
           version?: number
         }
@@ -2115,6 +2118,10 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      location_rename: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       location_update: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -2219,6 +2226,10 @@ export type Database = {
       }
       site_holding_groups: {
         Args: { p_page?: number; p_page_size?: number; p_site_id: string }
+        Returns: Json
+      }
+      site_set_active: {
+        Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
       site_update: {

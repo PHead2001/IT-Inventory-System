@@ -17,6 +17,7 @@ export type FileListSummary = z.infer<typeof summarySchema>[number];
 
 export async function getFileListSummaries(rows: InventoryResult[]) {
   const { supabase } = await requireMember();
+  if (rows.length === 0) return [];
   const assetIds = [
     ...new Set(rows.filter((row) => row.kind === 'asset').map((row) => row.id)),
   ];

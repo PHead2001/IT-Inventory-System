@@ -32,6 +32,7 @@ import styles from './designer.module.css';
 import { controlLayoutStyle } from './control-layout';
 import { FieldSettings, makeField } from './field-settings';
 import { AddFieldDialog } from './add-field-dialog';
+import { fetchCategoryForm } from './form-fetch.actions';
 import { MetadataFieldInput } from './field-value-input';
 import {
   fieldName,
@@ -41,9 +42,11 @@ import {
 } from './field-authoring-model';
 import {
   clearDesignerRecovery,
+  completeDesignerNavigation,
   readDesignerRecovery,
   writeDesignerRecovery,
   type DesignerRecovery,
+  type PendingFieldAddition,
 } from './designer-recovery';
 import {
   addFieldToSection,
@@ -538,23 +541,24 @@ export function MetadataSettings({
   categories,
   forms,
   memberId,
+  selectedCategoryId,
 }: {
   categories: Category[];
   forms: Record<string, MetadataForm>;
   memberId: string;
+  selectedCategoryId?: string;
 }) {
   const router = useRouter();
   const reducedMotion = useEffectiveReducedMotion();
   const active = categories.filter((category) => category.active);
-  const [categoryId, setCategoryId] = useState(active[0]?.id ?? '');
+  const [categoryId] = useState(selectedCategoryId ?? active[0]?.id ?? '');
   const selected = forms[categoryId];
   const [definition, setDefinition] = useState<MetadataDefinition | null>(() =>
-    initialDefinition(source(forms[active[0]?.id ?? ''])),
+    initialDefinition(source(forms[categoryId])),
   );
   const [saved, setSaved] = useState(() =>
     JSON.stringify(
-      initialDefinition(source(forms[active[0]?.id ?? ''])) ??
-        source(forms[active[0]?.id ?? '']),
+      initialDefinition(source(forms[categoryId])) ?? source(forms[categoryId]),
     ),
   );
   const [draftVersion, setDraftVersion] = useState(
@@ -577,6 +581,12 @@ export function MetadataSettings({
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
+  const [uncertainSave, setUncertainSave] = useState(false);
+  const unresolvedCommand = useRef<DesignerRecovery | null>(null);
+  const [blockedRecovery, setBlockedRecovery] = useState<
+    'none' | 'durable' | 'memory'
+  >('none');
+  const [blockedAccessMessage, setBlockedAccessMessage] = useState('');
   const [pending, startTransition] = useTransition();
   const [operationPending, setOperationPending] = useState(false);
   const [recovery, setRecovery] = useState<DesignerRecovery | null>(null);
@@ -596,10 +606,31 @@ export function MetadataSettings({
   const [history, setHistory] = useState<MetadataDefinition[]>([]);
   const [advancedJson, setAdvancedJson] = useState('');
   const [advancedError, setAdvancedError] = useState('');
-  const [addition, setAddition] = useState<{
-    sectionId: string;
-    field?: Field;
-  } | null>(null);
+  const [addition, setAddition] = useState<PendingFieldAddition | null>(null);
+  const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
+  const navigationEpoch = useRef(0);
+  const [navigationCommitted, setNavigationCommitted] = useState(false);
+  const committedNavigation = useRef(false);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const [discardAfterCategoryId, setDiscardAfterCategoryId] = useState<
+    string | undefined
+  >();
+  useEffect(
+    () => () => {
+      navigationEpoch.current += 1;
+      categorySession.current += 1;
+      clearTimeout(commitTimer.current);
+    },
+    [memberId, categoryId],
+  );
+  const stageAddition = useCallback((draft: PendingFieldAddition) => {
+    if (committedNavigation.current) return;
+    setAddition((prior) =>
+      prior && JSON.stringify(prior) !== JSON.stringify(draft) ? draft : prior,
+    );
+  }, []);
   const [configErrors, setConfigErrors] = useState<Record<string, string>>({});
   const [inspectorRevision, setInspectorRevision] = useState(0);
   const [scopeMessage, setScopeMessage] = useState('');
@@ -617,6 +648,12 @@ export function MetadataSettings({
   const [mobilePanel, setMobilePanel] = useState<
     'library' | 'canvas' | 'inspector'
   >('canvas');
+  const restoreAdditionFocus = useCallback(() => {
+    setMobilePanel('library');
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>('[data-designer-add-field]')?.focus(),
+    );
+  }, []);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     null,
   );
@@ -645,6 +682,20 @@ export function MetadataSettings({
     if (terminalDenied.current) return;
     terminalDenied.current = true;
     identityCheck.current += 1;
+    // An authorization check runs before RPC replay and cannot settle an
+    // earlier command. Capture it before masking the privileged draft.
+    const pendingCommand =
+      unresolvedCommand.current ??
+      readDesignerRecovery(memberId, categoryId).item;
+    const unresolved = pendingCommand?.uncertainSave ? pendingCommand : null;
+    unresolvedCommand.current = unresolved;
+    setBlockedRecovery(
+      unresolved
+        ? writeDesignerRecovery(unresolved)
+          ? 'durable'
+          : 'memory'
+        : 'none',
+    );
     gesture.current = null;
     dndBaseline.current = null;
     setDraggingControlId(null);
@@ -662,11 +713,52 @@ export function MetadataSettings({
     setSelectedSectionId(null);
     setRemoveSectionId(null);
     setAddition(null);
+    setUncertainSave(unresolved !== null);
     setConfigErrors({});
     setScopeMessage('');
-    clearDesignerRecovery(memberId, categoryId);
+    if (!unresolved) clearDesignerRecovery(memberId, categoryId);
     setIdentityStatus('blocked');
   }, [memberId, categoryId]);
+  const retryDeniedAccess = async () => {
+    if (!terminalDenied.current || busy.current || identityInFlight.current)
+      return;
+    busy.current = true;
+    identityInFlight.current = true;
+    setOperationPending(true);
+    setBlockedAccessMessage('Verifying the original actor’s access…');
+    const check = ++identityCheck.current;
+    try {
+      const result = await verifyMetadataDesignerIdentity(memberId);
+      if (check !== identityCheck.current) return;
+      if (!result.ok) {
+        setBlockedAccessMessage(
+          'The original actor’s configuration access could not be verified. Keep this page open and retry after access is restored.',
+        );
+        return;
+      }
+      const command = unresolvedCommand.current;
+      if (!command) return;
+      // Only this fresh server verification may release the terminal mask.
+      // The original command stays locked until explicitly recovered/replayed.
+      terminalDenied.current = false;
+      setDefinition(command.definition);
+      definitionRef.current = command.definition;
+      setRecovery(command);
+      setUncertainSave(true);
+      setIdentityStatus('verified');
+      setBlockedAccessMessage('');
+      setMessage('Access restored. Recover edits and retry the original save.');
+    } catch {
+      if (check === identityCheck.current)
+        setBlockedAccessMessage(
+          'Access verification was interrupted. Keep this page open and retry.',
+        );
+    } finally {
+      identityInFlight.current = false;
+      busy.current = false;
+      setOperationPending(false);
+    }
+  };
   useEffect(() => {
     definitionRef.current = definition;
   }, [definition]);
@@ -685,6 +777,10 @@ export function MetadataSettings({
   const [previewVersion, setPreviewVersion] = useState(0);
   const refreshRequested = useRef(false);
   const dirty = definition !== null && JSON.stringify(definition) !== saved;
+  const unsaved = dirty || addition !== null;
+  const unresolvedSave = uncertainSave || recovery?.uncertainSave === true;
+  const editorLocked =
+    operationPending || unresolvedSave || navigationCommitted;
   const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
     ? [
@@ -739,7 +835,9 @@ export function MetadataSettings({
   }, [denyIdentity, memberId]);
   useEffect(() => {
     let active = true;
+    completeDesignerNavigation(memberId, categoryId);
     const result = readDesignerRecovery(memberId, categoryId);
+    if (result.item?.uncertainSave) unresolvedCommand.current = result.item;
     queueMicrotask(() => {
       if (!active || terminalDenied.current) return;
       setRecovery(result.item);
@@ -758,7 +856,12 @@ export function MetadataSettings({
     // Wait for the entry read before clearing anything: an older unsaved draft
     // must remain available for explicit recovery on a fresh mount.
     if (recoveryLoadedScope !== recoveryScope || terminalDenied.current) return;
-    if (!dirty || !definition) {
+    // The command is captured synchronously before dispatch. Do not reconstruct
+    // it from passive state effects that may still contain an older receipt.
+    if (unresolvedCommand.current) return;
+    // A pending original request belongs to recovery until it is explicitly adopted.
+    if (recovery?.uncertainSave) return;
+    if (!unsaved || !definition) {
       if (!recovery) clearDesignerRecovery(memberId, categoryId);
       return;
     }
@@ -770,6 +873,10 @@ export function MetadataSettings({
       expectedDraftId: draftId,
       expectedDraftVersion: draftVersion,
       expectedPublishedRevisionId: publishedBaseline,
+      ...(addition ? { addition } : {}),
+      ...(receipt ? { receipt } : {}),
+      uncertainSave,
+      ...(discardAfterCategoryId ? { discardAfterCategoryId } : {}),
     });
     if (!stored)
       queueMicrotask(() =>
@@ -781,7 +888,11 @@ export function MetadataSettings({
     memberId,
     categoryId,
     definition,
-    dirty,
+    unsaved,
+    addition,
+    receipt,
+    uncertainSave,
+    discardAfterCategoryId,
     saved,
     draftVersion,
     draftId,
@@ -791,7 +902,8 @@ export function MetadataSettings({
     recoveryScope,
   ]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!unsaved && !operationPending && !unresolvedSave && !navigationTarget)
+      return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
@@ -804,10 +916,21 @@ export function MetadataSettings({
         !anchor ||
         anchor.getAttribute('href')?.startsWith('#') ||
         event.ctrlKey ||
-        event.metaKey
+        event.metaKey ||
+        anchor.hasAttribute('download') ||
+        anchor.getAttribute('target') === '_blank'
       )
         return;
-      if (!window.confirm('Leave this page and discard unsaved form edits?')) {
+      if (
+        busy.current ||
+        unresolvedSave ||
+        navigationTarget ||
+        !window.confirm(
+          storageWarning
+            ? 'Recovery is unavailable in this browser. Leave and lose these unsaved edits?'
+            : 'Leave this page? Unsaved form edits and field additions will be available to recover when you return.',
+        )
+      ) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
@@ -818,8 +941,15 @@ export function MetadataSettings({
       window.removeEventListener('beforeunload', warn);
       document.removeEventListener('click', guardLink, true);
     };
-  }, [dirty]);
+  }, [
+    unsaved,
+    operationPending,
+    navigationTarget,
+    storageWarning,
+    unresolvedSave,
+  ]);
   const edit = (next: MetadataDefinition) => {
+    if (unresolvedSave || busy.current || committedNavigation.current) return;
     editEpoch.current += 1;
     setPreviewVersion((version) => version + 1);
     if (definition)
@@ -866,26 +996,163 @@ export function MetadataSettings({
     // The explicit refresh request is the only route for adopting server revisions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forms]);
-  const switchCategory = (id: string) => {
-    if (busy.current) return;
-    if (dirty && !window.confirm('Discard unsaved edits and switch category?'))
+  const switchCategory = async (id: string) => {
+    if (
+      busy.current ||
+      unresolvedSave ||
+      readDesignerRecovery(memberId, categoryId).item?.uncertainSave ||
+      committedNavigation.current ||
+      terminalDenied.current ||
+      !active.some((entry) => entry.id === id)
+    )
       return;
-    if (dirty) clearDesignerRecovery(memberId, categoryId);
-    categorySession.current += 1;
-    setCategoryId(id);
-    reset(
-      source(forms[id]),
-      forms[id]?.draft_version ?? '0',
-      forms[id]?.published_revision_id ?? '',
-      forms[id]?.draft_id ?? null,
+    if (id === categoryId) {
+      navigationEpoch.current += 1;
+      setNavigationTarget(null);
+      setMessage('');
+      return;
+    }
+    if (
+      unsaved &&
+      !window.confirm('Discard unsaved edits and switch category?')
+    )
+      return;
+    // Cancelling a newer choice must leave the earlier load valid.
+    const epoch = ++navigationEpoch.current;
+    const original = JSON.stringify([definition, addition]);
+    setNavigationTarget(id);
+    setMessage(
+      'Loading selected category… Your current edits remain here until it opens.',
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const { result, identity } = await Promise.race([
+        (async () => {
+          const result = await fetchCategoryForm(id);
+          return {
+            result,
+            identity: result.ok
+              ? await verifyMetadataDesignerIdentity(memberId)
+              : null,
+          };
+        })(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('timeout')), 15000);
+        }),
+      ]);
+      if (epoch !== navigationEpoch.current || terminalDenied.current) return;
+      if (!result.ok) {
+        setMessage(result.message);
+        setNavigationTarget(null);
+        return;
+      }
+      if (!identity || !identity.ok) {
+        if (!identity) {
+          setNavigationTarget(null);
+          return;
+        }
+        if (identity.code === 'P1001') denyIdentity();
+        else setMessage(identity.message);
+        setNavigationTarget(null);
+        return;
+      }
+      if (
+        original !==
+          JSON.stringify([definitionRef.current, additionRef.current]) ||
+        busy.current ||
+        unresolvedSave ||
+        readDesignerRecovery(memberId, categoryId).item?.uncertainSave
+      ) {
+        setMessage(
+          'Your form changed while loading. Keep editing or choose the category again.',
+        );
+        setNavigationTarget(null);
+        return;
+      }
+      const path = `/settings/forms/${encodeURIComponent(id)}`;
+      if (unsaved) {
+        if (
+          !definition ||
+          !writeDesignerRecovery({
+            memberId,
+            categoryId,
+            definition,
+            savedDefinition: saved,
+            expectedDraftId: draftId,
+            expectedDraftVersion: draftVersion,
+            expectedPublishedRevisionId: publishedBaseline,
+            ...(addition ? { addition } : {}),
+            ...(receipt ? { receipt } : {}),
+            uncertainSave: false,
+            discardAfterCategoryId: id,
+          })
+        ) {
+          setNavigationTarget(null);
+          setMessage(
+            'The category switch could not preserve your recovery. Keep this page open and save your edits before switching.',
+          );
+          return;
+        }
+      }
+      setDiscardAfterCategoryId(unsaved ? id : undefined);
+      // App Router push returns before the new keyed designer mounts. The
+      // reviewed outgoing draft must stay frozen through that actual commit.
+      committedNavigation.current = true;
+      gesture.current = null;
+      dndBaseline.current = null;
+      setDraggingControlId(null);
+      setNavigationCommitted(true);
+      setMessage(
+        'Opening selected category… Your current editor is paused until it opens.',
+      );
+      commitTimer.current = setTimeout(() => {
+        if (epoch !== navigationEpoch.current || terminalDenied.current) return;
+        releaseNavigation();
+      }, 15000);
+      router.push(path);
+    } catch {
+      if (epoch === navigationEpoch.current) {
+        releaseNavigation();
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const releaseNavigation = () => {
+    clearTimeout(commitTimer.current);
+    const stored = readDesignerRecovery(memberId, categoryId);
+    if (
+      committedNavigation.current &&
+      (!stored.available ||
+        (stored.item?.discardAfterCategoryId &&
+          !writeDesignerRecovery({
+            ...stored.item,
+            discardAfterCategoryId: undefined,
+          })))
+    ) {
+      setMessage(
+        'The category has not opened and recovery storage is unavailable. Keep this editor open; editing is paused to protect the reviewed draft.',
+      );
+      return;
+    }
+    setDiscardAfterCategoryId(undefined);
+    committedNavigation.current = false;
+    setNavigationCommitted(false);
+    setNavigationTarget(null);
+    setMessage(
+      'The selected category could not be opened. Your edits remain here. Choose it again to retry.',
     );
   };
+  const additionRef = useRef(addition);
+  useEffect(() => {
+    additionRef.current = addition;
+  }, [addition]);
   const submit = (
     operation:
       'metadata_draft_save' | 'metadata_draft_discard' | 'metadata_publish',
     payload: Record<string, unknown>,
   ) => {
-    if (busy.current) return;
+    if (busy.current || unresolvedSave || committedNavigation.current) return;
     busy.current = true;
     setOperationPending(true);
     const submittedCategory = categoryId;
@@ -959,6 +1226,10 @@ export function MetadataSettings({
   const saveChanges = (confirmed = false) => {
     if (
       busy.current ||
+      committedNavigation.current ||
+      recovery?.uncertainSave ||
+      (!uncertainSave &&
+        readDesignerRecovery(memberId, categoryId).item?.uncertainSave) ||
       !definition ||
       issues.length ||
       identityStatus !== 'verified'
@@ -977,7 +1248,7 @@ export function MetadataSettings({
       );
       return;
     }
-    const payload =
+    let payload =
       confirmed && savePayload
         ? { ...savePayload, review_token: saveReview?.token }
         : {
@@ -988,9 +1259,46 @@ export function MetadataSettings({
             expected_published_revision_id: publishedBaseline,
             definition,
           };
+    if (uncertainSave && receipt) {
+      try {
+        const original = JSON.parse(receipt.key);
+        if (
+          original[0] !== 'metadata_form_save' ||
+          original[1]?.category_id !== categoryId ||
+          original[1]?.expected_actor_id !== memberId
+        )
+          throw new Error('context');
+        payload = original[1];
+      } catch {
+        setMessage(
+          'The original save request could not be recovered. Keep this page open and contact the application owner.',
+        );
+        return;
+      }
+    }
     const key = JSON.stringify(['metadata_form_save', payload]);
     const requestId = receipt?.key === key ? receipt.id : newId();
+    const wasUncertain = uncertainSave;
+    const command: DesignerRecovery = JSON.parse(
+      JSON.stringify({
+        memberId,
+        categoryId,
+        definition,
+        savedDefinition: saved,
+        expectedDraftId: draftId,
+        expectedDraftVersion: draftVersion,
+        expectedPublishedRevisionId: publishedBaseline,
+        receipt: { key, id: requestId },
+        uncertainSave: true,
+      }),
+    );
+    unresolvedCommand.current = command;
+    if (!writeDesignerRecovery(command))
+      setStorageWarning(
+        'The original save is retained only while this page stays open. Browser recovery is unavailable; do not reload until its outcome is resolved.',
+      );
     setReceipt({ key, id: requestId });
+    setUncertainSave(true);
     busy.current = true;
     setOperationPending(true);
     setMessage('Saving…');
@@ -1010,6 +1318,18 @@ export function MetadataSettings({
         )
           return;
         if (!result.ok) {
+          // P1001 is returned before replay by the action's actor check. It
+          // definitively denies a first attempt, but says nothing about an
+          // earlier attempt whose response was lost.
+          const unresolved =
+            (wasUncertain && result.code === 'P1001') ||
+            (!/^P\d{4}$/.test(result.code) &&
+              !/^[2345]\d{4}$/.test(result.code));
+          setUncertainSave(unresolved);
+          if (!unresolved) {
+            unresolvedCommand.current = null;
+            clearDesignerRecovery(memberId, categoryId);
+          }
           if (result.code === 'P1001') denyIdentity();
           else if (result.code === 'identity_unverified')
             setIdentityStatus('retry');
@@ -1020,6 +1340,9 @@ export function MetadataSettings({
           }
           return;
         }
+        setUncertainSave(false);
+        unresolvedCommand.current = null;
+        clearDesignerRecovery(memberId, categoryId);
         if (result.data.status === 'confirmation_required') {
           setSaveReview(result.data);
           setSavePayload(payload);
@@ -1040,6 +1363,14 @@ export function MetadataSettings({
           `Saved active form revision ${String(result.data.version)}.`,
         );
         router.refresh();
+      } catch {
+        if (
+          !terminalDenied.current &&
+          submittedSession === categorySession.current
+        )
+          setMessage(
+            'The save outcome could not be confirmed. Your edits remain here. Retry the same save to check its original request.',
+          );
       } finally {
         busy.current = false;
         setOperationPending(false);
@@ -1068,7 +1399,7 @@ export function MetadataSettings({
       });
   };
   const openAddition = (sectionId?: string, field?: Field) => {
-    if (!definition) return;
+    if (!definition || unresolvedSave || committedNavigation.current) return;
     setAddition({
       sectionId:
         sectionId ??
@@ -1099,7 +1430,7 @@ export function MetadataSettings({
     });
   };
   const addField = (field: Field, sectionId: string) => {
-    if (!definition) return;
+    if (!definition || unresolvedSave || committedNavigation.current) return;
     const next = addFieldToSection(definition, field, sectionId);
     if (next === definition) return;
     edit(next);
@@ -1164,7 +1495,14 @@ export function MetadataSettings({
     span: number,
     container: number,
   ) => {
-    if (terminalDenied.current || !definitionRef.current || gesture.current)
+    if (
+      terminalDenied.current ||
+      unresolvedSave ||
+      busy.current ||
+      committedNavigation.current ||
+      !definitionRef.current ||
+      gesture.current
+    )
       return;
     event.preventDefault();
     gesture.current = {
@@ -1181,7 +1519,15 @@ export function MetadataSettings({
   const updateResize = (event: { clientX: number }) => {
     const current = gesture.current;
     const now = definitionRef.current;
-    if (terminalDenied.current || !current || !now) return;
+    if (
+      terminalDenied.current ||
+      unresolvedSave ||
+      busy.current ||
+      committedNavigation.current ||
+      !current ||
+      !now
+    )
+      return;
     const desired =
       (current.span ?? 4) +
       ((event.clientX - current.x) / Math.max(1, current.container ?? 1)) * 12;
@@ -1207,7 +1553,14 @@ export function MetadataSettings({
   };
   const endResize = (cancel = false) => {
     const current = gesture.current;
-    if (terminalDenied.current || !current) return;
+    if (
+      terminalDenied.current ||
+      unresolvedSave ||
+      busy.current ||
+      committedNavigation.current ||
+      !current
+    )
+      return;
     gesture.current = null;
     if (cancel) {
       definitionRef.current = current.baseline;
@@ -1247,7 +1600,14 @@ export function MetadataSettings({
     setDraggingControlId(null);
     const baseline = dndBaseline.current;
     dndBaseline.current = null;
-    if (terminalDenied.current || !baseline) return;
+    if (
+      terminalDenied.current ||
+      unresolvedSave ||
+      busy.current ||
+      committedNavigation.current ||
+      !baseline
+    )
+      return;
     if (canceled) {
       definitionRef.current = baseline;
       setDefinition(baseline);
@@ -1303,8 +1663,13 @@ export function MetadataSettings({
           role="status"
           className="rounded border border-amber-700 p-3 text-sm"
         >
-          Configuration access changed. Refresh this page to continue.
-          {identityStatus === 'blocked' && (
+          Configuration access changed.{' '}
+          {blockedRecovery === 'memory'
+            ? 'The save outcome is still unknown and its original request is retained only in this open page. Do not reload or close it; restore the original actor’s access before retrying.'
+            : blockedRecovery === 'durable'
+              ? 'The save outcome is still unknown. The original request is retained for recovery and exact replay when the same actor has configuration access again.'
+              : 'Refresh this page to continue.'}
+          {blockedRecovery !== 'memory' && (
             <Button
               type="button"
               variant="outline"
@@ -1313,6 +1678,17 @@ export function MetadataSettings({
               Refresh access
             </Button>
           )}
+          {blockedRecovery !== 'none' && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={operationPending}
+              onClick={() => void retryDeniedAccess()}
+            >
+              Retry access
+            </Button>
+          )}
+          {blockedAccessMessage && <p>{blockedAccessMessage}</p>}
         </div>
       ) : active.length === 0 ? (
         <p>No active category is available.</p>
@@ -1334,9 +1710,10 @@ export function MetadataSettings({
           <label className="block">
             Category
             <select
+              aria-label="Designer category"
               className={input}
               value={categoryId}
-              disabled={operationPending}
+              disabled={editorLocked}
               onChange={(event) => switchCategory(event.target.value)}
             >
               {active.map((category) => (
@@ -1357,15 +1734,20 @@ export function MetadataSettings({
                 type="button"
                 disabled={
                   operationPending ||
+                  navigationCommitted ||
                   pending ||
                   !definition ||
                   issues.length > 0 ||
                   identityStatus !== 'verified' ||
-                  (!dirty && draftVersion === '0')
+                  (!dirty && !uncertainSave && draftVersion === '0')
                 }
                 onClick={() => saveChanges()}
               >
-                {operationPending ? 'Saving…' : 'Save changes'}
+                {operationPending
+                  ? 'Saving…'
+                  : uncertainSave
+                    ? 'Retry original save'
+                    : 'Save changes'}
               </Button>
               <span role="status" className="text-sm text-slate-300">
                 {operationPending
@@ -1382,8 +1764,9 @@ export function MetadataSettings({
             >
               <p>
                 Unsaved edits for this category were kept in this browser tab.
-                Choose whether to recover them. Recovery keeps the original
-                draft version and still requires a new save and impact review.
+                {recovery.uncertainSave
+                  ? 'Recover them and retry the original save to confirm its outcome. Discard and category navigation are paused until that request is resolved.'
+                  : 'Choose whether to recover them. Recovery keeps the original draft version and still requires a new save and impact review.'}
               </p>
               {(recovery.expectedDraftVersion !==
                 (selected?.draft_version ?? '0') ||
@@ -1400,7 +1783,9 @@ export function MetadataSettings({
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={navigationCommitted}
                   onClick={() => {
+                    if (committedNavigation.current) return;
                     setDefinition(recovery.definition);
                     resetInspector();
                     setSaveReview(null);
@@ -1414,8 +1799,13 @@ export function MetadataSettings({
                     setDraftVersion(recovery.expectedDraftVersion);
                     setDraftId(recovery.expectedDraftId);
                     setPublishedBaseline(recovery.expectedPublishedRevisionId);
-                    setReceipt(null);
+                    setReceipt(recovery.receipt ?? null);
+                    unresolvedCommand.current = recovery.uncertainSave
+                      ? recovery
+                      : null;
+                    setUncertainSave(recovery.uncertainSave ?? false);
                     setHistory([]);
+                    setAddition(recovery.addition ?? null);
                     setRecovery(null);
                     setMessage(
                       'Unsaved edits recovered. Review and save the draft.',
@@ -1427,7 +1817,14 @@ export function MetadataSettings({
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={unresolvedSave}
                   onClick={() => {
+                    if (
+                      unresolvedSave ||
+                      readDesignerRecovery(memberId, categoryId).item
+                        ?.uncertainSave
+                    )
+                      return;
                     clearDesignerRecovery(memberId, categoryId);
                     setRecovery(null);
                   }}
@@ -1450,8 +1847,9 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
-                disabled={!dirty || pending}
+                disabled={!dirty || pending || editorLocked}
                 onClick={() => {
+                  if (committedNavigation.current || unresolvedSave) return;
                   if (window.confirm('Discard unsaved edits?')) {
                     clearDesignerRecovery(memberId, categoryId);
                     setRecovery(null);
@@ -1469,9 +1867,14 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
-                disabled={history.length === 0 || pending || operationPending}
+                disabled={history.length === 0 || pending || editorLocked}
                 onClick={() => {
-                  if (busy.current) return;
+                  if (
+                    busy.current ||
+                    committedNavigation.current ||
+                    unresolvedSave
+                  )
+                    return;
                   const prior = history.at(-1);
                   if (prior) {
                     editEpoch.current += 1;
@@ -1490,8 +1893,9 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
-                disabled={pending}
+                disabled={pending || editorLocked}
                 onClick={() => {
+                  if (committedNavigation.current || unresolvedSave) return;
                   if (
                     dirty &&
                     !window.confirm(
@@ -1541,6 +1945,7 @@ export function MetadataSettings({
                 <textarea
                   className="min-h-44 w-full rounded border border-slate-600 bg-slate-950 p-3 font-mono text-xs"
                   value={advancedJson}
+                  disabled={navigationCommitted}
                   onChange={(event) => {
                     setAdvancedJson(event.target.value);
                     setAdvancedError('');
@@ -1555,7 +1960,13 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
-                disabled={operationPending || pending || !advancedJson.trim()}
+                disabled={
+                  operationPending ||
+                  pending ||
+                  unresolvedSave ||
+                  navigationCommitted ||
+                  !advancedJson.trim()
+                }
                 onClick={() => {
                   let parsed: unknown;
                   try {
@@ -1586,7 +1997,7 @@ export function MetadataSettings({
             </details>
           )}
           {definition && !recovery && (
-            <>
+            <fieldset disabled={editorLocked} className="min-w-0 space-y-4">
               <nav
                 className="flex flex-wrap gap-2 xl:hidden"
                 aria-label="Designer panels"
@@ -1604,7 +2015,13 @@ export function MetadataSettings({
               </nav>
               <DragDropProvider
                 onDragStart={(event) => {
-                  if (terminalDenied.current) return;
+                  if (
+                    terminalDenied.current ||
+                    unresolvedSave ||
+                    busy.current ||
+                    committedNavigation.current
+                  )
+                    return;
                   const sourceId = String(event.operation.source?.id ?? '');
                   setDraggingControlId(
                     sourceId.startsWith('control:') ? sourceId.slice(8) : null,
@@ -1613,7 +2030,13 @@ export function MetadataSettings({
                     dndBaseline.current = copy(definitionRef.current);
                 }}
                 onDragOver={(event) => {
-                  if (terminalDenied.current) return;
+                  if (
+                    terminalDenied.current ||
+                    unresolvedSave ||
+                    busy.current ||
+                    committedNavigation.current
+                  )
+                    return;
                   const { operation } = event;
                   const source = operation.source;
                   if (
@@ -1698,6 +2121,7 @@ export function MetadataSettings({
                     <Button
                       type="button"
                       variant="outline"
+                      data-designer-add-field
                       onClick={() => openAddition()}
                     >
                       Add field
@@ -1785,7 +2209,14 @@ export function MetadataSettings({
                       >
                         {(sectionHandleRef) => (
                           <>
-                            <div className="flex flex-wrap gap-2">
+                            <div
+                              className="flex flex-wrap gap-2"
+                              onFocusCapture={() => {
+                                setSelectedSectionId(section.id);
+                                setSelectedControlId(null);
+                                setSelectedFieldId(null);
+                              }}
+                            >
                               <button
                                 type="button"
                                 aria-label={`Drag section ${section.label}`}
@@ -1794,19 +2225,14 @@ export function MetadataSettings({
                               >
                                 ⋮⋮
                               </button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
+                              <label
+                                className="min-w-40 flex-1 text-sm"
+                                onFocus={() => {
                                   setSelectedSectionId(section.id);
                                   setSelectedControlId(null);
                                   setSelectedFieldId(null);
-                                  setMobilePanel('inspector');
                                 }}
                               >
-                                Inspect section
-                              </Button>
-                              <label className="min-w-40 flex-1 text-sm">
                                 Section heading
                                 {section.visible === false ? ' · Hidden' : ''}
                                 <input
@@ -2322,7 +2748,7 @@ export function MetadataSettings({
                       <p className="text-sm text-slate-400">
                         {selectedSectionId
                           ? `Section ${definition.layout.find((section) => section.id === selectedSectionId)?.label}. Choose a field to inspect its settings.`
-                          : 'Select a section or field to inspect it.'}
+                          : 'Select a field to inspect its settings. Section settings are on the canvas.'}
                       </p>
                     )}
                   </aside>
@@ -2484,7 +2910,13 @@ export function MetadataSettings({
                   }
                   sectionId={addition.sectionId}
                   initialField={addition.field}
-                  onCancel={() => setAddition(null)}
+                  initialTab={addition.tab}
+                  onDraftChange={stageAddition}
+                  initialDateTimeDraft={addition.datetimeDraft}
+                  onRestoreFocus={restoreAdditionFocus}
+                  onCancel={() => {
+                    if (!committedNavigation.current) setAddition(null);
+                  }}
                   onAdd={addField}
                   onChange={edit}
                   onGo={(id, next) => selectPlacement(id, next ?? definition)}
@@ -2551,7 +2983,7 @@ export function MetadataSettings({
                   )}
                 </div>
               </details>
-            </>
+            </fieldset>
           )}
           {issues.length > 0 && !recovery && (
             <div
@@ -2573,7 +3005,7 @@ export function MetadataSettings({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={operationPending || pending}
+                    disabled={editorLocked || pending}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -2634,6 +3066,8 @@ export function MetadataSettings({
                 type="button"
                 disabled={
                   operationPending ||
+                  navigationCommitted ||
+                  unresolvedSave ||
                   pending ||
                   issues.length > 0 ||
                   identityStatus !== 'verified'
@@ -2645,7 +3079,9 @@ export function MetadataSettings({
               <Button
                 type="button"
                 variant="outline"
+                disabled={editorLocked}
                 onClick={() => {
+                  if (committedNavigation.current || unresolvedSave) return;
                   setSaveReview(null);
                   setSavePayload(null);
                   setMessage('Save canceled. Your edits remain here.');

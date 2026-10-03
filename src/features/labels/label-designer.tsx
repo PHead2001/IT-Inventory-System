@@ -85,15 +85,7 @@ function expandLabels(entries: QueueEntry[], rows: LiveLabel[]): LabelRecord[] {
 }
 const emptyInitial: LiveLabel[] = [];
 
-export function LabelDesigner({
-  locations,
-  categories,
-  origin,
-  memberId,
-  preview,
-  initial = emptyInitial,
-  defaults = defaultJob,
-}: {
+type LabelDesignerProps = {
   locations: LocationRef[];
   categories: CategoryRef[];
   origin: string;
@@ -101,7 +93,26 @@ export function LabelDesigner({
   preview: boolean;
   initial?: LiveLabel[];
   defaults?: JobSettings;
-}) {
+};
+
+export function LabelDesigner(props: LabelDesignerProps) {
+  return (
+    <LabelDesignerWorkspace
+      key={queueStorageKey(props.origin, props.memberId)}
+      {...props}
+    />
+  );
+}
+
+function LabelDesignerWorkspace({
+  locations,
+  categories,
+  origin,
+  memberId,
+  preview,
+  initial = emptyInitial,
+  defaults = defaultJob,
+}: LabelDesignerProps) {
   const storageKey = queueStorageKey(origin, memberId);
   const [entries, setEntries] = useState<QueueEntry[]>(initial.map(entryFor));
   const [live, setLive] = useState<LiveLabel[]>(initial);
@@ -129,6 +140,7 @@ export function LabelDesigner({
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
   const queueEpoch = useRef(0);
   const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
@@ -153,10 +165,12 @@ export function LabelDesigner({
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
       if (!current) return;
-      const stored = parseStoredQueue(
-        sessionStorage.getItem(storageKey),
-        defaults,
-      );
+      let stored: ReturnType<typeof parseStoredQueue> = null;
+      try {
+        stored = parseStoredQueue(sessionStorage.getItem(storageKey), defaults);
+      } catch {
+        setStorageUnavailable(true);
+      }
       if (stored) {
         const merged = [...stored.entries];
         for (const record of initial) {
@@ -180,13 +194,21 @@ export function LabelDesigner({
     };
   }, [storageKey, initial, defaults]);
   useEffect(() => {
-    if (hydrated)
+    if (!hydrated) return;
+    try {
       sessionStorage.setItem(
         storageKey,
         JSON.stringify({ entries, filters, job }),
       );
+    } catch {
+      // Search and printing remain available with an in-memory queue.
+      queueMicrotask(() => setStorageUnavailable(true));
+    }
   }, [storageKey, hydrated, entries, filters, job]);
   useEffect(() => {
+    // Restore the caller's filters before issuing a search. Otherwise revisits
+    // query defaults and then immediately query the restored filters again.
+    if (!hydrated) return;
     let current = true;
     void searchLabelRecords(filters)
       .then((result) => {
@@ -198,7 +220,7 @@ export function LabelDesigner({
     return () => {
       current = false;
     };
-  }, [filters]);
+  }, [filters, hydrated]);
 
   const invalidate = () => {
     queueEpoch.current++;
@@ -603,6 +625,12 @@ export function LabelDesigner({
         and {MAX_LABELS} labels total. Quantity results appear once per
         definition, even with several holdings.
       </p>
+      {storageUnavailable && (
+        <p role="status" className={styles.warning}>
+          Browser storage is unavailable. This label queue lasts only while this
+          page stays open.
+        </p>
+      )}
       <div className={styles.searchLayout}>
         <div className={styles.searchColumn}>
           <form

@@ -56,6 +56,13 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
       p_request_id: requestId,
       p_payload: payload as Json,
     });
+    if (error?.message === 'use_site_lifecycle')
+      return {
+        ok: false,
+        code: 'P1012',
+        message:
+          'Use Archive site or Restore site to change site availability and record a reason.',
+      };
     if (error) return custodyError(error.code);
     const result = mutationResultSchema.safeParse(data);
     if (!result.success) return custodyError();
@@ -67,6 +74,8 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
       '/history',
       '/settings',
       '/labels',
+      '/room',
+      '/spaces',
     ])
       revalidatePath(path);
     return {

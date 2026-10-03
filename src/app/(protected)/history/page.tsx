@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { getEventCustomPage } from '@/features/metadata/queries.server';
 import { notFound } from 'next/navigation';
+import Form from 'next/form';
+import Link from 'next/link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -164,7 +166,11 @@ export default async function HistoryPage({
         Append-only records of inventory changes. Physical movements and record
         corrections are shown separately.
       </p>
-      <form className={panel + ' mb-5 space-y-3'} aria-label="Filter history">
+      <Form
+        action="/history"
+        className={panel + ' mb-5 space-y-3'}
+        aria-label="Filter history"
+      >
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="history-type">Tracking type</label>
@@ -195,14 +201,14 @@ export default async function HistoryPage({
             <input type="hidden" name="entityId" value={params.entityId} />
             <p className="text-sm text-slate-400">
               Showing history for the selected inventory record.{' '}
-              <a className="text-cyan-300 underline" href="/history">
+              <Link className="text-cyan-300 underline" href="/history">
                 Clear record filter
-              </a>
+              </Link>
             </p>
           </>
         )}
         <Button type="submit">Filter history</Button>
-      </form>
+      </Form>
       <div className={styles.history}>
         <HistoryList events={result.rows} />
       </div>

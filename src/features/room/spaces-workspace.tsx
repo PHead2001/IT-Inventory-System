@@ -170,6 +170,10 @@ export function SpacesWorkspace({
     () => spaceLocations(locations, selection.space),
     [locations, selection.space],
   );
+  const currentSpace =
+    availableSpaces(locations).find(
+      (space) => space.id === selection.space.id,
+    ) ?? selection.space;
   const selected = scoped.find((location) => location.code === selection.code);
   const bound =
     !!selected && bindings.some((binding) => binding.code === selected.code);
@@ -442,7 +446,7 @@ export function SpacesWorkspace({
               className={styles.viewer}
             >
               <div className={styles.viewerHeading}>
-                <strong>{selection.space.name} / measured map</strong>
+                <strong>{currentSpace.name} / measured map</strong>
                 <span>Select a location in the map or browser</span>
               </div>
               {sceneError ? (
@@ -468,6 +472,12 @@ export function SpacesWorkspace({
                   <RoomScene
                     key={selection.space.id}
                     room={room}
+                    locationNames={Object.fromEntries(
+                      locations.map((location) => [
+                        location.code,
+                        location.name,
+                      ]),
+                    )}
                     initialView={initialView}
                     onViewChange={(view) => {
                       if (viewKey) {
@@ -513,7 +523,7 @@ export function SpacesWorkspace({
           ) : !room ? (
             <div className={styles.unmodeled}>
               <h2 className="text-xl font-semibold">
-                {selection.space.name} inventory
+                {currentSpace.name} inventory
               </h2>
               <p className="mt-2 text-slate-300">
                 This space has no measured map yet. Browse its logical locations
@@ -554,9 +564,7 @@ export function SpacesWorkspace({
             ) : (
               <div>
                 <p className={styles.panelEyebrow}>Location inventory</p>
-                <h2 className={styles.selectionTitle}>
-                  {selection.space.name}
-                </h2>
+                <h2 className={styles.selectionTitle}>{currentSpace.name}</h2>
                 <p className={styles.breadcrumb}>
                   {
                     scoped.filter((location) => location.can_hold_inventory)

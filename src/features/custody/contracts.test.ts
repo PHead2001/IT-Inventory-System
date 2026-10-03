@@ -106,3 +106,40 @@ describe('custody command boundary', () => {
     expect(unknown.code).toBe('unexpected');
   });
 });
+
+it('rejects structural operations and extra structural fields on a name-only command', () => {
+  const payload = {
+    location_id: id(2),
+    expected_version: '1',
+    name: 'Renamed',
+  };
+  expect(parseCustodyCommand(command('location_rename', payload)).success).toBe(
+    true,
+  );
+  for (const key of [
+    'parent_id',
+    'kind',
+    'sort_order',
+    'active',
+    'can_hold_inventory',
+    'code',
+  ])
+    expect(
+      parseCustodyCommand(
+        command('location_rename', { ...payload, [key]: null }),
+      ).success,
+    ).toBe(false);
+  for (const operation of ['location_create', 'location_update'])
+    expect(parseCustodyCommand(command(operation, payload)).success).toBe(
+      false,
+    );
+  expect(
+    parseCustodyCommand(
+      command('site_set_active', {
+        site_id: id(2),
+        expected_version: '1',
+        active: false,
+      }),
+    ).success,
+  ).toBe(false);
+});

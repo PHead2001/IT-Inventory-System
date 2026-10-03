@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
-import { MotionToggle } from './motion-preference';
 import {
   Boxes,
   Map,
@@ -49,6 +48,60 @@ const groups = [
   },
 ];
 
+function NavigationFeedback() {
+  const { pending } = useLinkStatus();
+  return pending ? (
+    <span
+      className="ml-auto text-xs text-cyan-200"
+      role="status"
+      data-navigation-pending="true"
+    >
+      Opening…
+    </span>
+  ) : null;
+}
+
+function NavigationItem({
+  href,
+  label,
+  Icon,
+  active,
+  closeMenu,
+}: {
+  href: string;
+  label: string;
+  Icon: typeof Boxes;
+  active: boolean;
+  closeMenu: () => void;
+}) {
+  const [intent, setIntent] = useState(false);
+  return (
+    <Link
+      href={href}
+      // Partial framework prefetch only after pointer/keyboard intent. Never
+      // load all protected destinations or their complete data at shell mount.
+      prefetch={intent ? null : false}
+      onMouseEnter={() => setIntent(true)}
+      onFocus={() => setIntent(true)}
+      onClick={closeMenu}
+      className="experience-nav-link"
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+    >
+      {active && (
+        <motion.span
+          layoutId="navigation-active"
+          className="experience-nav-indicator"
+          transition={{ type: 'spring', stiffness: 520, damping: 43 }}
+        />
+      )}
+      <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+      <span>{label}</span>
+      <NavigationFeedback />
+    </Link>
+  );
+}
+
 export function Navigation() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -76,7 +129,6 @@ export function Navigation() {
           )}
           {open ? 'Close menu' : 'Menu'}
         </button>
-        <MotionToggle />
       </div>
       <nav
         id="experience-navigation"
@@ -88,27 +140,14 @@ export function Navigation() {
             <div className="experience-nav-group" key={group.name}>
               <p className="experience-nav-heading">{group.name}</p>
               {group.items.map(({ href, label, Icon }) => (
-                <Link
+                <NavigationItem
                   key={href}
                   href={href}
-                  onClick={() => setOpen(false)}
-                  className="experience-nav-link"
-                  aria-current={active === href ? 'page' : undefined}
-                >
-                  {active === href && (
-                    <motion.span
-                      layoutId="navigation-active"
-                      className="experience-nav-indicator"
-                      transition={{
-                        type: 'spring',
-                        stiffness: 520,
-                        damping: 43,
-                      }}
-                    />
-                  )}
-                  <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
-                  <span>{label}</span>
-                </Link>
+                  label={label}
+                  Icon={Icon}
+                  active={active === href}
+                  closeMenu={() => setOpen(false)}
+                />
               ))}
             </div>
           ))}

@@ -301,7 +301,7 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
               )}
               {event.assignment.reference && (
                 <p className="whitespace-pre-wrap break-words">
-                  Reference: {event.assignment.reference}
+                  Ticket number reference: {event.assignment.reference}
                 </p>
               )}
             </div>

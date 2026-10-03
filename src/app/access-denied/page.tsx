@@ -1,8 +1,5 @@
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
-import {
-  MotionPreference,
-  MotionToggle,
-} from '@/components/experience/motion-preference';
+import { MotionPreference } from '@/components/experience/motion-preference';
 export const dynamic = 'force-dynamic';
 export default function AccessDeniedPage() {
   return (
@@ -16,9 +13,6 @@ export default function AccessDeniedPage() {
             the application owner to request access.
           </p>
           <QueueLogoutForm />
-          <footer className="mt-7 border-t border-cyan-200/15 pt-4">
-            <MotionToggle />
-          </footer>
         </section>
       </main>
     </MotionPreference>

@@ -46,11 +46,12 @@ export type Space = (typeof spaces)[number];
 export const defaultSpaceId = parsed.defaultSpaceId;
 
 export function availableSpaces(locations: LocationRef[]) {
-  return spaces.filter((space) =>
-    locations.some(
-      (location) => location.code === space.rootCode && location.active,
-    ),
-  );
+  return spaces.flatMap((space) => {
+    const location = locations.find(
+      (entry) => entry.code === space.rootCode && entry.active,
+    );
+    return location ? [{ ...space, name: location.name }] : [];
+  });
 }
 
 export function containingSpace(locations: LocationRef[], code: string | null) {
@@ -59,7 +60,7 @@ export function containingSpace(locations: LocationRef[], code: string | null) {
   const seen = new Set<string>();
   while (location && !seen.has(location.id)) {
     const space = spaces.find((entry) => entry.rootCode === location?.code);
-    if (space) return space;
+    if (space) return { ...space, name: location.name };
     seen.add(location.id);
     location = location.parentId ? byId.get(location.parentId) : undefined;
   }
