@@ -13,7 +13,7 @@ permissions:
   pull-requests: read
   checks: read
 concurrency:
-  group: preview-staff-access-workflow-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: preview-staff-access-workflow-${{ github.ref }}-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: false
 jobs:
   discover:

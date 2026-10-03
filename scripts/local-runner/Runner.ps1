@@ -58,7 +58,16 @@ function Assert-InstalledHost($Config) {
     if (Get-RunnerState) { throw 'Runner state exists. Stop or investigate it before launching another.' }
 }
 
-function Get-GuestCloudConfig([string] $PublicKey) {
+function Get-RunnerGuestPrerequisites([string] $ProfileLabel) {
+    $profile = Get-RunnerResourceProfile $ProfileLabel
+    $docker = $profile.label -cnotin @('it-inventory-light', 'it-inventory-mid')
+    $packages = @('ca-certificates', 'curl', 'git', 'openssh-server', 'unzip')
+    if ($docker) { $packages += 'docker.io' }
+    return [pscustomobject]@{ docker = $docker; packages = $packages }
+}
+
+function Get-GuestCloudConfig([string] $PublicKey, [string] $ProfileLabel = 'it-inventory-ephemeral') {
+    $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
     # cloud-init's users/groups module runs before package installation. Declare
     # docker here so runner membership succeeds before docker.io creates it.
     return @"
@@ -76,7 +85,7 @@ users:
     ssh_authorized_keys:
       - $PublicKey
 package_update: true
-packages: [ca-certificates, curl, docker.io, git, openssh-server, unzip]
+packages: [$($prerequisites.packages -join ', ')]
 growpart:
   mode: auto
   devices: ['/']
@@ -84,7 +93,7 @@ resize_rootfs: true
 "@
 }
 
-function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config) {
+function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral') {
     [void](Assert-OwnedPath $Path)
     New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
     $mounted = Mount-VHD -Path $Path -Passthru
@@ -99,7 +108,7 @@ function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Confi
         $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
         $letter = $partition.DriveLetter
         $root = "$($letter):\"
-        $userData = Get-GuestCloudConfig $PublicKey
+        $userData = Get-GuestCloudConfig $PublicKey $ProfileLabel
         $network = @"
 version: 2
 ethernets:
@@ -298,19 +307,28 @@ function Get-SshArgs($State) {
         '-o', "UserKnownHostsFile=$($State.instancePath)\known_hosts", '-i', "$($State.instancePath)\id_ed25519")
 }
 
-function Wait-Guest($State, $Config) {
+function Get-RunnerGuestReadinessCommand([string] $ProfileLabel) {
+    $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
+    $command = 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test "$(id -un)" = runner && command -v curl >/dev/null && command -v git >/dev/null && command -v unzip >/dev/null'
+    if ($prerequisites.docker) { $command += ' && test -S /var/run/docker.sock && timeout 10 docker info >/dev/null 2>&1' }
+    return $command
+}
+
+function Wait-Guest($State, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral') {
     $args = Get-SshArgs $State
+    $command = Get-RunnerGuestReadinessCommand $ProfileLabel
     $limit = [DateTime]::UtcNow.AddMinutes(12)
     while ([DateTime]::UtcNow -lt $limit) {
         Assert-SessionAlive $State
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", 'timeout 25 cloud-init status --wait >/dev/null 2>&1 && test -S /var/run/docker.sock && test "$(id -un)" = runner && timeout 10 docker info >/dev/null 2>&1'))
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($args + @("runner@$($Config.guestIp)", $command))
         if ($exitCode -eq 0) { return }
         Start-Sleep -Seconds 10
     }
-    throw 'Guest never reached cloud-init/Docker readiness.'
+    throw 'Guest never reached its profile prerequisite readiness.'
 }
 
 function Get-RunnerArchive($State) {
+    Assert-SecureRoot
     $release = Invoke-GitHub 'https://api.github.com/repos/actions/runner/releases/latest'
     $assets = @($release.assets | Where-Object name -Match '^actions-runner-linux-x64-[0-9.]+\.tar\.gz$')
     if ($assets.Count -ne 1) {
@@ -319,12 +337,59 @@ function Get-RunnerArchive($State) {
     $digestMatch = [regex]::Match([string]$assets[0].digest, '^sha256:([0-9a-f]{64})$')
     if (-not $digestMatch.Success) { throw 'GitHub runner archive has no SHA-256 digest.' }
     $expectedDigest = $digestMatch.Groups[1].Value
-    $path = Join-Path $State.instancePath 'runner.tar.gz'
-    Invoke-WebRequest -Uri $assets[0].browser_download_url -OutFile $path -UseBasicParsing -TimeoutSec 1800
-    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $expectedDigest) {
-        throw 'GitHub runner archive digest mismatch.'
+    $assetName = [string]$assets[0].name
+    $version = $assetName.Substring('actions-runner-linux-x64-'.Length).Replace('.tar.gz', '')
+    $url = "https://github.com/actions/runner/releases/download/v$version/$assetName"
+    if ($release.tag_name -cne "v$version" -or $assets[0].browser_download_url -cne $url) {
+        throw 'GitHub runner archive release identity or official URL is invalid.'
     }
-    return $path
+    $mutex = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Archive-v1'
+    $temporary = $null
+    try {
+        $cache = Assert-OwnedPath (Join-Path $script:RunnerRoot 'runner-cache')
+        if (-not (Test-Path -LiteralPath $cache)) { [void][IO.Directory]::CreateDirectory($cache) }
+        Assert-RunnerProtectedPath $cache
+        # Validate the entire small cache before reuse or retention cleanup.
+        # Unknown entries, links, ACL changes and corrupted archives fail closed.
+        $archives = @()
+        $partials = @()
+        $entries = @(Get-ChildItem -LiteralPath $cache -Force -ErrorAction Stop)
+        if ($entries.Count -gt 16) { throw 'Runner archive cache exceeds its bounded entry view.' }
+        foreach ($entry in $entries) {
+            $entryPath = Assert-OwnedPath $entry.FullName
+            Assert-RunnerProtectedPath $entryPath
+            if ($entry.PSIsContainer) { throw 'Runner archive cache contains an unexpected directory.' }
+            if ($entry.Name -cmatch '^([0-9a-f]{64})\.tar\.gz$') {
+                $digest = $Matches[1]
+                if ((Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash -ine $digest) { throw 'Cached runner archive digest mismatch.' }
+                $archives += $entry
+            } elseif ($entry.Name -cmatch '^[0-9a-f]{64}\.[0-9a-f]{32}\.download$') { $partials += $entry }
+            else { throw 'Runner archive cache contains an unexpected entry.' }
+        }
+        foreach ($partial in $partials) { Remove-Item -LiteralPath (Assert-OwnedPath $partial.FullName) -Force -ErrorAction Stop }
+        $path = Assert-OwnedPath (Join-Path $cache "$expectedDigest.tar.gz")
+        if (-not (Test-Path -LiteralPath $path)) {
+            $temporary = Assert-OwnedPath (Join-Path $cache "$expectedDigest.$([guid]::NewGuid().ToString('N')).download")
+            Invoke-WebRequest -Uri $url -OutFile $temporary -UseBasicParsing -TimeoutSec 1800
+            Assert-RunnerProtectedPath $temporary
+            if ((Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash -ine $expectedDigest) { throw 'GitHub runner archive digest mismatch.' }
+            # Same-directory rename publishes only a complete verified archive.
+            [IO.File]::Move($temporary, $path)
+            $temporary = $null
+            Assert-RunnerProtectedPath $path
+        }
+        # Retain the current archive and at most one verified previous release.
+        $previous = @($archives | Where-Object FullName -CNE $path | Sort-Object LastWriteTimeUtc -Descending)
+        foreach ($old in @($previous | Select-Object -Skip 1)) { Remove-Item -LiteralPath (Assert-OwnedPath $old.FullName) -Force -ErrorAction Stop }
+        return $path
+    } finally {
+        try {
+            if ($null -ne $temporary -and (Test-Path -LiteralPath $temporary)) {
+                Assert-RunnerProtectedPath $temporary
+                Remove-Item -LiteralPath (Assert-OwnedPath $temporary) -Force -ErrorAction Stop
+            }
+        } finally { Exit-RunnerLock $mutex }
+    }
 }
 
 function New-RunnerProfileVm([string] $Name, [string] $Disk, [string] $Instance, [string] $ProfileLabel) {
@@ -410,7 +475,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Write-RunnerJson $script:RunnerStatePath $current
         } finally { Exit-RunnerLock $mutex }
         $seed = Join-Path $instance 'cidata.vhdx'
-        New-SeedDisk $seed $key $guestMac.seedMac $Config
+        New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label
         Add-VMHardDiskDrive -VMName $name -Path $seed
         $script:RunnerOperationStage = 'network-isolation'
         $mutex = Enter-RunnerLock
@@ -427,12 +492,15 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Start-GuardedVm $state
         Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         $script:RunnerOperationStage = 'guest-readiness'
-        Wait-Guest $state $Config
+        $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
+        Wait-Guest $state $Config $profile.label
+        Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
         Assert-SessionAlive $state
         Assert-AdapterRules $name $expectedRules
         Test-GuestIsolation $state $Config
 
         $script:RunnerOperationStage = 'runner-download'
+        $archiveWatch = [Diagnostics.Stopwatch]::StartNew()
         $archive = Get-RunnerArchive $state
         $sshArgs = Get-SshArgs $state
         $script:RunnerOperationStage = 'runner-transfer'
@@ -440,6 +508,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         if ($exitCode -ne 0) { throw 'Runner archive transfer failed.' }
         $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'mkdir -p ~/actions-runner && tar -xzf ~/runner.tar.gz -C ~/actions-runner && rm ~/runner.tar.gz'))
         if ($exitCode -ne 0) { throw 'Runner archive extraction failed.' }
+        Write-Host ('Verified runner archive retrieval, transfer and extraction finished in {0:N1}s.' -f $archiveWatch.Elapsed.TotalSeconds)
         Assert-SessionAlive $state
         Assert-AdapterRules $name $expectedRules
 
@@ -453,8 +522,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $evidence = Get-PilotEvidence $Config $attempt $token
             if (-not (Test-QueuedRunnerJob $evidence.job $Config.pilotLabel)) { throw 'Bound pilot job is no longer queued before registration.' }
         } elseif ($null -eq (Get-QueuedRunnerJob $Config $token -SessionProfileLabel $profile.label)) {
-            # Capacity was selected before boot. Demand may have been canceled or
-            # taken meanwhile; do not create an idle JIT for incompatible demand.
+            # Demand may have been canceled or taken during boot. The selected
+            # profile must still be queued; another profile cannot divert this VM.
             $token = $null
             return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
         }
@@ -476,7 +545,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'read -r JIT; cd ~/actions-runner; exec ./run.sh --jitconfig "$JIT" >/dev/null 2>&1')) $jit.encoded_jit_config
         if ($exitCode -ne 0) { throw 'JIT runner process ended abnormally; check GitHub Actions job state.' }
         Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
-        return [pscustomobject]@{ name = $name; id = $runnerId }
+        return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'job-completed' }
     } finally {
         $mutex = Enter-RunnerLock
         try {
@@ -506,8 +575,7 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token) {
 }
 
 function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
-    $compatibleLabels = @()
-    if ($SessionProfileLabel) { $compatibleLabels = @(Get-RunnerJitLabels $Config $SessionProfileLabel) }
+    if ($SessionProfileLabel) { [void](Get-RunnerSessionProfile $Config $SessionProfileLabel) }
     $label = $Config.label
     if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
     $parts = $Config.repo.Split('/')
@@ -527,7 +595,7 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
             foreach ($job in @($jobs.jobs)) {
                 $profile = Get-RunnerJobProfile $Config $job
                 if ($null -eq $profile -or $AvailableBytes -lt $profile.requiredBytes) { continue }
-                if ($SessionProfileLabel -and $compatibleLabels -cnotcontains $profile.label) { continue }
+                if ($SessionProfileLabel -and $SessionProfileLabel -cne $profile.label) { continue }
                 if (Test-QueuedRunnerJob $job $profile.label) {
                     if ($Config.activation -eq 'pilot') {
                         if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
@@ -592,6 +660,7 @@ function Invoke-SupervisorLoop {
             return
         }
         try {
+            $completedJob = $false
             $script:RunnerSessionName = $null
             $script:RunnerOperationStage = 'memory-admission'
             $initialLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
@@ -627,6 +696,7 @@ function Invoke-SupervisorLoop {
                 } else { $pilotAttempt = $null }
                 $token = $null
                 $allocatedRunner = Invoke-RunnerSession $config $pilotAttempt $profile.label
+                $completedJob = $allocatedRunner.PSObject.Properties.Name -contains 'outcome' -and $allocatedRunner.outcome -ceq 'job-completed'
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-verification'
                     $token = Get-OwnerToken
@@ -656,12 +726,14 @@ function Invoke-SupervisorLoop {
             }
         } catch {
             # API/guest failures never register a fallback runner. The next bounded poll may retry.
+            $completedJob = $false
             $existing = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
             if ($null -eq $existing -or $null -eq $script:RunnerSessionName -or $existing.sessionName -cne $script:RunnerSessionName) {
                 Write-RunnerFailure $script:RunnerOperationStage 'STAGE_FAILED' $script:RunnerSessionName
             }
             Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner stage failed: $script:RunnerOperationStage" -ErrorAction SilentlyContinue
         } finally { $token = $null }
+        if ($completedJob) { continue } # Session's finally completed owned cleanup.
         Start-Sleep -Seconds 30
     }
 }

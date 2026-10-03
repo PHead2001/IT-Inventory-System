@@ -35,6 +35,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell resource profile regr
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Jit.Demand.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression failed.' }
 
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Runner.Latency.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regression failed.' }
+
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
@@ -447,12 +450,14 @@ public class ArgvSink {
     function Add-VMHardDiskDrive { param($VMName, $Path) }
     $realSeedWriter = (Get-Command New-SeedDisk).ScriptBlock
     function New-SeedDisk {
-        param($Path, $PublicKey, $MacAddress, $Config)
+        param($Path, $PublicKey, $MacAddress, $Config, $ProfileLabel)
         $script:capturedSeedMac = $MacAddress
+        if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Seed construction lost the selected profile.' }
         if ((Get-RunnerState).guestMac -cne $script:seedAdapter.MacAddress) { throw 'Seed was built before static MAC journaling.' }
     }
     Write-RunnerJson $script:RunnerStatePath $creating
     $name = $validName; $instance = $validInstance; $key = 'dummy public key'; $Config = [pscustomobject]@{}
+    $profile = Get-RunnerResourceProfile 'it-inventory-heavy'
     $sessionDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $true)
     $segmentStart = $sessionDefinition.Extent.Text.IndexOf('$guestMac = Set-RunnerGuestMac')
     $segmentEnd = $sessionDefinition.Extent.Text.IndexOf('$script:RunnerOperationStage = ''network-isolation''')

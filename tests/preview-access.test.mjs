@@ -1002,9 +1002,24 @@ test('preview workflow coalesces pending PR events before discovery without canc
   );
   assert.equal(
     workflowConcurrency[1],
-    'preview-staff-access-workflow-${{ github.event.pull_request.number || inputs.pr_number }}',
-    'PR events and manual dispatches must share a per-PR group across revisions',
+    'preview-staff-access-workflow-${{ github.ref }}-${{ github.event.pull_request.number || inputs.pr_number }}',
+    'trusted main PR events and main dispatches must share a per-PR group while non-main dispatches remain separate',
   );
+  const groupFor = ({ ref, pr, input }) =>
+    workflowConcurrency[1]
+      .replace('${{ github.ref }}', ref)
+      .replace(
+        '${{ github.event.pull_request.number || inputs.pr_number }}',
+        pr || input,
+      );
+  const mainPrGroup = groupFor({ ref: 'refs/heads/main', pr: 27 });
+  assert.equal(mainPrGroup, groupFor({ ref: 'refs/heads/main', input: 27 }));
+  assert.notEqual(
+    mainPrGroup,
+    groupFor({ ref: 'refs/heads/feature', input: 27 }),
+    'a skipped non-main dispatch must not evict a pending trusted main run',
+  );
+  assert.notEqual(mainPrGroup, groupFor({ ref: 'refs/heads/main', pr: 28 }));
   assert.doesNotMatch(workflowHeader, /^\s+queue:/m);
   const provisionConcurrency = workflow
     .split('  provision:')[1]
