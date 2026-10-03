@@ -1,6 +1,12 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { queueStorageKey } from './queue-model';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { defaultFilters, defaultJob, queueStorageKey } from './queue-model';
 import type { LiveLabel } from './queue.server';
 
 const mocks = vi.hoisted(() => ({
@@ -104,6 +110,131 @@ beforeEach(() => {
     pageSize: 25,
   });
   vi.stubGlobal('print', vi.fn());
+});
+
+it('searches once after initial hydration and once with restored filters on a revisit', async () => {
+  const view = render(<LabelDesigner {...props} initial={[]} />);
+  await screen.findByText(/0 matching records\. Scroll this list/);
+  expect(mocks.searchLabelRecords).toHaveBeenCalledExactlyOnceWith(
+    defaultFilters,
+  );
+  view.unmount();
+  const restored = {
+    ...defaultFilters,
+    q: 'Adapters',
+    type: 'quantity' as const,
+    page: 2,
+  };
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({ entries: [], filters: restored, job: defaultJob }),
+  );
+  mocks.searchLabelRecords.mockClear();
+  render(<LabelDesigner {...props} initial={[]} />);
+  await screen.findByText(/0 matching records\. Scroll this list/);
+  expect(mocks.searchLabelRecords).toHaveBeenCalledExactlyOnceWith(restored);
+});
+
+it.each([
+  { memberId: 'member-b', origin: props.origin },
+  { memberId: props.memberId, origin: 'https://other.example.test' },
+])(
+  'remounts a changed queue scope and ignores a late old search ($memberId, $origin)',
+  async (scope) => {
+    let finish!: (result: {
+      rows: [];
+      total: number;
+      page: number;
+      pageSize: number;
+    }) => void;
+    mocks.searchLabelRecords.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = render(<LabelDesigner {...props} />);
+    await waitFor(() =>
+      expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(1),
+    );
+    const restored = { ...defaultFilters, q: 'Current scope' };
+    sessionStorage.setItem(
+      queueStorageKey(scope.origin, scope.memberId),
+      JSON.stringify({ entries: [], filters: restored, job: defaultJob }),
+    );
+    view.rerender(<LabelDesigner {...props} {...scope} initial={[]} />);
+    await screen.findByText(/0 matching records\. Scroll this list/);
+    expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(2);
+    expect(mocks.searchLabelRecords).toHaveBeenLastCalledWith(restored);
+    expect(
+      screen.getByRole('textbox', { name: /Name, serial, tag/ }),
+    ).toHaveValue('Current scope');
+    expect(document.querySelectorAll('.label-card')).toHaveLength(0);
+    await act(async () => {
+      finish({ rows: [], total: 99, page: 1, pageSize: 25 });
+    });
+    expect(screen.queryByText(/99 matching records/)).not.toBeInTheDocument();
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(scope.origin, scope.memberId))!,
+    );
+    expect(stored.entries).toEqual([]);
+    expect(stored.filters).toEqual(restored);
+  },
+);
+
+it('continues searching and printing with an in-memory queue when browser storage is blocked', async () => {
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  const write = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new Error('blocked');
+    });
+  try {
+    render(<LabelDesigner {...props} />);
+    await screen.findByText(/0 matching records\. Scroll this list/);
+    expect(mocks.searchLabelRecords).toHaveBeenCalledExactlyOnceWith(
+      defaultFilters,
+    );
+    expect(
+      screen.getByText(/Browser storage is unavailable/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    fireEvent.click(printButton());
+    await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  } finally {
+    read.mockRestore();
+    write.mockRestore();
+  }
+});
+
+it('ignores a failed old search after the member submits newer filters', async () => {
+  let fail!: (error: Error) => void;
+  mocks.searchLabelRecords.mockReturnValueOnce(
+    new Promise((_, reject) => {
+      fail = reject;
+    }),
+  );
+  render(<LabelDesigner {...props} initial={[]} />);
+  await waitFor(() =>
+    expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(1),
+  );
+  fireEvent.change(screen.getByRole('textbox', { name: /Name, serial, tag/ }), {
+    target: { value: 'Current filters' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Search label records' }));
+  await screen.findByText(/0 matching records\. Scroll this list/);
+  expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(2);
+  expect(mocks.searchLabelRecords).toHaveBeenLastCalledWith({
+    ...defaultFilters,
+    q: 'Current filters',
+  });
+  await act(async () => {
+    fail(new Error('late old failure'));
+  });
+  expect(
+    screen.queryByText(/Label search could not be loaded/),
+  ).not.toBeInTheDocument();
 });
 
 it('describes queued locations as locations while retaining inventory category fallbacks', async () => {

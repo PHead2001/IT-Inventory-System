@@ -138,3 +138,60 @@ checks, four membership reads and two location reads, with a 572 ms median.
 Candidate source optimizations passed 28 focused tests; measured candidate and
 hosted comparisons remain pending. Local route timings do not reproduce the
 reported multi-second hosted delay.
+
+## Review and performance correction checkpoint
+
+Commit `5c6e0b48cfd5d10eed6110d4ac821be483897913` fixes the remote Codex P1
+about an uncertain form save losing its original command after authorization
+denial. Automatic access loss now masks the editor while retaining the exact
+actor/category/environment-scoped request. A freshly authorized original actor
+can recover and replay it, including when only page memory is available.
+Explicit signout warns before removing unknown-outcome recovery. Independent
+Astra source review found no remaining actionable integrity finding in this fix.
+
+The broader application run exposed a new regression test clicking Retry before
+React's transition enabled it. Its timeout DOM and button-disable contract support
+that timing explanation; the original flake was not directly reproduced. The
+test now waits for an enabled control and proves the second request dispatched,
+retaining every masking and exact-replay assertion. Two consecutive full Vitest
+runs passed 922 tests across 94 files. Typecheck, lint and formatting passed.
+The remaining canonical application gates passed on `5c6e0b4`: preview access
+(127), staging sync (7), local Storage (4), performance contracts (8), bounded
+export memory, real file inspection (27), browser discovery (109 tests/19 files),
+and production build. Browser discovery is not browser execution.
+
+The first measured candidate (`51ed5b4`) made navigation feedback faster but
+regressed usable-content timing on several routes. Its immutable raw results and
+route comparison remain in the performance evidence directory. The broad protected
+loading boundary was removed in `5c6e0b4`; its replacement measurements remain
+pending. Immediate navigation feedback, intent-based prefetch and ordinary motion
+are retained. The room endpoint improved from a 572 ms populated baseline median
+to 424 ms in the first candidate, with Auth/membership/location reads reduced from
+4/4/2 to 1/1/1. This narrower improvement does not cancel the route regression.
+
+Hosted baseline empty measurements contain 90 observations against a dedicated
+preview built from all 417 byte-verified baseline source files. This deployment
+has no Git association and uses only PR28's isolated Supabase child. All 17
+inventory/site/history/file tables remained empty. Three run-owned temporary
+actors passed actual hosted login and Inventory reads; the standing preview
+account is untouched. Candidate, populated, functional and cleanup evidence are
+still pending. Provider configuration binding is distinguished from compiled-byte
+inspection; actual login/read proof supplements the verified branch environment.
+
+For the required browser zoom check, the lead performed a bounded specialist
+diagnosis after two unsuccessful preference-based probes. A disposable Chromium
+extension using the official Tabs API established native page zoom: `getZoom=2`,
+device-pixel ratio 1 to 2, CSS viewport 1418x802 to 709x401, and visual-viewport
+scale remaining 1. No user profile or CSS/device-scale substitute was used.
+The hosted designer subsequently passed actual dialog geometry, focus and visual
+inspection at native 200% zoom on `5c6e0b4`. Playwright's default screenshot path
+returned a blank image at that zoom; raw CDP surface capture returned the actual
+1418x802 image, with a legible centered dialog and visible fixed header/footer and
+actions. Browser zoom remained 2, DPR 2 and visual-viewport scale 1; computed CSS
+zoom was 1 and relevant opacity/visibility were normal. The blank screenshot was
+not accepted as proof and required no application change. The lead also inspected
+hosted dialog screenshots at 1440x900, 390x480 and 1440x330, confirming viewport
+bounds, readable controls and accessible actions. Other hosted functional checks
+and fixture cleanup remain pending.
+References: [Chromium Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-setZoom)
+and [Playwright extension testing](https://playwright.dev/docs/chrome-extensions).

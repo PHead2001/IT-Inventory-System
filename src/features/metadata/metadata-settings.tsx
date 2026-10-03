@@ -1710,6 +1710,7 @@ export function MetadataSettings({
           <label className="block">
             Category
             <select
+              aria-label="Designer category"
               className={input}
               value={categoryId}
               disabled={editorLocked}

@@ -1027,9 +1027,12 @@ describe('category form designer', () => {
       />,
     );
     addField();
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     expect(confirm).toHaveBeenCalledWith(
       'Discard unsaved edits and switch category?',
     );
@@ -1048,15 +1051,22 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form }}
       />,
     );
-    expect(screen.getByLabelText('Category')).toHaveValue(id(1));
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toHaveValue(id(1));
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() =>
       expect(router.push).toHaveBeenCalledWith(`/settings/forms/${id(20)}`),
     );
     expect(fetchCategoryForm).toHaveBeenCalledWith(id(20));
-    expect(screen.getByLabelText('Category')).toHaveValue(id(1));
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toHaveValue(id(1));
     expect(saveMetadataForm).not.toHaveBeenCalled();
   });
   it('preserves entered edits when a selected form fails to load, then permits retry', async () => {
@@ -1076,9 +1086,12 @@ describe('category form designer', () => {
       />,
     );
     addField('Keep this input');
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(
         'Form could not be loaded',
@@ -1087,9 +1100,12 @@ describe('category form designer', () => {
     expect(screen.getByLabelText('Field name')).toHaveValue('Keep this input');
     expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull();
     expect(router.push).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
     confirm.mockRestore();
   });
@@ -1111,15 +1127,23 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form }}
       />,
     );
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(1) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(1) },
+      },
+    );
     finish({ ok: true, form: null });
     await waitFor(() =>
-      expect(screen.getByLabelText('Category')).toHaveValue(id(1)),
+      expect(
+        screen.getByLabelText('Designer category', { exact: true }),
+      ).toHaveValue(id(1)),
     );
     expect(router.push).not.toHaveBeenCalled();
   });
@@ -1148,12 +1172,18 @@ describe('category form designer', () => {
       />,
     );
     addField('Keep after cancellation');
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(21) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(21) },
+      },
+    );
     expect(fetchCategoryForm).toHaveBeenCalledTimes(1);
     finish({ ok: false, message: 'Adapters failed to open.' });
     await waitFor(() =>
@@ -1172,9 +1202,12 @@ describe('category form designer', () => {
       expect.stringContaining('Leave this page?'),
     );
     link.remove();
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(21) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(21) },
+      },
+    );
     await waitFor(() =>
       expect(router.push).toHaveBeenCalledWith(`/settings/forms/${id(21)}`),
     );
@@ -1197,11 +1230,16 @@ describe('category form designer', () => {
       />,
     );
     addField('Reviewed input');
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
-    expect(screen.getByLabelText('Category')).toBeDisabled();
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toBeDisabled();
     expect(screen.getByLabelText('Field name')).toBeDisabled();
     for (const name of [
       'Save changes',
@@ -1240,7 +1278,9 @@ describe('category form designer', () => {
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
     );
-    expect(screen.getByLabelText('Category')).toBeEnabled();
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toBeEnabled();
     expect(saveMetadataForm).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
@@ -1259,9 +1299,12 @@ describe('category form designer', () => {
       />,
     );
     addField('Original input');
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
     const expire = timers.mock.calls
       .filter(([, delay]) => delay === 15000)
@@ -1287,7 +1330,9 @@ describe('category form designer', () => {
       />,
     );
     await waitFor(() =>
-      expect(screen.getByLabelText('Category')).toHaveValue(id(20)),
+      expect(
+        screen.getByLabelText('Designer category', { exact: true }),
+      ).toHaveValue(id(20)),
     );
     expect(
       readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
@@ -1320,9 +1365,12 @@ describe('category form designer', () => {
       />,
     );
     addField('Protected reviewed input');
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     await waitFor(() => expect(router.push).toHaveBeenCalledOnce());
     const expire = timers.mock.calls
       .filter(([, delay]) => delay === 15000)
@@ -1377,9 +1425,12 @@ describe('category form designer', () => {
       within(screen.getByRole('dialog')).getByLabelText('Field name'),
       { target: { value: 'Unadded field' } },
     );
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     expect(confirm).toHaveBeenCalledWith(
       'Discard unsaved edits and switch category?',
     );
@@ -1456,7 +1507,9 @@ describe('category form designer', () => {
       target: { value: 'Connector' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    const category = screen.getByLabelText('Category');
+    const category = screen.getByLabelText('Designer category', {
+      exact: true,
+    });
     expect(category).toBeDisabled();
     fireEvent.change(category, { target: { value: id(20) } });
     expect(category).toHaveValue(id(1));
@@ -1745,13 +1798,18 @@ describe('category form designer', () => {
     expect(
       screen.getByRole('button', { name: 'Discard recovered edits' }),
     ).toBeDisabled();
-    expect(screen.getByLabelText('Category')).toBeDisabled();
+    expect(
+      screen.getByLabelText('Designer category', { exact: true }),
+    ).toBeDisabled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Discard recovered edits' }),
     );
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     expect(readDesignerRecovery(id(50), id(1)).item?.receipt?.id).toBe(
       original.requestId,
     );
@@ -1947,9 +2005,12 @@ describe('category form designer', () => {
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item).toBeNull(),
     );
-    fireEvent.change(screen.getByLabelText('Category'), {
-      target: { value: id(20) },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Designer category', { exact: true }),
+      {
+        target: { value: id(20) },
+      },
+    );
     cleanup();
     mountTwo();
     await waitFor(() =>
