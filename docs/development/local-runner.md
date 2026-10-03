@@ -53,21 +53,51 @@ bundle and exact-SHA job evidence must establish that cutover separately.
 
 The mapping is fixed in host code, including 2 GiB host headroom. Workflow/config
 values cannot set arbitrary guest memory. Each JIT advertises `self-hosted`,
-`Linux`, `X64` and the fixed capacity labels: heavy advertises heavy/mid/light,
-mid advertises mid/light, and light advertises light. Legacy and exact-SHA pilot
+`Linux`, `X64` and exactly its selected custom profile label. A heavy guest cannot
+be diverted to a normal light or mid job while the database job waits. Legacy and exact-SHA pilot
 sessions each retain their single custom label; normal guests never advertise the
 legacy label. Unsupported or mixed resource/platform requests are ineligible for
 provisioning. This request filter is not an assignment security boundary: a job
 requiring only default labels or a subset of advertised labels can still be assigned.
-Labels route compatible jobs and do not authorize hostile code. Active selection
-chooses capacity, not an exclusive GitHub job claim: GitHub may assign another job
-with compatible labels to the one-job runner. Immediately before JIT registration,
-a fresh bounded queue traversal checks for any demand compatible with the allocated
-capacity, skipping incompatible jobs. It does not recheck host free memory after
-allocation. If demand was canceled or taken and no compatible job remains, the
+Labels route jobs and do not authorize hostile code. Active selection
+chooses a profile, not an exclusive GitHub job claim: GitHub may assign another job
+requesting that profile to the one-job runner. Immediately before JIT registration,
+a fresh bounded queue traversal checks for demand requesting exactly the selected
+profile, skipping other profiles. It does not recheck host free memory after
+allocation. If demand was canceled or taken and no exact-profile job remains, the
 session returns `demand-withdrawn` and performs normal owned cleanup without creating
 an idle JIT runner. API uncertainty or queue overflow fails closed with cleanup.
 The pilot retains its exact binding and fresh exact-job registration check.
+
+Every guest remains a full disposable copy of the unchanged, verified Ubuntu base.
+Cloud-init installs common TLS/download, Git, SSH and unzip prerequisites for every
+profile. Light and mid omit Docker installation and its readiness probe: required
+aggregation uses Bash, preview discovery/provisioning use Node, production delivery
+uses the linked remote Supabase CLI, and application validation uses Node/npm without
+starting local Supabase. Heavy database/browser, legacy and diagnostic pilot guests
+retain Docker installation and Docker daemon readiness. New workflows needing Docker
+must request heavy or revise this reviewed prerequisite contract. Package updates
+still run in each guest; heavy startup still incurs package and Docker installation.
+
+The host fetches the latest official GitHub runner release metadata on every archive
+request, including cache hits, and requires its SHA-256 digest plus matching release
+tag, asset name and official download URL. Verified archives live in the protected
+`runner-cache` directory, keyed by digest. Owned-path, reparse-point and protected ACL
+checks apply before reuse or cleanup; corrupted or unexpected entries refuse pickup
+without silent replacement. A dedicated mutex serializes publication and retention.
+Downloads use temporary files and publish with a same-directory rename only after
+hash verification. Recognized interrupted download files are removed on the next
+request; retention keeps the current archive and at most one verified previous
+archive, with a bounded 16-entry inspection limit. Metadata failures never use a
+stale fallback. Guests receive an SCP copy, never a cache mount or write access.
+Only official runner bytes are shared; repository dependencies and guest state remain
+disposable. Guest readiness and archive retrieval/transfer/extraction report elapsed
+seconds without guest output or credentials.
+
+After a one-job runner exits normally and owned cleanup succeeds, the supervisor
+immediately reinspects demand. Idle queues, withdrawn startup demand, low memory
+and failures retain the 30-second backoff. This removes the per-completed-job pause
+without retrying failed bootstrap or cleanup in a tight loop.
 
 Demand can still disappear after the final check, leaving a JIT runner waiting.
 An idle light runner cannot accept a later heavy job. Its hard deadline still

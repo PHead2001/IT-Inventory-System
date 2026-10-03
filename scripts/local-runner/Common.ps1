@@ -192,13 +192,9 @@ function Get-RunnerJobProfile($Config, $Job) {
 
 function Get-RunnerJitLabels($Config, [string] $ProfileLabel = '') {
     $profile = Get-RunnerSessionProfile $Config $ProfileLabel
-    # Normal capacity is downward compatible. Pilot/legacy routing stays isolated.
-    $custom = switch -CaseSensitive ($profile.label) {
-        'it-inventory-heavy' { @('it-inventory-heavy', 'it-inventory-mid', 'it-inventory-light'); break }
-        'it-inventory-mid' { @('it-inventory-mid', 'it-inventory-light'); break }
-        default { @($profile.label) }
-    }
-    return @('self-hosted', 'Linux', 'X64') + @($custom)
+    # A provisioned heavy guest must not be diverted to a queued light job.
+    # Pilot and legacy callers retain their single custom label as before.
+    return @('self-hosted', 'Linux', 'X64', $profile.label)
 }
 
 function Assert-RunnerJitLabels($Config, $Runner, [string] $ProfileLabel = '') {

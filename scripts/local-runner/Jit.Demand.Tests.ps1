@@ -15,11 +15,14 @@ function Enter-RunnerLock { return $null }
 function Exit-RunnerLock {}
 function Get-OwnerToken { return 'fixture' }
 function Wait-Guest {
+    param($State, $Config, $ProfileLabel)
+    if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest readiness.' }
     # Withdraw the originally selected heavy demand during guest startup.
     if ($script:case -eq 'cancelled') { $script:jobs[0].status = 'completed' }
     elseif ($script:case -eq 'incompatible') { $script:jobs = @((New-Job 1 'it-inventory-ephemeral')) }
 }
 function Get-CimInstance { throw 'Postallocation capacity must not be inspected.' }
+function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel) { if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest cloud-config.' } }
 function New-RunnerSshKey($Path) { [IO.File]::WriteAllText(($Path + '.pub'), 'fixture-public') }
 function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{} }
 function Get-VM { return [pscustomobject]@{ Notes = $script:RunnerTag } }
@@ -37,7 +40,7 @@ function Invoke-GitHub($Uri, $Method, $Body, $Token) {
     if ($Uri -match '/runs/12/jobs\?') { return [pscustomobject]@{ total_count = $script:jobCount; jobs = $script:jobs } }
     if ($Uri -match '/generate-jitconfig$') {
         $script:jits++
-        if (($Body.labels -join ',') -cne 'self-hosted,Linux,X64,it-inventory-heavy,it-inventory-mid,it-inventory-light') { throw 'Session lost downward compatibility at JIT submission.' }
+        if (($Body.labels -join ',') -cne 'self-hosted,Linux,X64,it-inventory-heavy') { throw 'Session advertised another resource profile at JIT submission.' }
         $labels = @($Body.labels)
         if ($script:badReadback) { $labels += 'it-inventory-ephemeral' }
         return [pscustomobject]@{ encoded_jit_config = 'ZmFrZQ=='; runner = [pscustomobject]@{ name = $Body.name; id = 42; labels = @($labels | ForEach-Object { [pscustomobject]@{ name = $_ } }) } }
@@ -51,7 +54,7 @@ try {
             $script:jobs = @((New-Job 1 "it-inventory-$demand"))
             $script:jobCount = 1
             $selected = Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel "it-inventory-$capacity"
-            $expected = @('light', 'mid', 'heavy').IndexOf($demand) -ge 0 -and @('light', 'mid', 'heavy').IndexOf($demand) -le @('light', 'mid', 'heavy').IndexOf($capacity)
+            $expected = $demand -ceq $capacity
             if (($null -ne $selected) -ne $expected) { throw 'Capacity compatibility matrix changed.' }
         }
     }
@@ -59,31 +62,33 @@ try {
     if ($null -ne (Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-ephemeral')) { throw 'Legacy runner accepted normal demand.' }
     $script:jobs = @((New-Job 1 'it-inventory-ephemeral'))
     if ($null -eq (Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-ephemeral')) { throw 'Legacy singleton lost its own demand.' }
-    $script:jobs = @((New-Job 1 'it-inventory-heavy'), (New-Job 2 'it-inventory-light')); $script:jobCount = 2
+    $script:jobs = @((New-Job 1 'it-inventory-heavy'), (New-Job 2 'it-inventory-mid')); $script:jobCount = 2
     if ((Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-mid').id -ne 2) { throw 'Demand scan stopped at an incompatible first job.' }
     $script:runCount = 101
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:runCount = 1; $script:jobCount = 101
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:jobCount = 1
-    foreach ($case in @('cancelled', 'incompatible', 'lower', 'unexpected-readback', 'overflow')) {
+    foreach ($case in @('cancelled', 'incompatible', 'lower', 'same', 'unexpected-readback', 'overflow')) {
         $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0
         $script:badReadback = $case -eq 'unexpected-readback'
         $script:jobs = switch ($case) {
             'cancelled' { New-Job 1 'it-inventory-heavy' }
             'incompatible' { New-Job 1 'it-inventory-heavy' }
+            'same' { New-Job 1 'it-inventory-heavy' }
+            'unexpected-readback' { New-Job 1 'it-inventory-heavy' }
             default { New-Job 1 'it-inventory-light' }
         }
         $script:jobCount = if ($case -eq 'overflow') { 101 } else { 1 }
         if ($case -in @('unexpected-readback', 'overflow')) { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
         else {
             $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
-            if ($case -eq 'lower') { if ($result.id -ne 42 -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Compatible lower demand did not execute the actual session.' } }
+            if ($case -eq 'same') { if ($result.id -ne 42 -or $result.outcome -cne 'job-completed' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
             elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne 2) { throw 'Withdrawn demand registered or executed an idle JIT.' }
         }
         if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }
     }
-    Write-Host 'JIT demand passed: capacity matrix, queue filtering, overflow refusal, canceled startup, lower demand, exact readback and actual-session cleanup.'
+    Write-Host 'JIT demand passed: exact profile matrix, queue filtering, overflow refusal, canceled startup, lower-profile refusal, exact readback and actual-session cleanup.'
 } finally {
     if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -cne ([IO.Path]::GetTempPath()).TrimEnd('\') -or [IO.Path]::GetFileName($base) -notmatch '^ITIR-demand-[0-9a-f]{32}$') { throw 'Unexpected demand fixture cleanup path.' }
     Remove-Item -LiteralPath $base -Recurse -Force

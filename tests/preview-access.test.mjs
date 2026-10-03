@@ -987,6 +987,60 @@ test('malformed event JSON cannot print a secret or parser text', () => {
   }
 });
 
+test('preview workflow coalesces pending PR events before discovery without cancelling active provisioning', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/preview-access.yml', import.meta.url),
+    'utf8',
+  );
+  const workflowHeader = workflow.split('\njobs:')[0];
+  const workflowConcurrency = workflowHeader.match(
+    /^concurrency:\s*\n\s+group: ([^\r\n]+)\s*\n\s+cancel-in-progress: false\s*$/m,
+  );
+  assert.ok(
+    workflowConcurrency,
+    'coalescing must apply to the whole workflow before discovery can request a VM',
+  );
+  assert.equal(
+    workflowConcurrency[1],
+    'preview-staff-access-workflow-${{ github.ref }}-${{ github.event.pull_request.number || inputs.pr_number }}',
+    'trusted main PR events and main dispatches must share a per-PR group while non-main dispatches remain separate',
+  );
+  const groupFor = ({ ref, pr, input }) =>
+    workflowConcurrency[1]
+      .replace('${{ github.ref }}', ref)
+      .replace(
+        '${{ github.event.pull_request.number || inputs.pr_number }}',
+        pr || input,
+      );
+  const mainPrGroup = groupFor({ ref: 'refs/heads/main', pr: 27 });
+  assert.equal(mainPrGroup, groupFor({ ref: 'refs/heads/main', input: 27 }));
+  assert.notEqual(
+    mainPrGroup,
+    groupFor({ ref: 'refs/heads/feature', input: 27 }),
+    'a skipped non-main dispatch must not evict a pending trusted main run',
+  );
+  assert.notEqual(mainPrGroup, groupFor({ ref: 'refs/heads/main', pr: 28 }));
+  assert.doesNotMatch(workflowHeader, /^\s+queue:/m);
+  const provisionConcurrency = workflow
+    .split('  provision:')[1]
+    ?.match(
+      /concurrency:\s*\n\s*group: ([^\r\n]+)\s*\n\s*cancel-in-progress: false/,
+    );
+  assert.ok(
+    provisionConcurrency,
+    'retain the provisioning lock for older runs',
+  );
+  assert.equal(
+    provisionConcurrency[1],
+    'preview-staff-access-${{ matrix.pr }}',
+  );
+  assert.notEqual(
+    workflowConcurrency[1],
+    provisionConcurrency[1],
+    'workflow and job groups must be distinct to avoid cancelling or blocking their own run',
+  );
+});
+
 test('schedule discovery emits separate jobs for an early slow PR and a later ready PR', () => {
   const directory = mkdtempSync(join(tmpdir(), 'preview-discover-test-'));
   try {
@@ -1041,7 +1095,6 @@ test('schedule discovery emits separate jobs for an early slow PR and a later re
       /timeout-minutes: 15[\s\S]*environment: preview-access/,
     );
     assert.match(workflow, /fail-fast: false/);
-    assert.doesNotMatch(workflow.split('\njobs:')[0], /\bconcurrency:/);
     const provisionJob = workflow.split('  provision:')[1];
     assert.ok(provisionJob, 'the per-PR provisioning job must exist');
     assert.match(
