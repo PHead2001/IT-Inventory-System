@@ -1,0 +1,84 @@
+name: Sync staging to released production
+
+on:
+  workflow_run:
+    workflows: ['Foundation CI']
+    types: [completed]
+  schedule:
+    - cron: '17 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare_staging:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 2
+    environment: production-database
+    steps:
+      - name: Keep Supabase staging persistent and bound to Git staging
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --header "Content-Type: application/json" \
+            "https://api.supabase.com/v1/branches/ileoembzjxwhxgtiypec" \
+            --data '{"persistent":true,"git_branch":"staging"}' \
+            >/dev/null
+
+  sync_git:
+    if: github.event_name == 'workflow_run'
+    needs: prepare_staging
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 2
+    steps:
+      - name: Fast-forward staging to the released main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/PHead2001/IT-Inventory-System/git/refs/heads/staging" \
+            --data "{\"sha\":\"$TARGET_SHA\",\"force\":false}"
+
+  sync_users:
+    if: >-
+      always() &&
+      needs.prepare_staging.result == 'success' &&
+      (
+        (github.event_name == 'workflow_run' && needs.sync_git.result == 'success') ||
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch'
+      )
+    needs: [prepare_staging, sync_git]
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 5
+    environment: production-database
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Mirror production application users into staging
+        run: node scripts/staging-user-sync.mjs
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
