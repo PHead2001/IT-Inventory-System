@@ -13,8 +13,7 @@ export function assertStagingBranch(branches) {
     throw new Error('Staging branch listing is invalid');
   const matches = branches.filter(
     (branch) =>
-      branch?.project_ref === STAGING_REF &&
-      branch?.name === STAGING_BRANCH,
+      branch?.project_ref === STAGING_REF && branch?.name === STAGING_BRANCH,
   );
   if (matches.length !== 1)
     throw new Error('Staging branch identity is ambiguous');

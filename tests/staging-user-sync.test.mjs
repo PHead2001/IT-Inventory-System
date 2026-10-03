@@ -11,8 +11,7 @@ const prodUser = (overrides = {}) => ({
   id: '11111111-1111-4111-8111-111111111111',
   email: 'staff@example.com',
   phone: null,
-  password_hash:
-    '$2a$10$abcdefghijklmnopqrstuv123456789012345678901234567890',
+  password_hash: '$2a$10$abcdefghijklmnopqrstuv123456789012345678901234567890',
   email_confirmed: true,
   phone_confirmed: false,
   providers: ['email'],
@@ -164,7 +163,10 @@ test('sync updates mirrored users and deactivates removed mirrored memberships o
     deactivated: 1,
   });
   assert.deepEqual(calls.at(-1), ['deactivate', removed]);
-  assert.equal(calls.some((call) => call[1] === fixture), false);
+  assert.equal(
+    calls.some((call) => call[1] === fixture),
+    false,
+  );
 });
 
 test('sync fails closed on a staging email collision', async () => {
