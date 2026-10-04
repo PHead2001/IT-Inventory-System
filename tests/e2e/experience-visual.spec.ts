@@ -461,9 +461,20 @@ test('configuration, site custody, and location browsing remain legible at deskt
       .evaluate((input) => input.getBoundingClientRect().height);
     expect(searchHeight).toBeGreaterThanOrEqual(44);
     await locationBrowser
-      .locator('button:not([aria-label]):visible')
-      .first()
+      .getByRole('button', { name: 'IT Closet ITC', exact: true })
       .click();
+    const selectedLocation = page.getByRole('region', {
+      name: 'Selected location',
+    });
+    await expect(
+      selectedLocation.getByRole('heading', { name: 'IT Closet', exact: true }),
+    ).toBeVisible();
+    await expect(
+      selectedLocation.getByText('ITC', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      selectedLocation.getByRole('link', { name: 'View contents and history' }),
+    ).toHaveAttribute('href', '/locations/ITC');
     await expect(
       page.getByRole('region', { name: 'Selected location' }),
     ).toContainText('View contents and history');
