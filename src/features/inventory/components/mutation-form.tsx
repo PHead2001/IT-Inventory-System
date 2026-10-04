@@ -218,7 +218,7 @@ function MutationFormFields({
   actorId,
   operation,
   categories,
-  locations,
+  locations: latestLocations,
   item: latestItem,
   asset: latestAsset,
   currentLocation: latestLocation,
@@ -240,8 +240,14 @@ function MutationFormFields({
     asset: latestAsset,
     currentLocation: latestLocation,
     balances: freshStart?.balances ?? latestBalances ?? [],
+    locations: freshStart?.locations ?? latestLocations,
   }));
   const { item, asset, currentLocation, balances } = baseline;
+  const locations =
+    operation === 'quantity_move' ? baseline.locations : latestLocations;
+  const latestCatalogKey = JSON.stringify(latestLocations);
+  const [observedCatalogKey, setObservedCatalogKey] =
+    useState(latestCatalogKey);
   const entity = item ?? asset;
   const latestEntity = latestItem ?? latestAsset;
   const [refreshRequested, setRefreshRequested] = useState(false);
@@ -293,6 +299,20 @@ function MutationFormFields({
   useEffect(() => {
     if (completed) completionRef.current?.focus();
   }, [completed]);
+  // A verified action snapshot may be newer than unchanged route props. Only
+  // a newly observed prop catalog supersedes it; any changed review stays invalid.
+  if (
+    operation === 'quantity_move' &&
+    latestCatalogKey !== observedCatalogKey &&
+    !pending &&
+    !uncertain
+  ) {
+    setObservedCatalogKey(latestCatalogKey);
+    if (latestCatalogKey !== JSON.stringify(baseline.locations)) {
+      setBaseline({ ...baseline, locations: latestLocations });
+      setReview(false);
+    }
+  }
   if (
     refreshRequested &&
     latestEntity &&
@@ -303,6 +323,7 @@ function MutationFormFields({
       asset: latestAsset,
       currentLocation: latestLocation,
       balances: latestBalances ?? [],
+      locations: latestLocations,
     });
     setRefreshRequested(false);
     if (!thresholdTouched && latestItem)
@@ -337,6 +358,7 @@ function MutationFormFields({
       id: record?.id,
       version: record?.version,
       archived: record?.archived,
+      locationCatalog: locations,
       source: rows?.find((b) => b.location.id === values.source_location_id)
         ?.quantity,
       destination:
@@ -868,6 +890,7 @@ function MutationFormFields({
           asset: latestAsset,
           currentLocation: latestLocation,
           balances: fresh.balances,
+          locations: fresh.locations,
         });
         setRefreshRequested(false);
         setRefreshedVersion(null);

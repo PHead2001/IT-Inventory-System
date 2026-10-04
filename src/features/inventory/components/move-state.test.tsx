@@ -306,6 +306,93 @@ it('requires a successful fresh read for Move more and creates a new identity wi
   expect(mocks.submit.mock.calls[1][0].requestId).not.toBe(first);
   expect(mocks.submit.mock.calls[1][0].payload.expected_version).toBe(2);
 });
+it.each([
+  'Move more',
+  'Refresh latest record',
+  'Discard invalid receipt reference',
+])(
+  'uses the fresh authorized location catalog after %s even when route props have not refreshed',
+  async (action) => {
+    const clear = {
+      ...destination,
+      id: '00000000-0000-4000-8000-000000000003',
+      code: 'ITC-CLEAR',
+      name: 'Clear Container',
+      breadcrumb: 'IT Closet / Clear Container',
+    };
+    const fresh = {
+      item: { ...item, version: 2 },
+      balances: [{ location: source, quantity: 1 }],
+      locations: [source, { ...destination, active: false }, clear],
+    };
+    mocks.snapshot.mockResolvedValue(fresh);
+    if (action === 'Discard invalid receipt reference')
+      sessionStorage.setItem(completionKey(), 'invalid completed pointer');
+    if (action === 'Refresh latest record')
+      mocks.submit.mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Record changed',
+      });
+    const view = render(<MutationForm {...props} />);
+    const user = userEvent.setup();
+    if (action !== 'Discard invalid receipt reference') {
+      await prepare();
+      await user.click(
+        screen.getByRole('button', { name: 'Review move stock' }),
+      );
+      await user.click(
+        screen.getByRole('button', { name: 'Confirm move stock' }),
+      );
+    }
+    await user.click(await screen.findByRole('button', { name: action }));
+    await waitFor(() => expect(mocks.snapshot).toHaveBeenCalledOnce());
+    view.rerender(
+      <MutationForm {...props} item={fresh.item} balances={fresh.balances} />,
+    );
+    await user.click(
+      screen.getByLabelText('Destination location', { selector: 'button' }),
+    );
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'Clear',
+    );
+    await user.click(screen.getByRole('option', { name: /Clear Container/ }));
+    fireEvent.change(screen.getByLabelText('Quantity to move'), {
+      target: { value: '1' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    expect(
+      screen.getByRole('region', { name: 'Review changes' }),
+    ).toHaveTextContent('Clear Container');
+  },
+);
+it('invalidates confirmation when only the observed location catalog changes and does not revive it when catalog props revert', async () => {
+  const view = render(<MutationForm {...props} />);
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  expect(
+    screen.getByRole('button', { name: 'Confirm move stock' }),
+  ).toBeVisible();
+  view.rerender(
+    <MutationForm
+      {...props}
+      locations={[source, { ...destination, active: false }]}
+    />,
+  );
+  expect(
+    screen.queryByRole('button', { name: 'Confirm move stock' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('region', { name: 'Review changes' }),
+  ).not.toBeInTheDocument();
+  view.rerender(<MutationForm {...props} />);
+  expect(
+    screen.queryByRole('button', { name: 'Confirm move stock' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
 it('retains acknowledged success if its receipt read failed and reloads only the receipt', async () => {
   mocks.submit.mockResolvedValue({
     ...committed,

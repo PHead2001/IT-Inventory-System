@@ -136,6 +136,7 @@ function LabelDesignerWorkspace({
     addIntent.length > 0,
   );
   const [intentError, setIntentError] = useState('');
+  const [pendingIntentKeys, setPendingIntentKeys] = useState<QueueKey[]>([]);
   const handledIntent = useRef(new Set<string>());
   const cancelledIntent = useRef(new Set<string>());
   const manualClearEpoch = useRef(0);
@@ -303,6 +304,7 @@ function LabelDesignerWorkspace({
         setIntentPending(false);
         setIntentOutstanding(false);
         setIntentError('');
+        setPendingIntentKeys([]);
       });
       return;
     }
@@ -312,6 +314,15 @@ function LabelDesignerWorkspace({
         setIntentPending(true);
         setIntentOutstanding(true);
         setIntentError('');
+        setPendingIntentKeys(
+          requested.filter(
+            (key) =>
+              !handledIntent.current.has(queueIdentity(key)) &&
+              !currentEntries.current.some(
+                (entry) => queueIdentity(entry) === queueIdentity(key),
+              ),
+          ),
+        );
       }
     });
     void getQueueRecords(requested)
@@ -367,6 +378,7 @@ function LabelDesignerWorkspace({
         }
         if (notices.length) setMessage(notices.join(' '));
         setIntentOutstanding(false);
+        setPendingIntentKeys([]);
         consumeIntent();
       })
       .catch(() => {
@@ -406,6 +418,9 @@ function LabelDesignerWorkspace({
       clear ? [] : rows.filter((row) => !ids.has(queueIdentity(row))),
     );
     setUnavailable((list) => (clear ? [] : list.filter((id) => !ids.has(id))));
+    setPendingIntentKeys((keys) =>
+      clear ? [] : keys.filter((key) => !ids.has(queueIdentity(key))),
+    );
     invalidate();
     setMessage(
       clear ? 'Label queue cleared.' : 'Record removed from the label queue.',
@@ -1066,6 +1081,39 @@ function LabelDesignerWorkspace({
                 Clear queue
               </button>
             </div>
+            {pendingIntentKeys.length > 0 && (
+              <div
+                role="region"
+                aria-label="Pending linked additions"
+                className={styles.queueList}
+              >
+                <p className={styles.subtle}>
+                  Pending additions are not included in the label count or print
+                  sheet.
+                </p>
+                {pendingIntentKeys.map((key) => {
+                  const id = queueIdentity(key);
+                  return (
+                    <div key={id} className={styles.queueEntry}>
+                      <span className={styles.queueName}>
+                        Pending {key.kind}: {key.key}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy || !hydrated}
+                        aria-label={
+                          'Remove pending ' + key.kind + ' ' + key.key
+                        }
+                        onClick={() => removeEntries(new Set([id]))}
+                        className={styles.textButton}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {entries.length === 0 && (
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}

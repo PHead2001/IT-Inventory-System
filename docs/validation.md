@@ -40,6 +40,8 @@ Real-browser acceptance remains necessary for Back/Forward and internal navigati
 
 Quantity action-state regressions cover source overdraw before review, whole-unit/overflow input, field-associated errors and focus, invalidated review snapshots, acknowledged completion through data refresh and per-tab receipt recovery, exact unknown-response retries, double submission, genuine stale conflicts, and deliberate fresh Move more. Receipt action tests cover exact event/entity filtering, conserved immutable lines, current member/actor checks, and postcommit history/cache failures. These mocked tests establish UI/action behavior; real accounting, independent authenticated writer races and hosted browser acceptance still require the canonical database/E2E gates.
 
+Location-catalog regressions exercise fresh snapshot adoption through Move more, balance refresh and invalid-reference recovery, and catalog-only prop changes that invalidate confirmation. Deferred label lookups exercise the actual individual pending Remove controls, including failed lookup and partial cancellation without late resurrection. The label browser suite delays an authorized response and removes one unresolved quantity while preserving an unrelated location addition and normalized URL through reload.
+
 Unit/component tests cover strict room parsing, measured/default classifications, coordinate mapping, capability predicates, auth validation, explicit confirmation, and cookie refresh behavior.
 
 pgTAP proves counts/categories, immutable identity, hierarchy integrity, role-based reads, direct-write denial and immediate deactivation. A separate real database integration test checks the exact 35-location fixture, room bindings/parents/capabilities, and concurrent hierarchy writers.
