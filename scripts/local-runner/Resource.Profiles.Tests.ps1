@@ -23,13 +23,14 @@ $script:dynamic = $false
 foreach ($case in @(
     @{ label = 'it-inventory-light'; guest = 2GB },
     @{ label = 'it-inventory-mid'; guest = 4GB },
-    @{ label = 'it-inventory-heavy'; guest = 8GB },
+    @{ label = 'it-inventory-heavy'; guest = 6GB; reserve = 1GB },
     @{ label = 'it-inventory-ephemeral'; guest = 8GB },
     @{ label = $pilot.pilotLabel; guest = 8GB }
 )) {
     $cfg = if ($case.label -ceq $pilot.pilotLabel) { $pilot } else { $config }
     $profile = Get-RunnerSessionProfile $cfg $case.label
-    if ($profile.memoryBytes -ne $case.guest -or $profile.requiredBytes -ne ($case.guest + 2GB)) { throw 'Fixed profile mapping changed.' }
+    $reserve = if ($case.ContainsKey('reserve')) { $case.reserve } else { 2GB }
+    if ($profile.memoryBytes -ne $case.guest -or $profile.hostReserveBytes -ne $reserve -or $profile.requiredBytes -ne ($case.guest + $reserve)) { throw 'Fixed profile mapping changed.' }
     foreach ($offset in @(-1, 0, 1)) {
         $script:freeKiB = [uint64]($profile.requiredBytes / 1KB + $offset)
         $admission = Get-RunnerMemoryAdmission $case.label
@@ -75,7 +76,7 @@ function Invoke-GitHub {
     if ($Uri -match '/runs/12/jobs\?') { return [pscustomobject]@{ total_count = $script:jobs.Count; jobs = $script:jobs } }
     throw 'Unexpected profile API probe.'
 }
-foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 10GB; id = 1 })) {
+foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 7GB; id = 1 }, @{ free = ([decimal]7.76 * 1GB); id = 1 })) {
     $selected = Get-QueuedRunnerJob $config 'dummy' $case.free
     if ($selected.id -ne $case.id -or $selected.resourceLabel -cne $selected.labels[1]) { throw 'Capacity traversal failed to skip a nonfitting job.' }
 }

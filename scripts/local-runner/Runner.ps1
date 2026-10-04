@@ -9,6 +9,7 @@ param(
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
+. (Join-Path $PSScriptRoot 'Update.ps1') # Definitions only; dot sourcing never installs a bundle.
 
 function Invoke-GitHub([string] $Uri, [string] $Method = 'GET', $Body = $null, [string] $Token = '') {
     $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2026-03-10'; 'User-Agent' = 'ITInventoryLocalRunner' }
@@ -575,6 +576,7 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token) {
 }
 
 function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
+    $script:RunnerQueueObservation = @{}
     if ($SessionProfileLabel) { [void](Get-RunnerSessionProfile $Config $SessionProfileLabel) }
     $label = $Config.label
     if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
@@ -594,9 +596,12 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
             if ($jobs.total_count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
             foreach ($job in @($jobs.jobs)) {
                 $profile = Get-RunnerJobProfile $Config $job
-                if ($null -eq $profile -or $AvailableBytes -lt $profile.requiredBytes) { continue }
+                if ($null -eq $profile) { continue }
                 if ($SessionProfileLabel -and $SessionProfileLabel -cne $profile.label) { continue }
                 if (Test-QueuedRunnerJob $job $profile.label) {
+                    if (-not $script:RunnerQueueObservation.ContainsKey($profile.label)) { $script:RunnerQueueObservation[$profile.label] = 0 }
+                    $script:RunnerQueueObservation[$profile.label]++
+                    if ($AvailableBytes -lt $profile.requiredBytes) { continue }
                     if ($Config.activation -eq 'pilot') {
                         if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
                         $job | Add-Member -NotePropertyName pilotBinding -NotePropertyValue ([pscustomobject]@{
@@ -645,6 +650,72 @@ function Get-RunnerMemoryAdmission([string] $ProfileLabel = 'it-inventory-epheme
     return [pscustomobject]@{ ready = ($availableBytes -ge $profile.requiredBytes); requiredBytes = $profile.requiredBytes; availableBytes = $availableBytes }
 }
 
+function Get-RunnerCapacityReport($Config, [decimal] $AvailableBytes, $QueuedProfiles = $null) {
+    $labels = if ($Config.activation -ceq 'pilot') { @($Config.pilotLabel) } else {
+        @('it-inventory-light', 'it-inventory-mid', 'it-inventory-heavy', 'it-inventory-ephemeral')
+    }
+    foreach ($label in $labels) {
+        $profile = Get-RunnerResourceProfile $label
+        $queued = if ($null -eq $QueuedProfiles) { $null } elseif ($QueuedProfiles.ContainsKey($label)) { $QueuedProfiles[$label] } else { 0 }
+        [pscustomobject]@{
+            label = $label; memoryBytes = $profile.memoryBytes; hostReserveBytes = $profile.hostReserveBytes
+            requiredBytes = $profile.requiredBytes; ready = ($AvailableBytes -ge $profile.requiredBytes); observedQueued = $queued
+        }
+    }
+}
+
+function Write-RunnerObservation([ValidateSet('waiting-capacity', 'idle', 'session-starting', 'inspection-failed')][string] $Outcome,
+    $Config, $AvailableBytes = $null, $QueuedProfiles = $null) {
+    # A poll timestamp is not a job heartbeat: SSH may block for a whole one-job session.
+    $profiles = if ($null -eq $AvailableBytes) { @() } else { @(Get-RunnerCapacityReport $Config $AvailableBytes $QueuedProfiles) }
+    Write-RunnerJson (Assert-OwnedPath (Join-Path $script:RunnerRoot 'controller-observation.json')) ([ordered]@{
+        schema = 1; tag = $script:RunnerTag; observedUtc = [DateTime]::UtcNow.ToString('o')
+        supervisorPid = $PID; outcome = $Outcome; availableBytes = $AvailableBytes; profiles = $profiles
+    })
+}
+
+function Show-RunnerCapacityStatus($Config) {
+    try {
+        $admission = Get-RunnerMemoryAdmission 'it-inventory-light'
+        Write-Host ('Capacity now: {0:N2} GiB available physical memory.' -f ($admission.availableBytes / 1GB))
+        foreach ($profile in @(Get-RunnerCapacityReport $Config $admission.availableBytes)) {
+            $eligibility = if ($profile.ready) { 'fits' } else { 'waiting for capacity' }
+            Write-Host ("{0}: {1} GiB guest + {2} GiB host reserve = {3} GiB admission; {4}." -f
+                $profile.label, ($profile.memoryBytes / 1GB), ($profile.hostReserveBytes / 1GB), ($profile.requiredBytes / 1GB), $eligibility)
+        }
+    } catch { Write-Host 'Capacity: physical memory inspection unavailable; pickup refuses work.' }
+    try {
+        $observation = Read-RunnerJson (Assert-OwnedPath (Join-Path $script:RunnerRoot 'controller-observation.json'))
+        if ($null -ne $observation) {
+            if ($observation.schema -ne 1 -or $observation.tag -cne $script:RunnerTag -or
+                $observation.outcome -cnotin @('waiting-capacity','idle','session-starting','inspection-failed')) { throw 'Invalid observation.' }
+            $age = [Math]::Max(0, ([DateTime]::UtcNow - [DateTime]::Parse($observation.observedUtc).ToUniversalTime()).TotalSeconds)
+            Write-Host ('Last controller poll: {0}; {1}; {2:N0}s ago. A poll timestamp does not establish job/process health.' -f $observation.observedUtc, $observation.outcome, $age)
+            foreach ($profile in @($observation.profiles)) {
+                if ($null -ne $profile.observedQueued -and $profile.observedQueued -gt 0) {
+                    [void](Get-RunnerResourceProfile $profile.label)
+                    Write-Host ("Observed queued {0}: {1}; capacity at that poll: {2}." -f $profile.label, $profile.observedQueued, $(if ($profile.ready) { 'fits' } else { 'blocked' }))
+                }
+            }
+        }
+    } catch { Write-Host 'Last controller poll: observation unavailable or invalid.' }
+}
+
+function Show-RunnerSessionResources($State, $Vm) {
+    try {
+        Assert-StateIdentity $State
+        $expectedPath = Assert-OwnedPath (Join-Path $State.instancePath $State.vmName)
+        if ($null -eq $Vm -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $script:RunnerTag -or
+            -not [string]::Equals([IO.Path]::GetFullPath($Vm.Path), $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'VM ownership readback failed.' }
+        $label = if ($State.PSObject.Properties.Name -contains 'resourceLabel') { $State.resourceLabel } else { 'it-inventory-ephemeral' }
+        $profile = Get-RunnerResourceProfile $label
+        $memory = Get-VMMemory -VMName $State.vmName -ErrorAction Stop
+        Write-Host ('Session resources: {0}; startup memory {1:N2} GiB; dynamic memory {2}; expected fixed guest {3} GiB.' -f
+            $label, ($memory.Startup / 1GB), $memory.DynamicMemoryEnabled, ($profile.memoryBytes / 1GB))
+        if ($memory.Startup -ne $profile.memoryBytes -or $memory.DynamicMemoryEnabled) { Write-Host 'Session resources differ from the current fixed profile; this is not candidate allocation proof.' }
+    } catch { Write-Host 'Session resource readback unavailable or VM ownership is unverified.' }
+}
+
 function Invoke-SupervisorLoop {
     while (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
         Assert-RunnerTransitionClear
@@ -661,24 +732,30 @@ function Invoke-SupervisorLoop {
         }
         try {
             $completedJob = $false
+            $script:RunnerQueueObservation = $null
             $script:RunnerSessionName = $null
             $script:RunnerOperationStage = 'memory-admission'
             $initialLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
             $admission = Get-RunnerMemoryAdmission $initialLabel
             if (-not $admission.ready) {
+                Write-RunnerObservation 'waiting-capacity' $config $admission.availableBytes
                 Start-Sleep -Seconds 30
                 continue
             }
             $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token $admission.availableBytes
+            $pollOutcome = if ($null -ne $job) { 'session-starting' } elseif ($null -ne $script:RunnerQueueObservation -and $script:RunnerQueueObservation.Count -gt 0) { 'waiting-capacity' } else { 'idle' }
+            Write-RunnerObservation $pollOutcome $config $admission.availableBytes $script:RunnerQueueObservation
             if ($null -ne $job) {
                 if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
                 Assert-RunnerTransitionClear
                 $script:RunnerOperationStage = 'memory-admission'
                 $profile = Get-RunnerJobProfile $config $job
                 if ($null -eq $profile) { throw 'Selected runner job has unsupported resource labels.' }
-                if (-not (Get-RunnerMemoryAdmission $profile.label).ready) {
+                $selectedAdmission = Get-RunnerMemoryAdmission $profile.label
+                if (-not $selectedAdmission.ready) {
+                    Write-RunnerObservation 'waiting-capacity' $config $selectedAdmission.availableBytes $script:RunnerQueueObservation
                     Start-Sleep -Seconds 30
                     continue
                 }
@@ -732,6 +809,7 @@ function Invoke-SupervisorLoop {
                 Write-RunnerFailure $script:RunnerOperationStage 'STAGE_FAILED' $script:RunnerSessionName
             }
             Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner stage failed: $script:RunnerOperationStage" -ErrorAction SilentlyContinue
+            Write-RunnerObservation 'inspection-failed' $config
         } finally { $token = $null }
         if ($completedJob) { continue } # Session's finally completed owned cleanup.
         Start-Sleep -Seconds 30
@@ -960,19 +1038,54 @@ function Start-RunnerSupervisorCore {
 
 function Invoke-Watchdog {
     Assert-Administrator
+    Assert-SecureRoot
     $mutex = Enter-RunnerLock
     try {
         $state = Get-RunnerState
-        if ($null -eq $state) { return }
-        Assert-StateIdentity $state
-        $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
-        $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
-        $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
-            -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
-        if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead) {
-            Remove-RunnerInstance $state
+        if ($null -ne $state) {
+            Assert-StateIdentity $state
+            $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
+            $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
+            $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
+                -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
+            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead) {
+                Remove-RunnerInstance $state
+            }
         }
     } finally { Exit-RunnerLock $mutex }
+    Invoke-RunnerSupervisorRecovery
+}
+
+function Invoke-RunnerSupervisorRecovery {
+    # Cleanup is separate above. Never wait behind a running supervisor or updater.
+    try { $lifetime = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1' -FailFast }
+    catch { return }
+    try {
+        $mutex = Enter-RunnerLock
+        try {
+            Assert-SecureRoot
+            Assert-RunnerTransitionClear
+            $config = Get-RunnerConfig
+            if ($config.activation -cne 'active' -or (Get-RunnerState) -or
+                (Test-Path -LiteralPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')))) { return }
+            $task = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop
+            if ($task.State -cne 'Ready') { return }
+            [void](Get-CoherentInstalledRunnerBundle)
+            $credentialPath = Assert-OwnedPath (Join-Path $script:RunnerRoot 'credential.dpapi')
+            if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { throw 'Credential record is missing.' }
+            Assert-RunnerProtectedPath $credentialPath
+            $record = Read-RunnerJson $credentialPath
+            if ($null -eq $record -or $record.tag -cne $script:RunnerTag -or $record.scope -cne 'LocalMachine' -or
+                [string]::IsNullOrEmpty($record.ciphertext) -or $record.ciphertext.Length -gt 16384 -or
+                [Convert]::FromBase64String($record.ciphertext).Length -eq 0) { throw 'Credential record is invalid.' }
+            # No token decryption, VM creation or API request belongs to recovery.
+            if (@(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -ne 0) { throw 'Unexpected owned-prefix VM blocks recovery.' }
+            Assert-RunnerClaimOpen # Recheck explicit Stop/journals immediately before start.
+            if ((Get-RunnerConfig).activation -cne 'active' -or (Get-RunnerState) -or
+                (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -cne 'Ready') { return }
+            Start-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop
+        } finally { Exit-RunnerLock $mutex }
+    } finally { Exit-RunnerLock $lifetime }
 }
 
 $actionControl = $null
@@ -1029,13 +1142,10 @@ try { switch ($Action) {
             Assert-StateIdentity $state
             $vm = Get-VM -Name $state.vmName -ErrorAction SilentlyContinue
             Write-Host "VM: $($state.vmName); state: $(if ($vm) { $vm.State } else { 'missing' }); deadline: $($state.deadlineUtc); heartbeat: $($state.heartbeatUtc)."
+            Show-RunnerSessionResources $state $vm
         }
         if ($null -eq $state -and $config.activation -in @('pilot', 'active')) {
-            try {
-                $minimumLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
-                $admission = Get-RunnerMemoryAdmission $minimumLabel
-                if (-not $admission.ready) { Write-Host "Capacity: below $($admission.requiredBytes / 1GB) GiB available physical memory; pickup waits for the minimum eligible profile plus 2 GiB host headroom." }
-            } catch { Write-Host 'Capacity: physical memory inspection unavailable; pickup refuses work.' }
+            Show-RunnerCapacityStatus $config
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
         if ($config.PSObject.Properties.Name -contains 'pilotExpectedSha') { Write-Host "Pilot binding: workflow=$($config.pilotWorkflowPath); SHA=$($config.pilotExpectedSha); label=$($config.pilotLabel)." }

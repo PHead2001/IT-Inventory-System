@@ -4,6 +4,47 @@ The repository routes all six normal CI jobs to fixed light/mid/heavy self-hoste
 
 The design runs one repository-scoped, just-in-time GitHub runner in one fresh Ubuntu 24.04 Hyper-V VM at a time. A persistent Windows SYSTEM supervisor looks for queued jobs carrying one supported resource label, creates a full copy of the clean boot disk for one job, and deletes the VM and per-job files when the runner exits. The single boot-triggered supervisor first recovers the recorded old session under a lock, then begins pickup; recovery failure prevents pickup. A separate SYSTEM watchdog runs every minute and removes the recorded VM when its hard deadline expires or its supervisor/ready network guardian dies. Each VM explicitly disables automatic start and uses TurnOff at host shutdown; both settings are read back before boot. Restart always destroys the old VM before a new one can be launched. No host directory or cross-job package cache is mounted in the VM. The guest receives only its per-VM SSH public key and a one-job JIT configuration; the repository PAT stays on Windows.
 
+## Unattended recovery and capacity status
+
+After exact owned-session cleanup succeeds, the minute watchdog may restart an
+exited **active** supervisor. It first acquires the supervisor lifetime mutex
+without waiting, then the state mutex. A running supervisor or bundle updater
+owns that lifetime mutex and prevents a second start. Recovery requires a secure
+root, coherent protected installed manifest/receipt/dependencies, clear lifecycle
+journals, valid active config, a protected well-formed machine-bound credential
+record, no remaining recorded session or unexpected owned-prefix VM, and a
+supervisor task in `Ready` state. It checks Stop/journals/config/session/task again
+before requesting start. It never decrypts a token, changes activation, installs
+an update, creates a VM or contacts GitHub. The fresh supervisor still performs
+the full claim, host, memory and isolation checks before registration.
+
+An explicit `Stop` remains suspended across watchdog ticks and reboot: recovery
+never deletes `stop.requested`. Only the owner's Start/Restart control clears it.
+Disabled activation, pilot activation (including a consumed pilot), disabled
+tasks, invalid provenance/credentials/journals, unverified VM identity and failed
+cleanup remain closed. Resolve unsafe state through the existing owner controls;
+automatic recovery does not repair or adopt it. Routine API/guest startup errors
+that leave no session retain the supervisor's 30-second retry. Low capacity is a
+wait, not an error. Process exit is retried at the minute watchdog cadence only
+after all recovery guards pass. A broken watchdog/task installation still requires
+owner repair. Scheduled startup/recovery and offline tests do not establish real
+reboot, process-loss or continuous 24/7 operation; record those host checks separately.
+
+Status reports current available physical memory and guest/reserve/admission for
+every applicable fixed profile, so an idle controller does not imply capacity for
+a queued heavy job. The bounded queue traversal records only observed per-profile
+counts, capacity and the last controller poll outcome/timestamp in protected
+`controller-observation.json`. Traversal may stop at the first fitting job; counts
+describe inspected demand, not a complete queue census. Unsupported requests are
+not counted as eligible demand. Status distinguishes this historical poll from
+current capacity. A stale poll during blocking one-job execution is not proof of
+process loss and never triggers cleanup. No token, JIT value, API payload, job ID
+or guest output is recorded. Corrupt/missing observations do not authorize work.
+For a recorded VM, Status reads its startup memory/dynamic flag only after matching
+the recorded name, ownership tag and exact nested configuration path; a mismatch
+or unavailable readback is reported explicitly. Capture this while the guest exists,
+before normal ephemeral cleanup, to establish actual candidate allocation.
+
 ## Owner setup
 
 Double-click `scripts/local-runner/Setup.cmd` and accept the Windows elevation prompt. Its small menu offers **Enable Hyper-V**, **Install or resume**, and **Store GitHub token**. Enabling the feature never restarts Windows automatically; restart if Windows requests it, then open Setup again and choose Install. A failed step stays visible and can be retried from the menu. The defaults target `PHead2001/IT-Inventory-System` and GitHub's default runner group ID `1`; the JIT API will reject an invalid group rather than silently choose another repository. Setup stops if another Windows NAT occupies the host, including one used by Rancher/WSL. It never removes or changes that NAT, the Rancher distribution, or an existing VM.
@@ -47,12 +88,22 @@ bundle and exact-SHA job evidence must establish that cutover separately.
 | ------------------------------ | ------------ | ------------------------------ | ------------------------------------------------------------------- |
 | `it-inventory-light`           | 2 GiB        | 4 GiB                          | Required aggregate, preview discover/provision, production database |
 | `it-inventory-mid`             | 4 GiB        | 6 GiB                          | Application                                                         |
-| `it-inventory-heavy`           | 8 GiB        | 10 GiB                         | Database/Playwright                                                 |
+| `it-inventory-heavy`           | 6 GiB        | 7 GiB                          | Database/Playwright (candidate pending complete real workload)      |
 | `it-inventory-ephemeral`       | 8 GiB        | 10 GiB                         | Legacy workflows                                                    |
 | `it-inventory-pilot-<headSha>` | 8 GiB        | 10 GiB                         | Exact-SHA diagnostic pilot                                          |
 
-The mapping is fixed in host code, including 2 GiB host headroom. Workflow/config
-values cannot set arbitrary guest memory. Each JIT advertises `self-hosted`,
+The mapping and host reserve are fixed in host code. Heavy uses a 6 GiB static guest
+plus 1 GiB unallocated host reserve; light/mid retain their existing 2 GiB reserve.
+Legacy ephemeral and exact-SHA pilot retain 8 GiB guests plus 2 GiB reserves to
+preserve their earlier contracts and diagnostic evidence. The explicit heavy
+candidate addresses admission starvation on a busy 32 GiB development host; it is
+not accepted as viable until a complete real database/Playwright workload passes
+with no checks skipped. Preserve exact job SHA, installed bundle hash/version and
+verified 6 GiB/static-memory readback. A job pass proves workload viability for that
+run, not measured absence of memory pressure/OOM or indefinite availability.
+Admission is not a reservation and does not guarantee sufficient memory for every
+future workload. Workflow/config values cannot set arbitrary guest memory or
+reserve. Each JIT advertises `self-hosted`,
 `Linux`, `X64` and exactly its selected custom profile label. A heavy guest cannot
 be diverted to a normal light or mid job while the database job waits. Legacy and exact-SHA pilot
 sessions each retain their single custom label; normal guests never advertise the
