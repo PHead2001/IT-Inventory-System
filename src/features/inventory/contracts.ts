@@ -34,6 +34,9 @@ export type MutationState =
       version: string;
       changed: boolean;
       needsMetadata?: boolean;
+      eventId?: string;
+      movement?: MoveReceipt;
+      refreshFailed?: boolean;
     }
   | {
       ok: false;
@@ -42,6 +45,13 @@ export type MutationState =
       message: string;
       fieldErrors?: Record<string, string>;
     };
+
+export type MoveReceipt = {
+  itemName: string;
+  quantity: number;
+  source: { id: string; name: string; after: number };
+  destination: { id: string; name: string; after: number };
+};
 
 const uuid = z.uuid();
 const count = z.number().int().min(0).max(2147483647);

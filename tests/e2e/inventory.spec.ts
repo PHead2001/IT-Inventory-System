@@ -50,7 +50,12 @@ async function version(page: Page, value: number) {
     page.getByText(new RegExp('Version ' + value + '$')),
   ).toBeVisible();
 }
-async function createQuantity(page: Page, name: string, count = 0) {
+async function createQuantity(
+  page: Page,
+  name: string,
+  count = 0,
+  locationCode = 'ITC-S1A',
+) {
   await page.goto('/inventory/quantity/new');
   expect(
     await page.evaluate(
@@ -64,7 +69,7 @@ async function createQuantity(page: Page, name: string, count = 0) {
   await form.getByLabel('Name', { exact: true }).fill(name);
   if (count) {
     await form.getByLabel('Initial quantity').fill(String(count));
-    await choose(form, 'Initial location', 'ITC-S1A');
+    await choose(form, 'Initial location', locationCode);
   }
   await confirm(form, 'Create quantity inventory');
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
@@ -75,6 +80,143 @@ async function createQuantity(page: Page, name: string, count = 0) {
     ),
   ).toBe(true);
 }
+
+test('quantity move rejects an overdraw and retains committed receipt through data refresh and reload', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createQuantity(
+    page,
+    'Checkpoint movement ' + crypto.randomUUID(),
+    2,
+    'ITC-RED',
+  );
+  const detailUrl = page.url();
+  let form = await openForm(page, 'Move stock');
+  await choose(form, 'Destination location', 'ITC-BLACK');
+  const amount = form.getByLabel('Quantity to move');
+  await expect(
+    form.getByText('Recorded source availability: 2 units.'),
+  ).toBeVisible();
+  await amount.fill('3');
+  await form.getByRole('button', { name: 'Review move stock' }).click();
+  await expect(form.getByRole('alert')).toContainText('only 2 units');
+  await expect(amount).toBeFocused();
+  await expect(amount).toHaveAttribute('aria-invalid', 'true');
+  await expect(
+    form.getByRole('button', { name: 'Confirm move stock' }),
+  ).toHaveCount(0);
+  await amount.fill('1');
+  await confirm(form, 'Move stock');
+  await version(page, 2);
+  await expect(form.getByRole('status')).toContainText(
+    'Moved 1 unit from Red Container to Black Container',
+  );
+  await expect(form.getByRole('status')).toContainText(
+    'After this move: Red Container 1 unit; Black Container 1 unit',
+  );
+  await expect(form.getByRole('status')).toBeFocused();
+  await form.getByRole('button', { name: 'Refresh balances' }).click();
+  await expect(form.getByRole('status')).toContainText('move completed');
+  await expect(
+    form.getByRole('button', { name: 'Review move stock' }),
+  ).toHaveCount(0);
+  await page.reload();
+  form = await openForm(page, 'Move stock');
+  await expect(form.getByRole('status')).toContainText(
+    'After this move: Red Container 1 unit; Black Container 1 unit',
+  );
+  await form.getByRole('button', { name: 'Move more' }).click();
+  await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+  await choose(form, 'Source location', 'ITC-RED');
+  await choose(form, 'Destination location', 'ITC-BLACK');
+  await form.getByLabel('Quantity to move').fill('1');
+  await confirm(form, 'Move stock');
+  await version(page, 3);
+  await expect(form.getByRole('status')).toContainText(
+    'After this move: Red Container 0 units; Black Container 2 units',
+  );
+  await page.getByRole('link', { name: 'View all item history' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Physically moved', exact: true }),
+  ).toHaveCount(2);
+  await page.goto(detailUrl);
+  const archive = await openForm(
+    page,
+    'Archive quantity definition and clear stock',
+  );
+  await archive
+    .getByLabel('Reason (required)')
+    .fill('Checkpoint fictional fixture cleanup');
+  await archive.getByRole('checkbox', { name: /I understand/ }).check();
+  await archive
+    .getByRole('button', { name: 'Review archive and clear stock' })
+    .click();
+  await archive
+    .getByRole('button', { name: 'Confirm archive and clear stock' })
+    .click();
+  await version(page, 4);
+});
+
+test('a separate authenticated writer changes stock after move review and rejection keeps unsaved intent', async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  await createQuantity(
+    page,
+    'Checkpoint conflict ' + crypto.randomUUID(),
+    2,
+    'ITC-RED',
+  );
+  const detailUrl = page.url();
+  const form = await openForm(page, 'Move stock');
+  await choose(form, 'Destination location', 'ITC-BLACK');
+  await form.getByLabel('Quantity to move').fill('2');
+  await form.getByRole('button', { name: 'Review move stock' }).click();
+  const context = await browser.newContext();
+  try {
+    const writer = await context.newPage();
+    await login(writer);
+    await writer.goto(detailUrl);
+    const correction = await openForm(writer, 'Correct physical count');
+    await choose(correction, 'Counted location', 'ITC-RED');
+    await correction.getByLabel('Observed physical count').fill('1');
+    await correction
+      .getByLabel('Reason (required)')
+      .fill('Independent checkpoint stock recount');
+    await confirm(correction, 'Correct physical count');
+    await version(writer, 2);
+    await form.getByRole('button', { name: 'Confirm move stock' }).click();
+    await expect(form.getByRole('alert')).toContainText('changed');
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('2');
+    await expect(
+      form.getByRole('button', { name: 'Confirm move stock' }),
+    ).toHaveCount(0);
+    await form.getByRole('button', { name: 'Refresh latest record' }).click();
+    await expect(
+      form.getByText('Recorded source availability: 1 units.'),
+    ).toBeVisible();
+    await form.getByRole('button', { name: 'Review move stock' }).click();
+    await expect(form.getByRole('alert')).toContainText('only 1 units');
+    await page.reload();
+    await page.getByRole('link', { name: 'View all item history' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Physically moved', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', {
+        name: 'Physical count corrected',
+        exact: true,
+      }),
+    ).toHaveCount(1);
+  } finally {
+    await context.close();
+  }
+});
 
 test('archiving stocked quantity clears every location in one reviewed operation', async ({
   page,

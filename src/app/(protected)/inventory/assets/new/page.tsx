@@ -12,7 +12,9 @@ export default async function NewAssetPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
-  const returnTo = (await searchParams)?.returnTo;
+  const query = await searchParams;
+  const returnTo = query?.returnTo;
+  const draft = typeof query?.draft === 'string' ? query.draft : undefined;
   const { member } = await requireMember();
   if (member.role !== 'staff')
     return (
@@ -45,6 +47,9 @@ export default async function NewAssetPage({
       </p>
       <div className={`${panel} max-w-5xl`}>
         <MetadataForm
+          key={`${member.user_id}:${draft ?? 'new'}`}
+          creationDraftId={draft}
+          recoveryBackend={process.env.NEXT_PUBLIC_SUPABASE_URL}
           actorId={member.user_id}
           kind="asset"
           categories={categories}

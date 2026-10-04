@@ -14,6 +14,70 @@ import { chooseLocation } from './location-picker';
 const rootCode = 'ITC';
 test.use({ deviceScaleFactor: 2 });
 
+test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/inventory/assets/new');
+  const create = page.getByRole('form', { name: 'Create asset inventory' });
+  const name = 'Checkpoint retired label ' + crypto.randomUUID();
+  await create.getByLabel('Name', { exact: true }).fill(name);
+  await chooseLocation(create, 'Current location', 'ITC-RED');
+  await create.getByRole('button', { name: 'Review metadata' }).click();
+  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  const assetUrl = page.url();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Retire asset$/ })
+    .click();
+  const retire = page.getByRole('form', { name: 'Retire asset', exact: true });
+  await retire
+    .getByLabel('Reason (required)')
+    .fill('Checkpoint fictional retired label fixture');
+  await retire.getByRole('button', { name: 'Review retire asset' }).click();
+  await retire.getByRole('button', { name: 'Confirm retire asset' }).click();
+  await expect(page.getByText(/Retired · Version 2/)).toBeVisible();
+  await page.getByRole('link', { name: 'Print asset label' }).click();
+  await expect(page).toHaveURL(/\/labels$/);
+  const queue = page.getByRole('region', { name: 'Label queue' });
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  await queue.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('retired-label-removed.png'),
+  });
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toHaveCount(0);
+  await page.goto(assetUrl);
+  await page.getByRole('link', { name: 'Print asset label' }).click();
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  await queue.getByRole('button', { name: 'Clear queue' }).click();
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await page.goto('/labels?location=ITC-RED&keep=state#sheet');
+  await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await queue.getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
+});
+
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);

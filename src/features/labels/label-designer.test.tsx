@@ -10,9 +10,19 @@ import { defaultFilters, defaultJob, queueStorageKey } from './queue-model';
 import type { LiveLabel } from './queue.server';
 
 const mocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+  query: '',
   getQueueRecords: vi.fn(),
   searchLabelRecords: vi.fn(),
 }));
+vi.mock('next/navigation', () => {
+  const router = { replace: mocks.replace };
+  return {
+    useRouter: () => router,
+    usePathname: () => '/labels',
+    useSearchParams: () => new URLSearchParams(mocks.query),
+  };
+});
 vi.mock('./queue.server', () => ({
   getQueueRecords: mocks.getQueueRecords,
   searchLabelRecords: mocks.searchLabelRecords,
@@ -101,6 +111,8 @@ const printButton = () =>
   screen.getByRole('button', { name: /Print selected labels/ });
 
 beforeEach(() => {
+  mocks.query = '';
+  mocks.replace.mockReset();
   sessionStorage.clear();
   mocks.getQueueRecords.mockReset().mockResolvedValue([quantity, asset]);
   mocks.searchLabelRecords.mockReset().mockResolvedValue({
@@ -111,6 +123,351 @@ beforeEach(() => {
   });
   vi.stubGlobal('print', vi.fn());
 });
+
+it('consumes a deep-linked addition so removed records do not return after reload', async () => {
+  mocks.query = 'asset=' + assetId + '&keep=filters';
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  const view = render(
+    <LabelDesigner
+      {...props}
+      initial={[asset]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByText('1 distinct records · 1 labels');
+  await waitFor(() =>
+    expect(mocks.replace).toHaveBeenCalledWith('/labels?keep=filters', {
+      scroll: false,
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  await screen.findByText('0 distinct records · 0 labels');
+  view.unmount();
+  mocks.query = 'keep=filters';
+  render(<LabelDesigner {...props} initial={[]} addIntent={[]} />);
+  await screen.findByText('0 distinct records · 0 labels');
+});
+it('removes the last lifecycle warning immediately when its queued record is removed', async () => {
+  const retired = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockResolvedValue([retired]);
+  render(<LabelDesigner {...props} initial={[retired]} />);
+  await screen.findByRole('button', { name: 'Acknowledge changes' });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  expect(
+    screen.queryByRole('button', { name: 'Acknowledge changes' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/Tag or lifecycle state changed for/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/A tag or lifecycle state needs review/),
+  ).not.toBeInTheDocument();
+});
+
+it('hydrates once and cannot re-add a removed initial record from a later server prop refresh', async () => {
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  const view = render(<LabelDesigner {...props} initial={[asset]} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  view.rerender(
+    <LabelDesigner
+      {...props}
+      initial={[{ ...asset, name: 'Refetched laptop' }]}
+    />,
+  );
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries,
+    ).toHaveLength(0),
+  );
+});
+it('removing A during pending A+B cancels A only and retains unrelated copies/settings while B is added once', async () => {
+  const location: LiveLabel = {
+    ...quantity,
+    kind: 'location',
+    key: 'ITC-CLEAR',
+    name: 'Clear Container',
+    path: '/locations/ITC-CLEAR',
+  };
+  const entry = (row: LiveLabel, copies: number) => ({
+    kind: row.kind,
+    key: row.key,
+    copies,
+    baselineTag: row.tag,
+    baselineState: row.state,
+    lifecycleAcknowledged: true,
+  });
+  const savedFilters = { ...defaultFilters, q: 'Saved filters' };
+  const savedJob = { ...defaultJob, size: '70x35', page: 'A4' };
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [entry(asset, 4), entry(location, 3)],
+      filters: savedFilters,
+      job: savedJob,
+    }),
+  );
+  mocks.query =
+    'asset=' + assetId + '&quantity=' + quantityId + '&keep=filters';
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue([location, quantity]);
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[
+        { kind: 'asset', key: assetId },
+        { kind: 'quantity', key: quantityId },
+      ]}
+    />,
+  );
+  await waitFor(() =>
+    expect(mocks.getQueueRecords).toHaveBeenCalledWith([
+      { kind: 'asset', key: assetId },
+      { kind: 'quantity', key: quantityId },
+    ]),
+  );
+  expect(screen.getAllByLabelText('Copies')[0]).toHaveValue(4);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+  await act(async () => finish([asset, quantity]));
+  expect(screen.getByText('2 distinct records · 4 labels')).toBeVisible();
+  await waitFor(() =>
+    expect(mocks.replace).toHaveBeenLastCalledWith('/labels?keep=filters', {
+      scroll: false,
+    }),
+  );
+  const persisted = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(persisted.entries).toMatchObject([
+    { key: location.key, copies: 3 },
+    { key: quantityId, copies: 1 },
+  ]);
+  expect(persisted.filters).toEqual(savedFilters);
+  expect(persisted.job).toEqual(savedJob);
+  expect(
+    persisted.entries.some((row: { key: string }) => row.key === assetId),
+  ).toBe(false);
+});
+it('Clear cancels all pending additions without late-response resurrection', async () => {
+  mocks.query = 'asset=' + assetId;
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByText('Adding linked records after restoring this queue…');
+  fireEvent.click(screen.getByRole('button', { name: 'Clear queue' }));
+  await act(async () => finish([asset]));
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+  expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
+  expect(screen.queryByText(/Tag or lifecycle/)).not.toBeInTheDocument();
+});
+it('retains a failed lookup intent for an explicit retry instead of consuming it prematurely', async () => {
+  mocks.query = 'asset=' + assetId;
+  mocks.getQueueRecords
+    .mockRejectedValueOnce(new Error('lookup failed'))
+    .mockResolvedValue([asset]);
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByRole('button', { name: 'Retry linked additions' });
+  expect(mocks.replace).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry linked additions' }),
+  );
+  await screen.findByText('1 distinct records · 1 labels');
+  expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
+});
+it('permits a new intentional addition of the same record after completed removal', async () => {
+  mocks.query = 'asset=' + assetId;
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  const view = render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByText('1 distinct records · 1 labels');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  mocks.query = '';
+  view.rerender(<LabelDesigner {...props} initial={[]} addIntent={[]} />);
+  await act(async () => {});
+  mocks.query = 'asset=' + assetId;
+  view.rerender(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByText('1 distinct records · 1 labels');
+  expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1);
+});
+it('removing one historical record preserves the remaining record lifecycle safeguard', async () => {
+  const retired = { ...asset, state: 'retired' },
+    archived = { ...quantity, state: 'archived' };
+  mocks.getQueueRecords.mockResolvedValue([retired, archived]);
+  render(<LabelDesigner {...props} initial={[retired, archived]} />);
+  await screen.findByRole('button', { name: 'Acknowledge changes' });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
+  expect(screen.getByRole('alert')).toHaveTextContent('Adapters');
+  expect(screen.getByRole('alert')).not.toHaveTextContent('Laptop');
+  expect(
+    screen.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  expect(printButton()).toBeDisabled();
+});
+it('reports that removal may not survive reload when queue persistence fails', async () => {
+  const view = render(<LabelDesigner {...props} initial={[asset]} />);
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const storage = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new Error('quota');
+    });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  await screen.findByText(/including removals, may not survive reload/);
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+  storage.mockRestore();
+  view.unmount();
+});
+
+it('merges an overlapping manual Add after a linked addition resolves instead of losing the manual result', async () => {
+  mocks.query = 'asset=' + assetId;
+  mocks.searchLabelRecords.mockResolvedValue({
+    rows: [
+      {
+        kind: 'quantity',
+        key: quantityId,
+        name: quantity.name,
+        categoryName: 'Cables',
+        status: 'active',
+        assetTag: null,
+        itemCode: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+        holdingContext: quantity.holdingContext,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  let finishLinked!: (rows: LiveLabel[]) => void,
+    finishManual!: (rows: LiveLabel[]) => void;
+  const linked = new Promise<LiveLabel[]>((resolve) => {
+    finishLinked = resolve;
+  });
+  const manual = new Promise<LiveLabel[]>((resolve) => {
+    finishManual = resolve;
+  });
+  mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+    keys.length > 1
+      ? Promise.resolve([asset, quantity])
+      : keys[0].key === assetId
+        ? linked
+        : manual,
+  );
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  await waitFor(() =>
+    expect(mocks.getQueueRecords).toHaveBeenCalledWith([
+      { kind: 'quantity', key: quantityId },
+    ]),
+  );
+  await act(async () => finishLinked([asset]));
+  expect(screen.getByText('1 distinct records · 1 labels')).toBeVisible();
+  await act(async () => finishManual([quantity]));
+  expect(screen.getByText('2 distinct records · 2 labels')).toBeVisible();
+});
+it('allows Clear to cancel a failed empty-queue linked intent and any subsequent delayed retry', async () => {
+  mocks.query = 'asset=' + assetId;
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockRejectedValueOnce(new Error('failed'))
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByRole('button', { name: 'Retry linked additions' });
+  expect(screen.getByRole('button', { name: 'Clear queue' })).toBeEnabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry linked additions' }),
+  );
+  await screen.findByText('Adding linked records after restoring this queue…');
+  fireEvent.click(screen.getByRole('button', { name: 'Clear queue' }));
+  await act(async () => finish([asset]));
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+  expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
+});
+it.each([{ memberId: 'member-b' }, { origin: 'https://other.example.test' }])(
+  'ignores a late linked lookup after queue scope changes %j',
+  async (scope) => {
+    mocks.query = 'asset=' + assetId;
+    let finish!: (rows: LiveLabel[]) => void;
+    mocks.getQueueRecords.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const view = render(
+      <LabelDesigner
+        {...props}
+        initial={[]}
+        addIntent={[{ kind: 'asset', key: assetId }]}
+      />,
+    );
+    await screen.findByText(
+      'Adding linked records after restoring this queue…',
+    );
+    mocks.query = 'keep=current';
+    view.rerender(
+      <LabelDesigner {...props} {...scope} initial={[]} addIntent={[]} />,
+    );
+    await act(async () => finish([asset]));
+    expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  },
+);
 
 it('searches once after initial hydration and once with restored filters on a revisit', async () => {
   const view = render(<LabelDesigner {...props} initial={[]} />);

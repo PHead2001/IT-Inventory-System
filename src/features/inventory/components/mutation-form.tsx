@@ -1,11 +1,16 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { pickerLocations } from '@/features/locations/picker-model';
-import { submitInventory, findDuplicateSerials } from '../actions';
+import {
+  submitInventory,
+  findDuplicateSerials,
+  reloadMoveReceipt,
+  loadMoveSnapshot,
+} from '../actions';
 import type { MutationCommand, MutationState } from '../contracts';
 import type {
   AssetItem,
@@ -15,6 +20,7 @@ import type {
   QuantityItem,
 } from '../contracts-ui';
 import { field, panel } from './read-ui';
+import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
 
 type Operation = MutationCommand['operation'];
 const labels: Record<string, string> = {
@@ -33,6 +39,8 @@ const labels: Record<string, string> = {
   asset_restore: 'Restore asset',
 };
 type Props = {
+  actorId?: string;
+  backendScope?: string;
   operation: Operation;
   categories: CategoryRef[];
   locations: LocationRef[];
@@ -41,22 +49,197 @@ type Props = {
   currentLocation?: LocationRef;
   balances?: { location: LocationRef; quantity: number }[];
 };
-export function MutationForm({
+export function MutationForm(props: Props) {
+  if (props.operation === 'quantity_move' && props.actorId && props.item)
+    return (
+      <MoveRecovery
+        key={[props.backendScope, props.actorId, props.item.id].join(':')}
+        {...props}
+      />
+    );
+  return <MutationFormFields {...props} />;
+}
+function MoveRecovery(props: Props) {
+  const itemId = props.item!.id;
+  const itemVersion = props.item!.version;
+  const [loaded, setLoaded] = useState(false);
+  const [restored, setRestored] = useState<Extract<
+    MutationState,
+    { ok: true }
+  > | null>(null);
+  const [storageKey, setStorageKey] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [storageWarning, setStorageWarning] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  const [invalidPointer, setInvalidPointer] = useState(false);
+  const [freshStart, setFreshStart] = useState<Awaited<
+    ReturnType<typeof loadMoveSnapshot>
+  > | null>(null);
+  const [recoveryPending, startRecovery] = useTransition();
+  const router = useRouter();
+  useEffect(() => {
+    let current = true;
+    queueMicrotask(async () => {
+      if (!current) return;
+      let raw: string | null = null;
+      try {
+        if (!props.backendScope) throw new Error('Backend scope unavailable');
+        const key = moveCompletionKey(
+          window.location.origin,
+          props.backendScope,
+          props.actorId!,
+          itemId,
+        );
+        raw = sessionStorage.getItem(key);
+        if (current) setStorageKey(key);
+      } catch {
+        if (current) {
+          setStorageWarning(
+            'Browser storage is unavailable. This move receipt cannot be retained through a page reload.',
+          );
+          setLoaded(true);
+        }
+        return;
+      }
+      if (!raw) {
+        if (current) setLoaded(true);
+        return;
+      }
+      let pointer: ReturnType<typeof parseMoveCompletion>;
+      try {
+        pointer = parseMoveCompletion(raw, itemId);
+      } catch {
+        if (current) {
+          setInvalidPointer(true);
+          setError(
+            'The saved reference for a completed move is invalid. Discarding this reference does not undo inventory or history.',
+          );
+        }
+        return;
+      }
+      try {
+        const movement = await reloadMoveReceipt({
+          ...pointer,
+          expectedActorId: props.actorId,
+        });
+        if (current) {
+          setRestored({
+            ok: true,
+            entityId: pointer.entityId,
+            eventId: pointer.eventId,
+            version: String(itemVersion),
+            changed: true,
+            movement,
+          });
+          setError('');
+          setInvalidPointer(false);
+          setLoaded(true);
+        }
+      } catch {
+        if (current)
+          setError(
+            'The previous move receipt could not be verified. Retry loading it before starting another move.',
+          );
+      }
+    });
+    return () => {
+      current = false;
+    };
+  }, [attempt, props.actorId, props.backendScope, itemId, itemVersion]);
+  const discardInvalidPointer = () => {
+    if (!invalidPointer || !storageKey || recoveryPending) return;
+    startRecovery(async () => {
+      try {
+        const snapshot = await loadMoveSnapshot({
+          entityId: itemId,
+          expectedActorId: props.actorId,
+        });
+        sessionStorage.removeItem(storageKey);
+        setFreshStart(snapshot);
+        setRestored(null);
+        setError('');
+        setInvalidPointer(false);
+        setLoaded(true);
+        try {
+          router.refresh();
+        } catch {
+          setStorageWarning(
+            'The invalid receipt reference was discarded and current balances were verified. The page could not refresh.',
+          );
+        }
+      } catch {
+        setError(
+          'The invalid reference is retained. Current balances or browser storage could not be verified. Try discarding the reference again.',
+        );
+      }
+    });
+  };
+  if (!loaded)
+    return (
+      <div className="space-y-3">
+        {error ? (
+          <>
+            <p role="alert" className="text-sm text-red-300">
+              {error}
+            </p>
+            <Button
+              type="button"
+              disabled={recoveryPending}
+              onClick={() => {
+                if (invalidPointer) {
+                  discardInvalidPointer();
+                  return;
+                }
+                setError('');
+                setAttempt((n) => n + 1);
+              }}
+            >
+              {invalidPointer
+                ? 'Discard invalid receipt reference'
+                : 'Retry loading move receipt'}
+            </Button>
+          </>
+        ) : (
+          <p role="status">Checking the previous move receipt…</p>
+        )}
+      </div>
+    );
+  return (
+    <MutationFormFields
+      {...props}
+      initialCompletion={restored}
+      completionStorageKey={storageKey}
+      initialStorageWarning={storageWarning}
+      freshStart={freshStart}
+    />
+  );
+}
+function MutationFormFields({
+  actorId,
   operation,
   categories,
   locations,
   item: latestItem,
   asset: latestAsset,
   currentLocation: latestLocation,
-  balances: latestBalances = [],
-}: Props) {
+  balances: latestBalances,
+  initialCompletion = null,
+  completionStorageKey = null,
+  initialStorageWarning = '',
+  freshStart = null,
+}: Props & {
+  initialCompletion?: Extract<MutationState, { ok: true }> | null;
+  completionStorageKey?: string | null;
+  initialStorageWarning?: string;
+  freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
+}) {
   const router = useRouter();
   // The editable values and their optimistic-concurrency baseline travel together.
   const [baseline, setBaseline] = useState(() => ({
-    item: latestItem,
+    item: freshStart?.item ?? latestItem,
     asset: latestAsset,
     currentLocation: latestLocation,
-    balances: latestBalances,
+    balances: freshStart?.balances ?? latestBalances ?? [],
   }));
   const { item, asset, currentLocation, balances } = baseline;
   const entity = item ?? asset;
@@ -78,7 +261,7 @@ export function MutationForm({
     asset_tag: asset?.assetTag ?? '',
     serial_number: asset?.serialNumber ?? '',
     initial_quantity: '0',
-    quantity: '1',
+    quantity: freshStart ? '' : '1',
     observed_quantity: '0',
     source_location_id:
       balances.filter((b) => b.quantity > 0).length === 1
@@ -90,7 +273,8 @@ export function MutationForm({
     reason: '',
     move_all: 'false',
   });
-  const [state, setState] = useState<MutationState | null>(null);
+  const [state, setState] = useState<MutationState | null>(initialCompletion);
+  const [storageWarning, setStorageWarning] = useState(initialStorageWarning);
   const [locationError, setLocationError] = useState('');
   const [review, setReview] = useState(false);
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
@@ -98,6 +282,17 @@ export function MutationForm({
   );
   const [duplicates, setDuplicates] = useState<DuplicateSerial[]>([]);
   const [pending, startTransition] = useTransition();
+  const inFlight = useRef(false);
+  const submitted = useRef<MutationCommand | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [amountError, setAmountError] = useState('');
+  const [completedError, setCompletedError] = useState('');
+  const [reviewKey, setReviewKey] = useState('');
+  const completionRef = useRef<HTMLDivElement>(null);
+  const completed = operation === 'quantity_move' && state?.ok === true;
+  useEffect(() => {
+    if (completed) completionRef.current?.focus();
+  }, [completed]);
   if (
     refreshRequested &&
     latestEntity &&
@@ -107,7 +302,7 @@ export function MutationForm({
       item: latestItem,
       asset: latestAsset,
       currentLocation: latestLocation,
-      balances: latestBalances,
+      balances: latestBalances ?? [],
     });
     setRefreshRequested(false);
     if (!thresholdTouched && latestItem)
@@ -118,9 +313,9 @@ export function MutationForm({
             ? ''
             : String(latestItem.reorderThreshold),
       }));
-    setRefreshedVersion(latestEntity.version);
+    setRefreshedVersion(state?.ok ? null : latestEntity.version);
     setReview(false);
-    setState(null);
+    if (!state?.ok) setState(null);
   }
   const metadata = [
     'quantity_create',
@@ -131,6 +326,45 @@ export function MutationForm({
   const serialized = operation.startsWith('asset_');
   const creating = operation.endsWith('_create');
   const moving = operation === 'quantity_move';
+  const sourceBalance = balances.find(
+    (b) => b.location.id === values.source_location_id,
+  );
+  const snapshotKey = (
+    record: QuantityItem | undefined,
+    rows: Props['balances'],
+  ) =>
+    JSON.stringify({
+      id: record?.id,
+      version: record?.version,
+      archived: record?.archived,
+      source: rows?.find((b) => b.location.id === values.source_location_id)
+        ?.quantity,
+      destination:
+        rows === undefined
+          ? undefined
+          : (rows.find((b) => b.location.id === values.destination_location_id)
+              ?.quantity ?? 0),
+      eligible:
+        locations.find((l) => l.id === values.destination_location_id)
+          ?.active &&
+        locations.find((l) => l.id === values.destination_location_id)
+          ?.can_hold_inventory,
+    });
+  const baselineKey = snapshotKey(item, balances);
+  const moveSnapshotChanged =
+    moving &&
+    (latestBalances === undefined ||
+      baselineKey !== snapshotKey(latestItem, latestBalances));
+  const currentReviewKey = JSON.stringify({
+    operation,
+    values,
+    snapshot: baselineKey,
+  });
+  const validReview =
+    review &&
+    (!moving || (!moveSnapshotChanged && reviewKey === currentReviewKey));
+  if (moving && review && moveSnapshotChanged && !uncertain && !completed)
+    setReview(false);
   const requiresReason = [
     'quantity_receive',
     'quantity_adjust',
@@ -146,6 +380,7 @@ export function MutationForm({
     setReview(false);
     setState(null);
     setLocationError('');
+    setAmountError('');
     if (name === 'serial_number') setDuplicates([]);
   };
   const input = (
@@ -171,6 +406,16 @@ export function MutationForm({
         min={options.numeric ? (options.min ?? 0) : undefined}
         max={options.numeric ? 2147483647 : undefined}
         step={options.numeric ? 1 : undefined}
+        aria-invalid={
+          moving && name === 'quantity' && !!amountError ? true : undefined
+        }
+        aria-describedby={
+          moving && name === 'quantity'
+            ? operation +
+              '-availability' +
+              (amountError ? ' ' + operation + '-quantity-error' : '')
+            : undefined
+        }
       />
     </div>
   );
@@ -207,7 +452,7 @@ export function MutationForm({
       }
       required={required}
       error={
-        locationError && !values[name]
+        locationError
           ? locationError
           : state && !state.ok
             ? state.fieldErrors?.[name]
@@ -403,7 +648,53 @@ export function MutationForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || refreshRequested) return;
+    if (pending || inFlight.current || refreshRequested || completed) return;
+    if (!uncertain && moving) {
+      if (
+        moveSnapshotChanged ||
+        (state &&
+          !state.ok &&
+          ['stale_version', 'insufficient_stock'].includes(state.code))
+      ) {
+        setReview(false);
+        setState({
+          ok: false,
+          kind: 'domain',
+          code: 'stale_version',
+          message:
+            'Stock changed. Refresh balances and review your entered move again.',
+        });
+        return;
+      }
+      const amount =
+        values.move_all === 'true'
+          ? sourceBalance?.quantity
+          : Number(values.quantity);
+      const invalid =
+        !sourceBalance || sourceBalance.quantity <= 0
+          ? 'Choose a source with recorded stock before reviewing.'
+          : values.move_all !== 'true' &&
+              (!values.quantity.trim() ||
+                !Number.isSafeInteger(amount) ||
+                amount! <= 0 ||
+                amount! > 2147483647)
+            ? 'Enter a whole number of units between 1 and 2,147,483,647.'
+            : amount! > sourceBalance.quantity
+              ? `This source has only ${sourceBalance.quantity} units available. Enter no more than ${sourceBalance.quantity}.`
+              : amount! +
+                    (balances.find(
+                      (b) => b.location.id === values.destination_location_id,
+                    )?.quantity ?? 0) >
+                  2147483647
+                ? 'This move would exceed the destination quantity limit. Enter a smaller amount.'
+                : '';
+      if (invalid) {
+        setAmountError(invalid);
+        setReview(false);
+        document.getElementById(operation + '-quantity')?.focus();
+        return;
+      }
+    }
     const needed =
       operation === 'quantity_create'
         ? Number(values.initial_quantity) > 0
@@ -421,7 +712,7 @@ export function MutationForm({
               ].includes(operation)
             ? ['location_id']
             : [];
-    for (const name of needed) {
+    for (const name of uncertain ? [] : needed) {
       const source = name === 'source_location_id';
       const valid = pickerLocations(
         locations,
@@ -451,7 +742,8 @@ export function MutationForm({
         return;
       }
     }
-    if (!review) {
+    if (!uncertain && !validReview) {
+      setReviewKey(currentReviewKey);
       if (serialized && metadata && values.serial_number.trim()) {
         startTransition(async () => {
           try {
@@ -472,22 +764,72 @@ export function MutationForm({
       } else setReview(true);
       return;
     }
-    const commandPayload = payload();
+    const commandPayload =
+      uncertain && submitted.current ? submitted.current.payload : payload();
     const key = JSON.stringify({ operation, payload: commandPayload });
-    const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
+    const requestId =
+      uncertain && submitted.current
+        ? submitted.current.requestId
+        : receipt?.key === key
+          ? receipt.id
+          : crypto.randomUUID();
     setReceipt({ key, id: requestId });
+    const command =
+      uncertain && submitted.current
+        ? submitted.current
+        : ({
+            operation,
+            requestId,
+            ...(actorId ? { expectedActorId: actorId } : {}),
+            payload: commandPayload,
+          } as MutationCommand);
+    submitted.current = command;
+    inFlight.current = true;
     startTransition(async () => {
       try {
-        const result = await submitInventory({
-          operation,
-          requestId,
-          payload: commandPayload,
-        } as MutationCommand);
+        const result = await submitInventory(command);
         setState(result);
+        if (moving) {
+          const unresolved =
+            !result.ok &&
+            (result.kind === 'unexpected' ||
+              (uncertain &&
+                ['forbidden', 'actor_changed', 'idempotency_conflict'].includes(
+                  result.code,
+                )));
+          setUncertain(unresolved);
+          if (!result.ok && !unresolved) {
+            setReview(false);
+            submitted.current = null;
+            setReceipt(null);
+          }
+        }
         if (result.ok) {
           setReview(false);
-          if (entity && result.changed) setRefreshRequested(true);
-          router.refresh();
+          if (moving && completionStorageKey && result.eventId) {
+            try {
+              sessionStorage.setItem(
+                completionStorageKey,
+                JSON.stringify({
+                  entityId: result.entityId,
+                  eventId: result.eventId,
+                }),
+              );
+            } catch {
+              setStorageWarning(
+                'The move is saved. Browser storage is unavailable, so its receipt cannot be retained through a page reload.',
+              );
+            }
+          }
+          if (!moving && entity && result.changed) setRefreshRequested(true);
+          try {
+            router.refresh();
+          } catch {
+            if (moving)
+              setCompletedError(
+                'The move is saved. Current balances could not be refreshed.',
+              );
+          }
           if (creating)
             router.push(
               '/inventory/' +
@@ -497,6 +839,7 @@ export function MutationForm({
             );
         }
       } catch {
+        if (moving) setUncertain(true);
         setState({
           ok: false,
           kind: 'unexpected',
@@ -504,6 +847,80 @@ export function MutationForm({
           message:
             'The result could not be confirmed. Keep these values and retry safely.',
         });
+      } finally {
+        inFlight.current = false;
+      }
+    });
+  };
+  const refreshMove = (startNew: boolean) => {
+    if (pending || inFlight.current || !item || !actorId) return;
+    inFlight.current = true;
+    startTransition(async () => {
+      try {
+        const fresh = await loadMoveSnapshot({
+          entityId: item.id,
+          expectedActorId: submitted.current?.expectedActorId ?? actorId,
+        });
+        if (state?.ok && Number(state.version) > fresh.item.version)
+          throw new Error('Stale read');
+        setBaseline({
+          item: fresh.item,
+          asset: latestAsset,
+          currentLocation: latestLocation,
+          balances: fresh.balances,
+        });
+        setRefreshRequested(false);
+        setRefreshedVersion(null);
+        setCompletedError('');
+        setReview(false);
+        if (startNew) {
+          if (completionStorageKey) {
+            try {
+              sessionStorage.removeItem(completionStorageKey);
+            } catch {
+              setStorageWarning(
+                'The saved receipt pointer could not be cleared. A page reload may restore the previous move receipt.',
+              );
+            }
+          }
+          setValues((v) => ({
+            ...v,
+            quantity: '',
+            move_all: 'false',
+            reason: '',
+          }));
+          setState(null);
+          setReceipt(null);
+          submitted.current = null;
+          setUncertain(false);
+          setAmountError('');
+        } else if (!state?.ok) setState(null);
+        router.refresh();
+      } catch {
+        setCompletedError(
+          'Current balances could not be loaded. Keep this move and try Refresh balances again.',
+        );
+      } finally {
+        inFlight.current = false;
+      }
+    });
+  };
+  const refreshReceipt = () => {
+    if (!state?.ok || !state.eventId || !actorId || pending) return;
+    const saved = state;
+    startTransition(async () => {
+      try {
+        const movement = await reloadMoveReceipt({
+          entityId: saved.entityId,
+          eventId: saved.eventId,
+          expectedActorId: submitted.current?.expectedActorId ?? actorId,
+        });
+        setState({ ...saved, movement });
+        setCompletedError('');
+      } catch {
+        setCompletedError(
+          'The move is saved. Its receipt could not be loaded; try again.',
+        );
       }
     });
   };
@@ -512,8 +929,13 @@ export function MutationForm({
       onSubmit={submit}
       aria-label={labels[operation]}
       className="space-y-4"
+      noValidate={moving}
     >
-      <fieldset disabled={pending} className="space-y-4">
+      <fieldset
+        disabled={pending || (moving && uncertain)}
+        className="space-y-4"
+        hidden={completed}
+      >
         {metadata && (
           <>
             {input('name', 'Name', { required: true, max: 200 })}
@@ -643,6 +1065,18 @@ export function MutationForm({
           <>
             {selectLocation('source_location_id', 'Source location', true)}
             {selectLocation('destination_location_id', 'Destination location')}
+            <p
+              id={operation + '-availability'}
+              className="text-sm text-slate-400"
+            >
+              Recorded source availability:{' '}
+              {latestBalances === undefined
+                ? 'unavailable'
+                : sourceBalance
+                  ? `${sourceBalance.quantity} units`
+                  : 'choose a source'}
+              .
+            </p>
             <label className="flex min-h-11 items-center gap-3">
               <input
                 type="checkbox"
@@ -659,6 +1093,15 @@ export function MutationForm({
                 numeric: true,
                 min: 1,
               })}
+            {amountError && (
+              <p
+                id={operation + '-quantity-error'}
+                role="alert"
+                className="text-sm text-red-300"
+              >
+                {amountError}
+              </p>
+            )}
           </>
         )}
         {operation === 'quantity_adjust' && (
@@ -704,13 +1147,13 @@ export function MutationForm({
           Loading the latest record before another submission…
         </p>
       )}
-      {refreshedVersion !== null && (
+      {refreshedVersion !== null && !completed && (
         <p className="text-sm text-amber-200">
           Baseline refreshed to version {refreshedVersion}. Your entries are
           preserved; review them against the updated record before confirming.
         </p>
       )}
-      {review && (
+      {validReview && !completed && (
         <section aria-label="Review changes" className={panel}>
           <h3 className="font-semibold">Review before saving</h3>
           <ul className="mt-2 space-y-2 text-sm">
@@ -734,7 +1177,8 @@ export function MutationForm({
                 {key}: {value}
               </p>
             ))}
-          {state.code === 'stale_version' && (
+          {(state.code === 'stale_version' ||
+            (moving && state.code === 'insufficient_stock')) && (
             <>
               <p>
                 Another change was saved. Refresh the latest record, review the
@@ -745,6 +1189,10 @@ export function MutationForm({
                 type="button"
                 variant="outline"
                 onClick={() => {
+                  if (moving && actorId) {
+                    refreshMove(false);
+                    return;
+                  }
                   setReview(false);
                   setRefreshRequested(true);
                   router.refresh();
@@ -757,19 +1205,108 @@ export function MutationForm({
         </div>
       )}
       {state?.ok && (
-        <p role="status" className="text-sm text-cyan-200">
-          {state.changed
-            ? 'Saved successfully.'
-            : 'No change: the recorded state already matches.'}
+        <div
+          ref={completionRef}
+          tabIndex={-1}
+          role="status"
+          className="space-y-2 text-sm text-cyan-200"
+        >
+          {moving ? (
+            <>
+              <p className="font-semibold">
+                {state.movement?.itemName ?? item?.name}: move completed.
+              </p>
+              {state.movement ? (
+                <>
+                  <p>
+                    Moved {state.movement.quantity}{' '}
+                    {state.movement.quantity === 1 ? 'unit' : 'units'} from{' '}
+                    {state.movement.source.name} to{' '}
+                    {state.movement.destination.name}.
+                  </p>
+                  <p>
+                    After this move: {state.movement.source.name}{' '}
+                    {state.movement.source.after}{' '}
+                    {state.movement.source.after === 1 ? 'unit' : 'units'};{' '}
+                    {state.movement.destination.name}{' '}
+                    {state.movement.destination.after}{' '}
+                    {state.movement.destination.after === 1 ? 'unit' : 'units'}.
+                  </p>
+                  <p>Later transactions may change current balances.</p>
+                </>
+              ) : (
+                <p>
+                  The move is saved. Its committed receipt is currently
+                  unavailable.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              {state.changed
+                ? 'Saved successfully.'
+                : 'No change: the recorded state already matches.'}
+            </>
+          )}
+        </div>
+      )}
+      {completedError && (
+        <p role="alert" className="text-sm text-red-300">
+          {completedError}
         </p>
       )}
-      <Button type="submit" disabled={pending || refreshRequested}>
-        {pending
-          ? 'Saving…'
-          : review
-            ? 'Confirm ' + labels[operation].toLowerCase()
-            : 'Review ' + labels[operation].toLowerCase()}
-      </Button>
+      {storageWarning && (
+        <p role="alert" className="text-sm text-amber-200">
+          {storageWarning}
+        </p>
+      )}
+      {completed ? (
+        <div className="flex flex-wrap gap-3">
+          <Button
+            type="button"
+            disabled={pending}
+            onClick={() => refreshMove(true)}
+          >
+            Move more
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            onClick={() => refreshMove(false)}
+          >
+            Refresh balances
+          </Button>
+          {!state.movement && state.eventId && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={refreshReceipt}
+            >
+              Load move receipt
+            </Button>
+          )}
+        </div>
+      ) : (
+        <>
+          {moving && moveSnapshotChanged && !uncertain && (
+            <p role="status" className="text-sm text-amber-200">
+              Recorded stock changed. Refresh the latest record before
+              reviewing.
+            </p>
+          )}
+          <Button type="submit" disabled={pending || refreshRequested}>
+            {pending
+              ? 'Saving…'
+              : moving && uncertain
+                ? 'Retry this move safely'
+                : validReview
+                  ? 'Confirm ' + labels[operation].toLowerCase()
+                  : 'Review ' + labels[operation].toLowerCase()}
+          </Button>
+        </>
+      )}
     </form>
   );
 }

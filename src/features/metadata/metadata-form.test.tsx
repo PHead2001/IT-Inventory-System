@@ -16,12 +16,16 @@ import {
   buildCustomPatch,
 } from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
+import { readCreation, writeCreation } from './creation-recovery';
 
-const { push, refresh } = vi.hoisted(() => ({
+const { push, refresh, replace } = vi.hoisted(() => ({
   push: vi.fn(),
   refresh: vi.fn(),
+  replace: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh, push, replace }),
+}));
 vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
@@ -103,6 +107,8 @@ const item = {
   needsMetadata: false,
 };
 const props = {
+  actorId: '00000000-0000-4000-8000-000000000009',
+  recoveryBackend: 'http://127.0.0.1:54321',
   kind: 'quantity' as const,
   categories: [{ id: categoryId, name: 'Parts', active: true }],
   locations: [],
@@ -111,6 +117,7 @@ const props = {
 describe('published metadata form', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    sessionStorage.clear();
     vi.mocked(refreshMetadataRecord).mockResolvedValue({
       ok: true,
       record: item,
@@ -118,6 +125,352 @@ describe('published metadata form', () => {
       draftForm: form(),
     });
   });
+  it('recovers exact creation inputs after navigation remount and never restores an explicitly discarded instance', async () => {
+    const creation = {
+      ...props,
+      item: undefined,
+      actorId: item.id,
+      recoveryBackend: 'http://127.0.0.1:54321',
+      creationDraftId: secondRevision,
+      forms: { [categoryId]: form() },
+    };
+    const first = render(<MetadataForm {...creation} />);
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Recovered cable' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox'));
+    first.unmount();
+    const second = render(<MetadataForm {...creation} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Name')).toHaveValue('Recovered cable'),
+    );
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    second.unmount();
+    render(<MetadataForm {...creation} />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/This creation draft was discarded/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByDisplayValue('Recovered cable')).toBeNull();
+  });
+  it('recovers a submitted creation and retries its exact identity instead of creating another operation', async () => {
+    const creation = {
+      ...props,
+      item: undefined,
+      actorId: item.id,
+      recoveryBackend: 'http://127.0.0.1:54321',
+      creationDraftId: secondRevision,
+      forms: { [categoryId]: form() },
+    };
+    vi.mocked(submitInventory).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    const first = render(<MetadataForm {...creation} />);
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'One creation' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeInTheDocument(),
+    );
+    const command = vi.mocked(submitInventory).mock.calls[0][0];
+    first.unmount();
+    render(<MetadataForm {...creation} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    vi.mocked(submitInventory).mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(command);
+  });
+  it('blocks first dispatch when storage fails and retains input with a truthful navigation limitation', () => {
+    const failure = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('quota', 'QuotaExceededError');
+      });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Keep in memory' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    expect(submitInventory).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Name')).toHaveValue('Keep in memory');
+    expect(
+      screen.getByText(/browser and internal navigation may lose/),
+    ).toBeInTheDocument();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    failure.mockRestore();
+  });
+  it('offers another pending draft explicitly while canonical entry starts empty and another actor sees none', () => {
+    const first = render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Separate pending draft' },
+    });
+    first.unmount();
+    const second = render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('');
+    expect(
+      screen.getByRole('button', { name: 'Recover Separate pending draft' }),
+    ).toBeInTheDocument();
+    second.unmount();
+    render(
+      <MetadataForm
+        {...props}
+        actorId={firstRevision}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('');
+    expect(screen.queryByText('Separate pending draft')).toBeNull();
+  });
+  it('retains incomplete datetime wall/zone input and requires explicit review of a changed recovered schema', () => {
+    const current = form();
+    current.published_definition.fields[0] = {
+      ...current.published_definition.fields[0],
+      type: 'datetime',
+      required: false,
+      label: 'Observed at',
+    };
+    const first = render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Incomplete time' },
+    });
+    fireEvent.change(screen.getByLabelText('Date'), {
+      target: { value: '2026-10-03' },
+    });
+    fireEvent.change(screen.getByLabelText('Display timezone'), {
+      target: { value: 'America/Chicago' },
+    });
+    first.unmount();
+    const changed = {
+      ...current,
+      published_revision_id: secondRevision,
+      published_number: '2',
+    };
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: changed }}
+      />,
+    );
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-10-03');
+    expect(screen.getByLabelText('Time')).toHaveValue('');
+    expect(screen.getByLabelText('Display timezone')).toHaveValue(
+      'America/Chicago',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review updated fields' }),
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('Incomplete time');
+    expect(screen.getByText('Choose a date and time.')).toBeInTheDocument();
+  });
+  it('locks an older editing page on pageshow when its exact draft now has a submitted command', async () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Submitted elsewhere' },
+    });
+    const scope = {
+      origin: window.location.origin,
+      backend: props.recoveryBackend,
+      actor: props.actorId,
+      kind: 'quantity' as const,
+      site: null,
+    };
+    const envelope = readCreation(scope, secondRevision).envelope!;
+    const command = {
+      operation: 'quantity_create_v2' as const,
+      requestId: otherCategory,
+      expectedActorId: props.actorId,
+      payload: {
+        name: 'Submitted elsewhere',
+        description: null,
+        category_id: categoryId,
+        manufacturer: null,
+        model: null,
+        initial_quantity: 0,
+        initial_location_id: null,
+        expected_published_revision_id: firstRevision,
+        custom_patch: { set: { [fieldId]: false }, unset: [] },
+      },
+    };
+    expect(writeCreation({ ...envelope, status: 'submitted', command })).toBe(
+      true,
+    );
+    fireEvent(window, new Event('pageshow'));
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    vi.mocked(submitInventory).mockRejectedValueOnce(
+      new Error('still unknown'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledWith(command));
+  });
+  it('keeps the durable submitted request when success-marker storage fails and safely resolves that same request', async () => {
+    let acknowledge!: (
+      result: Awaited<ReturnType<typeof submitInventory>>,
+    ) => void;
+    vi.mocked(submitInventory).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const creation = {
+      ...props,
+      item: undefined,
+      creationDraftId: secondRevision,
+      forms: { [categoryId]: form() },
+    };
+    const first = render(<MetadataForm {...creation} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Acknowledged once' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    const original = vi.mocked(submitInventory).mock.calls[0][0];
+    const raw = sessionStorage.getItem(sessionStorage.key(0)!);
+    const failure = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('quota', 'QuotaExceededError');
+      });
+    await act(async () =>
+      acknowledge({ ok: true, entityId: item.id, version: '1', changed: true }),
+    );
+    expect(sessionStorage.getItem(sessionStorage.key(0)!)).toBe(raw);
+    expect(push).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('button', { name: 'Retry same save' }),
+    ).toBeInTheDocument();
+    failure.mockRestore();
+    vi.mocked(submitInventory).mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith(`/inventory/quantity/${item.id}`),
+    );
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(original);
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+    first.unmount();
+    render(<MetadataForm {...creation} />);
+    expect(
+      screen.getByText('This creation draft was already saved.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+  });
+  it.each(['quantity', 'asset'] as const)(
+    'recovers %s site-opening context, raw notes and amount without selecting a storage holding',
+    (kind) => {
+      const creation = {
+        ...props,
+        kind,
+        item: undefined,
+        creationDraftId: secondRevision,
+        openingSite: { id: item.id, code: 'SITE-A', name: 'Site A' },
+        forms: { [categoryId]: form() },
+      };
+      const first = render(<MetadataForm {...creation} />);
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Opening equipment' },
+      });
+      fireEvent.change(screen.getByLabelText('Reason (optional)'), {
+        target: { value: '  Original note  ' },
+      });
+      fireEvent.change(screen.getByLabelText('Reference (optional)'), {
+        target: { value: '  Opening reference  ' },
+      });
+      if (kind === 'quantity')
+        fireEvent.change(screen.getByLabelText('Units already at this site'), {
+          target: { value: '3' },
+        });
+      first.unmount();
+      render(<MetadataForm {...creation} />);
+      expect(screen.getByLabelText('Name')).toHaveValue('Opening equipment');
+      expect(screen.getByLabelText('Reason (optional)')).toHaveValue(
+        '  Original note  ',
+      );
+      expect(screen.getByLabelText('Reference (optional)')).toHaveValue(
+        '  Opening reference  ',
+      );
+      if (kind === 'quantity')
+        expect(screen.getByLabelText('Units already at this site')).toHaveValue(
+          3,
+        );
+      expect(screen.queryByLabelText('Initial location')).toBeNull();
+    },
+  );
   it('omits a section whose only control does not apply to an asset while keeping quantity item code', () => {
     const current = form();
     current.published_definition.layout.push({
@@ -397,6 +750,8 @@ describe('published metadata form', () => {
     });
     render(
       <MetadataForm
+        actorId={props.actorId}
+        recoveryBackend={props.recoveryBackend}
         kind="quantity"
         categories={props.categories}
         locations={[]}
@@ -445,6 +800,8 @@ describe('published metadata form', () => {
     });
     render(
       <MetadataForm
+        actorId={props.actorId}
+        recoveryBackend={props.recoveryBackend}
         kind="asset"
         categories={props.categories}
         locations={[]}
@@ -1168,7 +1525,7 @@ describe('published metadata form', () => {
     const current = form();
     current.published_definition.fields[0].default = false;
     current.published_definition.fields[0].required = false;
-    render(
+    const first = render(
       <MetadataForm
         {...props}
         item={undefined}
@@ -1181,6 +1538,14 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+    first.unmount();
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: current }}
+      />,
+    );
     push.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Clear answer' }));
     expect(screen.getByRole('checkbox')).toHaveAttribute(

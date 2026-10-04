@@ -1,6 +1,15 @@
 'use client';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type SetStateAction,
+} from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
 import type {
@@ -17,6 +26,7 @@ import {
 } from './queue.server';
 import { LabelSheet, type LabelRecord } from './label-sheet';
 import styles from './label-workspace.module.css';
+import { consumedLabelUrl } from './add-intent';
 import {
   addEntry,
   defaultFilters,
@@ -84,6 +94,7 @@ function expandLabels(entries: QueueEntry[], rows: LiveLabel[]): LabelRecord[] {
   );
 }
 const emptyInitial: LiveLabel[] = [];
+const emptyIntent: QueueKey[] = [];
 
 type LabelDesignerProps = {
   locations: LocationRef[];
@@ -92,6 +103,7 @@ type LabelDesignerProps = {
   memberId: string;
   preview: boolean;
   initial?: LiveLabel[];
+  addIntent?: QueueKey[];
   defaults?: JobSettings;
 };
 
@@ -111,10 +123,35 @@ function LabelDesignerWorkspace({
   memberId,
   preview,
   initial = emptyInitial,
+  addIntent = emptyIntent,
   defaults = defaultJob,
 }: LabelDesignerProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const query = useSearchParams().toString();
+  const intentSignature = JSON.stringify(addIntent);
+  const [intentRetry, setIntentRetry] = useState(0);
+  const [intentPending, setIntentPending] = useState(false);
+  const [intentOutstanding, setIntentOutstanding] = useState(
+    addIntent.length > 0,
+  );
+  const [intentError, setIntentError] = useState('');
+  const handledIntent = useRef(new Set<string>());
+  const cancelledIntent = useRef(new Set<string>());
+  const manualClearEpoch = useRef(0);
+  const cancelledManualAdds = useRef(new Set<string>());
+  const initialHydration = useRef({ initial, defaults });
   const storageKey = queueStorageKey(origin, memberId);
-  const [entries, setEntries] = useState<QueueEntry[]>(initial.map(entryFor));
+  const [entries, setEntriesState] = useState<QueueEntry[]>(
+    initial.map(entryFor),
+  );
+  const currentEntries = useRef(initial.map(entryFor));
+  const setEntries = useCallback((update: SetStateAction<QueueEntry[]>) => {
+    const next =
+      typeof update === 'function' ? update(currentEntries.current) : update;
+    currentEntries.current = next;
+    setEntriesState(next);
+  }, []);
   const [live, setLive] = useState<LiveLabel[]>(initial);
   const [filters, setFilters] = useState<LabelSearchFilters>(defaultFilters);
   const [draft, setDraft] = useState<LabelSearchFilters>(defaultFilters);
@@ -153,6 +190,7 @@ function LabelDesignerWorkspace({
   useEffect(
     () => () => {
       queueEpoch.current++;
+      manualClearEpoch.current++;
       activePrintAbort.current?.abort();
       clearPrintAuthorization.current?.();
     },
@@ -167,13 +205,16 @@ function LabelDesignerWorkspace({
       if (!current) return;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
-        stored = parseStoredQueue(sessionStorage.getItem(storageKey), defaults);
+        stored = parseStoredQueue(
+          sessionStorage.getItem(storageKey),
+          initialHydration.current.defaults,
+        );
       } catch {
         setStorageUnavailable(true);
       }
       if (stored) {
         const merged = [...stored.entries];
-        for (const record of initial) {
+        for (const record of initialHydration.current.initial) {
           if (
             !merged.some(
               (entry) => queueIdentity(entry) === queueIdentity(record),
@@ -192,7 +233,7 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [storageKey, initial, defaults]);
+  }, [storageKey, setEntries]);
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -222,7 +263,7 @@ function LabelDesignerWorkspace({
     };
   }, [filters, hydrated]);
 
-  const invalidate = () => {
+  const invalidate = useCallback(() => {
     queueEpoch.current++;
     activePrintAbort.current?.abort();
     clearPrintAuthorization.current?.();
@@ -230,23 +271,181 @@ function LabelDesignerWorkspace({
     setRefreshFailed(false);
     setFallbackPending(false);
     setFormatAcknowledged(false);
+  }, [setFallbackPending, setFormatAcknowledged]);
+  const consumeIntent = useCallback(() => {
+    const next = consumedLabelUrl(
+      pathname,
+      query,
+      handledIntent.current,
+      window.location.hash,
+    );
+    if (next === pathname + (query ? '?' + query : '') + window.location.hash)
+      return;
+    try {
+      router.replace(next, { scroll: false });
+    } catch {
+      setIntentError(
+        'The addition was handled, but its link could not be cleared. Reloading this URL may repeat the addition.',
+      );
+    }
+  }, [pathname, query, router]);
+  useEffect(() => {
+    handledIntent.current.clear();
+    cancelledIntent.current.clear();
+  }, [intentSignature]);
+  useEffect(() => {
+    if (!hydrated) return;
+    const requested = (JSON.parse(intentSignature) as QueueKey[]).filter(
+      (key) => !handledIntent.current.has(queueIdentity(key)),
+    );
+    if (!requested.length) {
+      queueMicrotask(() => {
+        setIntentPending(false);
+        setIntentOutstanding(false);
+        setIntentError('');
+      });
+      return;
+    }
+    let current = true;
+    queueMicrotask(() => {
+      if (current) {
+        setIntentPending(true);
+        setIntentOutstanding(true);
+        setIntentError('');
+      }
+    });
+    void getQueueRecords(requested)
+      .then((rows) => {
+        if (!current) return;
+        const requestedIds = new Set(requested.map(queueIdentity));
+        if (
+          new Set(rows.map(queueIdentity)).size !== rows.length ||
+          rows.some((row) => !requestedIds.has(queueIdentity(row)))
+        )
+          throw new Error('Unexpected records');
+        const next = [...currentEntries.current];
+        const added: LiveLabel[] = [];
+        const notices: string[] = [];
+        for (const key of requested) {
+          const id = queueIdentity(key);
+          if (cancelledIntent.current.has(id) || handledIntent.current.has(id))
+            continue;
+          const record = rows.find((row) => queueIdentity(row) === id);
+          if (!record)
+            notices.push('That record is unavailable to this account.');
+          else if (next.some((entry) => queueIdentity(entry) === id))
+            notices.push(
+              'Already in the queue. Existing copy counts are preserved.',
+            );
+          else {
+            const merged = addEntry(next, entryFor(record));
+            if (merged) {
+              next.push(entryFor(record));
+              added.push(record);
+            } else
+              notices.push(
+                `Queue limit: ${MAX_DISTINCT} distinct records, ${MAX_COPIES} copies each, ${MAX_LABELS} labels total.`,
+              );
+          }
+          handledIntent.current.add(id);
+        }
+        if (added.length) {
+          setEntries(next);
+          setLive((list) => [
+            ...list.filter(
+              (record) =>
+                !added.some(
+                  (row) => queueIdentity(row) === queueIdentity(record),
+                ),
+            ),
+            ...added,
+          ]);
+          invalidate();
+          notices.unshift(
+            `${added.map((record) => record.name).join(', ')} added. Names and context refresh before printing.`,
+          );
+        }
+        if (notices.length) setMessage(notices.join(' '));
+        setIntentOutstanding(false);
+        consumeIntent();
+      })
+      .catch(() => {
+        if (current)
+          setIntentError(
+            'Linked records could not be added. Retry the pending additions.',
+          );
+      })
+      .finally(() => {
+        if (current) setIntentPending(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [
+    hydrated,
+    intentSignature,
+    intentRetry,
+    consumeIntent,
+    invalidate,
+    setEntries,
+  ]);
+  const removeEntries = (ids: Set<string>, clear = false) => {
+    if (clear) manualClearEpoch.current++;
+    for (const id of ids) cancelledManualAdds.current.add(id);
+    for (const key of addIntent) {
+      const id = queueIdentity(key);
+      if (clear || ids.has(id)) {
+        cancelledIntent.current.add(id);
+        handledIntent.current.add(id);
+      }
+    }
+    setEntries((list) =>
+      clear ? [] : list.filter((entry) => !ids.has(queueIdentity(entry))),
+    );
+    setPendingChanges((rows) =>
+      clear ? [] : rows.filter((row) => !ids.has(queueIdentity(row))),
+    );
+    setUnavailable((list) => (clear ? [] : list.filter((id) => !ids.has(id))));
+    invalidate();
+    setMessage(
+      clear ? 'Label queue cleared.' : 'Record removed from the label queue.',
+    );
+    if (
+      addIntent.every((key) => handledIntent.current.has(queueIdentity(key)))
+    ) {
+      setIntentPending(false);
+      setIntentOutstanding(false);
+      setIntentError('');
+    }
+    consumeIntent();
   };
   const add = async (key: QueueKey) => {
     if (entries.some((entry) => queueIdentity(entry) === queueIdentity(key))) {
       setMessage('Already in the queue. Adjust its copy count below.');
       return;
     }
-    const epoch = ++queueEpoch.current;
+    const clearEpoch = manualClearEpoch.current;
+    const id = queueIdentity(key);
+    cancelledManualAdds.current.delete(id);
+    ++queueEpoch.current;
     activePrintAbort.current?.abort();
     setBusy(true);
     try {
       const rows = await getQueueRecords([key]);
-      if (epoch !== queueEpoch.current) return;
+      if (
+        clearEpoch !== manualClearEpoch.current ||
+        cancelledManualAdds.current.has(id)
+      )
+        return;
       if (rows.length !== 1 || queueIdentity(rows[0]) !== queueIdentity(key)) {
         setMessage('That record is unavailable to this account.');
         return;
       }
-      const next = addEntry(entries, entryFor(rows[0]));
+      if (currentEntries.current.some((entry) => queueIdentity(entry) === id)) {
+        setMessage('Already in the queue. Existing copy counts are preserved.');
+        return;
+      }
+      const next = addEntry(currentEntries.current, entryFor(rows[0]));
       if (!next) {
         setMessage(
           `Queue limit: ${MAX_DISTINCT} distinct records, ${MAX_COPIES} copies each, ${MAX_LABELS} labels total.`,
@@ -265,7 +464,11 @@ function LabelDesignerWorkspace({
         `${rows[0].name} added. Names and context refresh before printing.`,
       );
     } catch {
-      setMessage('Record could not be added. Try again.');
+      if (
+        clearEpoch === manualClearEpoch.current &&
+        !cancelledManualAdds.current.has(id)
+      )
+        setMessage('Record could not be added. Try again.');
     } finally {
       setBusy(false);
     }
@@ -386,6 +589,7 @@ function LabelDesignerWorkspace({
   };
   const print = async () => {
     if (
+      intentPending ||
       !prepared ||
       !printRows ||
       refreshPending ||
@@ -627,8 +831,8 @@ function LabelDesignerWorkspace({
       </p>
       {storageUnavailable && (
         <p role="status" className={styles.warning}>
-          Browser storage is unavailable. This label queue lasts only while this
-          page stays open.
+          Browser storage is unavailable. Queue changes, including removals, may
+          not survive reload; previously saved records may return.
         </p>
       )}
       <div className={styles.searchLayout}>
@@ -849,6 +1053,18 @@ function LabelDesignerWorkspace({
                 {entries.length} distinct records · {totalCopies(entries)}{' '}
                 labels
               </p>
+              <button
+                type="button"
+                className={styles.textButton}
+                disabled={
+                  !hydrated || busy || (!entries.length && !intentOutstanding)
+                }
+                onClick={() =>
+                  removeEntries(new Set(entries.map(queueIdentity)), true)
+                }
+              >
+                Clear queue
+              </button>
             </div>
             {entries.length === 0 && (
               <p className={styles.empty}>Add a record or location to begin.</p>
@@ -881,13 +1097,8 @@ function LabelDesignerWorkspace({
                       </label>
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setEntries((list) =>
-                            list.filter((item) => queueIdentity(item) !== id),
-                          );
-                          invalidate();
-                        }}
+                        disabled={busy || !hydrated}
+                        onClick={() => removeEntries(new Set([id]))}
                         className={styles.textButton}
                       >
                         Remove
@@ -1009,11 +1220,18 @@ function LabelDesignerWorkspace({
             printing.
           </p>
         )}
-        {pendingChanges.length > 0 && (
+        {pendingChanges.some((row) =>
+          entries.some((entry) => queueIdentity(entry) === queueIdentity(row)),
+        ) && (
           <div role="alert" className={styles.warning}>
             <p>
               Tag or lifecycle state changed for:{' '}
               {pendingChanges
+                .filter((row) =>
+                  entries.some(
+                    (entry) => queueIdentity(entry) === queueIdentity(row),
+                  ),
+                )
                 .map(
                   (row) =>
                     `${row.name} (${row.key}, ${row.state}${row.tag ? ', tag ' + row.tag : ''})`,
@@ -1036,6 +1254,23 @@ function LabelDesignerWorkspace({
             {message}
           </p>
         )}
+        {intentPending && (
+          <p role="status" className={styles.notice}>
+            Adding linked records after restoring this queue…
+          </p>
+        )}
+        {intentError && (
+          <div role="alert" className={styles.error}>
+            <p>{intentError}</p>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => setIntentRetry((n) => n + 1)}
+            >
+              Retry linked additions
+            </button>
+          </div>
+        )}
         {refreshPending && (
           <p role="status" className={styles.notice}>
             Refreshing labels; previous sheet shown until current records are
@@ -1055,6 +1290,7 @@ function LabelDesignerWorkspace({
           <button
             type="button"
             disabled={
+              intentPending ||
               !prepared ||
               busy ||
               refreshPending ||

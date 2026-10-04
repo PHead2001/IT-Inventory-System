@@ -3,15 +3,10 @@ import {
   getLocations,
 } from '@/features/inventory/queries.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
-import { getQueueRecords } from '@/features/labels/queue.server';
 import { LabelDesigner } from '@/features/labels/label-designer';
 import { getLabelDefaults } from '@/features/configuration/queries.server';
 import { requireMember } from '@/lib/auth/session.server';
-import {
-  ASSET_UUID,
-  LOCATION_CODE,
-  QUANTITY_UUID,
-} from '@/features/scan/targets';
+import { labelIntentKeys } from '@/features/labels/add-intent';
 export default async function LabelsPage({
   searchParams,
 }: {
@@ -49,17 +44,7 @@ export default async function LabelsPage({
     );
   }
   const { origin, preview } = config;
-  const selection: { kind: 'location' | 'asset' | 'quantity'; key: string }[] =
-    [];
-  if (params.location && LOCATION_CODE.test(params.location)) {
-    selection.push({ kind: 'location', key: params.location });
-  }
-  if (params.asset && ASSET_UUID.test(params.asset)) {
-    selection.push({ kind: 'asset', key: params.asset.toLowerCase() });
-  }
-  if (params.quantity && QUANTITY_UUID.test(params.quantity))
-    selection.push({ kind: 'quantity', key: params.quantity.toLowerCase() });
-  const initial = await getQueueRecords(selection);
+  const addIntent = labelIntentKeys(params);
   return (
     <>
       <p className="experience-eyebrow print:hidden">Tools / Labels</p>
@@ -76,7 +61,7 @@ export default async function LabelsPage({
         origin={origin}
         memberId={member.user_id}
         preview={preview}
-        initial={initial}
+        addIntent={addIntent}
         defaults={defaults}
       />
     </>

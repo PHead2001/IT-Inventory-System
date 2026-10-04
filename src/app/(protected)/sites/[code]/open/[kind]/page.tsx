@@ -12,9 +12,13 @@ import { panel } from '@/features/inventory/components/read-ui';
 
 export default async function SiteOpeningPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ code: string; kind: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const query = await searchParams;
+  const draft = typeof query?.draft === 'string' ? query.draft : undefined;
   const { member } = await requireMember();
   const { code, kind } = await params;
   const site = await getSite(code);
@@ -59,6 +63,9 @@ export default async function SiteOpeningPage({
       </p>
       <div className={panel + ' max-w-5xl'}>
         <MetadataForm
+          key={`${member.user_id}:${site.id}:${kind}:${draft ?? 'new'}`}
+          creationDraftId={draft}
+          recoveryBackend={process.env.NEXT_PUBLIC_SUPABASE_URL}
           actorId={member.user_id}
           kind={kind}
           categories={categories}

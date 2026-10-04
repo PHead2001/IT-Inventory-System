@@ -238,6 +238,8 @@ export default async function QuantityPage({
               </details>
             ) : (
               <OperationPanel
+                actorId={member.user_id}
+                backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
                 key={operation}
                 operation={operation}
                 item={item}
