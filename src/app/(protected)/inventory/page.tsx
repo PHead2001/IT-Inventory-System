@@ -1,12 +1,21 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import {
+  inventoryFilterParams,
+  pageRecoveryHref,
+  hasInventoryConstraints,
+} from '@/features/inventory/scope-presentation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
   getInventory,
   getCategories,
   getLocations,
+  hasRecordedInventory,
 } from '@/features/inventory/queries.server';
 import {
   InventoryRows,
+  InventoryCount,
+  panel,
   Pagination,
 } from '@/features/inventory/components/read-ui';
 import { SearchForm } from '@/features/inventory/components/search-form';
@@ -58,14 +67,23 @@ export default async function InventoryPage({
     () => getFileListSummaries(result.rows),
   );
   const filters = readFilters(params);
-  const exportParams = new URLSearchParams();
-  if (filters.query) exportParams.set('q', filters.query);
-  if (filters.type !== 'all') exportParams.set('type', filters.type);
-  if (filters.status !== 'active') exportParams.set('status', filters.status);
-  if (filters.category) exportParams.set('category', filters.category);
-  if (filters.location) exportParams.set('location', filters.location);
-  if (filters.site) exportParams.set('site', filters.site);
-  if (filters.lowStock) exportParams.set('lowStock', 'true');
+  const exportParams = inventoryFilterParams(params);
+  const recovery = pageRecoveryHref(
+    '/inventory',
+    Object.fromEntries(exportParams),
+    result,
+  );
+  if (recovery) redirect(recovery);
+  const constrained = hasInventoryConstraints(params);
+  const recorded =
+    result.total === 0 && !constrained ? await hasRecordedInventory() : null;
+  const emptyMessage = constrained
+    ? 'No inventory matches these filters.'
+    : !recorded
+      ? 'No inventory has been recorded yet.'
+      : filters.status === 'active'
+        ? 'No active inventory. Historical records are available.'
+        : 'No inventory in this status scope.';
   const returnParams = new URLSearchParams(exportParams);
   if (params.page) returnParams.set('page', params.page);
   const returnTo =
@@ -107,9 +125,7 @@ export default async function InventoryPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Matching inventory</h2>
-            <p className="experience-muted text-sm tabular-nums">
-              {result.total} results
-            </p>
+            <InventoryCount result={result} />
           </div>
           <details className="experience-export-menu">
             <summary>
@@ -141,7 +157,41 @@ export default async function InventoryPage({
             item-wide threshold calculation.
           </p>
         )}
-        <InventoryRows rows={result.rows} fileSummaries={fileSummaries} />
+        <InventoryRows
+          rows={result.rows}
+          fileSummaries={fileSummaries}
+          emptyState={
+            <div className={panel}>
+              <p>{emptyMessage}</p>
+              {constrained ? (
+                <Link
+                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href="/inventory"
+                >
+                  Clear inventory filters
+                </Link>
+              ) : recorded ? (
+                <Link
+                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href="/inventory?status=all"
+                >
+                  Include all statuses
+                </Link>
+              ) : member.role === 'staff' ? (
+                <Link
+                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href={'/inventory/quantity/new?' + createQuery}
+                >
+                  Add the first quantity item
+                </Link>
+              ) : (
+                <p className="mt-2 text-sm text-slate-400">
+                  Ask an IT staff member to add the first record.
+                </p>
+              )}
+            </div>
+          }
+        />
         <Pagination result={result} base="/inventory" params={params} />
       </div>
     </>

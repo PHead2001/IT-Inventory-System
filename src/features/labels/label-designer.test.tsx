@@ -125,6 +125,42 @@ beforeEach(() => {
   vi.stubGlobal('print', vi.fn());
 });
 
+it('omits empty search paging without changing the existing label queue', async () => {
+  render(<LabelDesigner {...props} />);
+  expect(
+    await screen.findByText('No records match these filters.'),
+  ).toBeVisible();
+  expect(screen.getByText(/0 matching records/)).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Previous' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '2 distinct records · 2 labels',
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+});
+
+it('retains nonempty search paging and sends the next page with its filters', async () => {
+  mocks.searchLabelRecords.mockResolvedValue({
+    rows: [],
+    total: 26,
+    page: 1,
+    pageSize: 25,
+  });
+  render(<LabelDesigner {...props} />);
+  const next = await screen.findByRole('button', { name: 'Next' });
+  expect(next).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+  fireEvent.click(next);
+  await waitFor(() =>
+    expect(mocks.searchLabelRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ...defaultFilters, page: 2 }),
+    ),
+  );
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '2 distinct records · 2 labels',
+  );
+});
+
 it('consumes a deep-linked addition so removed records do not return after reload', async () => {
   mocks.query = 'asset=' + assetId + '&keep=filters';
   mocks.getQueueRecords.mockResolvedValue([asset]);
@@ -135,7 +171,7 @@ it('consumes a deep-linked addition so removed records do not return after reloa
       addIntent={[{ kind: 'asset', key: assetId }]}
     />,
   );
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   await waitFor(() =>
     expect(mocks.replace).toHaveBeenCalledWith('/labels?keep=filters', {
       scroll: false,
@@ -322,7 +358,7 @@ it('lets the user individually remove an unresolved linked record while preservi
     { scroll: false },
   );
   await act(async () => finish([asset, quantity]));
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   const saved = JSON.parse(
     sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
   );
@@ -356,7 +392,7 @@ it('retains individually cancellable pending rows after a failed linked lookup',
   await user.click(
     screen.getByRole('button', { name: 'Retry linked additions' }),
   );
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   expect(mocks.getQueueRecords).toHaveBeenCalledWith([
     { kind: 'quantity', key: quantityId },
   ]);
@@ -379,7 +415,7 @@ it('retains a failed lookup intent for an explicit retry instead of consuming it
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry linked additions' }),
   );
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
 });
 it('permits a new intentional addition of the same record after completed removal', async () => {
@@ -392,7 +428,7 @@ it('permits a new intentional addition of the same record after completed remova
       addIntent={[{ kind: 'asset', key: assetId }]}
     />,
   );
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
   mocks.query = '';
   view.rerender(<LabelDesigner {...props} initial={[]} addIntent={[]} />);
@@ -405,7 +441,7 @@ it('permits a new intentional addition of the same record after completed remova
       addIntent={[{ kind: 'asset', key: assetId }]}
     />,
   );
-  await screen.findByText('1 distinct records · 1 labels');
+  await screen.findByText('1 distinct record · 1 label');
   expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(1);
 });
 it('removing one historical record preserves the remaining record lifecycle safeguard', async () => {
@@ -489,7 +525,7 @@ it('merges an overlapping manual Add after a linked addition resolves instead of
     ]),
   );
   await act(async () => finishLinked([asset]));
-  expect(screen.getByText('1 distinct records · 1 labels')).toBeVisible();
+  expect(screen.getByText('1 distinct record · 1 label')).toBeVisible();
   await act(async () => finishManual([quantity]));
   expect(screen.getByText('2 distinct records · 2 labels')).toBeVisible();
 });

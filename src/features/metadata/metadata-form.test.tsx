@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import {
   act,
   fireEvent,
@@ -126,6 +127,92 @@ describe('published metadata form', () => {
       draftForm: form(),
     });
   });
+  it('focuses an empty creation Name with a persistent associated error while preserving false answers', async () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    const name = await screen.findByLabelText('Name');
+    await waitFor(() => expect(name).toBeEnabled());
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    expect(name).toHaveAccessibleDescription(/Enter/);
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(submitInventory).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('region', { name: 'Metadata review' }),
+    ).toBeNull();
+  });
+  it('identifies an untouched required custom answer on submit and accepts corrected false', async () => {
+    const user = userEvent.setup();
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    await user.type(screen.getByLabelText('Name'), 'Cable');
+    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    const answer = screen.getByRole('checkbox', {
+      name: 'Inspected (required)',
+    });
+    expect(answer).toHaveFocus();
+    expect(answer).toHaveAttribute('aria-invalid', 'true');
+    expect(answer).toHaveAccessibleDescription('Answer this required field.');
+    expect(
+      screen.queryByRole('region', { name: 'Metadata review' }),
+    ).toBeNull();
+    await user.click(answer);
+    await user.click(answer);
+    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    expect(answer).not.toBeChecked();
+    expect(answer).not.toHaveAttribute('required');
+    expect(answer).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.getByRole('region', { name: 'Metadata review' }),
+    ).toBeVisible();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+
+  it.each(['quantity', 'asset'] as const)(
+    'retains invalid %s site-opening values and focuses its required Name',
+    async (kind) => {
+      const user = userEvent.setup();
+      render(
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={undefined}
+          forms={{ [categoryId]: form() }}
+          openingSite={{
+            id: otherCategory,
+            code: 'EXAMPLE',
+            name: 'Example site',
+          }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+      expect(screen.getByLabelText('Name')).toHaveFocus();
+      expect(screen.getByLabelText('Name')).toHaveAccessibleDescription(
+        /Enter/,
+      );
+      expect(submitCustody).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Reason (optional)')).not.toBeRequired();
+      if (kind === 'quantity')
+        expect(screen.getByLabelText('Units already at this site')).toHaveValue(
+          1,
+        );
+    },
+  );
   it('recovers exact creation inputs after navigation remount and never restores an explicitly discarded instance', async () => {
     const creation = {
       ...props,
@@ -671,7 +758,7 @@ describe('published metadata form', () => {
       [...container.querySelectorAll('label')].map(
         (label) => label.textContent,
       ),
-    ).toEqual(['Name', 'Category', 'Inspected (required)']);
+    ).toEqual(['Name *', 'Category *', 'Inspected (required)']);
     expect(
       screen.queryByRole('button', { name: 'Review metadata' }),
     ).toBeNull();
@@ -704,7 +791,8 @@ describe('published metadata form', () => {
     expect(checkbox).toHaveAttribute('aria-checked', 'mixed');
     expect(screen.getByText('Not recorded')).toBeInTheDocument();
   });
-  it('validates quantity Item code by Unicode characters and keeps its display text', () => {
+  it('validates quantity Item code by Unicode characters and keeps its display text', async () => {
+    const user = userEvent.setup();
     const current = form();
     current.published_definition.layout[0].controls.push({
       id: '00000000-0000-4000-8000-000000000024',
@@ -717,14 +805,20 @@ describe('published metadata form', () => {
     expect(input).not.toHaveAttribute('maxLength');
     fireEvent.change(input, { target: { value: '😀'.repeat(101) } });
     expect(input).toHaveAttribute('aria-invalid', 'true');
+    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAccessibleDescription(/at most 100 characters/);
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
-    ).toBeDisabled();
+      screen.queryByRole('region', { name: 'Metadata review' }),
+    ).toBeNull();
+    expect(submitInventory).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '😀'.repeat(100) } });
+    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
     expect(input).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeEnabled();
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
-    ).toBeEnabled();
+      screen.getByRole('region', { name: 'Metadata review' }),
+    ).toBeVisible();
   });
   it('preserves false, zero and empty strings as values distinct from missing', () => {
     const definition = {
@@ -1760,7 +1854,8 @@ describe('published metadata form', () => {
       'could not be confirmed',
     );
   });
-  it('allows a touched then reverted grandfathered answer on the same category without weakening changed answers', () => {
+  it('allows a touched then reverted grandfathered answer on the same category without weakening changed answers', async () => {
+    const user = userEvent.setup();
     const current = form();
     current.published_definition.fields[0] = {
       ...current.published_definition.fields[0],
@@ -1789,9 +1884,15 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
       target: { value: 'Different long note' },
     });
+    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    const invalid = screen.getByLabelText('Old note (required)');
+    expect(invalid).toHaveFocus();
+    expect(invalid).toHaveAttribute('aria-invalid', 'true');
+    expect(invalid).toHaveAccessibleDescription(/at most 2/);
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
-    ).toBeDisabled();
+      screen.queryByRole('region', { name: 'Metadata review' }),
+    ).toBeNull();
+    expect(submitInventory).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
       target: { value: 'Legacy long note' },
     });

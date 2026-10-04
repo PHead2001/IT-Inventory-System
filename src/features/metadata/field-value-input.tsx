@@ -32,6 +32,7 @@ export type MetadataFieldInputProps = {
   onValidityChange?(message: string): void;
   initialDateTimeDraft?: DateTimeDraft;
   onDateTimeDraftChange?(draft: DateTimeDraft, edited?: boolean): void;
+  showErrors?: boolean;
 };
 export type DateTimeDraft = { wall: string; zone: string };
 const subscribeTimeZone = () => () => {};
@@ -40,6 +41,7 @@ export function DateTimeInput({
   onChange,
   id,
   describedBy,
+  invalid,
   disabled,
   onValidityChange,
   initialDraft,
@@ -49,6 +51,7 @@ export function DateTimeInput({
   onChange(value: unknown): void;
   id: string;
   describedBy?: string;
+  invalid?: boolean;
   disabled?: boolean;
   onValidityChange?(message: string): void;
   initialDraft?: DateTimeDraft;
@@ -97,6 +100,10 @@ export function DateTimeInput({
         ? 'This time occurs twice. Choose the intended UTC offset.'
         : 'This time does not exist in this timezone. Choose another time.'
     : '';
+  const errorDescription =
+    [describedBy, error ? id + '-datetime-error' : '']
+      .filter(Boolean)
+      .join(' ') || undefined;
   useEffect(() => {
     onValidityChange?.(error);
   }, [error, onValidityChange]);
@@ -126,7 +133,8 @@ export function DateTimeInput({
             id={id + '-date'}
             type="date"
             disabled={disabled}
-            aria-describedby={describedBy}
+            aria-describedby={errorDescription}
+            aria-invalid={invalid || !!error || undefined}
             value={wall.split('T')[0] ?? ''}
             onChange={(event) =>
               changeWall(
@@ -148,7 +156,8 @@ export function DateTimeInput({
             type="time"
             step="0.001"
             disabled={disabled}
-            aria-describedby={describedBy}
+            aria-describedby={errorDescription}
+            aria-invalid={invalid || !!error || undefined}
             value={(wall.split('T')[1] ?? '').replace(/(\.\d{3})\d+$/, '$1')}
             onChange={(event) =>
               changeWall(
@@ -242,7 +251,11 @@ export function DateTimeInput({
         </p>
       )}
       {error && (
-        <p role="alert" className="text-sm text-amber-200">
+        <p
+          id={id + '-datetime-error'}
+          role="alert"
+          className="text-sm text-amber-200"
+        >
           {error}
         </p>
       )}
@@ -260,6 +273,7 @@ export function MetadataFieldInput({
   onValidityChange,
   initialDateTimeDraft,
   onDateTimeDraftChange,
+  showErrors = false,
 }: MetadataFieldInputProps) {
   const generatedId = useId();
   const id = suppliedId ?? `field-${generatedId}`;
@@ -272,7 +286,10 @@ export function MetadataFieldInput({
     onValidityChange?.(error);
   }, [error, onValidityChange]);
   const describedBy =
-    [field.help ? id + '-help' : '', interacted && error ? id + '-error' : '']
+    [
+      field.help ? id + '-help' : '',
+      (interacted || showErrors) && error ? id + '-error' : '',
+    ]
       .filter(Boolean)
       .join(' ') || undefined;
   const change = (next: unknown) => {
@@ -285,7 +302,7 @@ export function MetadataFieldInput({
     className: fieldClass,
     disabled: locked,
     'aria-describedby': describedBy,
-    'aria-invalid': (interacted && !!error) || undefined,
+    'aria-invalid': ((interacted || showErrors) && !!error) || undefined,
   };
   const label = field.label || 'Untitled field';
   const heading = label + (field.required ? ' (required)' : '');
@@ -324,6 +341,7 @@ export function MetadataFieldInput({
         label={heading}
         id={id}
         describedBy={describedBy}
+        invalid={((interacted || showErrors) && !!error) || undefined}
         disabled={locked}
         historicalLabel={
           typeof value === 'string'
@@ -341,6 +359,7 @@ export function MetadataFieldInput({
           value={value}
           onChange={change}
           describedBy={describedBy}
+          invalid={((interacted || showErrors) && !!error) || undefined}
           disabled={locked}
           onValidityChange={setDatetimeError}
           initialDraft={initialDateTimeDraft}
@@ -422,7 +441,7 @@ export function MetadataFieldInput({
     );
   }
   return (
-    <div className="min-w-0 space-y-2">
+    <div id={id + '-validation-group'} className="min-w-0 space-y-2">
       {input}
       {field.type === 'boolean' && value === undefined && (
         <p className="text-xs text-slate-400">Not recorded</p>
@@ -435,7 +454,7 @@ export function MetadataFieldInput({
           {field.help}
         </p>
       )}
-      {interacted && error && (
+      {(interacted || showErrors) && error && (
         <p id={id + '-error'} role="alert" className="text-sm text-amber-200">
           {error}
         </p>

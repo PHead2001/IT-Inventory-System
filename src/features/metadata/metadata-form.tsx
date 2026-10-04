@@ -24,6 +24,14 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
+import { pickerLocations } from '@/features/locations/picker-model';
+import {
+  RequiredFieldsNote,
+  RequiredMark,
+  useFormValidation,
+  ValidationSummary,
+  type FieldIssue,
+} from '@/components/forms/validation';
 import {
   submitInventory,
   findDuplicateSerials,
@@ -232,6 +240,7 @@ export function MetadataForm({
   }, [actorId]);
   const creating = !latest;
   const scopeId = useId();
+  const validation = useFormValidation();
   const [formActor] = useState(actorId);
   const actorStale = formActor !== actorId;
   const [cleanCore, setCleanCore] = useState(() =>
@@ -793,6 +802,7 @@ export function MetadataForm({
         key={`${id}-${inputGeneration}`}
         id={`${scopeId}-metadata-${id}`}
         field={config}
+        showErrors={validation.issues.length > 0}
         value={value}
         initialDateTimeDraft={dateTimes[id]}
         onDateTimeDraftChange={
@@ -838,9 +848,14 @@ export function MetadataForm({
     if (name === 'category_id')
       return (
         <div className="space-y-2" key={name}>
-          <label htmlFor={`${scopeId}-metadata-category`}>Category</label>
+          <label htmlFor={`${scopeId}-metadata-category`}>
+            Category
+            <RequiredMark />
+          </label>
           <select
             id={`${scopeId}-metadata-category`}
+            aria-label="Category"
+            {...validation.props(`${scopeId}-metadata-category`)}
             className={fieldClass}
             value={core.category_id}
             onChange={(event) => updateCore('category_id', event.target.value)}
@@ -856,6 +871,7 @@ export function MetadataForm({
                 </option>
               ))}
           </select>
+          {validation.error(`${scopeId}-metadata-category`)}
         </div>
       );
     if (name === 'description')
@@ -876,15 +892,30 @@ export function MetadataForm({
       <div className="space-y-2" key={name}>
         <label htmlFor={scopeId + '-metadata-' + name}>
           {labels[name] ?? name}
+          {name === 'name' && <RequiredMark />}
         </label>
         <Input
           id={scopeId + '-metadata-' + name}
+          aria-label={labels[name] ?? name}
+          {...validation.props(
+            scopeId + '-metadata-' + name,
+            name === 'item_code' && invalidItemCode
+              ? scopeId + '-metadata-item_code-help'
+              : name === 'reorder_threshold'
+                ? scopeId + '-metadata-threshold-help'
+                : undefined,
+          )}
           type={name === 'reorder_threshold' ? 'number' : 'text'}
           min={name === 'reorder_threshold' ? 0 : undefined}
           max={name === 'reorder_threshold' ? 2147483647 : undefined}
           maxLength={name === 'item_code' ? undefined : 200}
           aria-invalid={
-            name === 'item_code' && invalidItemCode ? true : undefined
+            (name === 'item_code' && invalidItemCode) ||
+            validation.issues.some(
+              (issue) => issue.id === scopeId + '-metadata-' + name,
+            )
+              ? true
+              : undefined
           }
           required={name === 'name'}
           value={core[name as keyof typeof core] ?? ''}
@@ -892,13 +923,21 @@ export function MetadataForm({
             updateCore(name as keyof typeof core, event.target.value)
           }
         />
+        {validation.error(scopeId + '-metadata-' + name)}
         {name === 'item_code' && invalidItemCode && (
-          <p role="alert" className="text-sm text-amber-200">
+          <p
+            id={scopeId + '-metadata-item_code-help'}
+            role="alert"
+            className="text-sm text-amber-200"
+          >
             Use at most 100 characters without control characters.
           </p>
         )}
         {name === 'reorder_threshold' && (
-          <p className="text-xs text-slate-400">
+          <p
+            id={scopeId + '-metadata-threshold-help'}
+            className="text-xs text-slate-400"
+          >
             Blank disables monitoring; zero alerts only at zero stock.
           </p>
         )}
@@ -1005,6 +1044,7 @@ export function MetadataForm({
     setTouched([]);
     rebaseUsed.current = false;
     setAnswerErrors({});
+    validation.clear();
     setInputGeneration((generation) => generation + 1);
     setReviewedForms({});
     setPriorForms({});
@@ -1157,6 +1197,60 @@ export function MetadataForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!uncertain && !pending && !dispatched.current) {
+      const issues: FieldIssue[] = [];
+      for (const field of visibleFields) {
+        if (!creating && !touched.includes(field.id)) continue;
+        const value = Object.hasOwn(custom, field.id)
+          ? custom[field.id]
+          : creating && !touched.includes(field.id)
+            ? field.default
+            : undefined;
+        if (
+          !creating &&
+          core.category_id === baseline?.categoryId &&
+          Object.hasOwn(baseline?.customValues ?? {}, field.id) &&
+          JSON.stringify(value) ===
+            JSON.stringify(baseline?.customValues?.[field.id]?.value)
+        )
+          continue;
+        const message = fieldValueError(field, value) || answerErrors[field.id];
+        if (message)
+          issues.push({
+            id: `${scopeId}-metadata-${field.id}-validation-group`,
+            label: field.label,
+            message,
+          });
+      }
+      if (invalidItemCode)
+        issues.push({
+          id: scopeId + '-metadata-item_code',
+          label: 'Item code',
+          message: 'Use at most 100 characters without control characters.',
+        });
+      if (creating && !openingSite) {
+        const name =
+          kind === 'asset'
+            ? 'location'
+            : Number(core.initial_quantity) > 0
+              ? 'initial-location'
+              : null;
+        const chosen =
+          kind === 'asset' ? core.location_id : core.initial_location_id;
+        if (
+          name &&
+          !pickerLocations(locations, 'destination').some(
+            (location) => location.id === chosen,
+          )
+        )
+          issues.push({
+            id: `${scopeId}-metadata-${name}`,
+            label: kind === 'asset' ? 'Current location' : 'Initial location',
+            message: 'Choose an available inventory destination.',
+          });
+      }
+      if (!validation.validate(event.currentTarget, issues)) return;
+    }
     if (
       (recoveryEnabled &&
         (!recoveryReady || recoveryBlocked || terminalDraft)) ||
@@ -1471,6 +1565,7 @@ export function MetadataForm({
             : `Edit ${kind} metadata`
       }
       onSubmit={preview ? (event) => event.preventDefault() : submit}
+      noValidate
     >
       {recoveryEnabled && !recoveryReady && !recoveryBlocked && (
         <div role="status">
@@ -1735,6 +1830,7 @@ export function MetadataForm({
         }
         className="min-w-0 w-full max-w-full space-y-5"
       >
+        <RequiredFieldsNote />
         {definition?.layout
           .filter((section) =>
             section.controls.some((control) =>
@@ -1793,9 +1889,12 @@ export function MetadataForm({
           <div className="space-y-3">
             <label htmlFor={`${scopeId}-metadata-initial-quantity`}>
               Initial quantity
+              <RequiredMark />
             </label>
             <Input
               id={`${scopeId}-metadata-initial-quantity`}
+              aria-label="Initial quantity"
+              {...validation.props(`${scopeId}-metadata-initial-quantity`)}
               type="number"
               min={0}
               max={2147483647}
@@ -1805,6 +1904,7 @@ export function MetadataForm({
                 updateCore('initial_quantity', event.target.value)
               }
             />
+            {validation.error(`${scopeId}-metadata-initial-quantity`)}
             {Number(core.initial_quantity) > 0 && (
               <LocationPicker
                 id={`${scopeId}-metadata-initial-location`}
@@ -1813,6 +1913,12 @@ export function MetadataForm({
                 mode="destination"
                 value={core.initial_location_id}
                 required
+                error={
+                  validation.issues.find(
+                    (issue) =>
+                      issue.id === `${scopeId}-metadata-initial-location`,
+                  )?.message
+                }
                 onValueChange={(value) =>
                   updateCore('initial_location_id', value)
                 }
@@ -1828,6 +1934,11 @@ export function MetadataForm({
             mode="destination"
             value={core.location_id}
             required
+            error={
+              validation.issues.find(
+                (issue) => issue.id === `${scopeId}-metadata-location`,
+              )?.message
+            }
             onValueChange={(value) => updateCore('location_id', value)}
           />
         )}
@@ -1843,7 +1954,11 @@ export function MetadataForm({
             {kind === 'quantity' && (
               <label className="block space-y-2">
                 Units already at this site
+                <RequiredMark />
                 <Input
+                  id={`${scopeId}-metadata-opening-quantity`}
+                  aria-label="Units already at this site"
+                  {...validation.props(`${scopeId}-metadata-opening-quantity`)}
                   type="number"
                   min={1}
                   max={2147483647}
@@ -1856,6 +1971,7 @@ export function MetadataForm({
                     setReview(false);
                   }}
                 />
+                {validation.error(`${scopeId}-metadata-opening-quantity`)}
               </label>
             )}
             <label className="block space-y-2">
@@ -1886,6 +2002,7 @@ export function MetadataForm({
           </div>
         )}
       </fieldset>
+      <ValidationSummary issues={validation.issues} />
       {!preview && !terminalDraft && review && (
         <div
           className="rounded border border-cyan-700 p-3"
@@ -1949,8 +2066,6 @@ export function MetadataForm({
                   schemaStale ||
                   schemaConflictPending ||
                   !!schemaRefreshError ||
-                  invalidItemCode ||
-                  invalidAnswers ||
                   recordBlocked ||
                   refreshNeeded)) ||
               (review && legacyMigration && !ackLegacy)

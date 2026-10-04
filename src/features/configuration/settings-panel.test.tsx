@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { SettingsPanel } from './settings-panel';
+import userEvent from '@testing-library/user-event';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
 
 const mocks = vi.hoisted(() => ({
@@ -81,13 +82,106 @@ beforeEach(() => {
   mocks.refresh.mockReset();
 });
 
+it('focuses the category rename draft on open and restores its stable trigger on Cancel and Escape', () => {
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  const trigger = screen.getByRole('button', { name: /^Rename/ });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const input = screen.getByLabelText('New category name');
+  expect(input).toHaveFocus();
+  expect(input).toHaveValue(source.name);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(trigger).toHaveFocus();
+  fireEvent.click(trigger);
+  fireEvent.keyDown(screen.getByLabelText('New category name'), {
+    key: 'Escape',
+  });
+  expect(screen.queryByLabelText('New category name')).toBeNull();
+  expect(trigger).toHaveFocus();
+});
+
+it('retains an invalid rename draft with a durable associated error and input focus', () => {
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  fireEvent.click(screen.getByRole('button', { name: /^Rename/ }));
+  const input = screen.getByLabelText('New category name');
+  fireEvent.change(input, { target: { value: '  ' } });
+  fireEvent.submit(input.closest('form')!);
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(input).toHaveFocus();
+  expect(input).toHaveValue('  ');
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+  expect(input).toHaveAccessibleDescription(/Enter/);
+});
+
+it('keeps a submitted rename open through Escape and restores focus by identity after a successful rerender', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const user = userEvent.setup();
+  const view = render(
+    <SettingsPanel mode="categories" categories={[source]} canManage />,
+  );
+  await user.click(screen.getByRole('button', { name: 'Rename Source' }));
+  const input = screen.getByLabelText('New category name');
+  await user.clear(input);
+  await user.type(input, 'Renamed source');
+  await user.click(screen.getByRole('button', { name: 'Save name' }));
+  expect(input).toBeDisabled();
+  fireEvent.keyDown(input, { key: 'Escape' });
+  expect(input).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  view.rerender(
+    <SettingsPanel
+      mode="categories"
+      categories={[{ ...source, name: 'Renamed source', version: '2' }]}
+      canManage
+    />,
+  );
+  await act(async () => {
+    finish({ ok: true, result: { changed: true } });
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Rename Renamed source' }),
+    ).toHaveFocus(),
+  );
+  expect(screen.queryByLabelText('New category name')).toBeNull();
+  expect(mocks.submit).toHaveBeenCalledOnce();
+});
+
+it('returns focus to the surviving list when the renamed row is removed while saving', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(
+    <SettingsPanel mode="categories" categories={[source]} canManage />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  view.rerender(<SettingsPanel mode="categories" categories={[]} canManage />);
+  await act(async () => {
+    finish({ ok: true, result: { changed: true } });
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('list', { name: 'Categories' })).toHaveFocus(),
+  );
+});
+
 it('shows category actions and form deep links without label controls in category mode', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);
   expect(screen.getByRole('link', { name: 'Edit form' })).toHaveAttribute(
     'href',
     `/settings/forms/${source.id}`,
   );
-  expect(screen.getByRole('button', { name: 'Rename' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Rename Source' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Remove' })).toBeVisible();
   expect(screen.queryByRole('combobox', { name: 'Size' })).toBeNull();
 });

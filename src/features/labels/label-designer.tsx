@@ -26,6 +26,7 @@ import {
 } from './queue.server';
 import { LabelSheet, type LabelRecord } from './label-sheet';
 import styles from './label-workspace.module.css';
+import { countLabel } from '@/lib/count';
 import { consumedLabelUrl } from './add-intent';
 import {
   addEntry,
@@ -944,7 +945,7 @@ function LabelDesignerWorkspace({
             <h2 className={styles.title}>Records</h2>
             <p className={styles.subtle} id="label-results-scroll-hint">
               {search
-                ? `${search.total} matching records. Scroll this list to browse the current page.`
+                ? `${countLabel(search.total, 'matching record')}. Scroll this list to browse the current page.`
                 : 'Loading matching records…'}
             </p>
             <div
@@ -1009,10 +1010,10 @@ function LabelDesignerWorkspace({
                 <p className={styles.empty}>No records match these filters.</p>
               )}
             </div>
-            {search && (
+            {search && search.total > 0 && (
               <div className={styles.pagination}>
                 <span>
-                  {search.total} records · page {search.page} of{' '}
+                  {countLabel(search.total, 'record')} · page {search.page} of{' '}
                   {Math.max(1, Math.ceil(search.total / search.pageSize))}
                 </span>
                 <button
@@ -1065,8 +1066,8 @@ function LabelDesignerWorkspace({
             <div className={styles.queueHeader}>
               <h2 className={styles.title}>Label queue</h2>
               <p className={styles.count}>
-                {entries.length} distinct records · {totalCopies(entries)}{' '}
-                labels
+                {countLabel(entries.length, 'distinct record')} ·{' '}
+                {countLabel(totalCopies(entries), 'label')}
               </p>
               <button
                 type="button"

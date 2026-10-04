@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { countLabel } from '@/lib/count';
 import {
   ArrowRight,
   CircleCheck,
@@ -58,17 +59,49 @@ export default async function DashboardPage({
       <dl className="experience-stat-grid">
         <div className="experience-stat experience-surface">
           <dt className="experience-muted text-xs">Needs restocking</dt>
-          <dd className="text-amber-200">{result.needsRestockingCount}</dd>
+          <dd
+            className={
+              result.configuredCount ? 'text-amber-200' : 'text-slate-300'
+            }
+          >
+            {result.configuredCount ? (
+              result.needsRestockingCount
+            ) : (
+              <span className="text-base">Not configured</span>
+            )}
+          </dd>
         </div>
         <div className="experience-stat experience-surface">
           <dt className="experience-muted text-xs">Out of stock (subset)</dt>
-          <dd className="text-red-200">{result.outOfStockCount}</dd>
+          <dd
+            className={
+              result.configuredCount ? 'text-red-200' : 'text-slate-300'
+            }
+          >
+            {result.configuredCount ? (
+              result.outOfStockCount
+            ) : (
+              <span className="text-base">Not configured</span>
+            )}
+          </dd>
         </div>
         <div className="experience-stat experience-surface">
           <dt className="experience-muted text-xs">Monitored active items</dt>
           <dd>{result.configuredCount}</dd>
         </div>
       </dl>
+      <p className="experience-muted text-sm">
+        {countLabel(result.configuredCount, 'monitored active quantity item')}.{' '}
+        {result.configuredCount
+          ? 'Alert counts apply only to this monitored set.'
+          : 'Stock monitoring needs a reorder threshold.'}{' '}
+        <Link
+          className="inline-flex min-h-11 items-center text-cyan-300 underline"
+          href="/inventory?type=quantity"
+        >
+          Browse quantity items and thresholds
+        </Link>
+      </p>
       <section aria-labelledby="attention-heading">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -123,9 +156,15 @@ export default async function DashboardPage({
                 Monitored items need no restocking
               </h3>
               <p className="experience-muted mt-1 text-sm">
-                All {result.configuredCount} monitored active quantity items are
-                above their alert thresholds. Other inventory may have no
-                threshold.
+                {countLabel(
+                  result.configuredCount,
+                  'monitored active quantity item',
+                )}{' '}
+                {result.configuredCount === 1 ? 'is' : 'are'} above{' '}
+                {result.configuredCount === 1
+                  ? 'its alert threshold'
+                  : 'their alert thresholds'}
+                . Other inventory may have no threshold.
               </p>
               <Link
                 href="/inventory?type=quantity"

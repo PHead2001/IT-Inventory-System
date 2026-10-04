@@ -1,10 +1,12 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   requireMember: vi.fn(),
   getInventory: vi.fn(),
+  hasRecordedInventory: vi.fn(),
+  redirect: vi.fn(),
   getCategories: vi.fn(),
   getLocations: vi.fn(),
   getSites: vi.fn(),
@@ -16,6 +18,7 @@ vi.mock('@/lib/auth/session.server', () => ({
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getInventory: mocks.getInventory,
+  hasRecordedInventory: mocks.hasRecordedInventory,
   getCategories: mocks.getCategories,
   getLocations: mocks.getLocations,
 }));
@@ -29,6 +32,8 @@ vi.mock('@/features/inventory/components/search-form', () => ({
   SearchForm: mocks.searchForm,
 }));
 
+vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
+
 import InventoryPage from './page';
 
 const result = { rows: [], total: 0, page: 1, pageSize: 25 };
@@ -38,6 +43,7 @@ beforeEach(() => {
   vi.stubEnv('VERCEL_ENV', 'preview');
   mocks.requireMember.mockResolvedValue({ member: { role: 'staff' } });
   mocks.getInventory.mockResolvedValue(result);
+  mocks.hasRecordedInventory.mockResolvedValue(false);
   mocks.getCategories.mockResolvedValue([]);
   mocks.getLocations.mockResolvedValue([]);
   mocks.getSites.mockResolvedValue([]);
@@ -109,4 +115,39 @@ it('passes only the nonproduction diagnostic gate to the search client island', 
   expect(mocks.searchForm.mock.calls.at(-1)?.[0].diagnosticsEnabled).toBe(
     false,
   );
+});
+
+it('uses an authorized presence probe only for unfiltered empty inventory', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  mocks.requireMember.mockResolvedValue({ member: { role: 'viewer' } });
+  const { rerender } = render(
+    await InventoryPage({ searchParams: Promise.resolve({}) }),
+  );
+  expect(screen.getByText('No inventory has been recorded yet.')).toBeVisible();
+  expect(
+    screen.queryByRole('link', { name: 'Create quantity inventory' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.hasRecordedInventory).toHaveBeenCalledOnce();
+  mocks.hasRecordedInventory.mockResolvedValue(true);
+  rerender(await InventoryPage({ searchParams: Promise.resolve({}) }));
+  expect(
+    screen.getByText('No active inventory. Historical records are available.'),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Include all statuses' }),
+  ).toHaveAttribute('href', '/inventory?status=all');
+});
+it('does not infer catalog emptiness from a filtered page or convert probe failure into absence', async () => {
+  vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+  render(
+    await InventoryPage({ searchParams: Promise.resolve({ q: 'missing' }) }),
+  );
+  expect(mocks.hasRecordedInventory).not.toHaveBeenCalled();
+  expect(screen.getByText('No inventory matches these filters.')).toBeVisible();
+  mocks.hasRecordedInventory.mockRejectedValue(
+    new Error('Inventory presence could not be loaded.'),
+  );
+  await expect(
+    InventoryPage({ searchParams: Promise.resolve({}) }),
+  ).rejects.toThrow('Inventory presence could not be loaded.');
 });

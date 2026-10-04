@@ -13,6 +13,7 @@ export type ChoicePickerProps = {
   label: string;
   id?: string;
   describedBy?: string;
+  invalid?: boolean;
   disabled?: boolean;
   historicalLabel?: string;
 };
@@ -26,6 +27,7 @@ export function ChoicePicker({
   label,
   id,
   describedBy,
+  invalid,
   disabled,
   historicalLabel,
 }: ChoicePickerProps) {
@@ -99,6 +101,7 @@ export function ChoicePicker({
           id={inputId}
           aria-label={label}
           aria-describedby={describedBy}
+          aria-invalid={invalid || undefined}
           disabled={disabled}
           className={input}
           value={selected[0] ?? ''}
@@ -123,6 +126,7 @@ export function ChoicePicker({
     <fieldset
       id={id}
       aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
       disabled={disabled}
       onKeyDown={(event) => {
         if (

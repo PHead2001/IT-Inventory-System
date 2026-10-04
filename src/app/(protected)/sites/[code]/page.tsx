@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
+import { countLabel } from '@/lib/count';
 import {
   getSite,
   getSiteDetail,
@@ -117,8 +118,11 @@ export default async function SitePage({
                 · {group.model || 'Model not set'}
                 <p className="mt-1 text-sm text-slate-300 tabular-nums">
                   {group.inventory_kind === 'quantity'
-                    ? `${group.quantity_units} quantity units`
-                    : `${group.serialized_devices} distinct serialized devices`}
+                    ? countLabel(String(group.quantity_units), 'quantity unit')
+                    : countLabel(
+                        String(group.serialized_devices),
+                        'distinct serialized device',
+                      )}
                 </p>
               </li>
             ))}
@@ -191,7 +195,7 @@ export default async function SitePage({
                 <p className="mt-1 break-words text-sm text-slate-300 tabular-nums">
                   {row.category_name} · {row.model || 'Model not set'} ·{' '}
                   {row.inventory_kind === 'quantity'
-                    ? `${row.quantity} units`
+                    ? countLabel(row.quantity, 'unit')
                     : '1 serialized asset'}
                 </p>
                 {row.inventory_kind === 'asset' && (
@@ -325,7 +329,9 @@ export default async function SitePage({
                 <p className="mt-1 text-sm">
                   {event.from_label || 'Opening / no source'} →{' '}
                   {event.to_label || 'No destination'}
-                  {event.quantity ? ` · ${event.quantity} units` : ''}
+                  {event.quantity
+                    ? ` · ${countLabel(event.quantity, 'unit')}`
+                    : ''}
                 </p>
                 {event.reason && (
                   <p className="mt-1 whitespace-pre-wrap break-words text-sm">

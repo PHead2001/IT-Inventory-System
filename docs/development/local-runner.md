@@ -1,6 +1,6 @@
 # Local GitHub Actions runner
 
-The repository routes all six normal CI jobs to fixed light/mid/heavy self-hosted resource labels described below. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
+The repository routes normal CI jobs to fixed self-hosted resource labels described below. Foundation CI uses one heavy `required` job for application/database/browser validation and a separate light production database job; the two trusted preview-access jobs remain light. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
 
 The design runs one repository-scoped, just-in-time GitHub runner in one fresh Ubuntu 24.04 Hyper-V VM at a time. A persistent Windows SYSTEM supervisor looks for queued jobs carrying one supported resource label, creates a full copy of the clean boot disk for one job, and deletes the VM and per-job files when the runner exits. The single boot-triggered supervisor first recovers the recorded old session under a lock, then begins pickup; recovery failure prevents pickup. A separate SYSTEM watchdog runs every minute and removes the recorded VM when its hard deadline expires or its supervisor/ready network guardian dies. Each VM explicitly disables automatic start and uses TurnOff at host shutdown; both settings are read back before boot. Restart always destroys the old VM before a new one can be launched. No host directory or cross-job package cache is mounted in the VM. The guest receives only its per-VM SSH public key and a one-job JIT configuration; the repository PAT stays on Windows.
 
@@ -84,13 +84,13 @@ these new labels**. The owner controls the subsequent merge of workflow changes 
 main; a branch runtime update does not change trusted main workflows. The installed
 bundle and exact-SHA job evidence must establish that cutover separately.
 
-| Custom label                   | Guest memory | Required available host memory | Normal jobs                                                         |
-| ------------------------------ | ------------ | ------------------------------ | ------------------------------------------------------------------- |
-| `it-inventory-light`           | 2 GiB        | 4 GiB                          | Required aggregate, preview discover/provision, production database |
-| `it-inventory-mid`             | 4 GiB        | 6 GiB                          | Application                                                         |
-| `it-inventory-heavy`           | 6 GiB        | 7 GiB                          | Database/Playwright (candidate pending complete real workload)      |
-| `it-inventory-ephemeral`       | 8 GiB        | 10 GiB                         | Legacy workflows                                                    |
-| `it-inventory-pilot-<headSha>` | 8 GiB        | 10 GiB                         | Exact-SHA diagnostic pilot                                          |
+| Custom label                   | Guest memory | Required available host memory | Normal jobs                                         |
+| ------------------------------ | ------------ | ------------------------------ | --------------------------------------------------- |
+| `it-inventory-light`           | 2 GiB        | 4 GiB                          | Preview discover/provision, production database     |
+| `it-inventory-mid`             | 4 GiB        | 6 GiB                          | Available for reviewed workloads                    |
+| `it-inventory-heavy`           | 6 GiB        | 7 GiB                          | Required application/database/Playwright validation |
+| `it-inventory-ephemeral`       | 8 GiB        | 10 GiB                         | Legacy workflows                                    |
+| `it-inventory-pilot-<headSha>` | 8 GiB        | 10 GiB                         | Exact-SHA diagnostic pilot                          |
 
 The mapping and host reserve are fixed in host code. Heavy uses a 6 GiB static guest
 plus 1 GiB unallocated host reserve; light/mid retain their existing 2 GiB reserve.

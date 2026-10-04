@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
+import { countLabel } from '@/lib/count';
 import {
   getQuantityDetail,
   getQuantityArchiveReview,
@@ -81,22 +82,22 @@ export default async function QuantityPage({
         <dl className={styles.facts}>
           <div className={styles.fact}>
             <dt>Available in storage</dt>
-            <dd>{stockSummary.availableQuantity} units</dd>
+            <dd>{countLabel(stockSummary.availableQuantity, 'unit')}</dd>
           </div>
           <div className={styles.fact}>
             <dt>Assigned to sites</dt>
-            <dd>{stockSummary.assignedQuantity} units</dd>
+            <dd>{countLabel(stockSummary.assignedQuantity, 'unit')}</dd>
           </div>
           <div className={styles.fact}>
             <dt>Total recorded</dt>
-            <dd>{stockSummary.ownedQuantity} units</dd>
+            <dd>{countLabel(stockSummary.ownedQuantity, 'unit')}</dd>
           </div>
           <div className={styles.fact}>
             <dt>Reorder threshold</dt>
             <dd>
               {stockSummary.reorderThreshold === null
                 ? 'Monitoring disabled'
-                : `${stockSummary.reorderThreshold} units`}
+                : countLabel(stockSummary.reorderThreshold, 'unit')}
             </dd>
           </div>
           {item.itemCode && (
@@ -157,7 +158,7 @@ export default async function QuantityPage({
                   .map((b) => (
                     <li className={panel} key={b.location.id}>
                       <LocationLink location={b.location} />
-                      <p className="mt-2">{b.quantity} units</p>
+                      <p className="mt-2">{countLabel(b.quantity, 'unit')}</p>
                       {!b.location.active && (
                         <p className="mt-1 text-sm text-amber-200">
                           Inactive location: existing stock remains recorded and
@@ -189,7 +190,7 @@ export default async function QuantityPage({
                       {holding.site_name} ({holding.site_code})
                     </Link>
                     <p>
-                      {holding.quantity} units
+                      {countLabel(holding.quantity, 'unit')}
                       {!holding.site_active ? ' · Archived site' : ''}
                     </p>
                   </li>
@@ -290,6 +291,7 @@ export default async function QuantityPage({
                   return null;
                 return (
                   <CustodyChangeForm
+                    canManageConfiguration={member.can_manage_configuration}
                     key={action}
                     kind="quantity"
                     action={action}
@@ -315,8 +317,8 @@ export default async function QuantityPage({
                 {event.kind.replaceAll('_', ' ')}
               </span>{' '}
               · {event.from_label || 'Opening'} →{' '}
-              {event.to_label || 'No destination'} · {event.quantity ?? 0} units
-              · {event.actor_name} ·{' '}
+              {event.to_label || 'No destination'} ·{' '}
+              {countLabel(event.quantity ?? 0, 'unit')}· {event.actor_name} ·{' '}
               {new Date(event.created_at).toLocaleString('en-US', {
                 timeZone: 'UTC',
               })}{' '}

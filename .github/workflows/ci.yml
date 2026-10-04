@@ -11,49 +11,64 @@ concurrency:
 env:
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
-  app:
-    runs-on: [self-hosted, it-inventory-mid]
-    timeout-minutes: 15
-    env:
-      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: offline-build-placeholder
-      APP_ORIGIN: http://localhost:3000
-      APP_ENV: ci
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.TESTED_SHA }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-      - run: npm install --global npm@11.11.0
-      - run: npm ci
-      - run: git rev-parse HEAD
-      - run: npm run validate:app
-  database:
+  required:
     runs-on: [self-hosted, it-inventory-heavy]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
         with:
           ref: ${{ env.TESTED_SHA }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        id: node_setup
         with:
           node-version-file: .nvmrc
-      - run: npm install --global npm@11.11.0
-      - run: npm ci
-      - run: git rev-parse HEAD
-      - run: npm run db:start
-      - run: npm run db:reset
-      - id: database_tests
+      - id: npm_setup
+        run: npm install --global npm@11.11.0
+      - id: install
+        run: npm ci
+      - id: revision
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+      - id: app
+        run: npm run validate:app
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: offline-build-placeholder
+          APP_ORIGIN: http://localhost:3000
+          APP_ENV: ci
+      - id: db_start
+        run: npm run db:start
+      - id: db_reset
+        run: npm run db:reset
+      - id: db_tests
         run: npm run test:db
-      - run: npm run db:types:check
-      - if: ${{ !cancelled() && steps.database_tests.outcome == 'success' }}
+      - id: db_types
+        run: npm run db:types:check
+      - id: browser_install
         run: npx playwright install --with-deps chromium
-      - if: ${{ !cancelled() && steps.database_tests.outcome == 'success' }}
+      - id: e2e
         run: npm run test:e2e
+      - id: db_stop
+        if: always()
+        run: npm run db:stop
+      - name: Require every foundation gate
+        if: always()
+        run: node scripts/ci-gates.mjs
+        env:
+          FOUNDATION_CHECKOUT: ${{ steps.checkout.outcome }}
+          FOUNDATION_NODE_SETUP: ${{ steps.node_setup.outcome }}
+          FOUNDATION_NPM_SETUP: ${{ steps.npm_setup.outcome }}
+          FOUNDATION_INSTALL: ${{ steps.install.outcome }}
+          FOUNDATION_REVISION: ${{ steps.revision.outcome }}
+          FOUNDATION_APP: ${{ steps.app.outcome }}
+          FOUNDATION_DB_START: ${{ steps.db_start.outcome }}
+          FOUNDATION_DB_RESET: ${{ steps.db_reset.outcome }}
+          FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}
+          FOUNDATION_DB_TYPES: ${{ steps.db_types.outcome }}
+          FOUNDATION_BROWSER_INSTALL: ${{ steps.browser_install.outcome }}
+          FOUNDATION_E2E: ${{ steps.e2e.outcome }}
+          FOUNDATION_DB_STOP: ${{ steps.db_stop.outcome }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         id: failure_artifact
         if: failure() || cancelled()
@@ -67,21 +82,6 @@ jobs:
       - name: Warn when failure diagnostics cannot be uploaded
         if: ${{ always() && steps.failure_artifact.outcome == 'failure' }}
         run: echo '::warning::Failure diagnostics could not be uploaded; GitHub artifact storage quota or availability may prevent retrieval. Test failures remain failures.'
-      - if: always()
-        run: npm run db:stop
-  required:
-    if: always()
-    needs: [app, database]
-    runs-on: [self-hosted, it-inventory-light]
-    steps:
-      - name: Require all foundation gates
-        env:
-          APP_RESULT: ${{ needs.app.result }}
-          DATABASE_RESULT: ${{ needs.database.result }}
-        run: |
-          echo "Tested SHA: $TESTED_SHA"
-          test "$APP_RESULT" = success
-          test "$DATABASE_RESULT" = success
   production_database:
     name: ${{ github.event_name == 'push' && 'Production database ready' || 'Production database inactive (PR)' }}
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}

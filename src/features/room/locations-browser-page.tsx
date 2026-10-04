@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
+import { LocationCode } from '../inventory/components/read-ui';
+import { countLabel } from '@/lib/count';
 import { LocationBrowser } from './location-browser';
 
 export function LocationsBrowserPage({
@@ -38,8 +40,9 @@ export function LocationsBrowserPage({
               {selected.name}
             </h2>
             <p className="mt-2 break-words text-sm text-slate-300">
-              {selected.breadcrumb} · {selected.code}
+              {selected.breadcrumb}
             </p>
+            <LocationCode code={selected.code} />
             <p className="mt-2 text-sm text-slate-200">
               {!selected.active
                 ? 'Inactive: cannot be chosen as a new inventory destination.'
@@ -69,13 +72,15 @@ export function LocationsBrowserPage({
               Find a physical place
             </h2>
             <p className="experience-muted mt-2 text-sm leading-6">
-              Browse {locations.length} logical locations, including{' '}
-              {
+              Browse {countLabel(locations.length, 'logical location')},
+              including{' '}
+              {countLabel(
                 locations.filter((location) => location.can_hold_inventory)
-                  .length
-              }{' '}
-              inventory destinations. Select a group to explore its contents or
-              a destination to see the stock held there.
+                  .length,
+                'inventory destination',
+              )}
+              . Select a group to explore its contents or a destination to see
+              the stock held there.
             </p>
             <Link
               href="/room"

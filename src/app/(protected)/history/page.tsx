@@ -1,4 +1,11 @@
-import { getHistory, getLocations } from '@/features/inventory/queries.server';
+import {
+  getHistory,
+  getHistoryRecord,
+  getLocations,
+} from '@/features/inventory/queries.server';
+import { readFilters } from '@/features/inventory/read-model';
+import { pageRecoveryHref } from '@/features/inventory/scope-presentation';
+import { countLabel } from '@/lib/count';
 import {
   HistoryList,
   Pagination,
@@ -8,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { getEventCustomPage } from '@/features/metadata/queries.server';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Form from 'next/form';
 import Link from 'next/link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
@@ -154,10 +161,42 @@ export default async function HistoryPage({
       </>
     );
   }
+  const filter = readFilters(params);
+  const record =
+    params.entityId !== undefined
+      ? await getHistoryRecord(params.entityId)
+      : null;
+  const coherentParams = { ...params, type: record?.kind ?? filter.type };
+  const clearQuery = new URLSearchParams();
+  if (coherentParams.type !== 'all')
+    clearQuery.set('type', coherentParams.type);
+  if (filter.location) clearQuery.set('location', filter.location);
+  const clearHref = '/history' + (clearQuery.size ? '?' + clearQuery : '');
+  if (params.entityId !== undefined && !record) {
+    return (
+      <>
+        <h1 className="experience-heading">Inventory history</h1>
+        <div className={panel}>
+          <p>
+            Record history is unavailable. The record may be missing,
+            inaccessible, or the record filter may be invalid.
+          </p>
+          <Link
+            className="inline-flex min-h-11 items-center text-cyan-300 underline"
+            href={clearHref}
+          >
+            Clear record filter
+          </Link>
+        </div>
+      </>
+    );
+  }
   const [result, locations] = await Promise.all([
-    getHistory(params),
+    getHistory(coherentParams),
     getLocations(),
   ]);
+  const recovery = pageRecoveryHref('/history', coherentParams, result);
+  if (recovery) redirect(recovery);
   return (
     <>
       <p className="experience-eyebrow">Inventory · Audit trail</p>
@@ -175,15 +214,32 @@ export default async function HistoryPage({
           <div>
             <label htmlFor="history-type">Tracking type</label>
             <select
+              key={`${record?.id ?? 'all'}:${coherentParams.type}`}
               className={field}
               id="history-type"
               name="type"
-              defaultValue={params.type ?? ''}
+              defaultValue={
+                coherentParams.type === 'all' ? '' : coherentParams.type
+              }
+              disabled={Boolean(record)}
+              aria-describedby={record ? 'history-type-help' : undefined}
             >
               <option value="">All types</option>
               <option value="quantity">Quantity</option>
               <option value="asset">Serialized assets</option>
             </select>
+            {record && (
+              <>
+                <input type="hidden" name="type" value={record.kind} />
+                <p
+                  id="history-type-help"
+                  className="mt-2 text-sm text-slate-400"
+                >
+                  Tracking type is locked to this record. Clear the record
+                  filter to choose another type.
+                </p>
+              </>
+            )}
           </div>
           <LocationPicker
             key={params.location ?? ''}
@@ -196,23 +252,75 @@ export default async function HistoryPage({
             allowAll
           />
         </div>
-        {params.entityId && (
+        {record && (
           <>
-            <input type="hidden" name="entityId" value={params.entityId} />
+            <input type="hidden" name="entityId" value={record.id} />
             <p className="text-sm text-slate-400">
-              Showing history for the selected inventory record.{' '}
-              <Link className="text-cyan-300 underline" href="/history">
+              Record:{' '}
+              <Link
+                className="text-cyan-300 underline"
+                href={
+                  '/inventory/' +
+                  (record.kind === 'quantity' ? 'quantity' : 'assets') +
+                  '/' +
+                  record.id
+                }
+              >
+                {record.name}
+              </Link>{' '}
+              ·{' '}
+              {record.kind === 'quantity'
+                ? 'Quantity item'
+                : 'Serialized asset'}
+              .{' '}
+              <Link className="text-cyan-300 underline" href={clearHref}>
                 Clear record filter
               </Link>
             </p>
+            {params.type && params.type !== record.kind && (
+              <p role="status" className="text-sm text-amber-100">
+                Tracking type was reconciled to{' '}
+                {record.kind === 'quantity' ? 'Quantity' : 'Serialized assets'}{' '}
+                for this record.
+              </p>
+            )}
           </>
         )}
         <Button type="submit">Filter history</Button>
       </Form>
+      {filter.location && (
+        <p className="mb-3 text-sm text-slate-300">
+          Location:{' '}
+          {locations.find((location) => location.code === filter.location)
+            ?.breadcrumb ?? filter.location}{' '}
+          ·{' '}
+          <Link
+            className="text-cyan-300 underline"
+            href={
+              '/history?' +
+              new URLSearchParams(
+                Object.fromEntries(
+                  Object.entries(coherentParams).filter(
+                    ([key, value]) =>
+                      key !== 'location' &&
+                      key !== 'page' &&
+                      value !== undefined,
+                  ) as [string, string][],
+                ),
+              )
+            }
+          >
+            Clear location filter
+          </Link>
+        </p>
+      )}
+      <p className="experience-muted mb-3 text-sm">
+        {countLabel(result.total, 'matching event')}
+      </p>
       <div className={styles.history}>
         <HistoryList events={result.rows} />
       </div>
-      <Pagination result={result} base="/history" params={params} />
+      <Pagination result={result} base="/history" params={coherentParams} />
     </>
   );
 }

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useLayoutEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,12 @@ import { Input } from '@/components/ui/input';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
 import type { RemovalReview } from './contracts';
+import {
+  RequiredFieldsNote,
+  RequiredMark,
+  useFormValidation,
+  ValidationSummary,
+} from '@/components/forms/validation';
 
 function codeFor(name: string) {
   return name
@@ -36,6 +42,26 @@ export function SettingsPanel({
   const [code, setCode] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const renameValidation = useFormValidation();
+  const createValidation = useFormValidation();
+  const renameInput = useRef<HTMLInputElement>(null);
+  const renameTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const returnToCategory = useRef<string | null>(null);
+  const categoryList = useRef<HTMLUListElement>(null);
+  useLayoutEffect(() => {
+    if (editing) renameInput.current?.focus();
+    else if (!pending && returnToCategory.current) {
+      (
+        renameTriggers.current.get(returnToCategory.current) ??
+        categoryList.current
+      )?.focus();
+      returnToCategory.current = null;
+    }
+  }, [editing, pending]);
+  const closeRename = () => {
+    setEditing(null);
+    renameValidation.clear();
+  };
   const [removing, setRemoving] = useState<string | null>(null);
   const [replacement, setReplacement] = useState('');
   const [review, setReview] = useState<RemovalReview | null>(null);
@@ -144,7 +170,12 @@ export function SettingsPanel({
               before staff can add inventory.
             </p>
           )}
-          <ul className="experience-surface divide-y divide-cyan-100/10 overflow-hidden">
+          <ul
+            ref={categoryList}
+            tabIndex={-1}
+            aria-label="Categories"
+            className="experience-surface divide-y divide-cyan-100/10 overflow-hidden"
+          >
             {(categories ?? []).map((category) => (
               <li
                 key={category.id}
@@ -174,7 +205,15 @@ export function SettingsPanel({
                         type="button"
                         variant="outline"
                         disabled={pending}
+                        aria-label={'Rename ' + category.name}
+                        ref={(element) => {
+                          if (element)
+                            renameTriggers.current.set(category.id, element);
+                          else renameTriggers.current.delete(category.id);
+                        }}
                         onClick={() => {
+                          returnToCategory.current = category.id;
+                          renameValidation.clear();
                           setEditing(category.id);
                           setEditName(category.name);
                           setRemoving(null);
@@ -197,8 +236,24 @@ export function SettingsPanel({
                 {canManage && editing === category.id && (
                   <form
                     className="mt-4 space-y-3"
+                    noValidate
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === 'Escape' &&
+                        !event.defaultPrevented &&
+                        !pending
+                      ) {
+                        event.preventDefault();
+                        closeRename();
+                      }
+                    }}
                     onSubmit={(event) => {
                       event.preventDefault();
+                      if (
+                        pending ||
+                        !renameValidation.validate(event.currentTarget)
+                      )
+                        return;
                       submit(
                         'category_rename',
                         {
@@ -206,29 +261,38 @@ export function SettingsPanel({
                           expected_version: category.version,
                           name: editName,
                         },
-                        () => setEditing(null),
+                        closeRename,
                       );
                     }}
                   >
+                    <RequiredFieldsNote />
                     <label
                       className="block text-sm"
                       htmlFor={'rename-' + category.id}
                     >
                       New category name
+                      <RequiredMark />
                     </label>
                     <Input
                       id={'rename-' + category.id}
+                      ref={renameInput}
+                      aria-label="New category name"
+                      {...renameValidation.props('rename-' + category.id)}
                       value={editName}
                       maxLength={200}
                       required
+                      disabled={pending}
                       onChange={(event) => setEditName(event.target.value)}
                     />
+                    {renameValidation.error('rename-' + category.id)}
+                    <ValidationSummary issues={renameValidation.issues} />
                     <div className="flex gap-2">
                       <Button disabled={pending}>Save name</Button>
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => setEditing(null)}
+                        disabled={pending}
+                        onClick={closeRename}
                       >
                         Cancel
                       </Button>
@@ -382,24 +446,32 @@ export function SettingsPanel({
           {canManage && (
             <form
               className="experience-surface max-w-3xl space-y-3 p-4"
+              noValidate
               onSubmit={(event) => {
                 event.preventDefault();
+                if (pending || !createValidation.validate(event.currentTarget))
+                  return;
                 submit(
                   'category_create',
                   { name, code, sort_order: active.length + 1 },
                   () => {
                     setName('');
                     setCode('');
+                    createValidation.clear();
                   },
                 );
               }}
             >
               <h3 className="font-semibold">Add category</h3>
+              <RequiredFieldsNote />
               <label className="block text-sm" htmlFor="category-name">
                 Display name
+                <RequiredMark />
               </label>
               <Input
                 id="category-name"
+                aria-label="Display name"
+                {...createValidation.props('category-name')}
                 value={name}
                 required
                 maxLength={200}
@@ -408,17 +480,23 @@ export function SettingsPanel({
                   setCode(codeFor(event.target.value));
                 }}
               />
+              {createValidation.error('category-name')}
               <label className="block text-sm" htmlFor="category-code">
                 Permanent code
+                <RequiredMark />
               </label>
               <Input
                 id="category-code"
+                aria-label="Permanent code"
+                {...createValidation.props('category-code')}
                 value={code}
                 required
                 maxLength={100}
                 pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
                 onChange={(event) => setCode(event.target.value)}
               />
+              {createValidation.error('category-code')}
+              <ValidationSummary issues={createValidation.issues} />
               <p className="text-xs text-slate-400">
                 The code identifies this category permanently. You can rename
                 its display name later.

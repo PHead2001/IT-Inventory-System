@@ -131,6 +131,52 @@ export async function getInventory(
 ): Promise<PageResult<InventoryResult>> {
   return readInventory(await requireMember(), input, getLocations);
 }
+/** A bounded presence probe using the same caller authorization and search contract.
+ * Only used after an unfiltered empty read; errors remain errors, never absence. */
+export async function hasRecordedInventory() {
+  const { supabase } = await requireMember();
+  const { data, error } = await supabase.rpc('inventory_search_v3', {
+    p_type: 'all',
+    p_status: 'all',
+    p_page: 1,
+    p_page_size: 1,
+  });
+  return (
+    searchPage.parse(
+      requireData(data, error, 'Inventory presence could not be loaded.'),
+    ).total > 0
+  );
+}
+/** Resolve kind and name through two bounded caller-RLS reads, including historical records. */
+export async function getHistoryRecord(value: string) {
+  const { supabase } = await requireMember();
+  if (!z.uuid().safeParse(value).success) return null;
+  const [quantity, asset] = await Promise.all([
+    supabase
+      .from('quantity_items')
+      .select('id,name')
+      .eq('id', value)
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('serialized_assets')
+      .select('id,name')
+      .eq('id', value)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (quantity.error || asset.error)
+    throw new Error('Record identity could not be loaded.');
+  // No name or history is exposed for a missing, inaccessible, or ambiguous UUID.
+  if (Boolean(quantity.data) === Boolean(asset.data)) return null;
+  const record = z
+    .object({ id: z.uuid(), name: z.string() })
+    .parse(quantity.data ?? asset.data);
+  return {
+    ...record,
+    kind: quantity.data ? ('quantity' as const) : ('asset' as const),
+  };
+}
 async function readInventory(
   { supabase }: MemberContext,
   input: Record<string, string | undefined>,

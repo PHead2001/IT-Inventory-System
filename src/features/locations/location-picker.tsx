@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { RequiredMark } from '@/components/forms/validation';
 import type { LocationRef } from '../inventory/contracts-ui';
 import {
   locationAncestorIds,
@@ -433,11 +434,13 @@ export function LocationPicker({
         className="block text-sm font-medium text-slate-100"
       >
         {label}
+        {required && <RequiredMark />}
       </label>
       {description && <p className="text-xs text-slate-400">{description}</p>}
       <button
         ref={triggerRef}
         id={controlId}
+        aria-label={label}
         type="button"
         role={visibleOpen ? undefined : 'combobox'}
         disabled={disabled}

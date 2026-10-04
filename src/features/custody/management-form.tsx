@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,12 @@ import { submitCustody } from './actions';
 import { suggestSiteCode } from './site-code';
 import type { ManagedLocation, Site, SiteHolding } from './queries.server';
 import type { CustodyOperation, CustodyState } from './contracts';
+import {
+  RequiredFieldsNote,
+  RequiredMark,
+  useFormValidation,
+  ValidationSummary,
+} from '@/components/forms/validation';
 
 type Command = {
   operation: CustodyOperation;
@@ -132,6 +138,8 @@ export function SiteManagementForm({
   holdings?: SiteHolding[];
   holdingTotal?: number;
 }) {
+  const scope = useId();
+  const validation = useFormValidation();
   const { pending, uncertain, actorBlocked, state, setState, submit } =
     useSubmission(actorId);
   const [baseline, setBaseline] = useState(site);
@@ -218,17 +226,28 @@ export function SiteManagementForm({
   return (
     <form
       className={panel + ' max-w-4xl space-y-4'}
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        if (
+          pending ||
+          (!uncertain && !validation.validate(event.currentTarget))
+        )
+          return;
         save();
       }}
     >
       <h2 className="break-words text-lg font-semibold">
         {baseline ? `Manage ${baseline.name}` : 'Add property / site'}
       </h2>
+      <RequiredFieldsNote />
       <label className="block space-y-2">
         Name
+        <RequiredMark />
         <Input
+          id={scope + '-name'}
+          aria-label="Name"
+          {...validation.props(scope + '-name')}
           disabled={disabled || !!lifecycle}
           value={values.name}
           maxLength={200}
@@ -236,21 +255,32 @@ export function SiteManagementForm({
           onChange={(e) => update('name', e.target.value)}
         />
       </label>
+      {validation.error(scope + '-name')}
       {!baseline && (
         <div className="space-y-2">
           <label className="block space-y-2">
             Permanent code
+            <RequiredMark />
             <Input
+              id={scope + '-code'}
+              aria-label="Permanent code"
+              {...validation.props(
+                scope + '-code',
+                scope + '-site-code-guidance',
+              )}
               disabled={disabled}
               value={values.code || suggestSiteCode(values.name)}
               maxLength={100}
               required
               pattern="[A-Z][A-Z0-9]*(-[A-Z0-9]+)*"
-              aria-describedby="site-code-guidance"
               onChange={(e) => update('code', e.target.value.toUpperCase())}
             />
           </label>
-          <p id="site-code-guidance" className="text-sm text-slate-300">
+          {validation.error(scope + '-code')}
+          <p
+            id={scope + '-site-code-guidance'}
+            className="text-sm text-slate-300"
+          >
             Suggested from the name when possible; edit to override or enter a
             code manually if no suggestion appears.
           </p>
@@ -259,6 +289,8 @@ export function SiteManagementForm({
       <label className="block space-y-2">
         Notes
         <textarea
+          id={scope + '-notes'}
+          aria-describedby={scope + '-notes-guidance'}
           className={field}
           disabled={disabled || !!lifecycle}
           value={values.notes}
@@ -266,6 +298,9 @@ export function SiteManagementForm({
           onChange={(e) => update('notes', e.target.value)}
         />
       </label>
+      <p id={scope + '-notes-guidance'} className="text-sm text-slate-400">
+        Notes are optional.
+      </p>
       {stale && !uncertain && (
         <p role="alert">
           Site settings changed elsewhere. Your entries are retained. Cancel to
@@ -344,7 +379,11 @@ export function SiteManagementForm({
               )}
               <label className="block space-y-2">
                 Reason
+                <RequiredMark />
                 <textarea
+                  id={scope + '-reason'}
+                  aria-label="Reason"
+                  {...validation.props(scope + '-reason')}
                   required
                   maxLength={2000}
                   className={field}
@@ -356,6 +395,7 @@ export function SiteManagementForm({
                   }}
                 />
               </label>
+              {validation.error(scope + '-reason')}
             </section>
           )}
         </>
@@ -376,14 +416,10 @@ export function SiteManagementForm({
             : state.message}
         </p>
       )}
+      <ValidationSummary issues={validation.issues} />
       <div className="flex flex-wrap gap-3">
         <Button
-          disabled={
-            pending ||
-            actorBlocked ||
-            (!uncertain && stale) ||
-            (!!lifecycle && !reason.trim())
-          }
+          disabled={pending || actorBlocked || (!uncertain && stale)}
           type="submit"
         >
           {pending
@@ -412,6 +448,7 @@ export function SiteManagementForm({
               setLifecycle(null);
               setReason('');
               setState(null);
+              validation.clear();
             }}
           >
             Cancel
@@ -429,6 +466,8 @@ export function LocationManagementForm({
   location: ManagedLocation;
   actorId?: string;
 }) {
+  const scope = useId();
+  const validation = useFormValidation();
   const { pending, uncertain, actorBlocked, state, setState, submit } =
     useSubmission(actorId);
   const [baseline, setBaseline] = useState(location);
@@ -442,8 +481,14 @@ export function LocationManagementForm({
   return (
     <form
       className={panel + ' max-w-4xl space-y-4'}
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        if (
+          pending ||
+          (!uncertain && !validation.validate(event.currentTarget))
+        )
+          return;
         if (stale && !uncertain) return;
         void submit(
           'location_rename',
@@ -467,13 +512,18 @@ export function LocationManagementForm({
       <h2 className="break-words text-lg font-semibold">
         Rename {baseline.name}
       </h2>
+      <RequiredFieldsNote />
       <p className="text-sm text-slate-300">
         Storage structure is maintained with reviewed room code. This action
         changes only the display name. Permanent code: {baseline.code}.
       </p>
       <label className="block space-y-2">
         Name
+        <RequiredMark />
         <Input
+          id={scope + '-name'}
+          aria-label="Name"
+          {...validation.props(scope + '-name')}
           value={name}
           required
           maxLength={200}
@@ -484,6 +534,8 @@ export function LocationManagementForm({
           }}
         />
       </label>
+      {validation.error(scope + '-name')}
+      <ValidationSummary issues={validation.issues} />
       {stale && !uncertain && (
         <p role="alert">
           This location changed elsewhere. Your name edit is retained. Cancel to
@@ -521,6 +573,7 @@ export function LocationManagementForm({
             setBaseline(current);
             setName(current.name);
             setState(null);
+            validation.clear();
           }}
         >
           Cancel

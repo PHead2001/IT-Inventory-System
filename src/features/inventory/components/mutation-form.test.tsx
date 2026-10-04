@@ -74,6 +74,120 @@ async function chooseLocation(
   await user.click(screen.getByRole('option', { name: new RegExp(name) }));
 }
 describe('inventory operation forms', () => {
+  it.each([1, 2])(
+    'uses the correct unit for %s available stock without permitting overdraw',
+    async (count) => {
+      const user = userEvent.setup();
+      render(
+        <MutationForm
+          {...defaults}
+          balances={[{ location, quantity: count }]}
+          operation="quantity_move"
+        />,
+      );
+      const unit = count === 1 ? 'unit' : 'units';
+      expect(
+        screen.getByText(`Recorded source availability: ${count} ${unit}.`, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await chooseLocation(user, 'Destination location', '1B');
+      const amount = screen.getByLabelText('Quantity to move');
+      await user.clear(amount);
+      await user.type(amount, String(count + 1));
+      await user.click(
+        screen.getByRole('button', { name: 'Review move stock' }),
+      );
+      expect(amount).toHaveFocus();
+      expect(amount).toHaveAccessibleDescription(
+        `Recorded source availability: ${count} ${unit}. This source has only ${count} ${unit} available. Enter no more than ${count}.`,
+      );
+      expect(
+        screen.queryByRole('region', { name: 'Review changes' }),
+      ).toBeNull();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ['quantity_receive', 'Receive at', 'Review receive stock'],
+    ['asset_move', 'Destination location', 'Review move asset'],
+    ['asset_create', 'Destination location', 'Review create serialized asset'],
+  ] as const)(
+    'associates the missing destination error with the actual %s picker',
+    async (operation, label, reviewName) => {
+      const user = userEvent.setup();
+      render(
+        <MutationForm
+          categories={defaults.categories}
+          locations={defaults.locations}
+          operation={operation}
+          item={operation === 'quantity_receive' ? item : undefined}
+          asset={
+            operation === 'asset_move'
+              ? {
+                  ...item,
+                  status: 'active',
+                  assetTag: null,
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          currentLocation={operation === 'asset_move' ? location : undefined}
+        />,
+      );
+      if (operation === 'asset_create')
+        await user.type(screen.getByLabelText('Name'), 'Fictional asset');
+      const reason = screen.queryByLabelText('Reason (required)');
+      if (reason) await user.type(reason, 'Fictional operation');
+      await user.click(screen.getByRole('button', { name: reviewName }));
+      const picker = screen.getByLabelText(label, { selector: 'button' });
+      expect(picker).toHaveFocus();
+      expect(picker).toHaveAttribute('aria-invalid', 'true');
+      expect(picker).toHaveAccessibleDescription('Choose a location.');
+      const error = screen.getByText('Choose a location.', { exact: true });
+      expect(error).toBeVisible();
+      expect(picker).toHaveAttribute('aria-describedby', error.id);
+      expect(
+        screen.queryByRole('region', { name: 'Review changes' }),
+      ).toBeNull();
+      expect(mocks.submit).not.toHaveBeenCalled();
+      await chooseLocation(user, label, '1B');
+      await user.click(screen.getByRole('button', { name: reviewName }));
+      expect(picker).not.toHaveAttribute('aria-invalid', 'true');
+      expect(
+        screen.getByRole('region', { name: 'Review changes' }),
+      ).toBeVisible();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps receive validation inline, associated and focused while allowing correction', async () => {
+    const user = userEvent.setup();
+    render(<MutationForm {...defaults} operation="quantity_receive" />);
+    await chooseLocation(user, 'Receive at', '1B');
+    await user.type(screen.getByLabelText('Reason (required)'), 'Delivery');
+    const amount = screen.getByLabelText('Quantity to receive');
+    await user.clear(amount);
+    await user.type(amount, '0');
+    await user.click(
+      screen.getByRole('button', { name: 'Review receive stock' }),
+    );
+    expect(amount).toHaveFocus();
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(amount).toHaveAccessibleDescription('Enter at least 1.');
+    expect(screen.queryByRole('region', { name: 'Review changes' })).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    await user.clear(amount);
+    await user.type(amount, '2');
+    await user.click(
+      screen.getByRole('button', { name: 'Review receive stock' }),
+    );
+    expect(amount).toHaveValue(2);
+    expect(amount).not.toHaveAttribute('aria-invalid');
+    expect(
+      screen.getByRole('region', { name: 'Review changes' }),
+    ).toBeVisible();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it('retains acknowledged sibling success when its own record refresh arrives', async () => {
     mocks.submit.mockResolvedValue({
       ok: true,

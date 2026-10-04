@@ -1,8 +1,15 @@
 'use client';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { countLabel } from '@/lib/count';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  RequiredFieldsNote,
+  RequiredMark,
+  useFormValidation,
+  ValidationSummary,
+} from '@/components/forms/validation';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { pickerLocations } from '@/features/locations/picker-model';
 import {
@@ -234,6 +241,7 @@ function MutationFormFields({
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
   const router = useRouter();
+  const validation = useFormValidation();
   // The editable values and their optimistic-concurrency baseline travel together.
   const [baseline, setBaseline] = useState(() => ({
     item: freshStart?.item ?? latestItem,
@@ -416,9 +424,13 @@ function MutationFormFields({
     } = {},
   ) => (
     <div className="space-y-2" key={name}>
-      <label htmlFor={operation + '-' + name}>{label}</label>
+      <label htmlFor={operation + '-' + name}>
+        {label}
+        {options.required && <RequiredMark />}
+      </label>
       <Input
         id={operation + '-' + name}
+        aria-label={label}
         name={name}
         value={values[name] ?? ''}
         onChange={(event) => update(name, event.target.value)}
@@ -429,16 +441,23 @@ function MutationFormFields({
         max={options.numeric ? 2147483647 : undefined}
         step={options.numeric ? 1 : undefined}
         aria-invalid={
-          moving && name === 'quantity' && !!amountError ? true : undefined
-        }
-        aria-describedby={
-          moving && name === 'quantity'
-            ? operation +
-              '-availability' +
-              (amountError ? ' ' + operation + '-quantity-error' : '')
+          (moving && name === 'quantity' && !!amountError) ||
+          validation.issues.some((issue) => issue.id === operation + '-' + name)
+            ? true
             : undefined
         }
+        aria-describedby={
+          validation.props(
+            operation + '-' + name,
+            moving && name === 'quantity'
+              ? operation +
+                  '-availability' +
+                  (amountError ? ' ' + operation + '-quantity-error' : '')
+              : undefined,
+          )['aria-describedby']
+        }
       />
+      {validation.error(operation + '-' + name)}
     </div>
   );
   const selectLocation = (
@@ -474,11 +493,10 @@ function MutationFormFields({
       }
       required={required}
       error={
-        locationError
-          ? locationError
-          : state && !state.ok
-            ? state.fieldErrors?.[name]
-            : undefined
+        validation.issues.find((issue) => issue.id === operation + '-' + name)
+          ?.message ||
+        locationError ||
+        (state && !state.ok ? state.fieldErrors?.[name] : undefined)
       }
       description={
         source ? 'Only locations with stock are available.' : undefined
@@ -702,7 +720,7 @@ function MutationFormFields({
                 amount! > 2147483647)
             ? 'Enter a whole number of units between 1 and 2,147,483,647.'
             : amount! > sourceBalance.quantity
-              ? `This source has only ${sourceBalance.quantity} units available. Enter no more than ${sourceBalance.quantity}.`
+              ? `This source has only ${countLabel(sourceBalance.quantity, 'unit')} available. Enter no more than ${sourceBalance.quantity}.`
               : amount! +
                     (balances.find(
                       (b) => b.location.id === values.destination_location_id,
@@ -734,6 +752,7 @@ function MutationFormFields({
               ].includes(operation)
             ? ['location_id']
             : [];
+    const locationIssues = [];
     for (const name of uncertain ? [] : needed) {
       const source = name === 'source_location_id';
       const valid = pickerLocations(
@@ -756,13 +775,28 @@ function MutationFormFields({
         },
       ).some((location) => location.id === values[name]);
       if (!valid) {
-        setLocationError(
-          values[name]
+        locationIssues.push({
+          id: operation + '-' + name,
+          label:
+            name === 'source_location_id'
+              ? 'Source location'
+              : name === 'destination_location_id'
+                ? 'Destination location'
+                : name === 'initial_location_id'
+                  ? 'Initial location'
+                  : 'Location',
+          message: values[name]
             ? 'Selected location is unavailable. Choose another location.'
             : 'Choose a location.',
-        );
-        return;
+        });
       }
+    }
+    if (
+      !uncertain &&
+      !validation.validate(event.currentTarget, locationIssues)
+    ) {
+      setReview(false);
+      return;
     }
     if (!uncertain && !validReview) {
       setReviewKey(currentReviewKey);
@@ -952,20 +986,26 @@ function MutationFormFields({
       onSubmit={submit}
       aria-label={labels[operation]}
       className="space-y-4"
-      noValidate={moving}
+      noValidate
     >
       <fieldset
         disabled={pending || (moving && uncertain)}
         className="space-y-4"
         hidden={completed}
       >
+        <RequiredFieldsNote />
         {metadata && (
           <>
             {input('name', 'Name', { required: true, max: 200 })}
             <div className="space-y-2">
-              <label htmlFor={operation + '-category'}>Category</label>
+              <label htmlFor={operation + '-category'}>
+                Category
+                <RequiredMark />
+              </label>
               <select
                 id={operation + '-category'}
+                aria-label="Category"
+                {...validation.props(operation + '-category')}
                 className={field}
                 value={values.category_id}
                 onChange={(event) => update('category_id', event.target.value)}
@@ -980,6 +1020,7 @@ function MutationFormFields({
                     </option>
                   ))}
               </select>
+              {validation.error(operation + '-category')}
             </div>
             {input('manufacturer', 'Manufacturer', { max: 200 })}
             {input('model', 'Model', { max: 200 })}
@@ -1000,11 +1041,13 @@ function MutationFormFields({
               <textarea
                 className={field}
                 id={operation + '-description'}
+                {...validation.props(operation + '-description')}
                 rows={3}
                 maxLength={4000}
                 value={values.description}
                 onChange={(event) => update('description', event.target.value)}
               />
+              {validation.error(operation + '-description')}
             </div>
             {serialized && (
               <>
@@ -1096,7 +1139,7 @@ function MutationFormFields({
               {latestBalances === undefined
                 ? 'unavailable'
                 : sourceBalance
-                  ? `${sourceBalance.quantity} units`
+                  ? countLabel(sourceBalance.quantity, 'unit')
                   : 'choose a source'}
               .
             </p>
@@ -1156,15 +1199,18 @@ function MutationFormFields({
             <textarea
               className={field}
               id={operation + '-reason'}
+              {...validation.props(operation + '-reason')}
               rows={2}
               maxLength={2000}
               required={requiresReason}
               value={values.reason}
               onChange={(event) => update('reason', event.target.value)}
             />
+            {validation.error(operation + '-reason')}
           </div>
         )}
       </fieldset>
+      <ValidationSummary issues={validation.issues} />
       {refreshRequested && (
         <p role="status" className="text-sm text-cyan-200">
           Loading the latest record before another submission…

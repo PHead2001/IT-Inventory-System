@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { LocationManagementForm, SiteManagementForm } from './management-form';
 import { submitCustody } from './actions';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('./actions', () => ({ submitCustody: vi.fn() }));
@@ -30,6 +31,47 @@ const area = {
   version: '1',
 };
 beforeEach(() => vi.mocked(submitCustody).mockReset());
+
+it('keeps site creation errors associated and focuses Name before submission', () => {
+  render(<SiteManagementForm />);
+  const name = screen.getByLabelText('Name');
+  fireEvent.submit(name.closest('form')!);
+  expect(submitCustody).not.toHaveBeenCalled();
+  expect(name).toHaveFocus();
+  expect(name).toHaveAttribute('aria-invalid', 'true');
+  expect(name).toHaveAccessibleDescription(/Enter/);
+});
+
+it('retains code guidance and optional Notes while correcting invalid site format', async () => {
+  const user = userEvent.setup();
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: true,
+    entityId: id(9),
+    version: '1',
+    changed: true,
+  });
+  render(<SiteManagementForm />);
+  await user.type(screen.getByLabelText('Name'), 'Fictional property');
+  const code = screen.getByLabelText('Permanent code', { exact: true });
+  await user.click(code);
+  await user.keyboard('{Control>}a{/Control}');
+  await user.type(code, 'BAD CODE', { skipClick: true });
+  await user.click(screen.getByRole('button', { name: 'Save site' }));
+  expect(submitCustody).not.toHaveBeenCalled();
+  expect(code).toHaveFocus();
+  expect(code).toHaveAttribute('aria-invalid', 'true');
+  expect(code).toHaveAccessibleDescription(
+    /Suggested from the name.*Use the required format/,
+  );
+  expect(screen.getByLabelText('Name')).toHaveValue('Fictional property');
+  expect(screen.getByLabelText('Notes')).not.toBeRequired();
+  await user.click(code);
+  await user.keyboard('{Control>}a{/Control}');
+  await user.type(code, 'VALID-CODE', { skipClick: true });
+  await user.click(screen.getByRole('button', { name: 'Save site' }));
+  await waitFor(() => expect(submitCustody).toHaveBeenCalledOnce());
+  expect(code).not.toHaveAttribute('aria-invalid');
+});
 
 it('suggests a site code from its name and submits that visible suggestion', async () => {
   vi.mocked(submitCustody).mockResolvedValue({

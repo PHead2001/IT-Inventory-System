@@ -26,6 +26,10 @@ Recenter translates the camera and orbit pivot to `room.camera.target` while pre
 
 ## Accessibility, failure and performance
 
+Location names and codes occupy separate lines. Ordinary codes remain intact; codes longer than 24 characters have a bounded horizontal scroll region with the complete code and a keyboard focus target outside selection buttons. Search results retain full path context, while group-detail child links use short names with full accessible breadcrumbs and existing capability labels. A single parent map/Spaces action supplies the secondary navigation.
+
+The contents panel names active-only scope, distinguishes each row's local holding from item-wide totals, and labels distinct counts as “On this page”; the full matching count remains rows. Empty destinations explain “No active inventory here” and link to all-status location contents, without an empty pager. Out-of-range contents pages replace the page parameter and retain selection while a new authorized response loads. Request identity/generation checks continue to reject stale results. No-selection guidance names the map only when registered, visible and available; unmodeled, hidden and failed surfaces direct users to the location browser.
+
 Normal location selection and inventory links stay available outside the canvas. Controls have readable names and touch-sized targets. Selection is announced as text, not color alone. Labels are hidden until hover by default and can all be shown while Show all labels is enabled; visible labels are keyboard-operable buttons, while mesh clicks remain a separate canvas raycast path. Touch users select through the conventional location panel. Occluded storage remains available through the picker. The room can be hidden on any screen, and phone workflows do not require precise pointing.
 
 The renderer is dynamically imported with server rendering disabled. Loading, unavailable graphics, initialization errors and context loss keep the conventional UI usable. Retry recreates the graphics surface. Hide/show clears readiness until the remounted scene actually renders.
