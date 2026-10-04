@@ -159,14 +159,15 @@ function Get-RunnerResourceProfile([string] $Label) {
     $memory = switch -CaseSensitive ($Label) {
         'it-inventory-light' { 2GB; break }
         'it-inventory-mid' { 4GB; break }
-        'it-inventory-heavy' { 8GB; break }
+        'it-inventory-heavy' { 6GB; break }
         'it-inventory-ephemeral' { 8GB; break }
         default {
             if ($Label -cmatch '^it-inventory-pilot-[0-9a-f]{40}$') { 8GB }
             else { throw 'Unsupported runner resource label.' }
         }
     }
-    return [pscustomobject]@{ label = $Label; memoryBytes = $memory; requiredBytes = ($memory + 2GB) }
+    $reserve = if ($Label -ceq 'it-inventory-heavy') { 1GB } else { 2GB }
+    return [pscustomobject]@{ label = $Label; memoryBytes = $memory; hostReserveBytes = $reserve; requiredBytes = ($memory + $reserve) }
 }
 
 function Get-RunnerSessionProfile($Config, [string] $ProfileLabel = '') {
