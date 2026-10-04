@@ -14,6 +14,18 @@ import { setLocalReducedMotion } from './motion-settings';
 
 test.use({ deviceScaleFactor: 2 });
 
+async function expectLocationIdentity(
+  panel: Locator,
+  name: string,
+  code: string,
+) {
+  await expect(panel.getByRole('heading', { name, exact: true })).toBeVisible();
+  await expect(panel.getByText(code, { exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole('link', { name: 'Location details and history' }),
+  ).toHaveAttribute('href', '/locations/' + code);
+}
+
 type CameraSnapshot = {
   position: [number, number, number];
   target: [number, number, number];
@@ -724,9 +736,7 @@ test('Spaces selection updates the heading immediately, rejects stale contents a
   const space = page.getByLabel('Space', { exact: true });
   const inventory = page.getByRole('region', { name: 'Location inventory' });
   await expect(space).toHaveValue('it-closet');
-  await expect(
-    inventory.getByRole('heading', { name: /ITC-D01/ }),
-  ).toBeVisible();
+  await expectLocationIdentity(inventory, 'Drawer 1', 'ITC-D01');
   await expect(inventory).toHaveAttribute('aria-busy', 'false');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
@@ -760,31 +770,30 @@ test('Spaces selection updates the heading immediately, rejects stale contents a
     await expect(viewer).toHaveCount(0);
     const browser = page.getByRole('navigation', { name: 'Location browser' });
     await browser.getByLabel('Browse locations').fill('ITO');
-    const office = browser.getByRole('button', { name: /ITO/ }).first();
+    const office = browser.getByRole('button', { name: /IT Office ITO$/ });
     await expect(office).toBeVisible();
     await office.click();
     await officeRequest;
-    await expect(inventory.getByRole('heading', { name: /ITO/ })).toBeVisible();
+    await expectLocationIdentity(inventory, 'IT Office', 'ITO');
     await space.selectOption('it-closet');
     await browser.getByLabel('Browse locations').fill('ITC-D01');
     await browser
       .getByRole('button', { name: /ITC-D01/ })
       .first()
       .click();
-    await expect(
-      inventory.getByRole('heading', { name: /ITC-D01/ }),
-    ).toBeVisible();
+    await expectLocationIdentity(inventory, 'Drawer 1', 'ITC-D01');
     releaseOffice();
     await expect(inventory).toHaveAttribute('aria-busy', 'false');
     await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-D01');
-    await expect(inventory.getByRole('heading', { name: /ITO/ })).toHaveCount(
-      0,
-    );
+    await expect(
+      inventory.getByRole('heading', { name: 'IT Office', exact: true }),
+    ).toHaveCount(0);
+    await expect(inventory.getByText('ITO', { exact: true })).toHaveCount(0);
     await page.goBack();
     await expect(space).toHaveValue('it-closet');
     await page.goBack();
     await expect(space).toHaveValue('it-office');
-    await expect(inventory.getByRole('heading', { name: /ITO/ })).toBeVisible();
+    await expectLocationIdentity(inventory, 'IT Office', 'ITO');
   } finally {
     releaseOffice();
     await page.unroute('**/api/room/contents?*');
@@ -959,9 +968,7 @@ test('Spaces handles a failed contents request without dropping selection or the
     .getByRole('button', { name: /ITC-D01/ })
     .first()
     .click();
-  await expect(
-    inventory.getByRole('heading', { name: /ITC-D01/ }),
-  ).toBeVisible();
+  await expectLocationIdentity(inventory, 'Drawer 1', 'ITC-D01');
   await expect(inventory.getByRole('alert')).toContainText(
     'Inventory could not be loaded',
   );

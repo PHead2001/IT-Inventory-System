@@ -211,10 +211,10 @@ test('a separate authenticated writer changes stock after move review and reject
     ).toHaveCount(0);
     await form.getByRole('button', { name: 'Refresh latest record' }).click();
     await expect(
-      form.getByText('Recorded source availability: 1 units.'),
+      form.getByText('Recorded source availability: 1 unit.'),
     ).toBeVisible();
     await form.getByRole('button', { name: 'Review move stock' }).click();
-    await expect(form.getByRole('alert')).toContainText('only 1 units');
+    await expect(form.getByRole('alert')).toContainText('only 1 unit');
     await page.reload();
     await page.getByRole('link', { name: 'View all item history' }).click();
     await expect(

@@ -223,9 +223,23 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await expect(
     page.getByRole('heading', { name: 'IT Office inventory' }),
   ).toBeVisible();
+  const selectedLocation = page.getByRole('region', {
+    name: 'Location inventory',
+  });
   await expect(
-    page.getByRole('region', { name: 'Location inventory' }),
-  ).toContainText(`Fictional overflow cabinet renamed (${locationCode})`);
+    selectedLocation.getByRole('heading', {
+      name: 'Fictional overflow cabinet renamed',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    selectedLocation.getByText(locationCode, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    selectedLocation.getByRole('link', {
+      name: 'Location details and history',
+    }),
+  ).toHaveAttribute('href', '/locations/' + locationCode);
   await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   await page.goto('/locations/' + locationCode);
   await expect(
@@ -313,7 +327,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await expect(page.getByRole('link', { name })).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Grouped current holdings' }),
-  ).toContainText('1 distinct serialized devices');
+  ).toContainText('1 distinct serialized device');
   await expect(
     page.getByText('Current serialized assets').locator('..'),
   ).toContainText('1');
@@ -558,10 +572,38 @@ test('site movements distinguish available, assigned and recorded; dated activit
   expect(siteCsvText).not.toContain(aCode);
   expect(siteCsvText).not.toContain('ITO-GENERAL');
   await page.goto('/inventory?q=' + encodeURIComponent(name));
-  await expect(page.getByRole('link', { name, exact: true })).toHaveCount(3);
+  const holdings = page.getByRole('listitem').filter({
+    has: page.getByRole('link', { name, exact: true }),
+  });
+  await expect(holdings).toHaveCount(3);
   await expect(
-    page.getByText('Available 8 · Assigned 2 · Total recorded 10'),
+    holdings.getByText('Across all storage: 8 available', { exact: true }),
   ).toHaveCount(3);
+  await expect(
+    holdings.getByText('Overall totals: 2 assigned · 10 recorded', {
+      exact: true,
+    }),
+  ).toHaveCount(3);
+  for (const siteCode of [aCode, bCode]) {
+    const siteHolding = holdings.filter({
+      has: page.getByRole('link', { name: new RegExp(siteCode) }),
+    });
+    await expect(
+      siteHolding.getByText('At this site', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      siteHolding.getByText('1 unit', { exact: true }),
+    ).toBeVisible();
+  }
+  const storageHolding = holdings.filter({
+    has: page.getByRole('link', { name: /IT Office.*ITO-GENERAL/ }),
+  });
+  await expect(
+    storageHolding.getByText('At this location', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    storageHolding.getByText('8 units', { exact: true }),
+  ).toBeVisible();
   await page.goto('/sites/' + aCode + '/open/quantity');
   await expect(
     page.getByRole('heading', { name: /Record existing quantity holding/ }),
