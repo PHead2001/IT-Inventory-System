@@ -1,3 +1,8 @@
+import { openRecordTask } from '../e2e/record-task-controls';
+import {
+  metadataReviewButton,
+  metadataSaveButton,
+} from '../e2e/metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { expect, test, type Page } from '@playwright/test';
@@ -14,11 +19,7 @@ async function login(page: Page, email: string) {
   ).toBeVisible();
 }
 async function operation(page: Page, name: string) {
-  await page
-    .locator('summary')
-    .filter({ hasText: new RegExp('^' + name + '$') })
-    .click();
-  return page.getByRole('form', { name, exact: true });
+  return openRecordTask(page, name);
 }
 async function archive(page: Page, detail: string) {
   await page.goto(detail);
@@ -188,21 +189,18 @@ test('fresh first-use, site availability and configured stock states stay truthf
 
     await page.goto('/inventory/quantity/new');
     let form = page.getByRole('form', {
-      name: 'Create quantity inventory',
+      name: 'Add quantity item',
       exact: true,
     });
     const name = 'Checkpoint 2 fresh quantity ' + randomUUID();
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Initial quantity').fill('2');
     await chooseLocation(form, 'Initial location', 'ITC-RED');
-    await form.getByRole('button', { name: 'Review metadata' }).click();
-    await form.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataReviewButton(form).click();
+    await metadataSaveButton(form).click();
     await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
     detail = page.url();
-    const issue = page.getByRole('form', {
-      name: 'Issue stock to a site',
-      exact: true,
-    });
+    const issue = await openRecordTask(page, 'Issue stock to a site');
     await expect(
       issue.getByText(
         'No sites are configured. This operation needs a destination site.',
@@ -214,10 +212,7 @@ test('fresh first-use, site availability and configured stock states stay truthf
     await expect(
       issue.getByRole('link', { name: 'Open site settings' }),
     ).toHaveAttribute('href', '/settings/sites');
-    const opening = page.getByRole('form', {
-      name: 'Record existing site holding',
-      exact: true,
-    });
+    const opening = await openRecordTask(page, 'Record existing site holding');
     await expect(
       opening.getByRole('button', {
         name: 'Record existing site holding',
@@ -232,10 +227,10 @@ test('fresh first-use, site availability and configured stock states stay truthf
     const ordinary = await ordinaryContext.newPage();
     await login(ordinary, ordinaryEmail);
     await ordinary.goto(detail);
-    const ordinaryIssue = ordinary.getByRole('form', {
-      name: 'Issue stock to a site',
-      exact: true,
-    });
+    const ordinaryIssue = await openRecordTask(
+      ordinary,
+      'Issue stock to a site',
+    );
     await expect(
       ordinaryIssue.getByText(/Ask a configuration maintainer/),
     ).toBeVisible();
@@ -268,7 +263,7 @@ test('fresh first-use, site availability and configured stock states stay truthf
     await page.goto('/settings/sites');
     const siteForm = page.locator('form').filter({
       has: page.getByRole('heading', {
-        name: 'Add property / site',
+        name: 'Add property/site',
         exact: true,
       }),
     });
@@ -286,17 +281,15 @@ test('fresh first-use, site availability and configured stock states stay truthf
     await page.goto('/sites/' + siteCode);
     await page
       .getByRole('link', {
-        name: 'Record existing quantity holding',
+        name: 'Record existing quantity item',
         exact: true,
       })
       .click();
     const siteOpening = page.getByRole('form', {
-      name: 'Record opening quantity at site',
+      name: 'Record opening quantity item at site',
       exact: true,
     });
-    await siteOpening
-      .getByRole('button', { name: 'Review metadata', exact: true })
-      .click();
+    await metadataReviewButton(siteOpening).click();
     await expect(siteOpening.getByLabel('Name', { exact: true })).toBeFocused();
     await expect(
       siteOpening.getByLabel('Name', { exact: true }),
@@ -308,9 +301,7 @@ test('fresh first-use, site availability and configured stock states stay truthf
       .getByLabel('Name', { exact: true })
       .fill('Unsubmitted fictional opening');
     await siteOpening.getByLabel('Units already at this site').fill('0');
-    await siteOpening
-      .getByRole('button', { name: 'Review metadata', exact: true })
-      .click();
+    await metadataReviewButton(siteOpening).click();
     await expect(
       siteOpening.getByLabel('Units already at this site'),
     ).toBeFocused();
@@ -350,8 +341,8 @@ test('fresh first-use, site availability and configured stock states stay truthf
       await page.goto(detail!);
       const edit = await operation(page, 'Edit quantity metadata');
       await edit.getByLabel('Reorder threshold (optional)').fill(String(value));
-      await edit.getByRole('button', { name: 'Review metadata' }).click();
-      await edit.getByRole('button', { name: 'Confirm save' }).click();
+      await metadataReviewButton(edit).click();
+      await metadataSaveButton(edit).click();
       await expect(
         edit.getByRole('status').filter({ hasText: /^Metadata saved\.$/ }),
       ).toBeVisible();

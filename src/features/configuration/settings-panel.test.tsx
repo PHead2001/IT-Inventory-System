@@ -229,7 +229,7 @@ it('requires a replacement for history-only references and explains tombstone re
   const review = await within(row).findByRole('region', {
     name: 'Removal impact review',
   });
-  expect(review).toHaveTextContent('1 historical quantity definitions');
+  expect(review).toHaveTextContent('1 historical quantity items');
   expect(review).toHaveTextContent('retained for readable history');
   expect(within(review).getByRole('alert')).toHaveTextContent(
     'Choose a replacement',
@@ -264,7 +264,7 @@ it('does not call a currently referenced category unreferenced when no replaceme
   const review = await within(row).findByRole('region', {
     name: 'Removal impact review',
   });
-  expect(review).toHaveTextContent('2 current quantity definitions');
+  expect(review).toHaveTextContent('2 current quantity items');
   expect(review).toHaveTextContent('retained for readable history');
   expect(review).not.toHaveTextContent('unreferenced category will be deleted');
   expect(within(review).getByRole('alert')).toHaveTextContent(
@@ -342,7 +342,7 @@ it('keeps an authored form category for history and shows target metadata gaps b
   });
   expect(review).toHaveTextContent('1 authored form revisions');
   expect(review).toHaveTextContent('2 records with retained custom values');
-  expect(review).toHaveTextContent('1 quantity definitions');
+  expect(review).toHaveTextContent('1 quantity items');
   expect(review).toHaveTextContent('legacy values');
   expect(review).toHaveTextContent('retained for readable history');
 });

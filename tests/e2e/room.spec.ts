@@ -1408,7 +1408,7 @@ test('viewer phone navigation offers keyboard selection and an optional room wit
     page.getByRole('heading', { name: inventoryName, exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText('Manage quantity inventory', { exact: true }),
+    page.getByRole('region', { name: 'Record tasks', exact: true }),
   ).toHaveCount(0);
   await expect(
     page.getByRole('form', { name: 'Move stock', exact: true }),

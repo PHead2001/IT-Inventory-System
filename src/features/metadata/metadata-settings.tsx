@@ -578,6 +578,10 @@ export function MetadataSettings({
     unknown
   > | null>(null);
   const [message, setMessage] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [recoveryToolsOpen, setRecoveryToolsOpen] = useState(false);
+  const recoveryToolsRef = useRef<HTMLDialogElement>(null);
+  const recoveryToolsTrigger = useRef<HTMLButtonElement>(null);
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
@@ -597,6 +601,18 @@ export function MetadataSettings({
   const [identityStatus, setIdentityStatus] = useState<
     'verified' | 'checking' | 'blocked' | 'retry'
   >('verified');
+  useEffect(() => {
+    const dialog = recoveryToolsRef.current;
+    if (!dialog) return;
+    if (recoveryToolsOpen && identityStatus !== 'blocked') {
+      if (dialog.showModal) dialog.showModal();
+      else dialog.setAttribute('open', '');
+    } else if (dialog.open) {
+      if (dialog.close) dialog.close();
+      else dialog.removeAttribute('open');
+      recoveryToolsTrigger.current?.focus();
+    }
+  }, [recoveryToolsOpen, identityStatus]);
   const identityCheck = useRef(0);
   const identityInFlight = useRef(false);
   const terminalDenied = useRef(false);
@@ -955,6 +971,7 @@ export function MetadataSettings({
     if (definition)
       setHistory((prior) => [...prior.slice(-19), copy(definition)]);
     setDefinition(next);
+    setSaveFailed(false);
     setSaveReview(null);
     setSavePayload(null);
     setMessage('');
@@ -969,6 +986,7 @@ export function MetadataSettings({
     setPreviewVersion((version) => version + 1);
     const parsed = initialDefinition(value);
     setDefinition(parsed);
+    setSaveFailed(false);
     setSaved(JSON.stringify(parsed ?? value));
     setDraftVersion(version);
     setDraftId(nextDraftId);
@@ -1301,6 +1319,7 @@ export function MetadataSettings({
     setUncertainSave(true);
     busy.current = true;
     setOperationPending(true);
+    setSaveFailed(false);
     setMessage('Saving…');
     const submittedSession = categorySession.current;
     const submittedEpoch = editEpoch.current;
@@ -1333,6 +1352,7 @@ export function MetadataSettings({
           if (result.code === 'P1001') denyIdentity();
           else if (result.code === 'identity_unverified')
             setIdentityStatus('retry');
+          setSaveFailed(true);
           setMessage(result.message);
           if (['P1002', 'P1017'].includes(result.code)) {
             setSaveReview(null);
@@ -1341,6 +1361,7 @@ export function MetadataSettings({
           return;
         }
         setUncertainSave(false);
+        setSaveFailed(false);
         unresolvedCommand.current = null;
         clearDesignerRecovery(memberId, categoryId);
         if (result.data.status === 'confirmation_required') {
@@ -1646,18 +1667,12 @@ export function MetadataSettings({
   };
   return (
     <section
-      className="min-w-0 space-y-5 rounded-lg border border-slate-700 p-3 sm:p-4"
+      className="min-w-0 space-y-3 rounded-lg border border-slate-700 p-3"
       aria-labelledby="metadata-settings-heading"
     >
-      <div>
-        <h2 id="metadata-settings-heading" className="text-xl font-semibold">
-          Forms and fields
-        </h2>
-        <p className="text-sm text-slate-400">
-          Arrange fields and sections, preview the result, then save the active
-          form.
-        </p>
-      </div>
+      <h2 id="metadata-settings-heading" className="sr-only">
+        Forms and fields
+      </h2>
       {identityStatus === 'blocked' ? (
         <div
           role="status"
@@ -1707,55 +1722,323 @@ export function MetadataSettings({
               </Button>
             </div>
           )}
-          <label className="block">
-            Category
-            <select
-              aria-label="Designer category"
-              className={input}
-              value={categoryId}
-              disabled={editorLocked}
-              onChange={(event) => switchCategory(event.target.value)}
+          <div
+            role="toolbar"
+            aria-label="Form designer"
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/30 bg-slate-950 p-2 min-[1024px]:sticky min-[1024px]:top-20 min-[1024px]:z-10"
+          >
+            <label className="min-w-0 flex-1 basis-44 text-xs text-slate-400">
+              Category form
+              <select
+                aria-label="Designer category"
+                className={input}
+                value={categoryId}
+                disabled={editorLocked}
+                onChange={(event) => switchCategory(event.target.value)}
+              >
+                {active.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span
+              role="status"
+              aria-label="Form save state"
+              className="text-sm text-slate-300"
             >
-              {active.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="text-sm text-slate-400">
-            Published revision {selected?.published_number ?? 'unknown'}
-            {draftVersion !== '0' ? ' · Legacy draft available' : ''}
-            {dirty ? ' · Unsaved changes' : ' · Saved'}
-          </p>
-          {!recovery && (
-            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-cyan-500/30 bg-slate-950/95 p-2 shadow-lg backdrop-blur-sm xl:top-20">
+              {operationPending
+                ? 'Saving…'
+                : unresolvedSave
+                  ? 'Save outcome unconfirmed'
+                  : saveFailed
+                    ? 'Save failed · edits retained'
+                    : recovery
+                      ? 'Recovery available'
+                      : saveReview
+                        ? 'Review required'
+                        : unsaved
+                          ? 'Unsaved changes'
+                          : draftVersion !== '0'
+                            ? 'Draft awaiting publication'
+                            : selected?.published_revision_id
+                              ? 'Active form saved'
+                              : 'Not published'}
+            </span>
+            {!recovery && (
+              <>
+                <Button
+                  type="button"
+                  disabled={
+                    operationPending ||
+                    navigationCommitted ||
+                    pending ||
+                    !definition ||
+                    issues.length > 0 ||
+                    identityStatus !== 'verified' ||
+                    (!dirty && !uncertainSave && draftVersion === '0')
+                  }
+                  onClick={() => saveChanges()}
+                >
+                  {operationPending
+                    ? 'Saving…'
+                    : uncertainSave
+                      ? 'Retry original save'
+                      : 'Save changes'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={history.length === 0 || pending || editorLocked}
+                  onClick={() => {
+                    if (
+                      busy.current ||
+                      committedNavigation.current ||
+                      unresolvedSave
+                    )
+                      return;
+                    const prior = history.at(-1);
+                    if (prior) {
+                      editEpoch.current += 1;
+                      setDefinition(prior);
+                      resetInspector();
+                      setSaveReview(null);
+                      setSavePayload(null);
+                      setMessage('');
+                      setSaveFailed(false);
+                      setPreviewVersion((version) => version + 1);
+                      setHistory(history.slice(0, -1));
+                    }
+                  }}
+                >
+                  Undo edit
+                </Button>
+              </>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              ref={recoveryToolsTrigger}
+              aria-haspopup="dialog"
+              onClick={(event) => {
+                recoveryToolsTrigger.current = event.currentTarget;
+                setRecoveryToolsOpen(true);
+              }}
+            >
+              Recovery & advanced
+            </Button>
+          </div>
+          {message && !operationPending && (
+            <p
+              role="status"
+              className="break-words rounded border border-slate-700 p-2 text-sm text-slate-300"
+            >
+              {message}
+              {saveFailed && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="ml-2"
+                  onClick={(event) => {
+                    recoveryToolsTrigger.current = event.currentTarget;
+                    setRecoveryToolsOpen(true);
+                  }}
+                >
+                  Review recovery options
+                </Button>
+              )}
+            </p>
+          )}
+          <dialog
+            ref={recoveryToolsRef}
+            aria-labelledby="designer-recovery-title"
+            onCancel={() => setRecoveryToolsOpen(false)}
+            onClose={() => {
+              setRecoveryToolsOpen(false);
+              recoveryToolsTrigger.current?.focus();
+            }}
+            className="m-auto max-h-[calc(100dvh-2rem)] w-[min(92vw,42rem)] space-y-4 overflow-y-auto rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 backdrop:bg-slate-950/80"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 id="designer-recovery-title" className="font-semibold">
+                Recovery & advanced
+              </h3>
               <Button
                 type="button"
-                disabled={
-                  operationPending ||
-                  navigationCommitted ||
-                  pending ||
-                  !definition ||
-                  issues.length > 0 ||
-                  identityStatus !== 'verified' ||
-                  (!dirty && !uncertainSave && draftVersion === '0')
-                }
-                onClick={() => saveChanges()}
+                variant="outline"
+                onClick={() => setRecoveryToolsOpen(false)}
               >
-                {operationPending
-                  ? 'Saving…'
-                  : uncertainSave
-                    ? 'Retry original save'
-                    : 'Save changes'}
+                Close recovery tools
               </Button>
-              <span role="status" className="text-sm text-slate-300">
-                {operationPending
-                  ? 'Saving the form…'
-                  : message || (dirty ? 'Ready to save' : 'All changes saved')}
-              </span>
             </div>
-          )}
+            <p className="text-sm text-slate-400">
+              Published revision {selected?.published_number ?? 'unknown'}
+              {draftVersion !== '0' ? ' · Legacy draft available' : ''}
+            </p>
+            {!recovery && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!dirty || pending || editorLocked}
+                  onClick={() => {
+                    if (committedNavigation.current || unresolvedSave) return;
+                    if (window.confirm('Discard unsaved edits?')) {
+                      clearDesignerRecovery(memberId, categoryId);
+                      setRecovery(null);
+                      setRecoveryToolsOpen(false);
+                      setSaveFailed(false);
+                      reset(
+                        JSON.parse(saved),
+                        draftVersion,
+                        publishedBaseline,
+                        draftId,
+                      );
+                    }
+                  }}
+                >
+                  Discard unsaved edits
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={pending || editorLocked}
+                  onClick={() => {
+                    if (committedNavigation.current || unresolvedSave) return;
+                    if (
+                      dirty &&
+                      !window.confirm(
+                        'Discard unsaved edits and load the latest form from the server?',
+                      )
+                    )
+                      return;
+                    clearDesignerRecovery(memberId, categoryId);
+                    setRecovery(null);
+                    refreshRequested.current = true;
+                    router.refresh();
+                    setRecoveryToolsOpen(false);
+                    setSaveFailed(false);
+                    setMessage(
+                      'Refresh requested. Review the latest form before resubmitting.',
+                    );
+                  }}
+                >
+                  Refresh from server
+                </Button>
+              </div>
+            )}
+            {!recovery && (
+              <div className="flex flex-wrap gap-2">
+                {draftVersion !== '0' && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={editorLocked || pending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            'Discard the saved draft and unsaved edits?',
+                          )
+                        )
+                          submit('metadata_draft_discard', {
+                            expected_actor_id: memberId,
+                            category_id: categoryId,
+                            expected_draft_id: draftId,
+                            expected_draft_version: draftVersion,
+                            expected_published_revision_id: publishedBaseline,
+                          });
+                      }}
+                    >
+                      Discard saved draft
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+            {!recovery && (
+              <details className="rounded border border-slate-700 p-3 text-sm">
+                <summary className="cursor-pointer font-medium">
+                  Advanced JSON recovery
+                </summary>
+                <p className="my-2 text-slate-400">
+                  The visual editor is the normal way to change forms. Load the
+                  current document to inspect or copy it. Pasted JSON changes
+                  your local editor only after you apply it. Use Save changes to
+                  publish those edits.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={operationPending || pending}
+                  onClick={() => {
+                    setAdvancedJson(
+                      JSON.stringify(definition ?? source(selected), null, 2),
+                    );
+                    setAdvancedError('');
+                  }}
+                >
+                  Load current document JSON
+                </Button>
+                <label className="mt-3 block space-y-1">
+                  <span>Form definition JSON</span>
+                  <textarea
+                    className="min-h-44 w-full rounded border border-slate-600 bg-slate-950 p-3 font-mono text-xs"
+                    value={advancedJson}
+                    disabled={navigationCommitted}
+                    onChange={(event) => {
+                      setAdvancedJson(event.target.value);
+                      setAdvancedError('');
+                    }}
+                  />
+                </label>
+                {advancedError && (
+                  <p role="alert" className="mt-2 text-amber-200">
+                    {advancedError}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    operationPending ||
+                    pending ||
+                    unresolvedSave ||
+                    navigationCommitted ||
+                    !advancedJson.trim()
+                  }
+                  onClick={() => {
+                    let parsed: unknown;
+                    try {
+                      parsed = JSON.parse(advancedJson);
+                    } catch {
+                      setAdvancedError(
+                        'JSON syntax is invalid. No form changes were applied.',
+                      );
+                      return;
+                    }
+                    const result = metadataDefinition.safeParse(parsed);
+                    if (!result.success) {
+                      setAdvancedError(
+                        'This JSON is not a supported form document. No form changes were applied.',
+                      );
+                      return;
+                    }
+                    edit(result.data);
+                    setRecoveryToolsOpen(false);
+                    resetInspector();
+                    setAdvancedError('');
+                    setMessage(
+                      'JSON applied to the local editor. Save changes to publish it.',
+                    );
+                  }}
+                >
+                  Apply JSON to visual editor
+                </Button>
+              </details>
+            )}
+          </dialog>
           {recovery && (
             <div
               role="region"
@@ -1842,164 +2125,90 @@ export function MetadataSettings({
               {storageWarning}
             </p>
           )}
-          {!recovery && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!dirty || pending || editorLocked}
-                onClick={() => {
-                  if (committedNavigation.current || unresolvedSave) return;
-                  if (window.confirm('Discard unsaved edits?')) {
-                    clearDesignerRecovery(memberId, categoryId);
-                    setRecovery(null);
-                    reset(
-                      JSON.parse(saved),
-                      draftVersion,
-                      publishedBaseline,
-                      draftId,
-                    );
-                  }
-                }}
-              >
-                Discard unsaved edits
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={history.length === 0 || pending || editorLocked}
-                onClick={() => {
-                  if (
-                    busy.current ||
-                    committedNavigation.current ||
-                    unresolvedSave
-                  )
-                    return;
-                  const prior = history.at(-1);
-                  if (prior) {
-                    editEpoch.current += 1;
-                    setDefinition(prior);
-                    resetInspector();
-                    setSaveReview(null);
-                    setSavePayload(null);
-                    setMessage('');
-                    setPreviewVersion((version) => version + 1);
-                    setHistory(history.slice(0, -1));
-                  }
-                }}
-              >
-                Undo edit
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={pending || editorLocked}
-                onClick={() => {
-                  if (committedNavigation.current || unresolvedSave) return;
-                  if (
-                    dirty &&
-                    !window.confirm(
-                      'Discard unsaved edits and load the latest form from the server?',
-                    )
-                  )
-                    return;
-                  clearDesignerRecovery(memberId, categoryId);
-                  setRecovery(null);
-                  refreshRequested.current = true;
-                  router.refresh();
-                  setMessage(
-                    'Refresh requested. Review the latest form before resubmitting.',
-                  );
-                }}
-              >
-                Refresh from server
-              </Button>
+          {issues.length > 0 && !recovery && (
+            <div
+              className="break-words rounded border border-amber-700 p-3 text-sm"
+              role="alert"
+            >
+              <p>Resolve before saving:</p>
+              <ul className="list-disc pl-5">
+                {issues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
             </div>
           )}
-          {!recovery && (
-            <details className="rounded border border-slate-700 p-3 text-sm">
-              <summary className="cursor-pointer font-medium">
-                Advanced JSON recovery
-              </summary>
-              <p className="my-2 text-slate-400">
-                The visual editor is the normal way to change forms. Load the
-                current document to inspect or copy it. Pasted JSON changes your
-                local editor only after you apply it. Use Save changes to
-                publish those edits.
+          {saveReview && !recovery && (
+            <div
+              role="region"
+              aria-label="Form save impact"
+              className="space-y-3 break-words rounded border border-amber-700 p-3 text-sm"
+            >
+              <p>
+                Records in affected form types:{' '}
+                {String(saveReview.affected_quantity)} quantity records and{' '}
+                {String(saveReview.affected_assets)} individual assets.{' '}
+                {String(saveReview.newly_needs_quantity)} quantity records and{' '}
+                {String(saveReview.newly_needs_assets)} assets will newly need
+                metadata review. Existing values are retained.
+              </p>
+              <ul className="list-disc pl-5">
+                {Array.isArray(saveReview.reasons) &&
+                  saveReview.reasons.map((reason, index) => {
+                    const entry = reason as {
+                      kind?: string;
+                      id?: string;
+                      affected_kinds?: string[];
+                    };
+                    return (
+                      <li key={index}>
+                        {label(entry.kind ?? 'Change')}{' '}
+                        {entry.id ? `(${entry.id})` : ''}:{' '}
+                        {(entry.affected_kinds ?? []).map(label).join(', ')}
+                      </li>
+                    );
+                  })}
+              </ul>
+              <p className="text-xs text-slate-400">
+                Review expires at{' '}
+                {new Date(String(saveReview.expires_at)).toLocaleTimeString()}.
               </p>
               <Button
                 type="button"
-                variant="outline"
-                disabled={operationPending || pending}
-                onClick={() => {
-                  setAdvancedJson(
-                    JSON.stringify(definition ?? source(selected), null, 2),
-                  );
-                  setAdvancedError('');
-                }}
+                disabled={
+                  operationPending ||
+                  navigationCommitted ||
+                  unresolvedSave ||
+                  pending ||
+                  issues.length > 0 ||
+                  identityStatus !== 'verified'
+                }
+                onClick={() => saveChanges(true)}
               >
-                Load current document JSON
+                Confirm and save changes
               </Button>
-              <label className="mt-3 block space-y-1">
-                <span>Form definition JSON</span>
-                <textarea
-                  className="min-h-44 w-full rounded border border-slate-600 bg-slate-950 p-3 font-mono text-xs"
-                  value={advancedJson}
-                  disabled={navigationCommitted}
-                  onChange={(event) => {
-                    setAdvancedJson(event.target.value);
-                    setAdvancedError('');
-                  }}
-                />
-              </label>
-              {advancedError && (
-                <p role="alert" className="mt-2 text-amber-200">
-                  {advancedError}
-                </p>
-              )}
               <Button
                 type="button"
                 variant="outline"
-                disabled={
-                  operationPending ||
-                  pending ||
-                  unresolvedSave ||
-                  navigationCommitted ||
-                  !advancedJson.trim()
-                }
+                disabled={editorLocked}
                 onClick={() => {
-                  let parsed: unknown;
-                  try {
-                    parsed = JSON.parse(advancedJson);
-                  } catch {
-                    setAdvancedError(
-                      'JSON syntax is invalid. No form changes were applied.',
-                    );
-                    return;
-                  }
-                  const result = metadataDefinition.safeParse(parsed);
-                  if (!result.success) {
-                    setAdvancedError(
-                      'This JSON is not a supported form document. No form changes were applied.',
-                    );
-                    return;
-                  }
-                  edit(result.data);
-                  resetInspector();
-                  setAdvancedError('');
-                  setMessage(
-                    'JSON applied to the local editor. Save changes to publish it.',
-                  );
+                  if (committedNavigation.current || unresolvedSave) return;
+                  setSaveReview(null);
+                  setSavePayload(null);
+                  setMessage('Save canceled. Your edits remain here.');
                 }}
               >
-                Apply JSON to visual editor
+                Cancel
               </Button>
-            </details>
+            </div>
           )}
           {definition && !recovery && (
-            <fieldset disabled={editorLocked} className="min-w-0 space-y-4">
+            <fieldset
+              disabled={editorLocked}
+              className="min-w-0 space-y-4 lg:[&_input]:scroll-mt-56 lg:[&_button]:scroll-mt-56 lg:[&_select]:scroll-mt-56 lg:[&_textarea]:scroll-mt-56 lg:[&_[data-control-id]]:scroll-mt-56"
+            >
               <nav
-                className="flex flex-wrap gap-2 xl:hidden"
+                className="flex flex-wrap gap-2 lg:hidden"
                 aria-label="Designer panels"
               >
                 {(['library', 'canvas', 'inspector'] as const).map((panel) => (
@@ -2111,11 +2320,11 @@ export function MetadataSettings({
               >
                 <div
                   data-testid="designer-panes"
-                  className="grid min-w-0 gap-4 xl:grid-cols-[minmax(12rem,1fr)_minmax(28rem,2.5fr)_minmax(15rem,1fr)]"
+                  className="grid min-w-0 gap-4 lg:grid-cols-[minmax(10rem,1fr)_minmax(0,2.5fr)_minmax(13rem,1fr)]"
                 >
                   <div
                     data-testid="designer-library"
-                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
+                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
                   >
                     <h3 className="font-semibold">Field library</h3>
                     <Button
@@ -2170,7 +2379,7 @@ export function MetadataSettings({
                   </div>
                   <div
                     data-testid="designer-canvas"
-                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
+                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
                   >
                     <h3 className="font-semibold">Form canvas</h3>
                     <Button
@@ -2349,8 +2558,12 @@ export function MetadataSettings({
                                     }}
                                   >
                                     <option value="quantity,asset">Both</option>
-                                    <option value="quantity">Quantity</option>
-                                    <option value="asset">Serialized</option>
+                                    <option value="quantity">
+                                      Quantity items
+                                    </option>
+                                    <option value="asset">
+                                      Individual assets
+                                    </option>
                                   </select>
                                   <Button
                                     type="button"
@@ -2585,7 +2798,7 @@ export function MetadataSettings({
                   </div>
                   <aside
                     data-testid="designer-inspector"
-                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 xl:block`}
+                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
                     aria-label="Designer inspector"
                   >
                     <h3 className="font-semibold">Inspector</h3>
@@ -2650,7 +2863,7 @@ export function MetadataSettings({
                                     Quantity items
                                   </option>
                                   <option value="asset">
-                                    Serialized assets
+                                    Individual assets
                                   </option>
                                   {selectedControl &&
                                     selectedControlSection &&
@@ -2924,7 +3137,7 @@ export function MetadataSettings({
               )}
               <details className="rounded-xl border border-slate-700 bg-slate-950/30">
                 <summary className="min-h-11 cursor-pointer px-3 py-2 font-semibold text-cyan-100">
-                  Try form · quantity items or serialized assets
+                  Try form · quantity items or individual assets
                 </summary>
                 <div className="space-y-3 pt-3">
                   <div className="flex flex-wrap gap-2">
@@ -2935,14 +3148,14 @@ export function MetadataSettings({
                       }
                       onClick={() => setPreviewKind('quantity')}
                     >
-                      Quantity
+                      Quantity item
                     </Button>
                     <Button
                       type="button"
                       variant={previewKind === 'asset' ? 'default' : 'outline'}
                       onClick={() => setPreviewKind('asset')}
                     >
-                      Asset
+                      Individual asset
                     </Button>
                     <Button
                       type="button"
@@ -2984,112 +3197,6 @@ export function MetadataSettings({
                 </div>
               </details>
             </fieldset>
-          )}
-          {issues.length > 0 && !recovery && (
-            <div
-              className="break-words rounded border border-amber-700 p-3 text-sm"
-              role="alert"
-            >
-              <p>Resolve before saving:</p>
-              <ul className="list-disc pl-5">
-                {issues.map((issue) => (
-                  <li key={issue}>{issue}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {!recovery && (
-            <div className="flex flex-wrap gap-2">
-              {draftVersion !== '0' && (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={editorLocked || pending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          'Discard the saved draft and unsaved edits?',
-                        )
-                      )
-                        submit('metadata_draft_discard', {
-                          expected_actor_id: memberId,
-                          category_id: categoryId,
-                          expected_draft_id: draftId,
-                          expected_draft_version: draftVersion,
-                          expected_published_revision_id: publishedBaseline,
-                        });
-                    }}
-                  >
-                    Discard saved draft
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-          {saveReview && !recovery && (
-            <div
-              role="region"
-              aria-label="Form save impact"
-              className="space-y-3 break-words rounded border border-amber-700 p-3 text-sm"
-            >
-              <p>
-                Records in affected form types:{' '}
-                {String(saveReview.affected_quantity)} quantity records and{' '}
-                {String(saveReview.affected_assets)} serialized assets.{' '}
-                {String(saveReview.newly_needs_quantity)} quantity records and{' '}
-                {String(saveReview.newly_needs_assets)} assets will newly need
-                metadata review. Existing values are retained.
-              </p>
-              <ul className="list-disc pl-5">
-                {Array.isArray(saveReview.reasons) &&
-                  saveReview.reasons.map((reason, index) => {
-                    const entry = reason as {
-                      kind?: string;
-                      id?: string;
-                      affected_kinds?: string[];
-                    };
-                    return (
-                      <li key={index}>
-                        {label(entry.kind ?? 'Change')}{' '}
-                        {entry.id ? `(${entry.id})` : ''}:{' '}
-                        {(entry.affected_kinds ?? []).map(label).join(', ')}
-                      </li>
-                    );
-                  })}
-              </ul>
-              <p className="text-xs text-slate-400">
-                Review expires at{' '}
-                {new Date(String(saveReview.expires_at)).toLocaleTimeString()}.
-              </p>
-              <Button
-                type="button"
-                disabled={
-                  operationPending ||
-                  navigationCommitted ||
-                  unresolvedSave ||
-                  pending ||
-                  issues.length > 0 ||
-                  identityStatus !== 'verified'
-                }
-                onClick={() => saveChanges(true)}
-              >
-                Confirm and save changes
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={editorLocked}
-                onClick={() => {
-                  if (committedNavigation.current || unresolvedSave) return;
-                  setSaveReview(null);
-                  setSavePayload(null);
-                  setMessage('Save canceled. Your edits remain here.');
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
           )}
         </>
       )}

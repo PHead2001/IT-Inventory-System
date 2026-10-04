@@ -106,6 +106,12 @@ it('loads only the selected active category form for an editor', async () => {
   );
   expect(mocks.forms).toHaveBeenCalledExactlyOnceWith([id]);
   expect(screen.getByText('Selected form designer')).toBeVisible();
+  expect(
+    screen.getByRole('heading', { level: 1, name: 'Tools form' }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('link', { name: 'All category forms' }),
+  ).toHaveAttribute('href', '/settings/forms');
   expect(mocks.designer).toHaveBeenCalledWith(
     expect.objectContaining({
       selectedCategoryId: id,

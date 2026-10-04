@@ -89,9 +89,7 @@ it('suggests a site code from its name and submits that visible suggestion', asy
   fireEvent.change(name, { target: { value: 'Oak Creek Apartments' } });
   expect(code).toHaveValue('OAK-CREEK-APARTMENTS');
   fireEvent.submit(
-    screen
-      .getByRole('heading', { name: 'Add property / site' })
-      .closest('form')!,
+    screen.getByRole('heading', { name: 'Add property/site' }).closest('form')!,
   );
 
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());

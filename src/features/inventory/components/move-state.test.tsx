@@ -7,6 +7,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { TaskWorkspace } from './task-workspace';
 import { MutationForm } from './mutation-form';
 import type { LocationRef, QuantityItem } from '../contracts-ui';
 import { moveCompletionKey } from '../move-completion';
@@ -634,4 +635,72 @@ it('reports unavailable browser storage on initial recovery without preventing i
   await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
   expect(await screen.findByRole('status')).toHaveTextContent('move completed');
   get.mockRestore();
+});
+
+it('blocks workspace switching while an existing move receipt is unverified or unavailable', async () => {
+  sessionStorage.setItem(
+    completionKey(),
+    JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+  );
+  let reject!: (e: Error) => void;
+  mocks.receipt.mockImplementationOnce(
+    () =>
+      new Promise((_, no) => {
+        reject = no;
+      }),
+  );
+  render(
+    <TaskWorkspace
+      choices={[
+        { id: 'move', label: 'Move stock' },
+        { id: 'receive', label: 'Receive stock' },
+      ]}
+      context={item.name}
+    >
+      {() => <MutationForm {...props} />}
+    </TaskWorkspace>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
+  await waitFor(() => expect(mocks.receipt).toHaveBeenCalledOnce());
+  await act(async () => reject(new Error('unavailable')));
+  await screen.findByRole('button', { name: 'Retry loading move receipt' });
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+});
+
+it('closes an untouched explicitly new move after Move more and returns launcher focus', async () => {
+  render(
+    <TaskWorkspace
+      choices={[
+        { id: 'move', label: 'Move stock' },
+        { id: 'receive', label: 'Receive stock' },
+      ]}
+      context={item.name}
+    >
+      {() => <MutationForm {...props} />}
+    </TaskWorkspace>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Move more' })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole('button', { name: 'Move more' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Close task' })).toBeEnabled(),
+  );
+  expect(screen.getByLabelText('Quantity to move')).toHaveValue(null);
+  await user.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.queryByRole('form', { name: 'Move stock' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Move stock' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  expect(screen.getByRole('button', { name: 'Move stock' })).toHaveFocus();
+  expect(mocks.submit).toHaveBeenCalledOnce();
+  expect(sessionStorage.getItem(completionKey())).toBeNull();
 });

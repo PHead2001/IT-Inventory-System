@@ -1,5 +1,5 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,10 @@ import { LocationPicker } from '@/features/locations/location-picker';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody } from './actions';
+import {
+  useReportTaskState,
+  useTaskReset,
+} from '@/features/inventory/components/task-state';
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
 import {
@@ -22,6 +26,7 @@ type QuantityAction =
 type AssetAction =
   'assign' | 'return' | 'transfer' | 'correct' | 'write_off' | 'retire';
 type Props = {
+  actorId?: string;
   kind: 'quantity' | 'asset';
   action: QuantityAction | AssetAction;
   entityId: string;
@@ -45,19 +50,30 @@ const titles: Record<string, string> = {
   retire: 'Retire asset at site',
 };
 
-export function CustodyChangeForm({
-  kind,
-  action,
-  entityId,
-  version,
-  locations,
-  sites,
-  canManageConfiguration = false,
-  storageBalances = [],
-  siteHoldings = [],
-  currentLocation,
-  currentSite,
-}: Props) {
+export function CustodyChangeForm(latest: Props) {
+  return (
+    <CustodyFields
+      key={[latest.actorId, latest.kind, latest.entityId, latest.action].join(
+        ':',
+      )}
+      {...latest}
+    />
+  );
+}
+function CustodyFields(latest: Props) {
+  const [baseline, setBaseline] = useState(latest);
+  const { kind, action, entityId, version } = baseline;
+  const {
+    locations,
+    sites,
+    actorId,
+    canManageConfiguration = false,
+    storageBalances = [],
+    siteHoldings = [],
+    currentLocation,
+    currentSite,
+  } = latest;
+  const resetTask = useTaskReset();
   const router = useRouter();
   const validation = useFormValidation();
   const scope = `${kind}-${action}`;
@@ -82,7 +98,20 @@ export function CustodyChangeForm({
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
+  const [initial, setInitial] = useState(values);
+  const [uncertain, setUncertain] = useState(false);
+  const inFlight = useRef(false);
+  const submitted = useRef<Parameters<typeof submitCustody>[0] | null>(null);
+  const completed = state?.ok === true;
+  const reportTask = useReportTaskState({
+    dirty: JSON.stringify(values) !== JSON.stringify(initial),
+    pending,
+    uncertain,
+    completed,
+  });
+  const stale = latest.version !== version;
   const update = (key: keyof typeof values, value: string) => {
+    if (pending || uncertain || completed || inFlight.current) return;
     setValues((old) => ({ ...old, [key]: value }));
     setState(null);
   };
@@ -119,27 +148,31 @@ export function CustodyChangeForm({
     event.preventDefault();
     if (
       pending ||
-      unavailable ||
-      !validation.validate(event.currentTarget, [
-        ...(fromStorage && !values.source_location_id
-          ? [
-              {
-                id: scope + '-source',
-                label: 'Storage source',
-                message: 'Choose a storage source.',
-              },
-            ]
-          : []),
-        ...(toStorage && !values.destination_location_id
-          ? [
-              {
-                id: scope + '-destination',
-                label: 'Return to storage',
-                message: 'Choose a return destination.',
-              },
-            ]
-          : []),
-      ])
+      inFlight.current ||
+      completed ||
+      (!uncertain &&
+        (unavailable ||
+          stale ||
+          !validation.validate(event.currentTarget, [
+            ...(fromStorage && !values.source_location_id
+              ? [
+                  {
+                    id: scope + '-source',
+                    label: 'Storage source',
+                    message: 'Choose a storage source.',
+                  },
+                ]
+              : []),
+            ...(toStorage && !values.destination_location_id
+              ? [
+                  {
+                    id: scope + '-destination',
+                    label: 'Return to storage',
+                    message: 'Choose a return destination.',
+                  },
+                ]
+              : []),
+          ])))
     )
       return;
     const payload: Record<string, unknown> = {
@@ -164,12 +197,54 @@ export function CustodyChangeForm({
     const key = JSON.stringify([operation, payload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
+    const command =
+      uncertain && submitted.current
+        ? submitted.current
+        : {
+            operation,
+            requestId,
+            payload,
+            ...(actorId ? { expectedActorId: actorId } : {}),
+          };
+    submitted.current = command;
+    inFlight.current = true;
+    reportTask({ pending: true });
     startTransition(async () => {
-      const result = await submitCustody({ operation, requestId, payload });
-      setState(result);
-      if (result.ok) {
-        setReceipt(null);
-        router.refresh();
+      try {
+        const result = await submitCustody(command);
+        setState(result);
+        const unresolved =
+          !result.ok &&
+          (result.code === 'unexpected' ||
+            (uncertain &&
+              [
+                'P1001',
+                'P1009',
+                'forbidden',
+                'actor_changed',
+                'idempotency_conflict',
+              ].includes(result.code)));
+        setUncertain(unresolved);
+        if (result.ok) {
+          try {
+            router.refresh();
+          } catch {
+            /* The confirmed receipt remains authoritative. */
+          }
+        } else if (!unresolved) {
+          submitted.current = null;
+          setReceipt(null);
+        }
+      } catch {
+        setUncertain(true);
+        setState({
+          ok: false,
+          code: 'unexpected',
+          message:
+            'The result could not be confirmed. Retry the same custody transaction safely.',
+        });
+      } finally {
+        inFlight.current = false;
       }
     });
   };
@@ -206,7 +281,10 @@ export function CustodyChangeForm({
             ))}
         </div>
       )}
-      <fieldset disabled={pending || unavailable} className="space-y-4">
+      <fieldset
+        disabled={pending || uncertain || completed || unavailable || stale}
+        className="space-y-4"
+      >
         {action === 'opening' && (
           <p className="text-sm text-slate-300">
             Opening holdings describe equipment already at a site. No past
@@ -379,9 +457,54 @@ export function CustodyChangeForm({
             : state.message}
         </p>
       )}
-      <Button disabled={pending || unavailable} type="submit">
-        {pending ? 'Saving…' : titles[action]}
-      </Button>
+      {stale && !uncertain && !completed && (
+        <div role="alert">
+          <p>
+            This record changed. Review the latest holdings before submitting;
+            your entries are retained.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setBaseline(latest);
+              setState(null);
+            }}
+          >
+            Review latest holdings
+          </Button>
+        </div>
+      )}
+      {completed ? (
+        <Button
+          type="button"
+          onClick={() => {
+            if (resetTask) {
+              resetTask();
+              return;
+            }
+            setBaseline(latest);
+            setState(null);
+            setReceipt(null);
+            submitted.current = null;
+            setUncertain(false);
+            setInitial(values);
+          }}
+        >
+          New transaction
+        </Button>
+      ) : (
+        <Button
+          disabled={pending || (!uncertain && (unavailable || stale))}
+          type="submit"
+        >
+          {pending
+            ? 'Saving…'
+            : uncertain
+              ? 'Retry same custody transaction'
+              : titles[action]}
+        </Button>
+      )}
     </form>
   );
 }

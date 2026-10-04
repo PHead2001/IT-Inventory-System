@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -35,10 +37,10 @@ test('creation recovery retains serialized input across Back/Forward, internal n
   await login(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page
-    .getByRole('link', { name: 'Create serialized asset', exact: true })
+    .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();
   let form = page.getByRole('form', {
-    name: 'Create asset inventory',
+    name: 'Add individual asset',
     exact: true,
   });
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
@@ -90,11 +92,11 @@ test('creation recovery retains serialized input across Back/Forward, internal n
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const savedURL = page.url();
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
@@ -102,18 +104,13 @@ test('creation recovery retains serialized input across Back/Forward, internal n
   await expect(
     page.getByText('This creation draft was already saved.'),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Confirm save' })).toHaveCount(
-    0,
-  );
+  await expect(metadataSaveButton(page.locator('body'))).toHaveCount(0);
   const afterSaveWarnings = warnings.length;
   await page.reload();
   expect(warnings.length).toBe(afterSaveWarnings);
   await page.goto(savedURL);
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Retire asset$/ })
-    .click();
-  form = page.getByRole('form', { name: 'Retire asset', exact: true });
+  await openRecordTask(page, 'Retire asset');
+  form = await openRecordTask(page, 'Retire asset');
   await form
     .getByLabel('Reason (required)')
     .fill('Checkpoint local recovery acceptance cleanup');
@@ -136,10 +133,10 @@ test('quantity creation preserves stock input; explicit discard survives return 
   });
   await login(page);
   await page
-    .getByRole('link', { name: 'Create quantity inventory', exact: true })
+    .getByRole('link', { name: 'Add quantity item', exact: true })
     .click();
   const form = page.getByRole('form', {
-    name: 'Create quantity inventory',
+    name: 'Add quantity item',
     exact: true,
   });
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
@@ -201,18 +198,18 @@ test('unavailable creation storage explains internal-navigation limits, blocks d
   });
   await login(page);
   await page
-    .getByRole('link', { name: 'Create serialized asset', exact: true })
+    .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();
   const form = page.getByRole('form', {
-    name: 'Create asset inventory',
+    name: 'Add individual asset',
     exact: true,
   });
   await form
     .getByLabel('Name', { exact: true })
     .fill('Checkpoint storage failure');
   await chooseLocation(form, 'Current location', 'ITC-RED');
-  await form.getByRole('button', { name: 'Review metadata' }).click();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(form).click();
+  await metadataSaveButton(form).click();
   await expect(form.getByRole('alert')).toContainText(
     'browser and internal navigation may lose',
   );
@@ -278,21 +275,17 @@ test('creation response lost after real commit reloads and resolves the original
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   await page
-    .getByRole('link', { name: 'Create serialized asset', exact: true })
+    .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();
   const form = page.getByRole('form', {
-    name: 'Create asset inventory',
+    name: 'Add individual asset',
     exact: true,
   });
   const name = 'Checkpoint lost-response asset ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(name);
   await chooseLocation(form, 'Current location', 'ITC-RED');
-  await form
-    .getByRole('button', { name: 'Review metadata', exact: true })
-    .click();
-  await expect(
-    form.getByRole('button', { name: 'Confirm save', exact: true }),
-  ).toBeEnabled();
+  await metadataReviewButton(form).click();
+  await expect(metadataSaveButton(form)).toBeEnabled();
   let createdId: string | undefined;
   let aborted = false;
   const routePattern = '**/inventory/assets/new**';
@@ -324,9 +317,7 @@ test('creation response lost after real commit reloads and resolves the original
     await route.abort('failed');
   });
   try {
-    await form
-      .getByRole('button', { name: 'Confirm save', exact: true })
-      .click();
+    await metadataSaveButton(form).click();
     await expect(
       form.getByRole('button', { name: 'Retry same save', exact: true }),
     ).toBeVisible();
@@ -395,14 +386,8 @@ test('creation response lost after real commit reloads and resolves the original
     await page.unroute(routePattern);
     if (createdId) {
       await page.goto('/inventory/assets/' + createdId);
-      await page
-        .locator('summary')
-        .filter({ hasText: /^Retire asset$/ })
-        .click();
-      const retire = page.getByRole('form', {
-        name: 'Retire asset',
-        exact: true,
-      });
+      await openRecordTask(page, 'Retire asset');
+      const retire = await openRecordTask(page, 'Retire asset');
       await retire
         .getByLabel('Reason (required)')
         .fill('Checkpoint real lost-response fixture cleanup');

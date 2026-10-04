@@ -45,7 +45,7 @@ export default async function SitePage({
         href="/sites"
         className="inline-flex min-h-11 items-center text-cyan-300 underline"
       >
-        All sites
+        All properties & sites
       </Link>
       <header className="experience-surface-bright mt-3 p-5 sm:p-6">
         <p className="experience-eyebrow">Site / Daily operations</p>
@@ -61,18 +61,36 @@ export default async function SitePage({
       </header>
       {member.role === 'staff' && site.active && (
         <div className="my-4 flex flex-wrap gap-2">
-          <Link
-            className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/20"
-            href={`/sites/${encodeURIComponent(code)}/open/quantity`}
-          >
-            Record existing quantity holding
-          </Link>
-          <Link
-            className="inline-flex min-h-11 items-center rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-100 hover:border-cyan-400/50"
-            href={`/sites/${encodeURIComponent(code)}/open/asset`}
-          >
-            Record existing serialized asset
-          </Link>
+          <div className="min-w-0 flex-1 basis-64">
+            <Link
+              className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/20"
+              href={`/sites/${encodeURIComponent(code)}/open/quantity`}
+              aria-describedby="site-quantity-choice-description"
+            >
+              Record existing quantity item
+            </Link>
+            <p
+              id="site-quantity-choice-description"
+              className="mt-2 text-sm text-slate-300"
+            >
+              Track interchangeable items by count, such as cables and adapters.
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 basis-64">
+            <Link
+              className="inline-flex min-h-11 items-center rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-100 hover:border-cyan-400/50"
+              href={`/sites/${encodeURIComponent(code)}/open/asset`}
+              aria-describedby="site-asset-choice-description"
+            >
+              Record existing individual asset
+            </Link>
+            <p
+              id="site-asset-choice-description"
+              className="mt-2 text-sm text-slate-300"
+            >
+              Track one specific device, such as a laptop or switch.
+            </p>
+          </div>
         </div>
       )}
       <div className="my-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-cyan-300 underline">
@@ -94,7 +112,7 @@ export default async function SitePage({
         </div>
         <div className={panel}>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-300">
-            Current serialized assets
+            Current individual assets
           </dt>
           <dd className="mt-2 text-2xl font-semibold tabular-nums">
             {detail.summary.current_serialized_assets}
@@ -171,8 +189,8 @@ export default async function SitePage({
               className={field}
             >
               <option value="">All</option>
-              <option value="quantity">Quantity</option>
-              <option value="asset">Serialized</option>
+              <option value="quantity">Quantity items</option>
+              <option value="asset">Individual assets</option>
             </select>
           </label>
           <button className="min-h-11 self-end rounded-lg bg-cyan-600 px-4 font-medium text-slate-950 hover:bg-cyan-500">

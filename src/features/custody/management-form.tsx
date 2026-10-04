@@ -238,7 +238,7 @@ export function SiteManagementForm({
       }}
     >
       <h2 className="break-words text-lg font-semibold">
-        {baseline ? `Manage ${baseline.name}` : 'Add property / site'}
+        {baseline ? `Manage ${baseline.name}` : 'Add property/site'}
       </h2>
       <RequiredFieldsNote />
       <label className="block space-y-2">

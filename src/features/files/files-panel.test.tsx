@@ -1,15 +1,24 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   fetch: vi.fn(),
   upload: vi.fn(),
+  download: vi.fn(),
 }));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
     rpc: mocks.rpc,
-    storage: { from: () => ({ upload: mocks.upload }) },
+    storage: {
+      from: () => ({ upload: mocks.upload, download: mocks.download }),
+    },
   }),
 }));
 
@@ -59,7 +68,15 @@ beforeEach(() => {
 
 describe('terminal file cancellation cleanup', () => {
   it('describes only supported photo formats for quantity records', () => {
-    render(<FilesPanel parentType="quantity" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     const files = screen.getByRole('region', { name: 'Inventory files' });
     expect(files).toHaveTextContent('JPEG, PNG or still WebP');
     expect(files).not.toHaveTextContent('PDF');
@@ -93,7 +110,15 @@ describe('terminal file cancellation cleanup', () => {
         return { data: null, error: { code: 'P1010', message: 'not found' } };
       throw new Error(`Unexpected RPC: ${name}`);
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     const title = (await screen.findAllByText(longName)).find(
       (element) => element.tagName === 'P',
     );
@@ -118,13 +143,24 @@ describe('terminal file cancellation cleanup', () => {
         cleanupDeleted: 0,
       }),
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Review and publish' }),
     );
     expect(
-      await screen.findByRole('button', { name: 'Retry file cleanup' }),
-    ).toBeVisible();
+      await screen.findByRole('button', {
+        name: 'Retry file cleanup',
+        hidden: true,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Invalid file content. Deleted 0 stored objects. Remaining cleanup is unverified',
     );
@@ -134,7 +170,15 @@ describe('terminal file cancellation cleanup', () => {
   });
 
   it('requests bounded cleanup after cancellation', async () => {
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
       expect(mocks.rpc).toHaveBeenCalledWith('inventory_file_cancel', {
@@ -181,13 +225,24 @@ describe('terminal file cancellation cleanup', () => {
       }
       throw new Error('Provider unavailable');
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Review and publish' }),
     );
     expect(
-      await screen.findByRole('button', { name: 'Retry file cleanup' }),
-    ).toBeVisible();
+      await screen.findByRole('button', {
+        name: 'Retry file cleanup',
+        hidden: true,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(
       'File published. Byte cleanup could not be confirmed',
     );
@@ -229,7 +284,15 @@ describe('terminal file cancellation cleanup', () => {
       }
       return cleanup;
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Review and publish' }),
     );
@@ -287,9 +350,21 @@ describe('terminal file cancellation cleanup', () => {
       completeCleanup = resolve;
     });
     mocks.fetch.mockReturnValue(cleanup);
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
-    expect(await screen.findByText('No ready files yet.')).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Download PDF' }),
+      ).not.toBeInTheDocument(),
+    );
     expect(screen.getByRole('alert')).toHaveTextContent(
       'File removed. Checking byte cleanup',
     );
@@ -309,11 +384,22 @@ describe('terminal file cancellation cleanup', () => {
       ok: true,
       json: async () => ({ deleted: 0, pending: false }),
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     expect(
-      await screen.findByRole('button', { name: 'Retry file cleanup' }),
-    ).toBeVisible();
+      await screen.findByRole('button', {
+        name: 'Retry file cleanup',
+        hidden: true,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Deleted 0 stored objects. Remaining cleanup is unverified',
     );
@@ -326,19 +412,32 @@ describe('terminal file cancellation cleanup', () => {
         ok: true,
         json: async () => ({ deleted: 1, pending: false }),
       });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     const retry = await screen.findByRole('button', {
       name: 'Retry file cleanup',
+      hidden: true,
     });
     expect(screen.getByRole('alert')).toHaveTextContent(
       /cleanup could not be confirmed/i,
     );
+    fireEvent.click(screen.getByText(/File activity/));
     fireEvent.click(retry);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Retry file cleanup' }),
-      ).toBeVisible(),
+        screen.getByRole('button', {
+          name: 'Retry file cleanup',
+          hidden: true,
+        }),
+      ).toBeInTheDocument(),
     );
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -408,7 +507,15 @@ describe('replacement selection and reviewed upload intent', () => {
       }
       return { ok: true, json: async () => ({ deleted: 0, pending: true }) };
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     const choice = await screen.findByLabelText('Replace a ready file');
     fireEvent.change(choice, { target: { value: original.id } });
     fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
@@ -471,7 +578,15 @@ describe('replacement selection and reviewed upload intent', () => {
       }
       return { ok: true, json: async () => ({ deleted: 0, pending: true }) };
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     const choice = await screen.findByLabelText('Replace a ready file');
     fireEvent.change(choice, { target: { value: original.id } });
     fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
@@ -539,7 +654,15 @@ describe('replacement selection and reviewed upload intent', () => {
         return { ok: true, json: async () => ({ result: {} }) };
       return { ok: true, json: async () => ({ deleted: 0 }) };
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     const choice = await screen.findByLabelText('Replace a ready file');
     fireEvent.change(choice, { target: { value: original.id } });
     fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
@@ -601,7 +724,15 @@ describe('replacement selection and reviewed upload intent', () => {
       }
       throw new Error(`Unexpected RPC: ${name}`);
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Confirm uploaded bytes' }),
     );
@@ -634,7 +765,15 @@ describe('replacement selection and reviewed upload intent', () => {
         return { data: { rows: [], has_more: false }, error: null };
       throw new Error(`Unexpected RPC: ${name}`);
     });
-    render(<FilesPanel parentType="asset" parentId={id} active staff />);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Review and publish' }),
     );
@@ -643,4 +782,680 @@ describe('replacement selection and reviewed upload intent', () => {
     );
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
+});
+
+describe('task-first file presentation', () => {
+  it('shows pending review as a next step rather than an empty ready collection', async () => {
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    expect(await screen.findByText('Uploaded · review required')).toBeVisible();
+    expect(screen.queryByText('No ready files yet.')).not.toBeInTheDocument();
+    expect(screen.getByText(/20 B/)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Review and publish' }),
+    ).toBeEnabled();
+  });
+});
+
+describe('file state and role fixtures', () => {
+  function show(files: Array<Record<string, unknown>>, historyError = false) {
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_cards')
+        return { data: { revision: '2', files }, error: null };
+      if (name === 'inventory_file_history')
+        return {
+          data: { rows: [], has_more: false },
+          error: historyError ? { message: 'Unavailable' } : null,
+        };
+      if (name === 'inventory_file_read')
+        return { data: null, error: { message: 'Unavailable' } };
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+  }
+  it.each(['quantity', 'asset'] as const)(
+    'offers a clear empty %s task to staff and no mutations to viewers',
+    async (parentType) => {
+      show([]);
+      const result = render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType={parentType}
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      expect(
+        await screen.findByText(
+          parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.',
+        ),
+      ).toBeVisible();
+      const picker = screen.getByLabelText(
+        parentType === 'quantity'
+          ? 'Add recognition photo'
+          : 'Add photo or PDF',
+      );
+      const choose = vi.spyOn(picker, 'click');
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: parentType === 'quantity' ? 'Add photo' : 'Add attachment',
+        }),
+      );
+      expect(choose).toHaveBeenCalledOnce();
+      result.rerender(
+        <FilesPanel
+          actorId="actor-a"
+          parentType={parentType}
+          parentId={id}
+          active
+          staff={false}
+        />,
+      );
+      expect(
+        screen.queryByRole('button', {
+          name: /Add photo|Add attachment|Upload and review/,
+        }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText('Check file cleanup')).not.toBeInTheDocument();
+    },
+  );
+  it.each([
+    ['reserved', 'Waiting for upload confirmation', 'Confirm uploaded bytes'],
+    ['uploaded', 'Uploaded · review required', 'Review and publish'],
+    ['validating', 'Validation in progress', 'Review and publish'],
+    ['validated', 'Awaiting publication', 'Review and publish'],
+  ])(
+    'describes %s without claiming readiness or invented progress',
+    async (state, label, action) => {
+      show([{ ...pending, state }]);
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      expect(await screen.findByText(label)).toBeVisible();
+      expect(screen.getByRole('button', { name: action })).toBeEnabled();
+      expect(screen.queryByText('No attachments yet.')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'View photo' }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
+    },
+  );
+  it.each(['rejected', 'removed', 'cancelled', 'expired'])(
+    'never offers reads or publication for terminal %s fixture',
+    async (state) => {
+      show([{ ...pending, state }]);
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      expect(
+        await screen.findByText(
+          /Byte cleanup remains unconfirmed|byte cleanup remains unconfirmed/,
+        ),
+      ).toBeVisible();
+      expect(
+        screen.queryByRole('button', {
+          name: /View photo|Review and publish|Cancel/,
+        }),
+      ).not.toBeInTheDocument();
+    },
+  );
+  it('preserves authorized pending information for a viewer without mutation controls', async () => {
+    show([pending]);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff={false}
+      />,
+    );
+    expect(await screen.findByText('Uploaded · review required')).toBeVisible();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+  it('keeps cleanup secondary and reports inaccessible activity truthfully', async () => {
+    show([], true);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByText('No attachments yet.');
+    expect(
+      screen
+        .getByRole('button', { name: 'Check file cleanup', hidden: true })
+        .closest('details'),
+    ).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('File activity'));
+    expect(
+      screen.getByRole('button', { name: 'Check file cleanup' }),
+    ).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'File activity could not be loaded',
+    );
+    expect(screen.queryByText('No file changes yet.')).not.toBeInTheDocument();
+  });
+  it('does not disguise a failed collection read as an empty record', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { message: 'Unavailable' },
+    });
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    expect(await screen.findByText('Files could not be loaded.')).toBeVisible();
+    expect(screen.queryByText('No photo yet.')).not.toBeInTheDocument();
+  });
+  it('places ready files first and preserves a usable original next to a pending replacement', async () => {
+    show([
+      pending,
+      { ...pending, id: `${id}-ready`, name: 'Original photo', state: 'ready' },
+    ]);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByText('Ready');
+    expect(screen.getAllByRole('listitem')[0]).toHaveTextContent(
+      'Original photo',
+    );
+    expect(screen.getByRole('button', { name: 'Replace photo' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+    expect(screen.getByLabelText('Replace a ready file')).toHaveValue(
+      `${id}-ready`,
+    );
+    expect(screen.getByRole('button', { name: 'View photo' })).toBeEnabled();
+  });
+});
+
+describe('file collection identity isolation', () => {
+  it.each(['parent', 'actor', 'role'] as const)(
+    'clears prior private state on a %s switch and ignores late reads',
+    async (switchKind) => {
+      let finishRead!: (value: unknown) => void;
+      const delayedRead = new Promise((resolve) => {
+        finishRead = resolve;
+      });
+      let first = true;
+      mocks.rpc.mockImplementation(async (name: string) => {
+        if (name === 'inventory_file_cards')
+          return {
+            data: {
+              revision: '2',
+              files: first
+                ? [
+                    {
+                      ...pending,
+                      state: 'ready',
+                      type: 'application/pdf',
+                      name: 'Prior private document',
+                    },
+                  ]
+                : [],
+            },
+            error: null,
+          };
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_read') return delayedRead;
+        throw new Error(`Unexpected RPC: ${name}`);
+      });
+      const view = render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Download PDF' }),
+      );
+      first = false;
+      view.rerender(
+        <FilesPanel
+          actorId={switchKind === 'actor' ? 'actor-b' : 'actor-a'}
+          parentType="asset"
+          parentId={switchKind === 'parent' ? `${id}-other` : id}
+          active
+          staff={switchKind !== 'role'}
+        />,
+      );
+      expect(
+        screen.queryByText('Prior private document'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Download PDF' }),
+      ).not.toBeInTheDocument();
+      finishRead({ data: null, error: { message: 'Late prior error' } });
+      await screen.findByText('No attachments yet.');
+      expect(
+        screen.queryByText('This file is unavailable.'),
+      ).not.toBeInTheDocument();
+      if (switchKind === 'role')
+        expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    },
+  );
+  it('does not retain download controls when a confirmed removal cannot refresh cards', async () => {
+    let removed = false;
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_cards')
+        return removed
+          ? { data: null, error: { message: 'Refresh unavailable' } }
+          : {
+              data: {
+                revision: '2',
+                files: [
+                  { ...pending, state: 'ready', type: 'application/pdf' },
+                ],
+              },
+              error: null,
+            };
+      if (name === 'inventory_file_history')
+        return { data: { rows: [], has_more: false }, error: null };
+      if (name === 'inventory_file_remove') {
+        removed = true;
+        return { data: {}, error: null };
+      }
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Download PDF' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('File removed');
+  });
+});
+
+describe('ready private file reads', () => {
+  it.each(['image/png', 'application/pdf'])(
+    'uses only the authorized variant for %s and retains viewer access',
+    async (type) => {
+      mocks.rpc.mockImplementation(
+        async (name: string, args: Record<string, unknown>) => {
+          if (name === 'inventory_file_cards')
+            return {
+              data: {
+                revision: '2',
+                files: [{ ...pending, state: 'ready', type }],
+              },
+              error: null,
+            };
+          if (name === 'inventory_file_history')
+            return { data: { rows: [], has_more: false }, error: null };
+          if (name === 'inventory_file_read')
+            return { data: `private-fixture/${args.p_variant}`, error: null };
+          throw new Error(`Unexpected RPC: ${name}`);
+        },
+      );
+      const create = vi
+        .spyOn(URL, 'createObjectURL')
+        .mockReturnValue('blob:fixture-private-preview');
+      const revoke = vi
+        .spyOn(URL, 'revokeObjectURL')
+        .mockImplementation(() => {});
+      const anchor = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(() => {});
+      mocks.download.mockResolvedValue({
+        data: new Blob(['fixture']),
+        error: null,
+      });
+      const panel = render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff={false}
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: type === 'application/pdf' ? 'Download PDF' : 'View photo',
+        }),
+      );
+      await waitFor(() =>
+        expect(mocks.rpc).toHaveBeenCalledWith('inventory_file_read', {
+          p_file_id: id,
+          p_variant: type === 'application/pdf' ? 'source' : 'display',
+        }),
+      );
+      await waitFor(() => expect(create).toHaveBeenCalled());
+      if (type === 'application/pdf') {
+        await waitFor(() => expect(anchor).toHaveBeenCalled());
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByRole('dialog')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Close photo' }));
+        await waitFor(() =>
+          expect(revoke).toHaveBeenCalledWith('blob:fixture-private-preview'),
+        );
+      }
+      panel.unmount();
+      create.mockRestore();
+      revoke.mockRestore();
+      anchor.mockRestore();
+    },
+  );
+});
+
+describe('explicit add intent and terminal invalidation', () => {
+  it('clears an abandoned replacement choice when staff explicitly adds an attachment', async () => {
+    const original = { ...pending, state: 'ready', type: 'application/pdf' };
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_cards')
+        return { data: { revision: '3', files: [original] }, error: null };
+      if (name === 'inventory_file_history')
+        return { data: { rows: [], has_more: false }, error: null };
+      if (name === 'inventory_file_reserve')
+        return { data: { id: `${id}-new`, path: 'fixture' }, error: null };
+      if (name === 'inventory_file_uploaded') return { data: {}, error: null };
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    mocks.fetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ message: 'Validation unavailable' }),
+    });
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace' }));
+    expect(screen.getByLabelText('Replace a ready file')).toHaveValue(id);
+    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
+      target: {
+        files: [new File(['fiction'], 'new.pdf', { type: 'application/pdf' })],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Upload and review' }));
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'inventory_file_reserve',
+        expect.objectContaining({
+          p_replaces: null,
+          p_expected_file_version: null,
+        }),
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Download PDF' })).toBeVisible();
+  });
+  it.each(['cancel', 'reject'] as const)(
+    'invalidates a confirmed terminal %s even if refresh fails',
+    async (action) => {
+      let terminal = false;
+      mocks.rpc.mockImplementation(async (name: string) => {
+        if (name === 'inventory_file_cards')
+          return terminal
+            ? { data: null, error: { message: 'Read failed' } }
+            : { data: { revision: '1', files: [pending] }, error: null };
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_cancel') {
+          terminal = true;
+          return { data: {}, error: null };
+        }
+        throw new Error(`Unexpected RPC: ${name}`);
+      });
+      mocks.fetch.mockImplementation(async (url: string) => {
+        if (url.includes('validate')) {
+          terminal = true;
+          return {
+            ok: false,
+            json: async () => ({
+              message: 'Invalid content',
+              terminalRejected: true,
+            }),
+          };
+        }
+        return { ok: true, json: async () => ({ deleted: 0 }) };
+      });
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: action === 'cancel' ? 'Cancel' : 'Review and publish',
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: 'Review and publish' }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        action === 'cancel' ? 'File cancelled' : 'Invalid content',
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /unverified|unconfirmed|could not be confirmed/,
+      );
+    },
+  );
+});
+
+describe('late successful private blob isolation', () => {
+  it.each(['parent', 'actor'] as const)(
+    'ignores successful delayed Storage bytes after %s changes',
+    async (change) => {
+      let finish!: (value: unknown) => void;
+      const delayed = new Promise((resolve) => {
+        finish = resolve;
+      });
+      mocks.download.mockReturnValue(delayed);
+      let prior = true;
+      mocks.rpc.mockImplementation(async (name: string) => {
+        if (name === 'inventory_file_cards')
+          return {
+            data: {
+              revision: '1',
+              files: prior
+                ? [{ ...pending, state: 'ready', type: 'application/pdf' }]
+                : [],
+            },
+            error: null,
+          };
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_read')
+          return { data: 'private-fixture/source', error: null };
+        throw new Error(`Unexpected RPC: ${name}`);
+      });
+      const create = vi.spyOn(URL, 'createObjectURL');
+      const view = render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType="asset"
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Download PDF' }),
+      );
+      await waitFor(() => expect(mocks.download).toHaveBeenCalled());
+      prior = false;
+      view.rerender(
+        <FilesPanel
+          actorId={change === 'actor' ? 'actor-b' : 'actor-a'}
+          parentType="asset"
+          parentId={change === 'parent' ? `${id}-next` : id}
+          active
+          staff
+        />,
+      );
+      await act(async () => {
+        finish({ data: new Blob(['private fixture']), error: null });
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      create.mockRestore();
+    },
+  );
+});
+
+it('revokes an open private preview when the authenticated actor changes', async () => {
+  let prior = true;
+  mocks.rpc.mockImplementation(async (name: string) => {
+    if (name === 'inventory_file_cards')
+      return {
+        data: {
+          revision: '1',
+          files: prior ? [{ ...pending, state: 'ready' }] : [],
+        },
+        error: null,
+      };
+    if (name === 'inventory_file_history')
+      return { data: { rows: [], has_more: false }, error: null };
+    if (name === 'inventory_file_read')
+      return { data: 'private-fixture/display', error: null };
+    throw new Error(`Unexpected RPC: ${name}`);
+  });
+  mocks.download.mockResolvedValue({
+    data: new Blob(['fixture']),
+    error: null,
+  });
+  const create = vi
+    .spyOn(URL, 'createObjectURL')
+    .mockReturnValue('blob:private-open-preview');
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const view = render(
+    <FilesPanel
+      actorId="actor-a"
+      parentType="asset"
+      parentId={id}
+      active
+      staff
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'View photo' }));
+  await screen.findByRole('dialog');
+  prior = false;
+  view.rerender(
+    <FilesPanel
+      actorId="actor-b"
+      parentType="asset"
+      parentId={id}
+      active
+      staff
+    />,
+  );
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(revoke).toHaveBeenCalledWith('blob:private-open-preview');
+  create.mockRestore();
+  revoke.mockRestore();
+});
+
+it('preserves the real upload validation failure when cards cannot refresh', async () => {
+  let rejected = false;
+  mocks.rpc.mockImplementation(async (name: string) => {
+    if (name === 'inventory_file_cards')
+      return rejected
+        ? { data: null, error: { message: 'Refresh unavailable' } }
+        : { data: { revision: '1', files: [] }, error: null };
+    if (name === 'inventory_file_history')
+      return { data: { rows: [], has_more: false }, error: null };
+    if (name === 'inventory_file_reserve')
+      return { data: { id, path: 'fixture' }, error: null };
+    if (name === 'inventory_file_uploaded') return { data: {}, error: null };
+    throw new Error(`Unexpected RPC: ${name}`);
+  });
+  mocks.fetch.mockImplementation(async () => {
+    rejected = true;
+    return {
+      ok: false,
+      json: async () => ({
+        message: 'Invalid file content.',
+        terminalRejected: true,
+        cleanupDeleted: 0,
+      }),
+    };
+  });
+  render(
+    <FilesPanel
+      actorId="actor-a"
+      parentType="asset"
+      parentId={id}
+      active
+      staff
+    />,
+  );
+  await screen.findByText('No attachments yet.');
+  fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
+    target: {
+      files: [
+        new File(['fixture'], 'invalid.pdf', { type: 'application/pdf' }),
+      ],
+    },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Upload and review' }));
+  await waitFor(() =>
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Invalid file content.',
+    ),
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Files could not be refreshed',
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Remaining cleanup is unverified',
+  );
 });

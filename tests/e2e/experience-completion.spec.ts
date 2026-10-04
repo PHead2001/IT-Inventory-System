@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -15,18 +17,16 @@ async function signIn(page: Page) {
 }
 
 async function reviewMetadata(form: Locator) {
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   if ((await form.getAttribute('aria-label')) === 'Edit quantity metadata') {
     await expect(
       form.getByRole('status').filter({ hasText: /^Metadata saved\.$/ }),
     ).toBeVisible();
-    await expect(
-      form.getByRole('button', { name: 'Review metadata', exact: true }),
-    ).toBeEnabled();
+    await expect(metadataReviewButton(form)).toBeEnabled();
     await expect(
       form.getByRole('button', { name: 'Retry saved record refresh' }),
     ).toHaveCount(0);
@@ -46,14 +46,7 @@ async function reviewStock(form: Locator, action: string) {
 }
 
 async function openEditForm(page: Page) {
-  const form = page.getByRole('form', { name: 'Edit quantity metadata' });
-  if (!(await form.isVisible()))
-    await page
-      .locator('summary')
-      .filter({ hasText: 'Edit quantity metadata' })
-      .click();
-  await expect(form).toBeVisible();
-  return form;
+  return openRecordTask(page, 'Edit quantity metadata');
 }
 
 async function readyQuantityLabel(page: Page, id: string, name: string) {
@@ -100,7 +93,7 @@ test('quantity label identity survives receipt, move, issue and return while pri
   const siteCode = `E2E-LABEL-${suffix.toUpperCase()}`;
   await page.goto('/settings/sites');
   const site = page.locator('form').filter({
-    has: page.getByRole('heading', { name: 'Add property / site' }),
+    has: page.getByRole('heading', { name: 'Add property/site' }),
   });
   await site.getByLabel('Name', { exact: true }).fill(`Label site ${suffix}`);
   await site.getByLabel('Permanent code', { exact: true }).fill(siteCode);
@@ -108,7 +101,7 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await expect(site.getByRole('status')).toContainText('Site saved');
 
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create.getByLabel('Name', { exact: true }).fill(name);
   await create.getByLabel('Initial quantity').fill('10');
   await chooseLocation(create, 'Initial location', 'ITC-S1A');
@@ -137,11 +130,8 @@ test('quantity label identity survives receipt, move, issue and return while pri
   };
 
   await page.goto(detail);
-  const receive = page.getByRole('form', { name: 'Receive stock' });
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Receive stock$/ })
-    .click();
+  const receive = await openRecordTask(page, 'Receive stock');
+  await openRecordTask(page, 'Receive stock');
   await chooseLocation(receive, 'Receive at', 'ITC-S1B');
   await receive.getByLabel('Quantity to receive').fill('5');
   await receive.getByLabel('Reason (required)').fill('Label stability receipt');
@@ -150,11 +140,8 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await unchanged();
 
   await page.goto(detail);
-  const move = page.getByRole('form', { name: 'Move stock' });
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Move stock$/ })
-    .click();
+  const move = await openRecordTask(page, 'Move stock');
+  await openRecordTask(page, 'Move stock');
   await chooseLocation(move, 'Source location', 'ITC-S1A');
   await chooseLocation(move, 'Destination location', 'ITC-S1C');
   await move.getByLabel('Quantity to move').fill('2');
@@ -269,16 +256,20 @@ async function openDesigner(page: Page, category: string) {
 async function saveDesigner(designer: Locator) {
   await designer.getByRole('button', { name: 'Save changes' }).click();
   const impact = designer.getByRole('region', { name: 'Form save impact' });
-  await expect(designer.getByRole('status')).toContainText(
-    /Saved active form revision|Review the effect/,
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: /Saved active form revision|Review the effect/ }),
+  ).toContainText(/Saved active form revision|Review the effect/);
   if (await impact.isVisible())
     await impact
       .getByRole('button', { name: 'Confirm and save changes' })
       .click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
 }
 
 function fieldControl(designer: Locator, name: string) {
@@ -325,7 +316,7 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await saveDesigner(designer);
 
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create.getByLabel('Category').selectOption({ label: category });
   await create
     .getByLabel('Name', { exact: true })
@@ -353,7 +344,7 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await expect(edit).toBeHidden();
   await expect(page).toHaveURL(new RegExp(`${detail}$`));
   await expect(
-    page.locator('summary').filter({ hasText: 'Edit quantity metadata' }),
+    page.getByRole('button', { name: 'Edit details', exact: true }),
   ).toBeFocused();
   await openEditForm(page);
   await expect(edit.getByLabel('Name', { exact: true })).toHaveValue(

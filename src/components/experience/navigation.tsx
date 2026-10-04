@@ -31,7 +31,7 @@ const groups = [
     items: [
       { href: '/room', label: 'Spaces & maps', Icon: Map },
       { href: '/locations', label: 'Locations', Icon: MapPin },
-      { href: '/sites', label: 'Properties / sites', Icon: Building2 },
+      { href: '/sites', label: 'Properties & sites', Icon: Building2 },
     ],
   },
   {

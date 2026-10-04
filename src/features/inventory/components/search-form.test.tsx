@@ -113,7 +113,7 @@ it('keeps advanced filter values mounted and removes only the chosen URL filter'
     'href',
     '/inventory?type=quantity&status=historical',
   );
-  expect(screen.getByRole('combobox', { name: 'Property / site' })).toHaveValue(
+  expect(screen.getByRole('combobox', { name: 'Property/site' })).toHaveValue(
     '',
   );
 });

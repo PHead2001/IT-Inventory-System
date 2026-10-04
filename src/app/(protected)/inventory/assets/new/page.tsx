@@ -40,9 +40,9 @@ export default async function NewAssetPage({
   return (
     <>
       <p className="experience-eyebrow">Inventory · New record</p>
-      <h1 className="experience-heading mt-3">Create serialized asset</h1>
+      <h1 className="experience-heading mt-3">Add individual asset</h1>
       <p className="experience-muted mb-5 mt-3 max-w-2xl text-sm">
-        Record one physical asset at its current location. Tags and serial
+        Track one specific device, such as a laptop or switch. Tags and serial
         numbers are optional.
       </p>
       <div className={`${panel} max-w-5xl`}>

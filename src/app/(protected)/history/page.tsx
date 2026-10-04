@@ -225,8 +225,8 @@ export default async function HistoryPage({
               aria-describedby={record ? 'history-type-help' : undefined}
             >
               <option value="">All types</option>
-              <option value="quantity">Quantity</option>
-              <option value="asset">Serialized assets</option>
+              <option value="quantity">Quantity items</option>
+              <option value="asset">Individual assets</option>
             </select>
             {record && (
               <>
@@ -271,7 +271,7 @@ export default async function HistoryPage({
               ·{' '}
               {record.kind === 'quantity'
                 ? 'Quantity item'
-                : 'Serialized asset'}
+                : 'Individual asset'}
               .{' '}
               <Link className="text-cyan-300 underline" href={clearHref}>
                 Clear record filter
@@ -280,7 +280,9 @@ export default async function HistoryPage({
             {params.type && params.type !== record.kind && (
               <p role="status" className="text-sm text-amber-100">
                 Tracking type was reconciled to{' '}
-                {record.kind === 'quantity' ? 'Quantity' : 'Serialized assets'}{' '}
+                {record.kind === 'quantity'
+                  ? 'Quantity items'
+                  : 'Individual assets'}{' '}
                 for this record.
               </p>
             )}

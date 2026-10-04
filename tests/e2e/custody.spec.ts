@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -26,14 +28,28 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
-function custodyForm(page: Page, title: string) {
+async function custodyForm(page: Page, title: string) {
+  if (
+    [
+      'Assign asset to a site',
+      'Issue stock to a site',
+      'Return to storage',
+      'Transfer between sites',
+      'Write off at site',
+      'Record existing site holding',
+      'Correct recorded site holding',
+      'Correct recorded site custody',
+      'Retire asset at site',
+    ].includes(title)
+  )
+    return openRecordTask(page, title);
   return page
     .locator('form')
     .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 }
 async function createSite(page: Page, siteCode: string, name: string) {
   await page.goto('/settings/sites');
-  const form = custodyForm(page, 'Add property / site');
+  const form = await custodyForm(page, 'Add property/site');
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await form.getByRole('button', { name: 'Save site' }).click();
@@ -49,7 +65,7 @@ async function createQuantity(
   threshold?: number,
 ) {
   await page.goto('/inventory/quantity/new');
-  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  const form = page.getByRole('form', { name: 'Add quantity item' });
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Initial quantity').fill(String(count));
   if (count) await chooseLocation(form, 'Initial location', storageCode);
@@ -57,11 +73,11 @@ async function createQuantity(
     await form
       .getByLabel('Reorder threshold (optional)')
       .fill(String(threshold));
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   return page.url().split('/').at(-1)!;
 }
@@ -266,23 +282,23 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await createSite(page, siteCode, siteName);
   await page.goto('/inventory/assets/new');
   const name = 'Fictional office laptop ' + randomUUID().slice(0, 8);
-  const form = page.getByRole('form', { name: 'Create asset inventory' });
+  const form = page.getByRole('form', { name: 'Add individual asset' });
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Asset tag').fill(code('E2E-TAG'));
   await form.getByLabel('Serial number').fill(code('E2E-SERIAL'));
   await chooseLocation(form, 'Current location', locationCode);
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const assetUrl = page.url();
   const assetId = assetUrl.split('/').at(-1)!;
   await expect(
     page.getByRole('link', { name: new RegExp(locationCode) }).first(),
   ).toBeVisible();
-  const assign = custodyForm(page, 'Assign asset to a site');
+  const assign = await custodyForm(page, 'Assign asset to a site');
   await assign
     .getByLabel('Destination site')
     .selectOption({ label: `${siteName} (${siteCode})` });
@@ -352,7 +368,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     .fill(new URL(assetUrl).pathname);
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page).toHaveURL(assetUrl);
-  const transfer = custodyForm(page, 'Return to storage');
+  const transfer = await custodyForm(page, 'Return to storage');
   await chooseLocation(transfer, 'Return to storage', locationCode);
   await submitCustody(transfer, 'Return to storage');
   await page.reload();
@@ -395,11 +411,16 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('heading', { name: siteName, exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('link', { name: 'Record existing serialized asset' }),
+    page.getByRole('link', { name: 'Record existing individual asset' }),
   ).toHaveCount(0);
   await page.goto(assetUrl);
+  await expect(page.getByRole('region', { name: 'Record tasks' })).toHaveCount(
+    0,
+  );
   await expect(
-    page.getByRole('heading', { name: 'Manage serialized asset' }),
+    page.getByRole('button', {
+      name: /^(Move asset|Assign asset to a site|Edit details)$/,
+    }),
   ).toHaveCount(0);
   await page.goto('/settings/locations');
   await expect(
@@ -438,7 +459,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await createSite(page, bCode, 'Fictional site ' + bCode);
   const name = 'Fictional custody cables ' + randomUUID().slice(0, 8);
   const id = await createQuantity(page, name, 'ITO-GENERAL', 10, 7);
-  const issue = custodyForm(page, 'Issue stock to a site');
+  const issue = await custodyForm(page, 'Issue stock to a site');
   await issue
     .getByLabel('Destination site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
@@ -462,7 +483,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(
     page.getByRole('button', { name: 'Review archive and clear stock' }),
   ).toHaveCount(0);
-  const overReturn = custodyForm(page, 'Return to storage');
+  const overReturn = await custodyForm(page, 'Return to storage');
   await overReturn
     .getByLabel('Source site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
@@ -473,7 +494,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
     'valid whole-unit quantity',
   );
   await page.goto('/settings/sites/' + aCode);
-  const archiveSite = custodyForm(page, `Manage Fictional site ${aCode}`);
+  const archiveSite = await custodyForm(page, `Manage Fictional site ${aCode}`);
   await archiveSite
     .getByRole('button', { name: 'Archive site', exact: true })
     .click();
@@ -492,7 +513,10 @@ test('site movements distinguish available, assigned and recorded; dated activit
     page.getByText(`${aCode} · Active · No room model`),
   ).toBeVisible();
   await page.goto('/settings/locations/ITO-GENERAL');
-  const fixedStorage = custodyForm(page, 'Rename General Storage / Unsorted');
+  const fixedStorage = await custodyForm(
+    page,
+    'Rename General Storage / Unsorted',
+  );
   await expect(fixedStorage.getByLabel('Active location')).toHaveCount(0);
   await expect(fixedStorage.getByLabel('Can hold inventory')).toHaveCount(0);
   await page.goto('/locations/ITO-GENERAL');
@@ -504,7 +528,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(row).toContainText('Available 7 · Assigned 3');
   await expect(row).toContainText('Total 10 · Threshold 7');
   await page.goto('/inventory/quantity/' + id);
-  const returned = custodyForm(page, 'Return to storage');
+  const returned = await custodyForm(page, 'Return to storage');
   await returned
     .getByLabel('Source site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
@@ -515,7 +539,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await expect(
     page.getByText('2 assigned to sites · 10 total recorded'),
   ).toBeVisible();
-  const transferred = custodyForm(page, 'Transfer between sites');
+  const transferred = await custodyForm(page, 'Transfer between sites');
   await transferred
     .getByLabel('Source site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
@@ -558,7 +582,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await page.goto(
     '/inventory?site=' + selectedSite + '&q=' + encodeURIComponent(name),
   );
-  await expect(page.getByLabel('Property / site')).toHaveValue(selectedSite);
+  await expect(page.getByLabel('Property/site')).toHaveValue(selectedSite);
   await expect(page.getByRole('link', { name, exact: true })).toHaveCount(1);
   const siteCsv = await page.request.get(
     '/api/exports/inventory?site=' +
@@ -606,7 +630,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   ).toBeVisible();
   await page.goto('/sites/' + aCode + '/open/quantity');
   await expect(
-    page.getByRole('heading', { name: /Record existing quantity holding/ }),
+    page.getByRole('heading', { name: /Record existing quantity item/ }),
   ).toBeVisible();
   await expect(
     page.getByText('Ordinary future issues start from a real storage holding.'),
@@ -623,19 +647,19 @@ test('opening holdings and write-off retain history without inventing a closet i
   const siteName = 'Fictional opening site ' + siteCode;
   await createSite(page, siteCode, siteName);
   await page
-    .getByRole('link', { name: 'Record existing quantity holding' })
+    .getByRole('link', { name: 'Record existing quantity item' })
     .click();
   const form = page.getByRole('form', {
-    name: 'Record opening quantity at site',
+    name: 'Record opening quantity item at site',
   });
   const name = 'Fictional preexisting adapters ' + randomUUID().slice(0, 8);
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Units already at this site').fill('2');
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
-  ).toContainText('Opening details');
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  ).toContainText('Records equipment already at this site');
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await expect(
     page.getByRole('heading', {
@@ -655,7 +679,7 @@ test('opening holdings and write-off retain history without inventing a closet i
     path: testInfo.outputPath('mobile-opening-holding.png'),
     fullPage: true,
   });
-  const writeOff = custodyForm(page, 'Write off at site');
+  const writeOff = await custodyForm(page, 'Write off at site');
   await writeOff
     .getByLabel('Source site')
     .selectOption({ label: `${siteName} (${siteCode})` });
@@ -686,7 +710,7 @@ test('opening holdings and write-off retain history without inventing a closet i
   await signIn(page, 'viewer');
   await page.goto('/sites/' + siteCode);
   await expect(
-    page.getByRole('link', { name: 'Record existing quantity holding' }),
+    page.getByRole('link', { name: 'Record existing quantity item' }),
   ).toHaveCount(0);
 });
 
@@ -719,7 +743,7 @@ test('empty property archive and restore are discoverable and keep identity', as
   await page
     .getByText('Manage site / Archive or restore', { exact: true })
     .click();
-  const restore = custodyForm(page, 'Manage ' + name);
+  const restore = await custodyForm(page, 'Manage ' + name);
   await restore
     .getByRole('button', { name: 'Restore site', exact: true })
     .click();

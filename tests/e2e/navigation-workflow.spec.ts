@@ -1,3 +1,4 @@
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { createClient } from '@supabase/supabase-js';
@@ -211,9 +212,11 @@ test('failed and delayed category requests retain dirty and pending input and sa
   );
   await page.unroute('**/settings/forms/**');
   await designer.getByRole('button', { name: 'Save changes' }).click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
   await selector.selectOption({ label: names[1] });
   await expect(
     page.getByRole('heading', { name: `${names[1]} form`, exact: true }),
@@ -253,13 +256,13 @@ test('a lost committed designer response survives authorization denial and repla
   };
   const beforePublications = await publications();
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create
     .getByLabel('Name', { exact: true })
     .fill('Reviewed save item ' + crypto.randomUUID());
   await create.getByLabel('Category').selectOption({ label: names[0] });
-  await create.getByRole('button', { name: 'Review metadata' }).click();
-  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(create).click();
+  await metadataSaveButton(create).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await page.goto(formUrl);
   const designer = page.getByRole('region', { name: 'Forms and fields' });
@@ -302,9 +305,11 @@ test('a lost committed designer response survives authorization denial and repla
   await impact
     .getByRole('button', { name: 'Confirm and save changes' })
     .click();
-  await expect(designer.getByRole('status')).toContainText(
-    'save outcome could not be confirmed',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'save outcome could not be confirmed' }),
+  ).toContainText('save outcome could not be confirmed');
   const committedPublications = await publications();
   expect(committedPublications).toHaveLength(beforePublications.length + 1);
   expect(
@@ -320,9 +325,11 @@ test('a lost committed designer response survives authorization denial and repla
     await other.getByRole('button', { name: 'Sign out' }).click();
     await signIn(other, 'viewer');
     await designer.getByRole('button', { name: 'Retry original save' }).click();
-    await expect(designer.getByRole('status')).toContainText(
-      'Configuration access changed',
-    );
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: 'Configuration access changed' }),
+    ).toContainText('Configuration access changed');
     expect(commands).toHaveLength(2);
     expect(commands[1]).toBe(commands[0]);
     await expect(
@@ -338,9 +345,11 @@ test('a lost committed designer response survives authorization denial and repla
       .click();
     await designer.getByRole('button', { name: 'Recover edits' }).click();
     await designer.getByRole('button', { name: 'Retry original save' }).click();
-    await expect(designer.getByRole('status')).toContainText(
-      'Saved active form revision',
-    );
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: 'Saved active form revision' }),
+    ).toContainText('Saved active form revision');
     expect(commands).toHaveLength(3);
     expect(commands[2]).toBe(commands[0]);
     try {

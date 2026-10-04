@@ -1,3 +1,4 @@
+import { openRecordTask } from './record-task-controls';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
@@ -83,7 +84,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('quantity-detail-desktop-1440.png'),
     fullPage: true,
   });
-  await page.getByText('Edit quantity metadata', { exact: true }).click();
+  await openRecordTask(page, 'Edit quantity metadata');
   await expect(
     page.getByRole('form', { name: 'Edit quantity metadata' }),
   ).toBeVisible();
@@ -103,7 +104,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('asset-detail-desktop-1440.png'),
     fullPage: true,
   });
-  await page.getByText('Edit asset metadata', { exact: true }).click();
+  await openRecordTask(page, 'Edit asset metadata');
   await expect(
     page.getByRole('form', { name: 'Edit asset metadata' }),
   ).toBeVisible();
@@ -174,7 +175,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('quantity-detail-phone-390.png'),
     fullPage: true,
   });
-  await page.getByText('Edit quantity metadata', { exact: true }).click();
+  await openRecordTask(page, 'Edit quantity metadata');
   await expect(
     page.getByRole('form', { name: 'Edit quantity metadata' }),
   ).toBeVisible();
@@ -194,7 +195,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('asset-detail-phone-390.png'),
     fullPage: true,
   });
-  await page.getByText('Edit asset metadata', { exact: true }).click();
+  await openRecordTask(page, 'Edit asset metadata');
   await expect(
     page.getByRole('form', { name: 'Edit asset metadata' }),
   ).toBeVisible();
@@ -372,7 +373,7 @@ test('configuration, site custody, and location browsing remain legible at deskt
         heading: 'Manage logical locations',
         file: 'manage-locations',
       },
-      { path: '/sites', heading: 'Properties and sites', file: 'sites' },
+      { path: '/sites', heading: 'Properties & sites', file: 'sites' },
     ]) {
       await page.goto(route.path);
       await expect(
@@ -686,12 +687,12 @@ test('configuration and inventory creation surfaces render at desktop and phone 
       { path: '/history', heading: 'Inventory history', file: 'history' },
       {
         path: '/inventory/quantity/new',
-        heading: 'Create quantity inventory',
+        heading: 'Add quantity item',
         file: 'create-quantity',
       },
       {
         path: '/inventory/assets/new',
-        heading: 'Create serialized asset',
+        heading: 'Add individual asset',
         file: 'create-asset',
       },
     ]) {
@@ -802,6 +803,9 @@ test('configuration and inventory creation surfaces render at desktop and phone 
     });
     if (viewport.width > 390) {
       page.once('dialog', (dialog) => void dialog.accept());
+      await page
+        .getByRole('button', { name: 'Recovery & advanced', exact: true })
+        .click();
       await page.getByRole('button', { name: 'Discard unsaved edits' }).click();
     }
     if (viewport.width === 390) {

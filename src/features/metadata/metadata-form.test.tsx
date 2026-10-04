@@ -17,6 +17,7 @@ import {
   buildCustomPatch,
 } from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
+import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
 import { readCreation, writeCreation } from './creation-recovery';
 
 const { push, refresh, replace } = vi.hoisted(() => ({
@@ -35,7 +36,35 @@ vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./record-refresh.actions', () => ({ refreshMetadataRecord: vi.fn() }));
 vi.mock('@/features/locations/location-picker', () => ({
-  LocationPicker: () => <div>Location picker</div>,
+  LocationPicker: ({
+    label,
+    id,
+    value,
+    locations,
+    onValueChange,
+  }: {
+    label: string;
+    id: string;
+    value: string;
+    locations: Array<{ id: string; name: string }>;
+    onValueChange: (value: string) => void;
+  }) => (
+    <label>
+      {label}
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+      >
+        <option value="">Choose location</option>
+        {locations.map((location) => (
+          <option key={location.id} value={location.id}>
+            {location.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  ),
 }));
 
 const categoryId = '00000000-0000-4000-8000-000000000001';
@@ -139,7 +168,11 @@ describe('published metadata form', () => {
     await waitFor(() => expect(name).toBeEnabled());
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     expect(name).toHaveFocus();
     expect(name).toHaveAttribute('aria-invalid', 'true');
     expect(name).toHaveAccessibleDescription(/Enter/);
@@ -160,7 +193,11 @@ describe('published metadata form', () => {
     );
     await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
     await user.type(screen.getByLabelText('Name'), 'Cable');
-    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     const answer = screen.getByRole('checkbox', {
       name: 'Inspected (required)',
     });
@@ -172,7 +209,11 @@ describe('published metadata form', () => {
     ).toBeNull();
     await user.click(answer);
     await user.click(answer);
-    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     expect(answer).not.toBeChecked();
     expect(answer).not.toHaveAttribute('required');
     expect(answer).not.toHaveAttribute('aria-invalid');
@@ -200,7 +241,11 @@ describe('published metadata form', () => {
         />,
       );
       await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
-      await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+      await user.click(
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
+      );
       expect(screen.getByLabelText('Name')).toHaveFocus();
       expect(screen.getByLabelText('Name')).toHaveAccessibleDescription(
         /Enter/,
@@ -264,8 +309,16 @@ describe('published metadata form', () => {
       target: { value: 'One creation' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Retry same save' }),
@@ -308,8 +361,16 @@ describe('published metadata form', () => {
       target: { value: 'Keep in memory' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     expect(submitInventory).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Name')).toHaveValue('Keep in memory');
     expect(
@@ -483,7 +544,9 @@ describe('published metadata form', () => {
       'America/Chicago',
     );
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeDisabled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Review updated fields' }),
@@ -560,8 +623,16 @@ describe('published metadata form', () => {
       target: { value: 'Acknowledged once' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     const original = vi.mocked(submitInventory).mock.calls[0][0];
     const raw = sessionStorage.getItem(sessionStorage.key(0)!);
     const failure = vi
@@ -597,7 +668,11 @@ describe('published metadata form', () => {
     expect(
       screen.getByText('This creation draft was already saved.'),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeNull();
   });
   it.each(['quantity', 'asset'] as const)(
     'recovers %s site-opening context, raw notes and amount without selecting a storage holding',
@@ -760,13 +835,19 @@ describe('published metadata form', () => {
       ),
     ).toEqual(['Name *', 'Category *', 'Inspected (required)']);
     expect(
-      screen.queryByRole('button', { name: 'Review metadata' }),
+      screen.queryByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeNull();
     expect(screen.queryByLabelText('Initial quantity')).toBeNull();
     fireEvent.submit(
       screen.getByRole('form', { name: 'Preview quantity metadata' }),
     );
-    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeNull();
     expect(submitInventory).not.toHaveBeenCalled();
   });
   it('keeps missing, false, and true boolean values distinct with an explicit Clear answer', () => {
@@ -805,7 +886,11 @@ describe('published metadata form', () => {
     expect(input).not.toHaveAttribute('maxLength');
     fireEvent.change(input, { target: { value: '😀'.repeat(101) } });
     expect(input).toHaveAttribute('aria-invalid', 'true');
-    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     expect(input).toHaveFocus();
     expect(input).toHaveAccessibleDescription(/at most 100 characters/);
     expect(
@@ -813,9 +898,17 @@ describe('published metadata form', () => {
     ).toBeNull();
     expect(submitInventory).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '😀'.repeat(100) } });
-    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     expect(input).not.toHaveAttribute('aria-invalid');
-    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeEnabled();
     expect(
       screen.getByRole('region', { name: 'Metadata review' }),
     ).toBeVisible();
@@ -948,8 +1041,16 @@ describe('published metadata form', () => {
       target: { value: '3' },
     });
     expect(screen.queryByLabelText('Initial location')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitCustody).toHaveBeenCalled());
     expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
       operation: 'quantity_site_open',
@@ -994,8 +1095,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Existing tablet' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitCustody).toHaveBeenCalled());
     const command = vi.mocked(submitCustody).mock.calls[0][0] as {
       operation: string;
@@ -1034,12 +1143,16 @@ describe('published metadata form', () => {
       'Latest: Updated elsewhere. My edit: Edited cable.',
     );
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Use my Name edit' }));
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
       ).toBeEnabled(),
     );
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
@@ -1087,14 +1200,24 @@ describe('published metadata form', () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
       ).toBeEnabled(),
     );
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Edited cable' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitInventory).toHaveBeenCalled());
     expect(
       (vi.mocked(submitInventory).mock.calls[0][0] as { payload: unknown })
@@ -1108,14 +1231,18 @@ describe('published metadata form', () => {
     );
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeDisabled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Review updated fields' }),
     );
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeEnabled();
   });
   it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
@@ -1213,8 +1340,16 @@ describe('published metadata form', () => {
       form: current,
       draftForm: current,
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
     expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
       payload: {
@@ -1260,11 +1395,21 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: otherCategory },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
       ).toBeEnabled(),
     );
     rerender(
@@ -1279,8 +1424,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Second edit' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
     expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
       payload: {
@@ -1322,8 +1475,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Mine' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
     const [first, second] = vi
       .mocked(submitInventory)
@@ -1339,7 +1500,9 @@ describe('published metadata form', () => {
     });
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
       ).toBeEnabled(),
     );
   });
@@ -1360,8 +1523,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Mine' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Changed again'),
     );
@@ -1401,8 +1572,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Mine' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Retry same save' }),
@@ -1441,8 +1620,16 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Saved name' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Retry saved record refresh' }),
@@ -1457,7 +1644,9 @@ describe('published metadata form', () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
       ).toBeEnabled(),
     );
     expect(submitInventory).toHaveBeenCalledOnce();
@@ -1506,7 +1695,9 @@ describe('published metadata form', () => {
       screen.getByRole('button', { name: 'Use my Name edit' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeDisabled();
   });
   it('requires an explicit legacy-value acknowledgement when changing an item category', () => {
@@ -1534,13 +1725,25 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: otherCategory },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    expect(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeDisabled();
     const acknowledgement = screen.getByLabelText(
       /existing custom values.*legacy values/i,
     );
     fireEvent.click(acknowledgement);
-    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeEnabled();
   });
   it.each(['quantity', 'asset'] as const)(
     'cancels untouched %s creation immediately without a write',
@@ -1639,16 +1842,26 @@ describe('published metadata form', () => {
       expect(screen.getByLabelText('Name')).toHaveValue('Cable');
       expect(screen.getByLabelText('Count')).toHaveValue('0');
       expect(screen.queryByRole('alert')).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
+      );
       expect(
-        screen.getByRole('button', { name: 'Confirm save' }),
+        screen.getByRole('button', {
+          name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+        }),
       ).toBeEnabled();
       // Pristine Cancel also closes and clears review state without a prompt.
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(summary.parentElement).not.toHaveAttribute('open');
       expect(screen.queryByRole('dialog')).toBeNull();
       summary.parentElement!.setAttribute('open', '');
-      expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+      expect(
+        screen.queryByRole('button', {
+          name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+        }),
+      ).toBeNull();
       fireEvent.change(screen.getByLabelText('Name'), {
         target: { value: 'Actual edit' },
       });
@@ -1658,8 +1871,16 @@ describe('published metadata form', () => {
         version: '2',
         changed: true,
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+        }),
+      );
       await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
       expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
         payload: {
@@ -1763,8 +1984,16 @@ describe('published metadata form', () => {
     const checkbox = screen.getByRole('checkbox');
     fireEvent.click(checkbox);
     fireEvent.click(checkbox);
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() => expect(submitInventory).toHaveBeenCalled());
     expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
       payload: {
@@ -1799,13 +2028,23 @@ describe('published metadata form', () => {
       target: { value: 'Cable' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Confirm save' })).toBeDisabled();
-    fireEvent.submit(
-      screen.getByRole('form', { name: 'Create quantity inventory' }),
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    ).toBeDisabled();
+    fireEvent.submit(screen.getByRole('form', { name: 'Add quantity item' }));
     expect(submitInventory).toHaveBeenCalledTimes(1);
     await act(async () =>
       finish({
@@ -1817,7 +2056,9 @@ describe('published metadata form', () => {
     );
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     expect(screen.getByLabelText('Name')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Edit values' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: /^(Edit values|Back to edit)$/ }),
+    ).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
     await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
     expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(
@@ -1842,8 +2083,16 @@ describe('published metadata form', () => {
       target: { value: 'Cable' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Retry same save' }),
@@ -1879,12 +2128,18 @@ describe('published metadata form', () => {
       />,
     );
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeEnabled();
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
       target: { value: 'Different long note' },
     });
-    await user.click(screen.getByRole('button', { name: 'Review metadata' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
     const invalid = screen.getByLabelText('Old note (required)');
     expect(invalid).toHaveFocus();
     expect(invalid).toHaveAttribute('aria-invalid', 'true');
@@ -1897,7 +2152,9 @@ describe('published metadata form', () => {
       target: { value: 'Legacy long note' },
     });
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
     ).toBeEnabled();
   });
   it.each(['forbidden', 'idempotency_conflict', 'actor_changed'])(
@@ -1927,8 +2184,16 @@ describe('published metadata form', () => {
         target: { value: 'Cable' },
       });
       fireEvent.click(screen.getByRole('checkbox'));
-      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+        }),
+      );
       await waitFor(() =>
         expect(
           screen.getByRole('button', { name: 'Retry same save' }),
@@ -1979,8 +2244,16 @@ describe('published metadata form', () => {
       target: { value: 'Actor-bound cable' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^Review (metadata|quantity item|individual asset)$/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+      }),
+    );
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Retry same save' }),
@@ -2006,9 +2279,7 @@ describe('published metadata form', () => {
           node.textContent?.includes('signed-in staff member changed'),
         ),
     ).toBe(true);
-    fireEvent.submit(
-      screen.getByRole('form', { name: 'Create quantity inventory' }),
-    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Add quantity item' }));
     expect(submitInventory).toHaveBeenCalledTimes(1);
     rerender(
       <MetadataForm
@@ -2027,4 +2298,325 @@ describe('published metadata form', () => {
       expectedActorId: firstRevision,
     });
   });
+});
+
+describe('creation intent review', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    sessionStorage.clear();
+  });
+  const destination = {
+    id: secondRevision,
+    code: 'DRAWER',
+    name: 'Drawer',
+    breadcrumb: 'IT Closet / Drawer',
+    active: true,
+    can_hold_inventory: true,
+    parentId: null,
+  };
+  function completeForm(kind: 'quantity' | 'asset' = 'quantity') {
+    const current = form();
+    current.published_definition.fields[0].applies_to = [kind];
+    current.published_definition.fields[0].default = false;
+    for (const [index, builtin] of [
+      'description',
+      'manufacturer',
+      'model',
+      ...(kind === 'quantity'
+        ? ['item_code', 'reorder_threshold']
+        : ['asset_tag', 'serial_number']),
+    ].entries())
+      current.published_definition.layout[0].controls.push({
+        id: `00000000-0000-4000-8000-00000000002${index}`,
+        kind: 'builtin',
+        builtin,
+        width: 12,
+      });
+    return current;
+  }
+  it('reviews normalized positive stock, returns to edit, then submits exactly the new reviewed values', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'fixture',
+      message: 'Fixture captured',
+    });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        locations={[destination]}
+        forms={{ [categoryId]: completeForm() }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: '  Cable first  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Initial quantity'), {
+      target: { value: '3' },
+    });
+    fireEvent.change(screen.getByLabelText('Initial location'), {
+      target: { value: destination.id },
+    });
+    fireEvent.change(screen.getByLabelText('Manufacturer'), {
+      target: { value: '  Maker  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Item code (SKU)'), {
+      target: { value: '  CODE  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Reorder threshold (optional)'), {
+      target: { value: '0' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Review quantity item' }),
+    ).toHaveFocus();
+    let summary = screen.getByRole('region', { name: 'Metadata review' });
+    expect(summary).toHaveTextContent('Cable first');
+    expect(summary).toHaveTextContent('IT Closet / Drawer');
+    expect(summary).toHaveTextContent('Starting count3');
+    fireEvent.click(screen.getByText('Record details & custom answers'));
+    expect(summary).toHaveTextContent('ManufacturerMaker');
+    expect(summary).toHaveTextContent('Reorder threshold0');
+    expect(summary).toHaveTextContent('Inspected · Default appliedNo');
+    expect(submitInventory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to edit' }));
+    expect(screen.getByLabelText('Name')).toHaveFocus();
+    expect(screen.getByLabelText('Name')).toHaveValue('  Cable first  ');
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: '  Cable final  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Initial quantity'), {
+      target: { value: '4' },
+    });
+    expect(
+      screen.queryByRole('region', { name: 'Metadata review' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    );
+    summary = screen.getByRole('region', { name: 'Metadata review' });
+    expect(summary).toHaveTextContent('Cable final');
+    expect(summary).not.toHaveTextContent('Cable first');
+    expect(summary).toHaveTextContent('Starting count4');
+    fireEvent.click(screen.getByRole('button', { name: 'Add quantity item' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      operation: 'quantity_create_v2',
+      payload: {
+        name: 'Cable final',
+        manufacturer: 'Maker',
+        initial_quantity: 4,
+        initial_location_id: destination.id,
+        item_code: 'CODE',
+        reorder_threshold: 0,
+        custom_patch: { set: { [fieldId]: false }, unset: [] },
+      },
+    });
+  });
+  it('reviews an explicitly cleared default separately and submits its omitted answer', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'fixture',
+      message: 'Captured',
+    });
+    const definition = completeForm();
+    definition.published_definition.fields[0].required = false;
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: definition }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Cleared answer item' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear answer' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    );
+    fireEvent.click(screen.getByText('Record details & custom answers'));
+    expect(
+      screen.getByRole('region', { name: 'Metadata review' }),
+    ).toHaveTextContent('Cleared');
+    fireEvent.click(screen.getByRole('button', { name: 'Add quantity item' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      payload: { custom_patch: { set: {}, unset: [] } },
+    });
+  });
+  it('reviews zero initial stock without a fabricated destination', async () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        locations={[destination]}
+        forms={{ [categoryId]: completeForm() }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Empty item' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    );
+    const summary = screen.getByRole('region', { name: 'Metadata review' });
+    expect(summary).toHaveTextContent('Starting count0');
+    expect(summary).toHaveTextContent(
+      'No initial stock · no storage destination',
+    );
+    expect(summary).not.toHaveTextContent('IT Closet / Drawer');
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('shows asset tag normalization, preserved serial case and the same submitted intent', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'fixture',
+      message: 'Fixture captured',
+    });
+    render(
+      <MetadataForm
+        {...props}
+        kind="asset"
+        item={undefined}
+        locations={[destination]}
+        forms={{ [categoryId]: completeForm('asset') }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: '  Device  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Current location'), {
+      target: { value: destination.id },
+    });
+    fireEvent.change(screen.getByLabelText('Asset tag'), {
+      target: { value: ' TAG-UPPER ' },
+    });
+    fireEvent.change(screen.getByLabelText('Serial number'), {
+      target: { value: ' SerialCase ' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review individual asset' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Add individual asset' }),
+      ).toBeEnabled(),
+    );
+    const summary = screen.getByRole('region', { name: 'Metadata review' });
+    expect(summary).toHaveTextContent('tag-upper');
+    expect(summary).toHaveTextContent('SerialCase');
+    expect(summary).toHaveTextContent('1 individually tracked asset');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add individual asset' }),
+    );
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      operation: 'asset_create_v2',
+      payload: {
+        name: 'Device',
+        asset_tag: 'tag-upper',
+        serial_number: 'SerialCase',
+        location_id: destination.id,
+      },
+    });
+  });
+  it('reviews site-opening equipment already there and dispatches the matching custody command', async () => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: false,
+      code: 'fixture',
+      message: 'Fixture captured',
+    });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        forms={{ [categoryId]: completeForm() }}
+        openingSite={{
+          id: secondRevision,
+          name: 'Example site',
+          code: 'EXAMPLE',
+        }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: '  Site cable  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Units already at this site'), {
+      target: { value: '2' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    );
+    expect(
+      screen.getByRole('heading', { name: 'Review quantity item' }),
+    ).toHaveFocus();
+    const summary = screen.getByRole('region', { name: 'Metadata review' });
+    expect(summary).toHaveTextContent('Example site');
+    expect(summary).toHaveTextContent('Count already at site2');
+    expect(summary).toHaveTextContent('Records equipment already at this site');
+    fireEvent.click(screen.getByRole('button', { name: 'Add quantity item' }));
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
+      operation: 'quantity_site_open',
+      payload: { name: 'Site cable', quantity: 2, site_id: secondRevision },
+    });
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+});
+
+it('retains completed workspace metadata until explicit New transaction', async () => {
+  vi.mocked(submitInventory).mockResolvedValue({
+    ok: true,
+    entityId: props.item.id,
+    version: '2',
+    changed: true,
+  });
+  render(
+    <TaskWorkspace
+      choices={[
+        { id: 'edit', label: 'Edit details' },
+        { id: 'receive', label: 'Receive stock' },
+      ]}
+      context="Cable"
+    >
+      {() => <MetadataForm {...props} forms={{ [categoryId]: form() }} />}
+    </TaskWorkspace>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+  await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Saved name' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+  await screen.findByText('Metadata saved.');
+  expect(screen.getByLabelText('Name')).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Unsafe new intent' },
+  });
+  expect(screen.getByLabelText('Name')).toHaveValue('Saved name');
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
+  expect(
+    screen.getByRole('button', { name: 'Review metadata' }),
+  ).toBeDisabled();
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'New transaction' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeEnabled();
+  expect(submitInventory).toHaveBeenCalledOnce();
 });

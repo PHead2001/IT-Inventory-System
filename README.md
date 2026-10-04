@@ -1,6 +1,6 @@
 # IT Inventory System
 
-Internal IT inventory software with conventional workflows and interactive 2.5D room navigation.
+Internal IT inventory software with conventional workflows and interactive 2.5D room navigation. Staff choose **Add quantity item** for interchangeable items tracked by count or **Add individual asset** for one specific device. Both choices show examples before entry. **Properties & sites** is the site-custody area; these presentation terms preserve the existing quantity and serialized-asset storage contracts.
 
 Inventory Core adds conventional quantity and serialized-asset workflows, multi-location stock, receiving, partial/Move All transfers, count/location corrections, archive/retire/restore, search and auditable history. Active viewers have read-only access; staff mutations are enforced in PostgreSQL. The graphical room provides location selection, inventory context and search-to-room focus, with conventional controls available without WebGL.
 

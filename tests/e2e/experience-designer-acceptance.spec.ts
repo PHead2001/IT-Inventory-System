@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -35,16 +37,20 @@ async function createCategory(page: Page) {
 async function saveDesigner(designer: Locator) {
   await designer.getByRole('button', { name: 'Save changes' }).click();
   const impact = designer.getByRole('region', { name: 'Form save impact' });
-  await expect(designer.getByRole('status')).toContainText(
-    /Saved active form revision|Review the effect/,
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: /Saved active form revision|Review the effect/ }),
+  ).toContainText(/Saved active form revision|Review the effect/);
   if (await impact.isVisible())
     await impact
       .getByRole('button', { name: 'Confirm and save changes' })
       .click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
 }
 
 function fieldControl(designer: Locator, name: string) {
@@ -224,26 +230,18 @@ test('advanced JSON action stays clickable below sticky Save at a constrained vi
   await page.setViewportSize({ width: 720, height: 450 });
   await signIn(page);
   const designer = await openDesigner(page, 'Cables');
+  await designer
+    .getByRole('button', { name: 'Recovery & advanced', exact: true })
+    .click();
   await designer.getByText('Advanced JSON recovery', { exact: true }).click();
   await designer
     .getByRole('button', { name: 'Load current document JSON' })
     .click();
-  await designer
-    .getByRole('navigation', { name: 'Designer panels' })
-    .getByRole('button', { name: 'Inspector' })
-    .click();
-  await expect(
-    designer.getByRole('heading', { name: 'Inspector' }),
-  ).toBeVisible();
   const apply = designer.getByRole('button', {
     name: 'Apply JSON to visual editor',
   });
   await expect(apply).toBeEnabled();
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
-  const save = designer.getByRole('button', { name: 'Save changes' });
-  await expect(save).toBeInViewport();
+  await apply.scrollIntoViewIfNeeded();
   expect(
     await apply.evaluate((button) => {
       const box = button.getBoundingClientRect();
@@ -255,9 +253,18 @@ test('advanced JSON action stays clickable below sticky Save at a constrained vi
     }),
   ).toBe(true);
   await apply.click();
-  await expect(designer.getByRole('status')).toContainText(
-    'JSON applied to the local editor',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'JSON applied to the local editor' }),
+  ).toContainText('JSON applied to the local editor');
+  await designer
+    .getByRole('navigation', { name: 'Designer panels' })
+    .getByRole('button', { name: 'Inspector' })
+    .click();
+  await expect(
+    designer.getByRole('heading', { name: 'Inspector' }),
+  ).toBeVisible();
 });
 
 test('nonempty section removal moves or unplaces a populated custom field, and hide/restore keeps its value', async ({
@@ -281,14 +288,14 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await saveDesigner(designer);
 
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create.getByLabel('Category').selectOption({ label: category });
   await create
     .getByLabel('Name', { exact: true })
     .fill(`Acceptance item ${category}`);
   await create.getByLabel(fieldName).fill(value);
-  await create.getByRole('button', { name: 'Review metadata' }).click();
-  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(create).click();
+  await metadataSaveButton(create).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   const itemId = page.url().split('/').at(-1)!;
 
@@ -386,12 +393,9 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await saveDesigner(designer);
   await retainedValue();
   await page.goto(`/inventory/quantity/${itemId}`);
-  const edit = page.getByRole('form', { name: 'Edit quantity metadata' });
+  const edit = await openRecordTask(page, 'Edit quantity metadata');
   if (!(await edit.isVisible()))
-    await page
-      .locator('summary')
-      .filter({ hasText: 'Edit quantity metadata' })
-      .click();
+    await openRecordTask(page, 'Edit quantity metadata');
   await expect(edit.getByLabel(fieldName)).toHaveCount(0);
 
   designer = await openDesigner(page, category);
@@ -404,14 +408,9 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   await saveDesigner(designer);
   await retainedValue();
   await page.goto(`/inventory/quantity/${itemId}`);
-  const restoredEdit = page.getByRole('form', {
-    name: 'Edit quantity metadata',
-  });
+  const restoredEdit = await openRecordTask(page, 'Edit quantity metadata');
   if (!(await restoredEdit.isVisible()))
-    await page
-      .locator('summary')
-      .filter({ hasText: 'Edit quantity metadata' })
-      .click();
+    await openRecordTask(page, 'Edit quantity metadata');
   await expect(restoredEdit.getByLabel(fieldName)).toHaveValue(value);
 
   designer = await openDesigner(page, category);
@@ -470,12 +469,9 @@ test('nonempty section removal moves or unplaces a populated custom field, and h
   designer = await openDesigner(page, category);
   await expect(fieldControl(designer, fieldName)).toHaveCount(1);
   await page.goto(`/inventory/quantity/${itemId}`);
-  const placedEdit = page.getByRole('form', { name: 'Edit quantity metadata' });
+  const placedEdit = await openRecordTask(page, 'Edit quantity metadata');
   if (!(await placedEdit.isVisible()))
-    await page
-      .locator('summary')
-      .filter({ hasText: 'Edit quantity metadata' })
-      .click();
+    await openRecordTask(page, 'Edit quantity metadata');
   await expect(placedEdit.getByLabel(fieldName)).toHaveValue(value);
 });
 
@@ -500,11 +496,13 @@ test('hidden sections and preview exclusions remain distinct through save and re
     .getByLabel('Applies to Quantity details')
     .selectOption('quantity');
   await designer
-    .getByText('Try form · quantity items or serialized assets', {
+    .getByText('Try form · quantity items or individual assets', {
       exact: true,
     })
     .click();
-  await designer.getByRole('button', { name: 'Asset', exact: true }).click();
+  await designer
+    .getByRole('button', { name: 'Individual asset', exact: true })
+    .click();
   const library = designer.getByTestId('designer-library');
   await openHiddenFields(library);
   await expect(

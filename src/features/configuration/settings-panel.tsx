@@ -305,7 +305,7 @@ export function SettingsPanel({
                     aria-label={'Remove ' + category.name}
                   >
                     <p className="text-sm">
-                      Review every affected quantity definition and asset,
+                      Review every affected quantity item and individual asset,
                       including archived and retired records. Current stock and
                       movement history stay with each record.
                     </p>
@@ -363,11 +363,11 @@ export function SettingsPanel({
                       >
                         <p>
                           <strong>
-                            {review.quantity_count} current quantity definitions
+                            {review.quantity_count} current quantity items
                           </strong>{' '}
                           and{' '}
                           <strong>
-                            {review.asset_count} current serialized assets
+                            {review.asset_count} current individual assets
                           </strong>{' '}
                           {review.target_name
                             ? 'will be reassigned to ' + review.target_name
@@ -377,12 +377,12 @@ export function SettingsPanel({
                         <p>
                           <strong>
                             {review.historical_quantity_count} historical
-                            quantity definitions
+                            quantity items
                           </strong>{' '}
                           and{' '}
                           <strong>
                             {review.historical_asset_count} historical
-                            serialized assets
+                            individual assets
                           </strong>{' '}
                           also reference this category.{' '}
                           {review.will_tombstone
@@ -399,8 +399,8 @@ export function SettingsPanel({
                           <p>
                             After reassignment,{' '}
                             {review.quantity_needs_metadata_count} quantity
-                            definitions and {review.asset_needs_metadata_count}{' '}
-                            serialized assets will need metadata review under
+                            items and {review.asset_needs_metadata_count}{' '}
+                            individual assets will need metadata review under
                             the replacement form. Their source custom values
                             stay visible as legacy values.
                           </p>

@@ -1,3 +1,4 @@
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -464,13 +465,13 @@ test('a newly required field requests targeted confirmation before changing the 
   await page.getByRole('button', { name: 'Add category' }).click();
   await expect(page.getByRole('status')).toContainText('Settings saved.');
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create
     .getByLabel('Name', { exact: true })
     .fill(`Review item ${category}`);
   await create.getByLabel('Category').selectOption({ label: category });
-  await create.getByRole('button', { name: 'Review metadata' }).click();
-  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(create).click();
+  await metadataSaveButton(create).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
@@ -487,21 +488,25 @@ test('a newly required field requests targeted confirmation before changing the 
   await expect(impact).toBeVisible();
   await expect(impact).toContainText('1 quantity records');
   await expect(impact).toContainText('newly need metadata review');
-  await expect(designer.getByRole('status')).toContainText('Review the effect');
+  await expect(
+    designer.getByRole('status').filter({ hasText: 'Review the effect' }),
+  ).toContainText('Review the effect');
   await impact
     .getByRole('button', { name: 'Confirm and save changes' })
     .click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
   await page.goto('/inventory/quantity/new');
   await page
-    .getByRole('form', { name: 'Create quantity inventory' })
+    .getByRole('form', { name: 'Add quantity item' })
     .getByLabel('Category')
     .selectOption({ label: category });
   await expect(
     page
-      .getByRole('form', { name: 'Create quantity inventory' })
+      .getByRole('form', { name: 'Add quantity item' })
       .getByLabel('Review required value'),
   ).toBeVisible();
 });
@@ -539,18 +544,25 @@ test('a stale category publication retains the exact unsaved input for explicit 
       .last()
       .fill('Competing publication');
     await competing.getByRole('button', { name: 'Save changes' }).click();
-    await expect(competing.getByRole('status')).toContainText(
-      'Saved active form revision',
-    );
+    await expect(
+      competing
+        .getByRole('status')
+        .filter({ hasText: 'Saved active form revision' }),
+    ).toContainText('Saved active form revision');
     await designer.getByRole('button', { name: 'Save changes' }).click();
-    await expect(designer.getByRole('status')).toContainText(
-      /changed|stale|revision/i,
-    );
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: /changed|stale|revision/i }),
+    ).toContainText(/changed|stale|revision/i);
     await expect(unsaved).toHaveValue('Retained local draft');
     await expect(
       designer.getByRole('region', { name: 'Form save impact' }),
     ).toHaveCount(0);
     page.once('dialog', (dialog) => dialog.accept());
+    await designer
+      .getByRole('button', { name: 'Recovery & advanced', exact: true })
+      .click();
     await designer.getByRole('button', { name: 'Refresh from server' }).click();
     await expect(designer.getByLabel('Section heading').last()).toHaveValue(
       'Competing publication',

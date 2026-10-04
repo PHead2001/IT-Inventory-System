@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -26,13 +28,27 @@ async function login(page: Page, role: 'staff' | 'viewer') {
   ).toBeVisible();
 }
 async function confirm(form: Locator) {
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
 }
-function custodyForm(page: Page, title: string) {
+async function custodyForm(page: Page, title: string) {
+  if (
+    [
+      'Assign asset to a site',
+      'Issue stock to a site',
+      'Return to storage',
+      'Transfer between sites',
+      'Write off at site',
+      'Record existing site holding',
+      'Correct recorded site holding',
+      'Correct recorded site custody',
+      'Retire asset at site',
+    ].includes(title)
+  )
+    return openRecordTask(page, title);
   return page
     .locator('form')
     .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
@@ -96,7 +112,7 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'staff');
   await page.goto('/inventory/quantity/new');
-  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  const form = page.getByRole('form', { name: 'Add quantity item' });
   const quantityName = 'Photo browser ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(quantityName);
   await confirm(form);
@@ -145,7 +161,11 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await expect(
     cards.getByRole('listitem').getByText('first.png', { exact: true }),
   ).toBeVisible();
-  await expect(cards.getByRole('listitem').getByText(/^ready/)).toBeVisible();
+  await expect(cards.getByRole('listitem').getByText(/^Ready/)).toBeVisible();
+  await expect(cards.getByRole('listitem')).toContainText(
+    /\b\d+(?:\.\d+)? KiB\b/,
+  );
+  await expect(cards.getByRole('listitem')).not.toContainText('0.0 MiB');
   await expect(
     files.getByRole('button', { name: 'Preview first.png' }).locator('img'),
   ).toBeVisible();
@@ -275,7 +295,9 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   ).toBeVisible();
   await expect(cards.getByText('first.png', { exact: true })).toHaveCount(0);
   await files.getByRole('button', { name: 'Remove' }).click();
-  await expect(files.getByText('No ready files yet.')).toBeVisible();
+  await expect(
+    files.getByText(/^(No photo yet|No attachments yet)\./),
+  ).toBeVisible();
   await expect(
     page.getByRole('heading', {
       name: 'Current stock — 0 available in storage',
@@ -291,13 +313,13 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   const siteCode = 'FILES-' + randomUUID().slice(0, 12).toUpperCase();
   const siteName = 'Fictional file site ' + siteCode;
   await page.goto('/settings/sites');
-  const siteForm = custodyForm(page, 'Add property / site');
+  const siteForm = await custodyForm(page, 'Add property/site');
   await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await siteForm.getByLabel('Name', { exact: true }).fill(siteName);
   await siteForm.getByRole('button', { name: 'Save site' }).click();
   await expect(siteForm.getByRole('status')).toContainText('Site saved');
   await page.goto('/inventory/assets/new');
-  const form = page.getByRole('form', { name: 'Create asset inventory' });
+  const form = page.getByRole('form', { name: 'Add individual asset' });
   const assetName = 'PDF browser ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(assetName);
   await chooseLocation(form, 'Current location', 'ITC-RACK');
@@ -328,7 +350,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',
   });
-  const assign = custodyForm(page, 'Assign asset to a site');
+  const assign = await custodyForm(page, 'Assign asset to a site');
   await assign
     .getByLabel('Destination site')
     .selectOption({ label: `${siteName} (${siteCode})` });
@@ -343,7 +365,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('manual.pdf');
   expect(sha256(await readFile(await download.path()))).toBe(sha256(bytes));
-  const returned = custodyForm(page, 'Return to storage');
+  const returned = await custodyForm(page, 'Return to storage');
   await chooseLocation(returned, 'Return to storage', 'ITC-RACK');
   await submitCustody(returned, 'Return to storage');
   await page.goto(assetUrl);
@@ -354,7 +376,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     cards.getByText('Updated manual title', { exact: true }),
   ).toBeVisible();
   await expect(files.getByText('Original: manual.pdf')).toBeVisible();
-  await files.locator('summary').filter({ hasText: 'File history' }).click();
+  await files.locator('summary').filter({ hasText: 'File activity' }).click();
   await expect(
     files.getByText(/renamed manual.pdf → Updated manual title/),
   ).toBeVisible();
@@ -401,7 +423,9 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     sha256(replacementBytes),
   );
   await files.getByRole('button', { name: 'Remove' }).click();
-  await expect(files.getByText('No ready files yet.')).toBeVisible();
+  await expect(
+    files.getByText(/^(No photo yet|No attachments yet)\./),
+  ).toBeVisible();
 });
 
 test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
@@ -424,7 +448,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
 
   await login(page, 'staff');
   await page.goto('/inventory/assets/new');
-  const form = page.getByRole('form', { name: 'Create asset inventory' });
+  const form = page.getByRole('form', { name: 'Add individual asset' });
   await form
     .getByLabel('Name', { exact: true })
     .fill('Large PDF browser ' + randomUUID());
@@ -521,7 +545,9 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
       sha256(nearLimit),
     );
     await files.getByRole('button', { name: 'Remove' }).click();
-    await expect(files.getByText('No ready files yet.')).toBeVisible();
+    await expect(
+      files.getByText(/^(No photo yet|No attachments yet)\./),
+    ).toBeVisible();
     published = true;
   } catch (error) {
     primaryError = error;

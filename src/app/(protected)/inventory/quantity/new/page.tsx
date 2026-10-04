@@ -40,10 +40,9 @@ export default async function NewQuantityPage({
   return (
     <>
       <p className="experience-eyebrow">Inventory · New record</p>
-      <h1 className="experience-heading mt-3">Create quantity inventory</h1>
+      <h1 className="experience-heading mt-3">Add quantity item</h1>
       <p className="experience-muted mb-5 mt-3 max-w-2xl text-sm">
-        Define interchangeable items with zero stock or an initial quantity at
-        one location.
+        Track interchangeable items by count, such as cables and adapters.
       </p>
       <div className={`${panel} max-w-5xl`}>
         <MetadataForm

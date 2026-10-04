@@ -149,11 +149,13 @@ it('reuses the same request after an uncertain outcome and invalidates review af
     screen.getByRole('button', { name: 'Review archive and clear stock' }),
   );
   await user.click(
-    screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+    screen.getByRole('button', {
+      name: /Confirm archive and clear stock|Retry same archive transaction/,
+    }),
   );
   expect(await screen.findByText('Result unknown')).toBeVisible();
   await user.click(
-    screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+    screen.getByRole('button', { name: 'Retry same archive transaction' }),
   );
   expect(mocks.submit).toHaveBeenCalledTimes(2);
   expect(mocks.submit.mock.calls[0][0].requestId).toBe(
@@ -172,4 +174,58 @@ it('reuses the same request after an uncertain outcome and invalidates review af
     );
   });
   expect(mocks.refresh).toHaveBeenCalled();
+});
+
+it('retains and replays an unknown archive across refreshed version and lifecycle changes', async () => {
+  const user = userEvent.setup();
+  mocks.submit
+    .mockRejectedValueOnce(new Error('lost response'))
+    .mockResolvedValueOnce({
+      ok: false,
+      kind: 'domain',
+      code: 'forbidden',
+      message: 'Access unavailable',
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: itemId,
+      version: '3',
+      changed: true,
+    });
+  const view = render(
+    <ArchiveQuantityForm latestReview={review} actorId={firstId} />,
+  );
+  await user.type(screen.getByLabelText('Reason (required)'), 'Obsolete');
+  await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
+  await user.click(
+    screen.getByRole('button', { name: 'Review archive and clear stock' }),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+  );
+  await screen.findByRole('alert');
+  const first = mocks.submit.mock.calls[0][0];
+  view.rerender(
+    <ArchiveQuantityForm
+      latestReview={{
+        ...review,
+        version: '3',
+        archived: true,
+        removed_total: '0',
+        locations: [],
+      }}
+      actorId={firstId}
+    />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toBeDisabled();
+  await user.click(
+    screen.getByRole('button', { name: 'Retry same archive transaction' }),
+  );
+  await screen.findByText('Access unavailable');
+  expect(mocks.submit.mock.calls[1][0]).toEqual(first);
+  await user.click(
+    screen.getByRole('button', { name: 'Retry same archive transaction' }),
+  );
+  expect(mocks.submit.mock.calls[2][0]).toEqual(first);
+  await screen.findByRole('status');
 });
