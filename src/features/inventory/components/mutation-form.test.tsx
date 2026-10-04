@@ -74,6 +74,36 @@ async function chooseLocation(
   await user.click(screen.getByRole('option', { name: new RegExp(name) }));
 }
 describe('inventory operation forms', () => {
+  it('retains acknowledged sibling success when its own record refresh arrives', async () => {
+    mocks.submit.mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '3',
+      changed: true,
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <MutationForm {...defaults} operation="quantity_receive" />,
+    );
+    await chooseLocation(user, 'Receive at', '1B');
+    await user.type(screen.getByLabelText('Reason (required)'), 'Delivery');
+    await user.click(
+      screen.getByRole('button', { name: 'Review receive stock' }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm receive stock' }),
+    );
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledOnce());
+    view.rerender(
+      <MutationForm
+        {...defaults}
+        item={{ ...item, version: 3 }}
+        operation="quantity_receive"
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Saved successfully');
+    expect(screen.queryByText(/Baseline refreshed/)).not.toBeInTheDocument();
+  });
   it('reviews a partial transfer and sends its source-scoped command', async () => {
     mocks.submit.mockResolvedValue({
       ok: true,

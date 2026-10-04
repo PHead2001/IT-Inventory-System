@@ -31,7 +31,7 @@ export type MetadataFieldInputProps = {
   previousOptions?: MetadataField['options'];
   onValidityChange?(message: string): void;
   initialDateTimeDraft?: DateTimeDraft;
-  onDateTimeDraftChange?(draft: DateTimeDraft): void;
+  onDateTimeDraftChange?(draft: DateTimeDraft, edited?: boolean): void;
 };
 export type DateTimeDraft = { wall: string; zone: string };
 const subscribeTimeZone = () => () => {};
@@ -52,7 +52,7 @@ export function DateTimeInput({
   disabled?: boolean;
   onValidityChange?(message: string): void;
   initialDraft?: DateTimeDraft;
-  onDraftChange?(draft: DateTimeDraft): void;
+  onDraftChange?(draft: DateTimeDraft, edited?: boolean): void;
 }) {
   const localZone = useSyncExternalStore(
     subscribeTimeZone,
@@ -112,6 +112,7 @@ export function DateTimeInput({
           ? undefined
           : next;
     setDraft({ wall: next, value: nextValue });
+    onDraftChange?.({ wall: next, zone }, true);
     onChange(nextValue);
   };
   return (
@@ -169,6 +170,16 @@ export function DateTimeInput({
         value={zone}
         onChange={(event) => {
           const nextZone = event.target.value;
+          onDraftChange?.(
+            {
+              wall:
+                typeof value === 'string' && instantMicros(value) !== null
+                  ? wallTimeAt(value, nextZone)
+                  : wall,
+              zone: nextZone,
+            },
+            true,
+          );
           setZone(nextZone);
           if (typeof value === 'string' && instantMicros(value) !== null)
             setDraft(null);

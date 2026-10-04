@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
   BinaryBitmap,
+  BarcodeFormat,
+  DecodeHintType,
   HybridBinarizer,
   MultiFormatReader,
   RGBLuminanceSource,
@@ -12,7 +14,179 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
 const rootCode = 'ITC';
-test.use({ deviceScaleFactor: 2 });
+test.use({ deviceScaleFactor: 2, trace: 'on' });
+
+test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/inventory/assets/new');
+  const create = page.getByRole('form', { name: 'Create asset inventory' });
+  const name = 'Checkpoint retired label ' + crypto.randomUUID();
+  await create.getByLabel('Name', { exact: true }).fill(name);
+  await chooseLocation(create, 'Current location', 'ITC-RED');
+  await create.getByRole('button', { name: 'Review metadata' }).click();
+  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  const assetUrl = page.url();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Retire asset$/ })
+    .click();
+  const retire = page.getByRole('form', {
+    name: 'Retire asset',
+    exact: true,
+  });
+  await retire
+    .getByLabel('Reason (required)')
+    .fill('Checkpoint fictional retired label fixture');
+  await retire.getByRole('button', { name: 'Review retire asset' }).click();
+  await retire.getByRole('button', { name: 'Confirm retire asset' }).click();
+  await expect(page.getByText(/retired · Version 2/)).toBeVisible();
+  await page.getByRole('link', { name: 'Print asset label' }).click();
+  await expect(page).toHaveURL(/\/labels$/);
+  const queue = page.getByRole('region', { name: 'Label queue' });
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  await queue.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('retired-label-removed.png'),
+  });
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toHaveCount(0);
+  await page.goto(assetUrl);
+  await page.getByRole('link', { name: 'Print asset label' }).click();
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(
+    page.getByRole('button', { name: 'Acknowledge changes' }),
+  ).toBeVisible();
+  await queue.getByRole('button', { name: 'Clear queue' }).click();
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await page.goto('/labels?location=ITC-RED&keep=state#sheet');
+  await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
+  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await queue.getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.reload();
+  await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
+});
+test('an individual pending linked quantity can be removed while an unrelated delayed location addition completes once', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  await page.goto('/inventory/quantity/new');
+  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const name = 'Checkpoint pending label ' + crypto.randomUUID();
+  await create.getByLabel('Name', { exact: true }).fill(name);
+  await create.getByRole('button', { name: 'Review metadata' }).click();
+  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const detailUrl = page.url();
+  const quantityId = detailUrl.split('/').at(-1)!;
+  let release!: () => void;
+  const responseBarrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let acknowledge!: () => void;
+  let rejectAcknowledgment!: (error: unknown) => void;
+  const authorized = new Promise<void>((resolve, reject) => {
+    acknowledge = resolve;
+    rejectAcknowledgment = reject;
+  });
+  await page.route('**/labels**', async (route) => {
+    if (
+      route.request().method() !== 'POST' ||
+      !route.request().postData()?.includes('ITC-RED')
+    ) {
+      await route.continue();
+      return;
+    }
+    try {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      acknowledge();
+      await responseBarrier;
+      await route.fulfill({ response });
+    } catch (error) {
+      rejectAcknowledgment(error);
+      throw error;
+    }
+  });
+  try {
+    await page.goto(
+      '/labels?quantity=' + quantityId + '&location=ITC-RED&keep=state#sheet',
+    );
+    await authorized;
+    const pending = page.getByRole('region', {
+      name: 'Pending linked additions',
+    });
+    await expect(pending).toBeVisible();
+    const queue = page.getByRole('region', { name: 'Label queue' });
+    await expect(queue).toContainText('0 distinct records · 0 labels');
+    await expect(
+      page.getByRole('button', { name: /Print selected labels/ }),
+    ).toBeDisabled();
+    await pending
+      .getByRole('button', { name: 'Remove pending quantity ' + quantityId })
+      .click();
+    await expect(
+      pending.getByRole('button', {
+        name: 'Remove pending quantity ' + quantityId,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      pending.getByRole('button', { name: 'Remove pending location ITC-RED' }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+      /\/labels\?location=ITC-RED&keep=state#sheet$/,
+    );
+    release();
+    await expect(queue).toContainText('1 distinct records · 1 labels');
+    await expect(pending).toHaveCount(0);
+    await expect(queue).toContainText('Red Container');
+    await expect(queue).not.toContainText(name);
+    await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
+    await page.reload();
+    await expect(queue).toContainText('1 distinct records · 1 labels');
+    await expect(queue).not.toContainText(name);
+  } finally {
+    release();
+    await page.unroute('**/labels**');
+    await page.goto(detailUrl);
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Archive quantity definition and clear stock$/ })
+      .click();
+    const archive = page.getByRole('form', {
+      name: 'Archive quantity definition and clear stock',
+      exact: true,
+    });
+    await archive
+      .getByLabel('Reason (required)')
+      .fill('Checkpoint pending label fixture cleanup');
+    await archive.getByRole('checkbox', { name: /I understand/ }).check();
+    await archive
+      .getByRole('button', { name: 'Review archive and clear stock' })
+      .click();
+    await archive
+      .getByRole('button', { name: 'Confirm archive and clear stock' })
+      .click();
+    await expect(page.getByText(/Archived · Version 2/)).toBeVisible();
+  }
+});
 
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -22,6 +196,15 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await expect(
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
+}
+
+async function addSearchRecord(page: Page, name: string) {
+  const row = page
+    .getByRole('region', { name: 'Search result records' })
+    .locator(':scope > div')
+    .filter({ has: page.getByRole('link', { name, exact: true }) });
+  await expect(row).toHaveCount(1);
+  await row.getByRole('button', { name: 'Add to queue', exact: true }).click();
 }
 
 async function openEditForm(
@@ -35,7 +218,11 @@ async function openEditForm(
   return form;
 }
 
-async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
+async function decodeScreenshot(
+  _page: Page,
+  png: Buffer,
+  format?: BarcodeFormat,
+): Promise<string> {
   const image = PNG.sync.read(png);
   const rgba = new Uint8ClampedArray(image.data);
   const canvas = {
@@ -58,7 +245,9 @@ async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
           new RGBLuminanceSource(gray, image.width, image.height),
         ),
       ),
-      new Map(),
+      format === undefined
+        ? new Map()
+        : new Map([[DecodeHintType.POSSIBLE_FORMATS, [format]]]),
     );
   }).getText();
 }
@@ -545,11 +734,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await readyPreview(page, 1);
   const card = page.locator('.label-card').filter({ hasText: originalName });
   await expect(card).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath('asset-before-move.png') });
+  const renderedQr = card.getByRole('img', { name: /QR code for/ });
   const initialCode = await decodeScreenshot(
     page,
-    await card.screenshot({
-      path: testInfo.outputPath('asset-before-move.png'),
-    }),
+    await renderedQr.screenshot(),
+    BarcodeFormat.QR_CODE,
   );
   expect(initialCode).toBe(process.env.APP_ORIGIN + '/inventory/assets/' + id);
   const located = await local
@@ -605,12 +795,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await page.goto('/labels?asset=' + id);
   await readyPreview(page, 1);
   await expect(card).toContainText('Renamed Label asset');
+  await card.screenshot({ path: testInfo.outputPath('asset-after-move.png') });
   expect(
     await decodeScreenshot(
       page,
-      await card.screenshot({
-        path: testInfo.outputPath('asset-after-move.png'),
-      }),
+      await renderedQr.screenshot(),
+      BarcodeFormat.QR_CODE,
     ),
   ).toBe(initialCode);
   await page.goto('/scan');
@@ -668,11 +858,11 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await addSearchRecord(page, quantityName);
   await search.getByRole('textbox').fill(assetName);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: assetName })).toBeVisible();
-  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await addSearchRecord(page, assetName);
   await chooseLocation(
     page.locator('section').filter({ hasText: 'Add a location' }).first(),
     'Location',

@@ -48,6 +48,18 @@ import { controlVisible } from './effective-controls';
 import { MetadataFieldInput } from './field-value-input';
 import { fieldValueError } from './field-value-validation';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
+import {
+  creationDraftId,
+  creationURL,
+  pendingCreations,
+  publishedSnapshots,
+  readCreation,
+  recoveryLimitation,
+  writeCreation,
+  type CreationEnvelope,
+  type CreationInputs,
+  type CreationCommand,
+} from './creation-recovery';
 
 type Kind = 'quantity' | 'asset';
 type Props = {
@@ -60,6 +72,8 @@ type Props = {
   preview?: boolean;
   returnTo?: string;
   actorId?: string;
+  recoveryBackend?: string;
+  creationDraftId?: string;
   openingSite?: { id: string; code: string; name: string };
 };
 export function buildCustomPatch(
@@ -196,6 +210,8 @@ export function MetadataForm({
   openingSite,
   returnTo,
   actorId,
+  recoveryBackend,
+  creationDraftId: routeDraftId,
 }: Props) {
   const router = useRouter();
   const incoming = item ?? asset;
@@ -261,6 +277,226 @@ export function MetadataForm({
     null,
   );
   const [duplicates, setDuplicates] = useState<string[]>([]);
+  const recoveryEnabled = creating && !preview;
+  const [recoveryReady, setRecoveryReady] = useState(!recoveryEnabled);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryBlocked, setRecoveryBlocked] = useState(false);
+  const [terminalDraft, setTerminalDraft] = useState<CreationEnvelope | null>(
+    null,
+  );
+  const [otherDrafts, setOtherDrafts] = useState<CreationEnvelope[]>([]);
+  const [dateTimes, setDateTimes] = useState<CreationInputs['dateTimes']>({});
+  const recovery = useRef<CreationEnvelope | null>(null);
+  const recoveredEditing = useRef(false);
+  const recoveryHydrated = useRef(false);
+  const recoveryURLQueued = useRef(false);
+  const liveMount = useRef(true);
+  useEffect(() => {
+    liveMount.current = true;
+    return () => {
+      liveMount.current = false;
+    };
+  }, []);
+  const inputsSnapshot = useRef<CreationInputs | null>(null);
+  const currentInputs: CreationInputs = {
+    core,
+    cleanCore,
+    custom,
+    touched,
+    reviewedForms: publishedSnapshots(reviewedForms),
+    priorForms: publishedSnapshots(priorForms),
+    dateTimes,
+    openingQuantity,
+    openingReason,
+    openingReference,
+  };
+  useLayoutEffect(() => {
+    if (recoveryHydrated.current && recovery.current?.status === 'editing')
+      inputsSnapshot.current = currentInputs;
+  });
+  const bindCreationURL = (instance: string) => {
+    recoveryURLQueued.current = true;
+    setRecoveryReady(false);
+    try {
+      router.replace(creationURL(instance), { scroll: false });
+    } catch {
+      setRecoveryError(
+        'The creation URL could not be opened. Retry creation recovery to reopen this same durable draft.',
+      );
+    }
+  };
+  const retryCreationURL = () => {
+    const active = recovery.current;
+    if (!active || routeDraftId || recoveryReady || recoveryBlocked) return;
+    const stored = readCreation(active.scope, active.instance);
+    if (!stored.envelope || stored.error) {
+      setRecoveryError(stored.error || recoveryLimitation);
+      return;
+    }
+    setRecoveryError('');
+    bindCreationURL(active.instance);
+  };
+  const persistInputs = (patch: Partial<CreationInputs> = {}) => {
+    if (!recoveryEnabled) return true;
+    const existing = recovery.current;
+    if (
+      !existing ||
+      existing.status !== 'editing' ||
+      actorStale ||
+      recoveryBlocked
+    )
+      return false;
+    const inputs = { ...(inputsSnapshot.current ?? currentInputs), ...patch };
+    inputsSnapshot.current = inputs;
+    const next = { ...existing, inputs };
+    recovery.current = next;
+    if (!writeCreation(next)) {
+      setRecoveryError(recoveryLimitation);
+      return false;
+    }
+    setRecoveryError('');
+    if (!routeDraftId && !recoveryURLQueued.current) {
+      bindCreationURL(existing.instance);
+    }
+    return true;
+  };
+  const persistInputsRef = useRef(persistInputs);
+  useLayoutEffect(() => {
+    persistInputsRef.current = persistInputs;
+  });
+  // Hydrate the external session snapshot once before enabling controls or painting recovered fields.
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+  useLayoutEffect(() => {
+    if (!recoveryEnabled || recoveryHydrated.current) return;
+    if (
+      !creationDraftId(formActor) ||
+      !recoveryBackend ||
+      (openingSite && !creationDraftId(openingSite.id)) ||
+      (routeDraftId && !creationDraftId(routeDraftId))
+    ) {
+      setRecoveryError(
+        'Creation recovery identity is unavailable or invalid. Reload from the inventory or site creation link before saving.',
+      );
+      setRecoveryBlocked(true);
+      return;
+    }
+    let backend: string;
+    try {
+      backend = new URL(recoveryBackend).origin;
+    } catch {
+      setRecoveryBlocked(true);
+      setRecoveryError('Creation recovery backend identity is unavailable.');
+      return;
+    }
+    const instance = routeDraftId ?? crypto.randomUUID();
+    const scope = {
+      origin: window.location.origin,
+      backend,
+      actor: formActor!,
+      kind,
+      site: openingSite?.id ?? null,
+    };
+    const stored = readCreation(scope, instance);
+    if (stored.error && !stored.error.startsWith('Recovery storage')) {
+      setRecoveryError(stored.error);
+      setRecoveryBlocked(true);
+      return;
+    }
+    const envelope: CreationEnvelope = stored.envelope ?? {
+      version: 1,
+      scope,
+      instance,
+      status: 'editing',
+      inputs: currentInputs,
+      command: null,
+      entityId: null,
+      completedRequestId: null,
+    };
+    recovery.current = envelope;
+    recoveryHydrated.current = true;
+    if (envelope.inputs) {
+      const values = envelope.inputs;
+      inputsSnapshot.current = values;
+      setCore(values.core);
+      setCleanCore(values.cleanCore);
+      setCustom(values.custom);
+      setTouched(values.touched);
+      setReviewedForms(values.reviewedForms);
+      setPriorForms(values.priorForms);
+      setDateTimes(values.dateTimes);
+      setOpeningQuantity(values.openingQuantity);
+      setOpeningReason(values.openingReason);
+      setOpeningReference(values.openingReference);
+      setInputGeneration((value) => value + 1);
+      recoveredEditing.current = !!stored.envelope;
+    }
+    if (envelope.status === 'submitted' && envelope.command) {
+      setReceipt({
+        key: JSON.stringify([
+          envelope.command.operation,
+          envelope.command.payload,
+        ]),
+        id: envelope.command.requestId,
+      });
+      setUncertain(true);
+    } else if (envelope.status === 'saved' || envelope.status === 'discarded')
+      setTerminalDraft(envelope);
+    const durable =
+      !stored.error && (!!stored.envelope || writeCreation(envelope));
+    if (!durable) setRecoveryError(recoveryLimitation);
+    setOtherDrafts(pendingCreations(scope, instance));
+    if (!routeDraftId && durable) {
+      bindCreationURL(instance);
+    }
+    // A canonical route replaces its component key when the supported router
+    // binds this instance. Keep controls disabled until that remount has read
+    // durable state; never remount a storage-failed in-memory draft.
+    setRecoveryReady(!!routeDraftId || !durable);
+  });
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (!recoveryEnabled) return;
+    const checkTerminal = () => {
+      const active = recovery.current;
+      if (!active) return;
+      const stored = readCreation(active.scope, active.instance).envelope;
+      if (stored?.status === 'submitted' && stored.command) {
+        recovery.current = stored;
+        inputsSnapshot.current = stored.inputs;
+        if (stored.inputs) {
+          const values = stored.inputs;
+          setCore(values.core);
+          setCleanCore(values.cleanCore);
+          setCustom(values.custom);
+          setTouched(values.touched);
+          setReviewedForms(values.reviewedForms);
+          setPriorForms(values.priorForms);
+          setDateTimes(values.dateTimes);
+          setOpeningQuantity(values.openingQuantity);
+          setOpeningReason(values.openingReason);
+          setOpeningReference(values.openingReference);
+          setInputGeneration((value) => value + 1);
+        }
+        setReceipt({
+          key: JSON.stringify([
+            stored.command.operation,
+            stored.command.payload,
+          ]),
+          id: stored.command.requestId,
+        });
+        setUncertain(true);
+        setReview(false);
+      }
+      if (stored?.status === 'saved' || stored?.status === 'discarded') {
+        recovery.current = stored;
+        setTerminalDraft(stored);
+        setReview(false);
+        setUncertain(false);
+      }
+    };
+    window.addEventListener('pageshow', checkTerminal);
+    return () => window.removeEventListener('pageshow', checkTerminal);
+  }, [recoveryEnabled]);
   const routeForm = forms[core.category_id];
   const fetchedForm = loadedForms[core.category_id];
   const currentForm =
@@ -319,6 +555,16 @@ export function MetadataForm({
           return;
         }
         setLoadedForms((prior) => ({ ...prior, [categoryId]: result.form! }));
+        if (
+          recoveryEnabled &&
+          !inputsSnapshot.current?.reviewedForms[categoryId]
+        )
+          persistInputsRef.current({
+            reviewedForms: publishedSnapshots({
+              ...inputsSnapshot.current?.reviewedForms,
+              [categoryId]: result.form,
+            }),
+          });
         setReviewedForms((prior) =>
           prior[categoryId] ? prior : { ...prior, [categoryId]: result.form! },
         );
@@ -332,7 +578,14 @@ export function MetadataForm({
     return () => {
       loadGeneration.current += 1;
     };
-  }, [core.category_id, forms, loadedForms, preview, loadRetry]);
+  }, [
+    core.category_id,
+    forms,
+    loadedForms,
+    preview,
+    loadRetry,
+    recoveryEnabled,
+  ]);
   useEffect(
     () => () => {
       conflictGeneration.current += 1;
@@ -419,7 +672,12 @@ export function MetadataForm({
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      if (schemaStale && (schemaCompatible || untouched) && currentForm)
+      if (
+        schemaStale &&
+        !recoveredEditing.current &&
+        (schemaCompatible || untouched) &&
+        currentForm
+      )
         setReviewedForms((prior) => ({
           ...prior,
           [core.category_id]: currentForm,
@@ -448,9 +706,21 @@ export function MetadataForm({
     Object.keys(baseline.customValues ?? {}).length > 0;
   const updateCore = (name: keyof typeof core, value: string) => {
     if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
-    setCore((prior) => ({ ...prior, [name]: value }));
+    const next = { ...core, [name]: value };
+    persistInputs({
+      core: next,
+      ...(name === 'category_id' && forms[value] && !reviewedForms[value]
+        ? {
+            reviewedForms: publishedSnapshots({
+              ...reviewedForms,
+              [value]: forms[value],
+            }),
+          }
+        : {}),
+    });
+    setCore(next);
     rebaseUsed.current = false;
-    if (name === 'category_id' && forms[value])
+    if (name === 'category_id' && forms[value] && !reviewedForms[value])
       setReviewedForms((prior) => ({ ...prior, [value]: forms[value] }));
     setReview(false);
     setAckLegacy(false);
@@ -458,14 +728,22 @@ export function MetadataForm({
   };
   const updateCustom = (id: string, value: unknown) => {
     if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
-    setCustom((prior) =>
+    const next =
       value === undefined
         ? Object.fromEntries(
-            Object.entries(prior).filter(([key]) => key !== id),
+            Object.entries(custom).filter(([key]) => key !== id),
           )
-        : { ...prior, [id]: value },
-    );
-    setTouched((prior) => (prior.includes(id) ? prior : [...prior, id]));
+        : { ...custom, [id]: value };
+    const nextTouched = touched.includes(id) ? touched : [...touched, id];
+    const latestDates = inputsSnapshot.current?.dateTimes ?? dateTimes;
+    const nextDates =
+      value === undefined && latestDates[id]
+        ? { ...latestDates, [id]: { ...latestDates[id], wall: '' } }
+        : latestDates;
+    persistInputs({ custom: next, touched: nextTouched, dateTimes: nextDates });
+    if (nextDates !== dateTimes) setDateTimes(nextDates);
+    setCustom(next);
+    setTouched(nextTouched);
     rebaseUsed.current = false;
     setReview(false);
     setAckLegacy(false);
@@ -516,6 +794,34 @@ export function MetadataForm({
         id={`${scopeId}-metadata-${id}`}
         field={config}
         value={value}
+        initialDateTimeDraft={dateTimes[id]}
+        onDateTimeDraftChange={
+          recoveryEnabled
+            ? (draft, edited) => {
+                if (
+                  !edited ||
+                  recovery.current?.status !== 'editing' ||
+                  actorStale ||
+                  recoveryBlocked
+                )
+                  return;
+                const previous = inputsSnapshot.current?.dateTimes[id];
+                if (
+                  previous?.wall === draft.wall &&
+                  previous.zone === draft.zone
+                )
+                  return;
+                // Empty, untouched datetime controls are not material edits.
+                if (!draft.wall && !previous && !touched.includes(id)) return;
+                const next = {
+                  ...(inputsSnapshot.current?.dateTimes ?? dateTimes),
+                  [id]: draft,
+                };
+                persistInputs({ dateTimes: next });
+                setDateTimes(next);
+              }
+            : undefined
+        }
         onChange={(next) => updateCustom(id, next)}
         previousOptions={
           priorDefinition?.fields.find((field) => field.id === id)?.options
@@ -627,6 +933,7 @@ export function MetadataForm({
     return !!fieldValueError(field, value) || !!answerErrors[field.id];
   });
   const dirty =
+    (recoveryEnabled && Object.keys(dateTimes).length > 0) ||
     JSON.stringify(core) !== JSON.stringify(cleanCore) ||
     openingQuantity !== '1' ||
     openingReason !== '' ||
@@ -658,6 +965,33 @@ export function MetadataForm({
     }
     setDiscardOpen(false);
     if (creating) {
+      if (recoveryEnabled) {
+        const active = recovery.current;
+        if (
+          !active ||
+          !writeCreation({
+            ...active,
+            status: 'discarded',
+            inputs: null,
+            command: null,
+            entityId: null,
+          })
+        ) {
+          setRecoveryError(
+            recoveryLimitation +
+              ' Discard could not be recorded; stay here and retry.',
+          );
+          return;
+        }
+        recovery.current = {
+          ...active,
+          status: 'discarded',
+          inputs: null,
+          command: null,
+          entityId: null,
+        };
+        setTerminalDraft(recovery.current);
+      }
       router.push(cancelPath);
       return;
     }
@@ -704,14 +1038,20 @@ export function MetadataForm({
     if (discardOpen) keepRef.current?.focus();
   }, [discardOpen]);
   useEffect(() => {
-    if (preview || !(dirty || uncertain || pending)) return;
+    if (
+      preview ||
+      terminalDraft ||
+      state?.ok ||
+      !(dirty || uncertain || pending)
+    )
+      return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty, uncertain, pending, preview]);
+  }, [dirty, uncertain, pending, preview, terminalDraft, state]);
   const keepEditing = () => {
     setDiscardOpen(false);
     cancelRef.current?.focus();
@@ -818,6 +1158,8 @@ export function MetadataForm({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
+      (recoveryEnabled &&
+        (!recoveryReady || recoveryBlocked || terminalDraft)) ||
       actorStale ||
       (!uncertain &&
         (!form ||
@@ -865,6 +1207,36 @@ export function MetadataForm({
     if (!commandPayload) return;
     const key = JSON.stringify([operation, commandPayload]);
     let requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
+    const creationCommand: CreationCommand | null = recoveryEnabled
+      ? {
+          operation: operation as CreationCommand['operation'],
+          requestId,
+          expectedActorId: formActor!,
+          payload: commandPayload,
+        }
+      : null;
+    if (creationCommand) {
+      const active = recovery.current;
+      if (
+        !active ||
+        !writeCreation({
+          ...active,
+          status: 'submitted',
+          inputs: inputsSnapshot.current ?? currentInputs,
+          command: creationCommand,
+        })
+      ) {
+        setRecoveryError(recoveryLimitation);
+        return;
+      }
+      recovery.current = {
+        ...active,
+        status: 'submitted',
+        inputs: inputsSnapshot.current ?? currentInputs,
+        command: creationCommand,
+      };
+      setRecoveryError('');
+    }
     setReceipt({ key, id: requestId });
     dispatched.current = true;
     startTransition(async () => {
@@ -964,10 +1336,57 @@ export function MetadataForm({
         };
       }
       dispatched.current = false;
+      if (creationCommand) {
+        const active = recovery.current;
+        if (!active || active.command?.requestId !== requestId) return;
+        if (result.ok) {
+          const saved: CreationEnvelope = {
+            ...active,
+            status: 'saved',
+            inputs: null,
+            command: null,
+            entityId: result.entityId,
+            completedRequestId: requestId,
+          };
+          if (!writeCreation(saved, requestId)) {
+            setRecoveryError(
+              'The save was acknowledged, but its completion marker could not be stored. Keep this form open and retry the same save to safely record completion.',
+            );
+            setUncertain(true);
+            setState(null);
+            return;
+          }
+          recovery.current = saved;
+          setTerminalDraft(saved);
+        } else if (
+          ![
+            'unexpected',
+            'forbidden',
+            'P1001',
+            'idempotency_conflict',
+            'P1009',
+            'actor_changed',
+          ].includes(result.code)
+        ) {
+          const editable: CreationEnvelope = {
+            ...active,
+            status: 'editing',
+            command: null,
+          };
+          if (writeCreation(editable, requestId)) recovery.current = editable;
+          else {
+            setRecoveryError(recoveryLimitation);
+            setUncertain(true);
+            setState(result);
+            return;
+          }
+        }
+      }
+      if (!liveMount.current || mountedActor.current !== formActor) return;
       setUncertain(
         !result.ok &&
           (result.code === 'unexpected' ||
-            (uncertain &&
+            ((uncertain || recoveryEnabled) &&
               [
                 'forbidden',
                 'P1001',
@@ -1053,6 +1472,75 @@ export function MetadataForm({
       }
       onSubmit={preview ? (event) => event.preventDefault() : submit}
     >
+      {recoveryEnabled && !recoveryReady && !recoveryBlocked && (
+        <div role="status">
+          <p>Checking creation recovery…</p>
+          {!routeDraftId && (
+            <Button type="button" variant="outline" onClick={retryCreationURL}>
+              Retry creation recovery
+            </Button>
+          )}
+        </div>
+      )}
+      {recoveryError && (
+        <p
+          role="alert"
+          className="rounded border border-amber-700 p-3 text-amber-100"
+        >
+          {recoveryError}
+        </p>
+      )}
+      {terminalDraft && (
+        <div role="status">
+          {terminalDraft.status === 'saved'
+            ? 'This creation draft was already saved.'
+            : 'This creation draft was discarded.'}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('draft');
+              router.push(url.pathname + url.search + url.hash);
+            }}
+          >
+            Start a new record
+          </Button>
+          {terminalDraft.entityId && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${terminalDraft.entityId}`,
+                )
+              }
+            >
+              Open saved record
+            </Button>
+          )}
+        </div>
+      )}
+      {!terminalDraft && otherDrafts.length > 0 && (
+        <div role="status">
+          <p>Other pending creation drafts in this tab:</p>
+          {otherDrafts.map((draft) => (
+            <Button
+              key={draft.instance}
+              type="button"
+              variant="outline"
+              onClick={() =>
+                router.replace(creationURL(draft.instance), { scroll: false })
+              }
+            >
+              Recover {draft.inputs?.core.name || 'unnamed record'}
+              {draft.status === 'submitted'
+                ? ' (save outcome unconfirmed)'
+                : ''}
+            </Button>
+          ))}
+        </div>
+      )}
       {actorStale && (
         <p
           role="alert"
@@ -1082,6 +1570,16 @@ export function MetadataForm({
             className="ml-2"
             disabled={pending || uncertain}
             onClick={() => {
+              persistInputs({
+                priorForms: publishedSnapshots({
+                  ...priorForms,
+                  [core.category_id]: form!,
+                }),
+                reviewedForms: publishedSnapshots({
+                  ...reviewedForms,
+                  [core.category_id]: currentForm!,
+                }),
+              });
               setPriorForms((prior) => ({
                 ...prior,
                 [core.category_id]: form,
@@ -1222,7 +1720,10 @@ export function MetadataForm({
         <p role="alert">The selected category has no published form.</p>
       )}
       <fieldset
+        hidden={!!terminalDraft}
         disabled={
+          (recoveryEnabled &&
+            (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
           pending ||
           uncertain ||
           actorStale ||
@@ -1350,6 +1851,7 @@ export function MetadataForm({
                   required
                   value={openingQuantity}
                   onChange={(event) => {
+                    persistInputs({ openingQuantity: event.target.value });
                     setOpeningQuantity(event.target.value);
                     setReview(false);
                   }}
@@ -1363,6 +1865,7 @@ export function MetadataForm({
                 maxLength={2000}
                 value={openingReason}
                 onChange={(event) => {
+                  persistInputs({ openingReason: event.target.value });
                   setOpeningReason(event.target.value);
                   setReview(false);
                 }}
@@ -1374,6 +1877,7 @@ export function MetadataForm({
                 maxLength={200}
                 value={openingReference}
                 onChange={(event) => {
+                  persistInputs({ openingReference: event.target.value });
                   setOpeningReference(event.target.value);
                   setReview(false);
                 }}
@@ -1382,7 +1886,7 @@ export function MetadataForm({
           </div>
         )}
       </fieldset>
-      {!preview && review && (
+      {!preview && !terminalDraft && review && (
         <div
           className="rounded border border-cyan-700 p-3"
           role="region"
@@ -1432,10 +1936,12 @@ export function MetadataForm({
           reviewing.
         </p>
       )}
-      {!preview && (
+      {!preview && !terminalDraft && (
         <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 rounded bg-slate-950/95 py-3">
           <Button
             disabled={
+              (recoveryEnabled &&
+                (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
               pending ||
               actorStale ||
               (!uncertain &&
@@ -1460,7 +1966,12 @@ export function MetadataForm({
             ref={cancelRef}
             type="button"
             variant="outline"
-            disabled={pending || uncertain}
+            disabled={
+              pending ||
+              uncertain ||
+              !!terminalDraft ||
+              (recoveryEnabled && !recoveryReady)
+            }
             onClick={cancel}
           >
             Cancel
