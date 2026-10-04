@@ -1123,8 +1123,25 @@ describe('category form designer', () => {
     expect(
       screen.getByRole('status', { name: 'Form save state' }),
     ).toHaveTextContent('Save failed');
+    const original = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    expect(original.payload).toMatchObject({
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: id(2),
+    });
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
+    // Error feedback precedes release of the React transition. Exercise the
+    // user's retry only when its actual control becomes enabled.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await screen.findByText('Saved active form revision 2.');
+    expect(saveMetadataForm).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(original);
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
     expect(
       screen.getByRole('status', { name: 'Form save state' }),
     ).toHaveTextContent('Active form saved');
