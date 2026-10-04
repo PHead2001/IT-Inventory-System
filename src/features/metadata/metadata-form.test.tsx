@@ -1167,6 +1167,14 @@ describe('published metadata form', () => {
     const secondary = { ...form(), category_id: otherCategory };
     const revised = { ...form(secondRevision), category_id: otherCategory };
     revised.published_definition.fields[0].required = false;
+    let finishSchema!: (
+      result: Awaited<ReturnType<typeof fetchCategoryForm>>,
+    ) => void;
+    const refreshedSchema = new Promise<
+      Awaited<ReturnType<typeof fetchCategoryForm>>
+    >((resolve) => {
+      finishSchema = resolve;
+    });
     vi.mocked(refreshMetadataRecord).mockResolvedValue({
       ok: true,
       record: item,
@@ -1175,7 +1183,7 @@ describe('published metadata form', () => {
     });
     vi.mocked(fetchCategoryForm)
       .mockResolvedValueOnce({ ok: true, form: secondary })
-      .mockResolvedValueOnce({ ok: true, form: revised });
+      .mockReturnValueOnce(refreshedSchema);
     vi.mocked(submitInventory).mockResolvedValue({
       ok: false,
       kind: 'domain',
@@ -1224,8 +1232,24 @@ describe('published metadata form', () => {
         .payload,
     ).toMatchObject({
       expected_published_revision_id: firstRevision,
+      expected_version: item.version,
+      category_id: otherCategory,
+      name: 'Edited cable',
+    });
+    expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+      operation: 'quantity_update_v2',
+      expectedActorId: props.actorId,
     });
     await waitFor(() => expect(fetchCategoryForm).toHaveBeenCalledTimes(2));
+    expect(
+      screen.getByText(/Loading the newly published category form/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
+    expect(
+      screen.getByRole('button', { name: 'Review metadata' }),
+    ).toBeDisabled();
+    expect(submitInventory).toHaveBeenCalledOnce();
+    await act(async () => finishSchema({ ok: true, form: revised }));
     await waitFor(() =>
       expect(screen.getByText(/category form changed/i)).toBeInTheDocument(),
     );
@@ -1235,15 +1259,43 @@ describe('published metadata form', () => {
         name: /^Review (metadata|quantity item|individual asset)$/,
       }),
     ).toBeDisabled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Review updated fields' }),
+      ).toBeEnabled(),
+    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Review updated fields' }),
     );
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
-    expect(
-      screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
-      }),
-    ).toBeEnabled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: /^Review (metadata|quantity item|individual asset)$/,
+        }),
+      ).toBeEnabled(),
+    );
+    expect(submitInventory).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    expect(submitInventory).toHaveBeenCalledOnce();
+    vi.mocked(submitInventory).mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '2',
+      changed: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
+      operation: 'quantity_update_v2',
+      expectedActorId: props.actorId,
+      payload: {
+        expected_published_revision_id: secondRevision,
+        expected_version: item.version,
+        category_id: otherCategory,
+        name: 'Edited cable',
+      },
+    });
   });
   it('keeps the original option and entered value until schema review, then shows a retired choice', () => {
     const choiceId = '00000000-0000-4000-8000-000000000020';
