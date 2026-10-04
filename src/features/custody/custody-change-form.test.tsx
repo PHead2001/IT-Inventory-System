@@ -48,6 +48,96 @@ const otherSite = {
 };
 beforeEach(() => vi.mocked(submitCustody).mockReset());
 
+it('explains absent sites and disables only the unavailable assignment', () => {
+  render(
+    <CustodyChangeForm
+      kind="asset"
+      action="assign"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[]}
+      currentLocation={location}
+    />,
+  );
+  expect(
+    screen.getByRole('button', { name: 'Assign asset to a site' }),
+  ).toBeDisabled();
+  expect(screen.getByText(/No sites are configured/)).toBeVisible();
+  expect(screen.queryByRole('link', { name: /site settings/i })).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('offers existing site settings only to a maintainer and distinguishes inactive configuration', () => {
+  const view = render(
+    <CustodyChangeForm
+      kind="asset"
+      action="assign"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[]}
+      currentLocation={location}
+      canManageConfiguration
+    />,
+  );
+  expect(
+    screen.getByRole('link', { name: 'Open site settings' }),
+  ).toHaveAttribute('href', '/settings/sites');
+  view.rerender(
+    <CustodyChangeForm
+      kind="asset"
+      action="assign"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[{ ...site, active: false }]}
+      currentLocation={location}
+    />,
+  );
+  expect(screen.getByText(/No active sites/)).toBeVisible();
+  expect(screen.queryByText(/No sites are configured/)).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Open site settings' })).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Assign asset to a site' }),
+  ).toBeDisabled();
+});
+
+it('distinguishes a transfer with no other destination and leaves an archived-site return available', () => {
+  const view = render(
+    <CustodyChangeForm
+      kind="asset"
+      action="transfer"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      currentSite={site}
+    />,
+  );
+  expect(screen.getByText(/No other active site/)).toBeVisible();
+  expect(
+    screen.getByRole('button', { name: 'Transfer between sites' }),
+  ).toBeDisabled();
+  view.rerender(
+    <CustodyChangeForm
+      kind="asset"
+      action="return"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[{ ...site, active: false }]}
+      currentSite={site}
+    />,
+  );
+  expect(
+    screen
+      .getAllByRole('button', { name: 'Return to storage' })
+      .find((button) => button.getAttribute('type') === 'submit'),
+  ).toBeEnabled();
+  expect(screen.queryByText(/No active sites/)).toBeNull();
+});
+
 it('assigns an asset from its authoritative storage source without duplicating a current drawer', async () => {
   vi.mocked(submitCustody).mockResolvedValue({
     ok: true,

@@ -99,15 +99,21 @@ async function selected(page: Page, code: string) {
   await expect(
     page.getByRole('navigation', { name: 'Location browser' }),
   ).toContainText('Selected path:');
+  const inventory = page.getByRole('region', {
+    name: 'Location inventory',
+    exact: true,
+  });
+  await expect(inventory).toBeVisible();
   await expect(
-    page.getByRole('heading', {
-      name: locationNames.get(code) + ' (' + code + ')',
+    inventory.getByRole('heading', {
+      name: locationNames.get(code),
       exact: true,
     }),
   ).toBeVisible();
+  await expect(inventory.getByText(code, { exact: true })).toBeVisible();
   await expect(
-    page.getByRole('region', { name: 'Location inventory', exact: true }),
-  ).toBeVisible();
+    inventory.getByRole('link', { name: 'Location details and history' }),
+  ).toHaveAttribute('href', '/locations/' + code);
 }
 
 async function chooseRoomLocation(page: Page, code: string) {

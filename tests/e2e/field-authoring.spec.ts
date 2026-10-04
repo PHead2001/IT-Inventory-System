@@ -13,8 +13,6 @@ import { chooseLocation } from './location-picker';
 import { instantMicros } from '../../src/features/metadata/field-value-validation';
 
 test.use({
-  video: 'on',
-  trace: 'on',
   actionTimeout: 15_000,
   viewport: { width: 1440, height: 960 },
 });
@@ -122,6 +120,70 @@ async function noOverflow(page: Page) {
       () => document.documentElement.scrollWidth <= innerWidth + 1,
     ),
   ).toBe(true);
+}
+async function withCancelPageFixture(query: string, run: () => Promise<void>) {
+  const url = new URL(process.env.LOCAL_API_URL!);
+  expect(['127.0.0.1', 'localhost']).toContain(url.hostname);
+  expect(url.port).toBe('54321');
+  const caller = createClient(
+    url.href,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const signed = await caller.auth.signInWithPassword({
+    email: fixture.emails.staff,
+    password: fixture.password,
+  });
+  expect(signed.error).toBeNull();
+  const ids: string[] = [];
+  try {
+    const category = await caller
+      .from('categories')
+      .select('id')
+      .eq('code', 'COMPUTERS')
+      .eq('active', true)
+      .single();
+    expect(category.error).toBeNull();
+    // A real second page is necessary: zero-match page=2 correctly recovers to page 1.
+    for (let index = 0; index < 26; index++) {
+      const created = await caller.rpc('quantity_create', {
+        p_request_id: randomUUID(),
+        p_payload: {
+          name: query + ' ' + String(index).padStart(2, '0'),
+          category_id: category.data!.id,
+          initial_quantity: 0,
+          initial_location_id: null,
+        },
+      });
+      expect(created.error).toBeNull();
+      ids.push((created.data as { entity_id: string }).entity_id);
+    }
+    await run();
+    const unchanged = await caller
+      .from('quantity_items')
+      .select('id,version,archived')
+      .in('id', ids);
+    expect(unchanged.error).toBeNull();
+    expect(unchanged.data).toHaveLength(26);
+    for (const item of unchanged.data!)
+      expect(item).toMatchObject({ version: 1, archived: false });
+  } finally {
+    try {
+      for (const id of ids) {
+        const archived = await caller.rpc('quantity_archive', {
+          p_request_id: randomUUID(),
+          p_payload: {
+            item_id: id,
+            expected_version: 1,
+            reason: 'Fictional Cancel pagination fixture cleanup',
+          },
+        });
+        expect(archived.error).toBeNull();
+      }
+    } finally {
+      await caller.auth.signOut({ scope: 'local' });
+    }
+  }
 }
 async function rule(dialog: Locator, name: string, value: string) {
   await dialog.getByLabel('Use ' + name.toLowerCase(), { exact: true }).check();
@@ -1026,80 +1088,91 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
 }, info) => {
   await login(page);
   const query = 'Cancel example ' + randomUUID().slice(0, 8);
-  await page.goto(
-    '/inventory?q=' + encodeURIComponent(query) + '&type=quantity&page=2',
-  );
-  await page.getByRole('link', { name: 'Create quantity inventory' }).click();
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page).toHaveURL(
-    new RegExp(
-      '/inventory\\?q=' +
-        query.replaceAll(' ', '\\+') +
-        '&type=quantity&page=2',
-    ),
-  );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/inventory/assets/new');
-  const form = page.getByRole('form', { name: 'Create asset inventory' });
-  await form.getByLabel('Name', { exact: true }).fill(query);
-  await noOverflow(page);
-  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Keep editing' }),
-  ).toBeFocused();
-  await capture(page, info, 'narrow-dirty-cancel');
-  await page.keyboard.press('Escape');
-  await expect(
-    form.getByRole('button', { name: 'Cancel', exact: true }),
-  ).toBeFocused();
-  await expect(form.getByLabel('Name', { exact: true })).toHaveValue(query);
-  await page.setViewportSize({ width: 1440, height: 960 });
-  await page.evaluate(() => {
-    document.documentElement.style.zoom = '2';
+  await withCancelPageFixture(query, async () => {
+    await page.goto(
+      '/inventory?q=' + encodeURIComponent(query) + '&type=quantity&page=2',
+    );
+    await expect(
+      page.getByText('26 matching rows', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('navigation', { name: 'Pagination' }),
+    ).toContainText('Page 2 of 2');
+    await expect(
+      page.getByRole('link', { name: query + ' 25', exact: true }),
+    ).toHaveCount(1);
+    await page.getByRole('link', { name: 'Create quantity inventory' }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page).toHaveURL(
+      new RegExp(
+        '/inventory\\?q=' +
+          query.replaceAll(' ', '\\+') +
+          '&type=quantity&page=2',
+      ),
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/inventory/assets/new');
+    const form = page.getByRole('form', { name: 'Create asset inventory' });
+    await form.getByLabel('Name', { exact: true }).fill(query);
+    await noOverflow(page);
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Keep editing' }),
+    ).toBeFocused();
+    await capture(page, info, 'narrow-dirty-cancel');
+    await page.keyboard.press('Escape');
+    await expect(
+      form.getByRole('button', { name: 'Cancel', exact: true }),
+    ).toBeFocused();
+    await expect(form.getByLabel('Name', { exact: true })).toHaveValue(query);
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '2';
+    });
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await capture(page, info, 'zoom200-cancel');
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(page).toHaveURL(/\/inventory$/);
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '1';
+    });
+    const siteCode = 'CANCEL-' + randomUUID().slice(0, 8).toUpperCase();
+    await page.goto('/settings/sites');
+    const siteForm = page.locator('form').filter({
+      has: page.getByRole('heading', {
+        name: 'Add property / site',
+        exact: true,
+      }),
+    });
+    await siteForm.getByLabel('Name', { exact: true }).fill('Cancel property');
+    await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
+    await siteForm.getByRole('button', { name: 'Save site' }).click();
+    await expect(siteForm.getByRole('status')).toContainText('Site saved');
+    await page.goto('/sites/' + siteCode);
+    await page
+      .getByRole('link', {
+        name: 'Record existing quantity holding',
+        exact: true,
+      })
+      .click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
+    await page
+      .getByRole('link', {
+        name: 'Record existing serialized asset',
+        exact: true,
+      })
+      .click();
+    await page
+      .getByLabel('Name', { exact: true })
+      .fill('Discarded opening asset');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
+    await expect(
+      page.getByRole('region', { name: 'Grouped current holdings' }),
+    ).not.toContainText('Discarded opening asset');
+    await capture(page, info, 'cancel-site-opening-no-holding');
   });
-  await form.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await capture(page, info, 'zoom200-cancel');
-  await page.getByRole('button', { name: 'Discard changes' }).click();
-  await expect(page).toHaveURL(/\/inventory$/);
-  await page.evaluate(() => {
-    document.documentElement.style.zoom = '1';
-  });
-  const siteCode = 'CANCEL-' + randomUUID().slice(0, 8).toUpperCase();
-  await page.goto('/settings/sites');
-  const siteForm = page.locator('form').filter({
-    has: page.getByRole('heading', {
-      name: 'Add property / site',
-      exact: true,
-    }),
-  });
-  await siteForm.getByLabel('Name', { exact: true }).fill('Cancel property');
-  await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
-  await siteForm.getByRole('button', { name: 'Save site' }).click();
-  await expect(siteForm.getByRole('status')).toContainText('Site saved');
-  await page.goto('/sites/' + siteCode);
-  await page
-    .getByRole('link', {
-      name: 'Record existing quantity holding',
-      exact: true,
-    })
-    .click();
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
-  await page
-    .getByRole('link', {
-      name: 'Record existing serialized asset',
-      exact: true,
-    })
-    .click();
-  await page
-    .getByLabel('Name', { exact: true })
-    .fill('Discarded opening asset');
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.getByRole('button', { name: 'Discard changes' }).click();
-  await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
-  await expect(
-    page.getByRole('region', { name: 'Grouped current holdings' }),
-  ).not.toContainText('Discarded opening asset');
-  await capture(page, info, 'cancel-site-opening-no-holding');
 });

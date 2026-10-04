@@ -1,6 +1,9 @@
 import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
 import { Box } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { countLabel } from '@/lib/count';
+import { pageInventoryCounts } from '../scope-presentation';
 import styles from './inventory-visual.module.css';
 import { InventoryListThumbnail } from '@/features/files/list-thumbnail';
 import type { FileListSummary } from '@/features/files/list.server';
@@ -12,15 +15,51 @@ import type {
 } from '../contracts-ui';
 export const panel = 'experience-surface min-w-0 p-5';
 export const field = 'experience-field min-h-11 w-full px-3 py-2 text-sm';
+export function LocationCode({ code }: { code: string }) {
+  return (
+    <span
+      className="block max-w-full overflow-x-auto whitespace-nowrap text-xs text-slate-400"
+      role={code.length > 24 ? 'region' : undefined}
+      tabIndex={code.length > 24 ? 0 : undefined}
+      aria-label={code.length > 24 ? `Full location code: ${code}` : undefined}
+    >
+      {code}
+    </span>
+  );
+}
+export function InventoryCount({
+  result,
+}: {
+  result: PageResult<InventoryResult>;
+}) {
+  return (
+    <div className="experience-muted text-sm tabular-nums">
+      <p>{countLabel(result.total, 'matching row')}</p>
+      {result.rows.length > 0 && (
+        <p className="mt-1 text-xs">
+          On this page: {pageInventoryCounts(result.rows)}
+        </p>
+      )}
+    </div>
+  );
+}
 export function LocationLink({ location }: { location: LocationRef }) {
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-3">
+    <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-3">
       <Link
         className="break-words text-cyan-300 underline"
+        aria-label={`${location.breadcrumb} (${location.code})`}
         href={'/locations/' + encodeURIComponent(location.code)}
       >
-        {location.breadcrumb} <span className="text-xs">({location.code})</span>
+        {location.breadcrumb}
+        {location.code.length <= 24 && (
+          <>
+            {' '}
+            <span className="whitespace-nowrap text-xs">({location.code})</span>
+          </>
+        )}
       </Link>
+      {location.code.length > 24 && <LocationCode code={location.code} />}
       <ShowInRoom location={location} />
     </span>
   );
@@ -28,12 +67,16 @@ export function LocationLink({ location }: { location: LocationRef }) {
 export function InventoryRows({
   rows,
   fileSummaries = [],
+  emptyState,
 }: {
   rows: InventoryResult[];
   fileSummaries?: FileListSummary[];
+  emptyState?: ReactNode;
 }) {
   if (!rows.length)
-    return <p className={panel}>No inventory matches these filters.</p>;
+    return (
+      emptyState ?? <p className={panel}>No inventory matches these filters.</p>
+    );
   return (
     <ul className={`experience-surface ${styles.list}`}>
       {rows.map((row) => {
@@ -93,19 +136,29 @@ export function InventoryRows({
               </div>
               <div className={styles.metric}>
                 <span className={styles.label}>
-                  {row.kind === 'quantity' ? 'This holding' : 'Asset tag'}
+                  {row.kind === 'quantity'
+                    ? row.site
+                      ? 'At this site'
+                      : row.location
+                        ? 'At this location'
+                        : 'Unlocated stock'
+                    : 'Asset tag'}
                 </span>
                 <strong>
                   {row.kind === 'quantity'
-                    ? (row.quantity ?? 0) + ' units'
+                    ? countLabel(row.quantity ?? 0, 'unit')
                     : row.assetTag || 'Untagged'}
                 </strong>
                 {row.kind === 'quantity' &&
                   row.availableQuantity !== undefined && (
                     <span className={styles.meta}>
-                      Available {row.availableQuantity} · Assigned{' '}
-                      {row.assignedQuantity} · Total recorded{' '}
-                      {row.ownedQuantity}
+                      <span className="block">
+                        Across all storage: {row.availableQuantity} available
+                      </span>
+                      <span className="block">
+                        Overall totals: {row.assignedQuantity} assigned ·{' '}
+                        {row.ownedQuantity} recorded
+                      </span>
                     </span>
                   )}
               </div>
@@ -196,6 +249,7 @@ export function Pagination({
   base: string;
   params: Record<string, string | undefined>;
 }) {
+  if (result.total === 0) return null;
   const pages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const href = (page: number) => {
     const query = new URLSearchParams();
@@ -211,7 +265,7 @@ export function Pagination({
       className="mt-5 flex flex-wrap items-center gap-5 text-sm"
     >
       <span>
-        {result.total} results · Page {result.page} of {pages}
+        Page {result.page} of {pages}
       </span>
       {result.page > 1 && (
         <Link
@@ -297,7 +351,10 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
                 {event.assignment.to.label ?? 'No recorded destination'}
               </p>
               {event.assignment.quantity !== null && (
-                <p>Custody quantity: {event.assignment.quantity} units</p>
+                <p>
+                  Custody quantity:{' '}
+                  {countLabel(event.assignment.quantity, 'unit')}
+                </p>
               )}
               {event.assignment.reference && (
                 <p className="whitespace-pre-wrap break-words">
@@ -311,10 +368,13 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
             event.lines.length > 0 && (
               <p className="mt-2 text-sm text-amber-100">
                 Removed{' '}
-                {event.lines
-                  .reduce((total, line) => total + BigInt(-line.delta), 0n)
-                  .toLocaleString('en-US')}{' '}
-                units across {event.lines.length} locations.
+                {countLabel(
+                  event.lines
+                    .reduce((total, line) => total + BigInt(-line.delta), 0n)
+                    .toLocaleString('en-US'),
+                  'unit',
+                )}{' '}
+                across {countLabel(event.lines.length, 'location')}.
               </p>
             )}
           {!event.assignment &&
@@ -334,7 +394,7 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
           {event.lines.map((line) => (
             <p className="mt-2 text-sm" key={line.location.id}>
               <LocationLink location={line.location} />: {line.before} →{' '}
-              {line.after} units ({line.delta > 0 ? '+' : ''}
+              {countLabel(line.after, 'unit')} ({line.delta > 0 ? '+' : ''}
               {line.delta})
             </p>
           ))}

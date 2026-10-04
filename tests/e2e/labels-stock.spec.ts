@@ -14,7 +14,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
 const rootCode = 'ITC';
-test.use({ deviceScaleFactor: 2, trace: 'on' });
+test.use({ deviceScaleFactor: 2 });
 
 test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
   page,
@@ -48,7 +48,7 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
   await page.getByRole('link', { name: 'Print asset label' }).click();
   await expect(page).toHaveURL(/\/labels$/);
   const queue = page.getByRole('region', { name: 'Label queue' });
-  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(queue).toContainText('1 distinct record · 1 label');
   await expect(
     page.getByRole('button', { name: 'Acknowledge changes' }),
   ).toBeVisible();
@@ -67,7 +67,7 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
   ).toHaveCount(0);
   await page.goto(assetUrl);
   await page.getByRole('link', { name: 'Print asset label' }).click();
-  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(queue).toContainText('1 distinct record · 1 label');
   await expect(
     page.getByRole('button', { name: 'Acknowledge changes' }),
   ).toBeVisible();
@@ -76,7 +76,7 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
   await expect(queue).toContainText('0 distinct records · 0 labels');
   await page.goto('/labels?location=ITC-RED&keep=state#sheet');
   await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
-  await expect(queue).toContainText('1 distinct records · 1 labels');
+  await expect(queue).toContainText('1 distinct record · 1 label');
   await queue.getByRole('button', { name: 'Remove', exact: true }).click();
   await page.reload();
   await expect(queue).toContainText('0 distinct records · 0 labels');
@@ -154,13 +154,13 @@ test('an individual pending linked quantity can be removed while an unrelated de
       /\/labels\?location=ITC-RED&keep=state#sheet$/,
     );
     release();
-    await expect(queue).toContainText('1 distinct records · 1 labels');
+    await expect(queue).toContainText('1 distinct record · 1 label');
     await expect(pending).toHaveCount(0);
     await expect(queue).toContainText('Red Container');
     await expect(queue).not.toContainText(name);
     await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
     await page.reload();
-    await expect(queue).toContainText('1 distinct records · 1 labels');
+    await expect(queue).toContainText('1 distinct record · 1 label');
     await expect(queue).not.toContainText(name);
   } finally {
     release();

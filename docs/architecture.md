@@ -63,6 +63,10 @@ The protected server layout mounts one `@vercel/speed-insights/next` client wrap
 
 ## Inventory Core
 
+Inventory result totals count matching rows, including quantity holdings and unlocated definitions; they are not distinct-item or stock-unit totals. Distinct quantity-item and asset counts are explicitly scoped to the visible page and keyed by kind and UUID. Shared list rows lead with the quantity at that row's real location/site, then label item-wide storage availability and overall assigned/recorded totals separately. Aggregate destinations include descendant rows without inventing one physical holding.
+
+Location status navigation, result scope and CSV links use the same normalized inventory filters. Record-specific history resolves actual kind/name with two bounded caller-RLS `id,name` reads, locks type, and visibly reconciles contradictory links. Invalid, missing, inaccessible or ambiguous records do not broaden to general history. Read failure remains an error. Clearing record scope preserves the normalized type/location filters. An unfiltered empty inventory read may use a single-row all-status search presence probe under the same caller to distinguish first use from historical-only inventory; filtered empty pages never establish catalog absence.
+
 Quantity inventory and serialized assets are separate models. No tracking-type conversion or hard-delete workflow exists.
 
 | Table                     | Current contract                                                                                                                                                                                                                                                            |

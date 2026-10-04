@@ -58,7 +58,9 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await page.getByRole('button', { name: 'Add category' }).click();
     const category = page.locator('li').filter({ hasText: code });
     await expect(category).toContainText(firstName);
-    await category.getByRole('button', { name: 'Rename' }).click();
+    await category
+      .getByRole('button', { name: 'Rename ' + firstName, exact: true })
+      .click();
     await category.getByLabel('New category name').fill(renamed);
     await category.getByRole('button', { name: 'Save name' }).click();
     await expect(category).toContainText(renamed);

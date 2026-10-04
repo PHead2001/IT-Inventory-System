@@ -10,6 +10,26 @@ const options = [
   { id: 'eth', label: 'Ethernet', parent_id: 'net', active: true },
 ];
 describe('shared choice picker', () => {
+  it('associates submitted validation with the actual choice control without changing its value', () => {
+    render(
+      <>
+        <p id="answer-error">Choose a configured answer.</p>
+        <ChoicePicker
+          options={options.filter((option) => !option.parent_id)}
+          type="single_select"
+          label="Connector"
+          value="usb"
+          onChange={() => {}}
+          invalid
+          describedBy="answer-error"
+        />
+      </>,
+    );
+    const input = screen.getByRole('combobox', { name: 'Connector' });
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription('Choose a configured answer.');
+    expect(input).toHaveValue('usb');
+  });
   it('shows a visible associated label for a flat dropdown', () => {
     render(
       <ChoicePicker

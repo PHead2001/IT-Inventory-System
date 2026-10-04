@@ -1,6 +1,11 @@
 import { render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
-import { HistoryList, InventoryRows } from './read-ui';
+import {
+  HistoryList,
+  InventoryRows,
+  Pagination,
+  InventoryCount,
+} from './read-ui';
 const location = {
   id: 'location',
   code: 'ITC-S4B',
@@ -10,6 +15,90 @@ const location = {
   can_hold_inventory: true,
   parentId: null,
 };
+it('identifies one local unit separately from overall available and assigned stock', () => {
+  render(
+    <InventoryRows
+      rows={[
+        {
+          kind: 'quantity',
+          id: 'item',
+          name: 'Cable',
+          categoryName: 'Cables',
+          status: 'active',
+          location,
+          quantity: 1,
+          assetTag: null,
+          serialNumber: null,
+          recordedTotal: 3,
+          availableQuantity: '2',
+          assignedQuantity: '1',
+          ownedQuantity: '3',
+          reorderThreshold: null,
+          stockState: 'disabled',
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText('At this location')).toBeVisible();
+  expect(screen.getByText('1 unit')).toBeVisible();
+  expect(screen.getByText(/Across all storage: 2 available/)).toBeVisible();
+  expect(
+    screen.getByText(/Overall totals: 1 assigned · 3 recorded/),
+  ).toBeVisible();
+});
+it('omits empty pagination and does not repeat the result count in nonempty pagination', () => {
+  const { rerender } = render(
+    <Pagination
+      result={{ rows: [], total: 0, page: 1, pageSize: 25 }}
+      base="/inventory"
+      params={{}}
+    />,
+  );
+  expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+  rerender(
+    <Pagination
+      result={{ rows: [], total: 26, page: 1, pageSize: 25 }}
+      base="/inventory"
+      params={{ status: 'all', q: 'Cable' }}
+    />,
+  );
+  expect(screen.getByText('Page 1 of 2')).toBeVisible();
+  expect(screen.queryByText(/26 results/)).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Next' })).toHaveAttribute(
+    'href',
+    '/inventory?status=all&q=Cable&page=2',
+  );
+});
+it('labels holding and distinct definition counts as page-local, with full matching rows separately', () => {
+  const row = {
+    kind: 'quantity' as const,
+    id: 'same',
+    name: 'Cable',
+    categoryName: 'Cables',
+    status: 'active',
+    location,
+    quantity: 1,
+    assetTag: null,
+    serialNumber: null,
+    recordedTotal: 2,
+    reorderThreshold: null,
+    stockState: 'disabled' as const,
+  };
+  render(
+    <InventoryCount
+      result={{
+        rows: [row, { ...row, location: { ...location, id: 'second' } }],
+        total: 52,
+        page: 2,
+        pageSize: 25,
+      }}
+    />,
+  );
+  expect(screen.getByText('52 matching rows')).toBeVisible();
+  expect(
+    screen.getByText(/On this page: 2 quantity holdings · 1 quantity item/),
+  ).toBeVisible();
+});
 it('exposes stable location links on search results with independent conventional and room destinations', () => {
   render(
     <InventoryRows

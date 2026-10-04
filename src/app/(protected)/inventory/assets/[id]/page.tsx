@@ -220,6 +220,7 @@ export default async function AssetPage({
               : (['assign'] as const)
             ).map((action) => (
               <CustodyChangeForm
+                canManageConfiguration={member.can_manage_configuration}
                 key={action}
                 kind="asset"
                 action={action}

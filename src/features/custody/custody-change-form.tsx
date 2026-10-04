@@ -1,6 +1,7 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
@@ -9,6 +10,12 @@ import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody } from './actions';
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
+import {
+  RequiredFieldsNote,
+  RequiredMark,
+  useFormValidation,
+  ValidationSummary,
+} from '@/components/forms/validation';
 
 type QuantityAction =
   'issue' | 'return' | 'transfer' | 'opening' | 'correct' | 'write_off';
@@ -21,6 +28,7 @@ type Props = {
   version: string;
   locations: LocationRef[];
   sites: Site[];
+  canManageConfiguration?: boolean;
   storageBalances?: { location: LocationRef; quantity: number }[];
   siteHoldings?: SiteHolding[];
   currentLocation?: LocationRef | null;
@@ -44,12 +52,15 @@ export function CustodyChangeForm({
   version,
   locations,
   sites,
+  canManageConfiguration = false,
   storageBalances = [],
   siteHoldings = [],
   currentLocation,
   currentSite,
 }: Props) {
   const router = useRouter();
+  const validation = useFormValidation();
+  const scope = `${kind}-${action}`;
   const [pending, startTransition] = useTransition();
   const [state, setState] = useState<CustodyState | null>(null);
   const [values, setValues] = useState({
@@ -91,9 +102,46 @@ export function CustodyChangeForm({
   const correction = action === 'correct';
   const requiresReason =
     correction || action === 'write_off' || action === 'retire';
+  const positiveSites = new Set(
+    siteHoldings.filter((row) => row.quantity > 0).map((row) => row.site_id),
+  );
+  const sourceSites = sites.filter((site) =>
+    quantity ? positiveSites.has(site.id) : site.id === currentSite?.id,
+  );
+  const destinationSites = sites.filter(
+    (site) => site.active && site.id !== values.source_site_id,
+  );
+  const requiresDestination = toSite && !(quantity && correction);
+  const noDestination = requiresDestination && destinationSites.length === 0;
+  const noSource = fromSite && sourceSites.length === 0;
+  const unavailable = noDestination || noSource;
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending) return;
+    if (
+      pending ||
+      unavailable ||
+      !validation.validate(event.currentTarget, [
+        ...(fromStorage && !values.source_location_id
+          ? [
+              {
+                id: scope + '-source',
+                label: 'Storage source',
+                message: 'Choose a storage source.',
+              },
+            ]
+          : []),
+        ...(toStorage && !values.destination_location_id
+          ? [
+              {
+                id: scope + '-destination',
+                label: 'Return to storage',
+                message: 'Choose a return destination.',
+              },
+            ]
+          : []),
+      ])
+    )
+      return;
     const payload: Record<string, unknown> = {
       action,
       [quantity ? 'item_id' : 'asset_id']: entityId,
@@ -125,143 +173,201 @@ export function CustodyChangeForm({
       }
     });
   };
-  const positiveSites = new Set(
-    siteHoldings.filter((row) => row.quantity > 0).map((row) => row.site_id),
-  );
   return (
-    <form className={panel + ' max-w-4xl space-y-4'} onSubmit={submit}>
+    <form
+      aria-label={titles[action]}
+      className={panel + ' max-w-4xl space-y-4'}
+      onSubmit={submit}
+      noValidate
+    >
       <h3 className="text-lg font-semibold">{titles[action]}</h3>
-      {action === 'opening' && (
-        <p className="text-sm text-slate-300">
-          Opening holdings describe equipment already at a site. No past closet
-          issue or date is invented.
-        </p>
+      <RequiredFieldsNote />
+      {unavailable && (
+        <div role="note" className="experience-feedback text-sm">
+          <p>
+            {noDestination
+              ? sites.length === 0
+                ? 'No sites are configured. This operation needs a destination site.'
+                : !sites.some((site) => site.active)
+                  ? 'No active sites are available for this operation.'
+                  : 'No other active site is available as a destination.'
+              : 'There is no recorded holding at a site to use as the source for this operation.'}
+          </p>
+          {noDestination &&
+            (canManageConfiguration ? (
+              <Link href="/settings/sites" className="text-cyan-300 underline">
+                Open site settings
+              </Link>
+            ) : (
+              <p>
+                Ask a configuration maintainer to add or restore a suitable
+                site.
+              </p>
+            ))}
+        </div>
       )}
-      {fromStorage && (
-        <LocationPicker
-          id={`${kind}-${action}-source`}
-          label="Storage source"
-          locations={locations}
-          mode="source"
-          sourceIds={
-            quantity
-              ? storageBalances
-                  .filter((row) => row.quantity > 0)
-                  .map((row) => row.location.id)
-              : currentLocation
-                ? [currentLocation.id]
-                : []
-          }
-          value={values.source_location_id}
-          onValueChange={(value) => update('source_location_id', value)}
-          required
-        />
-      )}
-      {toStorage && (
-        <LocationPicker
-          id={`${kind}-${action}-destination`}
-          label="Return to storage"
-          locations={locations}
-          mode="destination"
-          value={values.destination_location_id}
-          onValueChange={(value) => update('destination_location_id', value)}
-          required
-        />
-      )}
-      {fromSite && (
-        <label className="block space-y-2">
-          Source site
-          <select
-            className={field}
-            required
-            value={values.source_site_id}
-            onChange={(event) => update('source_site_id', event.target.value)}
-          >
-            <option value="">Choose site</option>
-            {sites
-              .filter((site) =>
-                quantity
-                  ? positiveSites.has(site.id)
-                  : site.id === currentSite?.id,
-              )
-              .map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.name} ({site.code})
-                </option>
-              ))}
-          </select>
-        </label>
-      )}
-      {toSite && !(quantity && correction) && (
-        <label className="block space-y-2">
-          Destination site
-          <select
-            className={field}
-            required
-            value={values.destination_site_id}
-            onChange={(event) =>
-              update('destination_site_id', event.target.value)
+      <fieldset disabled={pending || unavailable} className="space-y-4">
+        {action === 'opening' && (
+          <p className="text-sm text-slate-300">
+            Opening holdings describe equipment already at a site. No past
+            closet issue or date is invented.
+          </p>
+        )}
+        {fromStorage && (
+          <LocationPicker
+            id={`${kind}-${action}-source`}
+            label="Storage source"
+            locations={locations}
+            mode="source"
+            sourceIds={
+              quantity
+                ? storageBalances
+                    .filter((row) => row.quantity > 0)
+                    .map((row) => row.location.id)
+                : currentLocation
+                  ? [currentLocation.id]
+                  : []
             }
-          >
-            <option value="">Choose site</option>
-            {sites
-              .filter(
-                (site) => site.active && site.id !== values.source_site_id,
-              )
-              .map((site) => (
+            value={values.source_location_id}
+            onValueChange={(value) => update('source_location_id', value)}
+            required
+            error={
+              validation.issues.find((issue) => issue.id === scope + '-source')
+                ?.message
+            }
+          />
+        )}
+        {toStorage && (
+          <LocationPicker
+            id={`${kind}-${action}-destination`}
+            label="Return to storage"
+            locations={locations}
+            mode="destination"
+            value={values.destination_location_id}
+            onValueChange={(value) => update('destination_location_id', value)}
+            required
+            error={
+              validation.issues.find(
+                (issue) => issue.id === scope + '-destination',
+              )?.message
+            }
+          />
+        )}
+        {fromSite && (
+          <label className="block space-y-2">
+            Source site
+            <RequiredMark />
+            <select
+              id={scope + '-source-site'}
+              aria-label="Source site"
+              {...validation.props(scope + '-source-site')}
+              className={field}
+              required
+              value={values.source_site_id}
+              onChange={(event) => update('source_site_id', event.target.value)}
+            >
+              <option value="">Choose site</option>
+              {sourceSites.map((site) => (
                 <option key={site.id} value={site.id}>
                   {site.name} ({site.code})
                 </option>
               ))}
-          </select>
+            </select>
+            {validation.error(scope + '-source-site')}
+          </label>
+        )}
+        {toSite && !(quantity && correction) && (
+          <label className="block space-y-2">
+            Destination site
+            <RequiredMark />
+            <select
+              id={scope + '-destination-site'}
+              aria-label="Destination site"
+              {...validation.props(scope + '-destination-site')}
+              className={field}
+              required
+              value={values.destination_site_id}
+              onChange={(event) =>
+                update('destination_site_id', event.target.value)
+              }
+            >
+              <option value="">Choose site</option>
+              {destinationSites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name} ({site.code})
+                </option>
+              ))}
+            </select>
+            {validation.error(scope + '-destination-site')}
+          </label>
+        )}
+        {quantity &&
+          (correction ? (
+            <label className="block space-y-2">
+              Observed units at site
+              <RequiredMark />
+              <Input
+                id={scope + '-observed'}
+                aria-label="Observed units at site"
+                {...validation.props(scope + '-observed')}
+                type="number"
+                min={0}
+                max={2147483647}
+                step={1}
+                required
+                value={values.observed_quantity}
+                onChange={(e) => update('observed_quantity', e.target.value)}
+              />
+              {validation.error(scope + '-observed')}
+            </label>
+          ) : (
+            <label className="block space-y-2">
+              Units
+              <RequiredMark />
+              <Input
+                id={scope + '-quantity'}
+                aria-label="Units"
+                {...validation.props(scope + '-quantity')}
+                type="number"
+                min={1}
+                max={2147483647}
+                step={1}
+                required
+                value={values.quantity}
+                onChange={(e) => update('quantity', e.target.value)}
+              />
+              {validation.error(scope + '-quantity')}
+            </label>
+          ))}
+        <label className="block space-y-2">
+          Reason {requiresReason ? '(required)' : '(optional)'}
+          <textarea
+            id={scope + '-reason'}
+            aria-label={
+              requiresReason ? 'Reason (required)' : 'Reason (optional)'
+            }
+            {...validation.props(scope + '-reason')}
+            className={field}
+            required={requiresReason}
+            maxLength={2000}
+            value={values.reason}
+            onChange={(e) => update('reason', e.target.value)}
+          />
+          {validation.error(scope + '-reason')}
         </label>
-      )}
-      {quantity &&
-        (correction ? (
-          <label className="block space-y-2">
-            Observed units at site
-            <Input
-              type="number"
-              min={0}
-              max={2147483647}
-              step={1}
-              required
-              value={values.observed_quantity}
-              onChange={(e) => update('observed_quantity', e.target.value)}
-            />
-          </label>
-        ) : (
-          <label className="block space-y-2">
-            Units
-            <Input
-              type="number"
-              min={1}
-              max={2147483647}
-              step={1}
-              required
-              value={values.quantity}
-              onChange={(e) => update('quantity', e.target.value)}
-            />
-          </label>
-        ))}
-      <label className="block space-y-2">
-        Reason {requiresReason ? '(required)' : '(optional)'}
-        <textarea
-          className={field}
-          required={requiresReason}
-          maxLength={2000}
-          value={values.reason}
-          onChange={(e) => update('reason', e.target.value)}
-        />
-      </label>
-      <label className="block space-y-2">
-        Ticket number reference (optional)
-        <Input
-          maxLength={200}
-          value={values.reference}
-          onChange={(e) => update('reference', e.target.value)}
-        />
-      </label>
+        <label className="block space-y-2">
+          Ticket number reference (optional)
+          <Input
+            id={scope + '-reference'}
+            {...validation.props(scope + '-reference')}
+            maxLength={200}
+            value={values.reference}
+            onChange={(e) => update('reference', e.target.value)}
+          />
+          {validation.error(scope + '-reference')}
+        </label>
+      </fieldset>
+      <ValidationSummary issues={validation.issues} />
       {state && (
         <p
           role="status"
@@ -273,7 +379,7 @@ export function CustodyChangeForm({
             : state.message}
         </p>
       )}
-      <Button disabled={pending} type="submit">
+      <Button disabled={pending || unavailable} type="submit">
         {pending ? 'Saving…' : titles[action]}
       </Button>
     </form>

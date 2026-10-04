@@ -21,6 +21,23 @@ const shelf: LocationRef = {
   parentId: 'root',
   can_hold_inventory: true,
 };
+it('keeps normal codes on a separate intact line and gives long codes a separate keyboard scroll target', () => {
+  const longCode = 'ITO-' + 'LONG'.repeat(24);
+  render(
+    <LocationBrowser
+      locations={[{ ...root, code: longCode }]}
+      selectedCode={null}
+      onSelect={vi.fn()}
+    />,
+  );
+  const codes = screen.getAllByLabelText('Full location code: ' + longCode);
+  expect(codes).toHaveLength(2);
+  for (const code of codes) {
+    expect(code).toHaveAttribute('tabindex', '0');
+    expect(code.closest('button')).toBeNull();
+    expect(code).toHaveTextContent(longCode);
+  }
+});
 
 it('focuses a stable visible navigation landmark and announces mobile Open and Back without focusing search', () => {
   const select = vi.fn();

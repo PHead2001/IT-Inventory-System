@@ -19,6 +19,8 @@ try {
   fileKey = await installLocalFileKey(status);
   const env = {
     ...process.env,
+    // Focused invocations keep their exact selection and avoid project dependencies.
+    E2E_FULL_SUITE: playwrightArgs.length === 0 ? '1' : '0',
     NEXT_PUBLIC_SUPABASE_URL: status.API_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: status.ANON_KEY,
     // Deliberately differs from Supabase Site URL to exercise preview email redirects.

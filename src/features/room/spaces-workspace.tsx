@@ -16,7 +16,12 @@ import type {
   InventoryResult,
   PageResult,
 } from '../inventory/contracts-ui';
-import { InventoryRows } from '../inventory/components/read-ui';
+import {
+  InventoryRows,
+  InventoryCount,
+  LocationCode,
+} from '../inventory/components/read-ui';
+import { countLabel } from '@/lib/count';
 import { inventoryDescendantCodes } from '../locations/hierarchy';
 import { buildRoomBindings } from './bindings';
 import { LocationBrowser } from './location-browser';
@@ -306,6 +311,19 @@ export function SpacesWorkspace({
       })
       .then((data) => {
         if (active && current === generation.current) {
+          const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+          if (data.page > lastPage) {
+            const url = new URL(window.location.href);
+            if (lastPage > 1) url.searchParams.set('page', String(lastPage));
+            else url.searchParams.delete('page');
+            window.history.replaceState(
+              null,
+              '',
+              url.pathname + url.search + url.hash,
+            );
+            setSelection((previous) => ({ ...previous, page: lastPage }));
+            return;
+          }
           setContents({ key: attemptKey, result: data });
         }
       })
@@ -447,7 +465,11 @@ export function SpacesWorkspace({
             >
               <div className={styles.viewerHeading}>
                 <strong>{currentSpace.name} / measured map</strong>
-                <span>Select a location in the map or browser</span>
+                <span>
+                  {sceneError
+                    ? 'Select a location in the location browser'
+                    : 'Select a location in the map or browser'}
+                </span>
               </div>
               {sceneError ? (
                 <div className={styles.fallback}>
@@ -542,12 +564,8 @@ export function SpacesWorkspace({
                 className={reducedMotion ? undefined : styles.arrival}
               >
                 <p className={styles.panelEyebrow}>Selected location</p>
-                <h2 className={styles.selectionTitle}>
-                  {selected.name}{' '}
-                  <span className={styles.selectionCode}>
-                    ({selected.code})
-                  </span>
-                </h2>
+                <h2 className={styles.selectionTitle}>{selected.name}</h2>
+                <LocationCode code={selected.code} />
                 <p className={styles.breadcrumb}>
                   {selected.breadcrumb}
                   {!selected.can_hold_inventory
@@ -566,17 +584,22 @@ export function SpacesWorkspace({
                 <p className={styles.panelEyebrow}>Location inventory</p>
                 <h2 className={styles.selectionTitle}>{currentSpace.name}</h2>
                 <p className={styles.breadcrumb}>
-                  {
+                  {countLabel(
                     scoped.filter((location) => location.can_hold_inventory)
-                      .length
-                  }{' '}
-                  inventory destinations across{' '}
-                  {
+                      .length,
+                    'inventory destination',
+                  )}{' '}
+                  across{' '}
+                  {countLabel(
                     scoped.filter((location) => !location.can_hold_inventory)
-                      .length
-                  }{' '}
-                  groups. Choose a location in the map or browser to view its
-                  current contents.
+                      .length,
+                    'group',
+                  )}
+                  . Choose a location in{' '}
+                  {room && visible && !sceneError
+                    ? 'the map or browser'
+                    : 'the location browser'}{' '}
+                  to view its current contents.
                 </p>
               </div>
             )}
@@ -601,32 +624,57 @@ export function SpacesWorkspace({
                 key={attemptKey}
                 className={reducedMotion ? undefined : styles.arrival}
               >
-                <InventoryRows rows={result.rows} />
-                <nav aria-label="Pagination" className={styles.pagination}>
-                  <span>
-                    {result.total} results · Page {result.page} of {pages}
-                  </span>
-                  {result.page > 1 && (
-                    <button
-                      className="min-h-11 text-cyan-300 underline"
-                      onClick={() =>
-                        navigate({ ...selection, page: result.page - 1 })
+                <p className="mb-2 text-sm">
+                  Active only ·{' '}
+                  {selected?.can_hold_inventory
+                    ? 'At each listed destination'
+                    : 'Selected area and descendant inventory'}
+                </p>
+                <InventoryCount result={result} />
+                {result.total === 0 ? (
+                  <div className={styles.contentsState}>
+                    <p>No active inventory here.</p>
+                    <Link
+                      className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                      href={
+                        '/locations/' +
+                        encodeURIComponent(selection.code!) +
+                        '?status=all'
                       }
                     >
-                      Previous
-                    </button>
-                  )}
-                  {result.page < pages && (
-                    <button
-                      className="min-h-11 text-cyan-300 underline"
-                      onClick={() =>
-                        navigate({ ...selection, page: result.page + 1 })
-                      }
-                    >
-                      Next
-                    </button>
-                  )}
-                </nav>
+                      Include all statuses
+                    </Link>
+                  </div>
+                ) : (
+                  <InventoryRows rows={result.rows} />
+                )}
+                {result.total > 0 && (
+                  <nav aria-label="Pagination" className={styles.pagination}>
+                    <span>
+                      Page {result.page} of {pages}
+                    </span>
+                    {result.page > 1 && (
+                      <button
+                        className="min-h-11 text-cyan-300 underline"
+                        onClick={() =>
+                          navigate({ ...selection, page: result.page - 1 })
+                        }
+                      >
+                        Previous
+                      </button>
+                    )}
+                    {result.page < pages && (
+                      <button
+                        className="min-h-11 text-cyan-300 underline"
+                        onClick={() =>
+                          navigate({ ...selection, page: result.page + 1 })
+                        }
+                      >
+                        Next
+                      </button>
+                    )}
+                  </nav>
+                )}
               </div>
             )}
           </section>

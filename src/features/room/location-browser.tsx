@@ -3,11 +3,52 @@ import { useId, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import type { LocationRef } from '../inventory/contracts-ui';
+import { LocationCode } from '../inventory/components/read-ui';
 import {
   locationAncestorIds,
   pickerTree,
   visiblePickerTree,
 } from '../locations/picker-model';
+
+function BrowserLocation({
+  location,
+  selected,
+  search,
+  onSelect,
+  indent,
+}: {
+  location: LocationRef;
+  selected: boolean;
+  search: boolean;
+  onSelect: (code: string) => void;
+  indent?: number;
+}) {
+  return (
+    <div className="min-w-0 flex-1" style={{ marginLeft: indent }}>
+      <button
+        aria-current={selected ? 'location' : undefined}
+        aria-label={`${search ? location.breadcrumb : location.name} ${location.code}${!location.active ? ' Inactive' : ''}`}
+        className="min-h-11 w-full min-w-0 break-words rounded-lg px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
+        onClick={() => onSelect(location.code)}
+      >
+        <span className="block">
+          {search ? location.breadcrumb : location.name}
+        </span>
+        {location.code.length <= 24 && (
+          <span className="block overflow-x-auto whitespace-nowrap text-xs text-slate-300">
+            {location.code}
+          </span>
+        )}
+        {!location.active && <span className="text-amber-200">Inactive</span>}
+      </button>
+      {location.code.length > 24 && (
+        <div className="px-2 pb-2">
+          <LocationCode code={location.code} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function LocationBrowser({
   locations,
@@ -96,21 +137,12 @@ export function LocationBrowser({
             layout={!reducedMotion}
             className="flex min-w-0 items-center gap-1"
           >
-            <button
-              aria-current={
-                selectedCode === row.location.code ? 'location' : undefined
-              }
-              className="min-h-11 min-w-0 flex-1 break-words rounded-lg px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
-              onClick={() => onSelect(row.location.code)}
-            >
-              {row.location.name}{' '}
-              <span className="break-all text-xs text-slate-300">
-                {row.location.code}
-              </span>
-              {!row.location.active && (
-                <span className="ml-2 text-amber-200">Inactive</span>
-              )}
-            </button>
+            <BrowserLocation
+              location={row.location}
+              selected={selectedCode === row.location.code}
+              search={Boolean(search)}
+              onSelect={onSelect}
+            />
             {row.hasChildren && !search && (
               <button
                 aria-label={'Open ' + row.location.name}
@@ -157,25 +189,15 @@ export function LocationBrowser({
                 {expanded.has(row.location.id) ? '⌄' : '›'}
               </button>
             )}
-            <button
-              aria-current={
-                selectedCode === row.location.code ? 'location' : undefined
+            <BrowserLocation
+              location={row.location}
+              selected={selectedCode === row.location.code}
+              search={Boolean(search)}
+              onSelect={onSelect}
+              indent={
+                !search && !row.hasChildren ? row.depth * 12 + 40 : undefined
               }
-              style={{
-                marginLeft:
-                  !search && !row.hasChildren ? row.depth * 12 + 40 : undefined,
-              }}
-              className="min-h-11 min-w-0 flex-1 break-words rounded-lg px-2 text-left text-sm hover:bg-slate-800 aria-[current=location]:bg-cyan-900"
-              onClick={() => onSelect(row.location.code)}
-            >
-              {row.location.name}{' '}
-              <span className="break-all text-xs text-slate-300">
-                {row.location.code}
-              </span>
-              {!row.location.active && (
-                <span className="ml-2 text-amber-200">Inactive</span>
-              )}
-            </button>
+            />
           </motion.li>
         ))}
       </ul>

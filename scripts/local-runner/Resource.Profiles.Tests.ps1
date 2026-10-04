@@ -119,9 +119,9 @@ try {
     if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -cne ([IO.Path]::GetTempPath()).TrimEnd('\') -or [IO.Path]::GetFileName($base) -notmatch '^ITIR-profiles-[0-9a-f]{32}$') { throw 'Unexpected profile fixture cleanup path.' }
     Remove-Item -LiteralPath $base -Recurse -Force
 }
-# Routing-only changes must preserve exact-SHA and trusted main/environment gates.
+# Consolidated validation must preserve exact-SHA and trusted main/environment gates.
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$expected = @{ app = 'mid'; database = 'heavy'; required = 'light'; production_database = 'light'; discover = 'light'; provision = 'light' }
+$expected = @{ required = 'heavy'; production_database = 'light'; discover = 'light'; provision = 'light' }
 $seen = @{}
 foreach ($name in @('ci.yml', 'preview-access.yml')) {
     $source = [IO.File]::ReadAllText((Join-Path $root ".github/workflows/$name"))
@@ -134,9 +134,9 @@ foreach ($name in @('ci.yml', 'preview-access.yml')) {
     }
     if ($source.Contains('it-inventory-ephemeral')) { throw 'Normal workflow retained a generic runner label.' }
 }
-if ($seen.Count -ne 6) { throw 'Profile tests did not verify all six workflow jobs.' }
+if ($seen.Count -ne 4) { throw 'Profile tests did not verify all four validation/preview workflow jobs.' }
 $ci = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/ci.yml'))
 $preview = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-access.yml'))
-foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'needs: [app, database]', 'test "$APP_RESULT" = success', 'test "$DATABASE_RESULT" = success', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
+foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'run: npm run validate:app', 'run: npm run test:db', 'run: npm run db:types:check', 'run: npm run test:e2e', 'run: node scripts/ci-gates.mjs', 'FOUNDATION_APP: ${{ steps.app.outcome }}', 'FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}', 'FOUNDATION_E2E: ${{ steps.e2e.outcome }}', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]', 'test "$REQUIRED_RESULT" = success')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
 foreach ($contract in @('pull_request_target:', 'ref: refs/heads/main', 'environment: preview-access', "github.ref == 'refs/heads/main'")) { if (-not $preview.Contains($contract)) { throw 'Trusted preview gate changed.' } }
-Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and six workflow gates.'
+Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and four validation/preview workflow gates.'

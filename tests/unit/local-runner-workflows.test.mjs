@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
+import { foundationGates } from '../../scripts/ci-gates.mjs';
 
 const readWorkflow = (name) =>
   readFileSync(`.github/workflows/${name}`, 'utf8');
@@ -94,12 +95,10 @@ describe('disposable local runner workflow contracts', () => {
     ).toThrow('future.yaml:overlooked_job');
   });
 
-  it('routes all six normal jobs to their fixed resource profiles without a hosted fallback or Actions cache', () => {
+  it('routes the four validation/preview jobs to fixed profiles without a hosted fallback or Actions cache', () => {
     const workflows = ['ci.yml', 'preview-access.yml'];
     const profiles = {
-      app: 'mid',
-      database: 'heavy',
-      required: 'light',
+      required: 'heavy',
       production_database: 'light',
       discover: 'light',
       provision: 'light',
@@ -124,7 +123,7 @@ describe('disposable local runner workflow contracts', () => {
       expect(workflow, name).not.toContain('it-inventory-ephemeral');
       jobs += definitions.length;
     }
-    expect(jobs).toBe(6);
+    expect(jobs).toBe(4);
   });
 
   it('isolates the pilot on a SHA-specific runner label without the generic assignment', () => {
@@ -146,8 +145,10 @@ describe('disposable local runner workflow contracts', () => {
   });
 
   it('makes only diagnostic uploads best-effort and preserves failing test gates', () => {
-    const database = ci.split('  database:')[1].split('  required:')[0];
-    const artifact = database.split(
+    const required = ci
+      .split('  required:')[1]
+      .split('  production_database:')[0];
+    const artifact = required.split(
       '      - uses: actions/upload-artifact@',
     )[1];
     expect(artifact).toMatch(
@@ -157,20 +158,45 @@ describe('disposable local runner workflow contracts', () => {
       "always() && steps.failure_artifact.outcome == 'failure'",
     );
     expect(artifact).toContain('::warning::Failure diagnostics');
-    expect(database).toContain('run: npm run test:db');
-    expect(database).toContain('run: npm run test:e2e');
-    expect(database).toMatch(/if: always\(\)\s*\n\s*run: npm run db:stop/);
+    expect(required).toContain('run: npm run test:db');
+    expect(required).toContain('run: npm run test:e2e');
+    expect(required).toMatch(/if: always\(\)\s*\n\s*run: npm run db:stop/);
     expect(ci.match(/continue-on-error:/g)).toHaveLength(1);
-    expect(ci).toContain('needs: [app, database]');
-    expect(ci).toContain('test "$APP_RESULT" = success');
-    expect(ci).toContain('test "$DATABASE_RESULT" = success');
+    const workflow = load(ci);
+    const steps = workflow.jobs.required.steps;
+    const completion = steps.find(
+      (step) => step.run === 'node scripts/ci-gates.mjs',
+    );
+    expect(completion.if).toBe('always()');
+    for (const gate of foundationGates) {
+      const step = steps.find((entry) => entry.id === gate);
+      expect(step, gate).toBeDefined();
+      expect(step['continue-on-error'], gate).not.toBe(true);
+      expect(completion.env['FOUNDATION_' + gate.toUpperCase()]).toBe(
+        '${{ steps.' + gate + '.outcome }}',
+      );
+    }
+    expect(steps.filter((step) => step.run === 'npm ci')).toHaveLength(1);
+    expect(steps.find((step) => step.id === 'app').run).toBe(
+      'npm run validate:app',
+    );
+    expect(workflow.jobs.required.env).toBeUndefined();
+    expect(steps.find((step) => step.id === 'app').env).toMatchObject({
+      NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:1',
+      APP_ENV: 'ci',
+    });
+    expect(steps.find((step) => step.id === 'e2e').env).toBeUndefined();
+    expect(workflow.jobs.required.environment).toBeUndefined();
+    expect(JSON.stringify(workflow.jobs.required)).not.toContain('secrets.');
+    expect(workflow.jobs.required.needs).toBeUndefined();
   });
 
   it('preserves exact-SHA and trusted-main secret boundaries', () => {
     expect(ci).toContain(
       'TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}',
     );
-    expect(ci.match(/ref: \$\{\{ env\.TESTED_SHA \}\}/g)).toHaveLength(3);
+    expect(ci.match(/ref: \$\{\{ env\.TESTED_SHA \}\}/g)).toHaveLength(2);
+    expect(ci).toContain('test "$(git rev-parse HEAD)" = "$TESTED_SHA"');
     expect(ci).toContain('environment: production-database');
     expect(ci).toContain('needs: [required]');
     expect(ci).toContain(

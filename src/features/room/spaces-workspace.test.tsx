@@ -61,7 +61,8 @@ vi.mock('next/dynamic', () => ({
       );
     },
 }));
-vi.mock('../inventory/components/read-ui', () => ({
+vi.mock('../inventory/components/read-ui', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   InventoryRows: ({ rows }: { rows: { name: string }[] }) => (
     <div>{rows.map((row) => row.name).join(', ')}</div>
   ),
@@ -163,6 +164,127 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
+});
+it('uses browser-only guidance without a map, including singular destination and group', () => {
+  render(
+    <SpacesWorkspace
+      locations={[
+        ...locations,
+        {
+          id: 'office-general',
+          code: 'ITO-GENERAL',
+          name: 'General Storage',
+          breadcrumb: 'IT Office / General Storage',
+          active: true,
+          can_hold_inventory: true,
+          parentId: 'office',
+        },
+      ]}
+      userId="test-user"
+      initialSpace={spaces[1]}
+      initialCode={null}
+    />,
+  );
+  expect(
+    screen.getByText(
+      /1 inventory destination across 1 group\. Choose a location in the location browser/,
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(/Choose a location in the map or browser/),
+  ).not.toBeInTheDocument();
+});
+it('shows an empty destination with one count and no empty pager', async () => {
+  const empty = response('', 'ITC-A', 1, 0);
+  const json = await empty.json();
+  json.result.rows = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({ ...empty, json: async () => json }),
+  );
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-A"
+    />,
+  );
+  await screen.findByText('No active inventory here.');
+  expect(screen.getByText('0 matching rows')).toBeVisible();
+  expect(
+    screen.queryByRole('navigation', { name: 'Pagination' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('link', { name: 'Include all statuses' }),
+  ).toHaveAttribute('href', '/locations/ITC-A?status=all');
+});
+it('recovers an invalid contents page with replacement, keeping location and an honest loading state', async () => {
+  window.history.replaceState(
+    null,
+    '',
+    '/room?space=it-closet&location=ITC-A&page=99',
+  );
+  const requests: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      requests.push(url);
+      const page = Number(
+        new URL(url, window.location.origin).searchParams.get('page'),
+      );
+      const answer = response(
+        page === 2 ? 'Last available page' : '',
+        'ITC-A',
+        page,
+        26,
+      );
+      return answer;
+    }),
+  );
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-A"
+      initialPage={99}
+    />,
+  );
+  await screen.findByText('Last available page');
+  expect(requests).toHaveLength(2);
+  expect(window.location.search).toBe('?space=it-closet&location=ITC-A&page=2');
+  expect(screen.getByText('Page 2 of 2')).toBeVisible();
+  expect(
+    screen.queryByText('No active inventory here.'),
+  ).not.toBeInTheDocument();
+});
+it('refers to the browser when the map is hidden or failed and restores map guidance on retry', async () => {
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  await user.click(screen.getByRole('button', { name: 'Hide room' }));
+  expect(
+    screen.getByText(/Choose a location in the location browser/),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Show room' }));
+  await user.click(screen.getByRole('button', { name: 'Fail room' }));
+  expect(
+    screen.getByText(/Choose a location in the location browser/),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(/Choose a location in the map or browser/),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Retry room' }));
+  expect(
+    screen.getByText(/Choose a location in the map or browser/),
+  ).toBeVisible();
 });
 
 it('highlights immediately and ignores slow A/B/A contents responses', async () => {
@@ -537,9 +659,7 @@ it('pages contents without remounting the room or delaying selection', async () 
   const scene = screen.getByTestId('scene-selection');
   const focusBeforePage = scene.getAttribute('data-focus');
   await user.click(screen.getByRole('button', { name: 'Next' }));
-  await waitFor(() =>
-    expect(screen.getByText('30 results · Page 2 of 2')).toBeVisible(),
-  );
+  await waitFor(() => expect(screen.getByText('Page 2 of 2')).toBeVisible());
   expect(screen.getByTestId('scene-selection')).toBe(scene);
   expect(scene).toHaveAttribute('data-focus', focusBeforePage);
   expect(fetcher).toHaveBeenLastCalledWith(
