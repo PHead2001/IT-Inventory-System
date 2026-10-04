@@ -457,10 +457,18 @@ test('configuration, site custody, and location browsing remain legible at deskt
       Number.parseFloat(getComputedStyle(element).paddingLeft),
     );
     expect(browserPadding).toBeGreaterThanOrEqual(12);
-    const searchHeight = await locationBrowser
+    const searchMetrics = await locationBrowser
       .getByRole('searchbox', { name: 'Browse locations' })
-      .evaluate((input) => input.getBoundingClientRect().height);
-    expect(searchHeight).toBeGreaterThanOrEqual(44);
+      .evaluate((input) => ({
+        height: input.getBoundingClientRect().height,
+        minimumHeight: Number.parseFloat(getComputedStyle(input).minHeight),
+      }));
+    expect(searchMetrics.minimumHeight).toBeGreaterThanOrEqual(44);
+    // Chromium can report 43.999969px for a 44px box. Normalize only
+    // sub-millipixel geometry precision while retaining the 44px minimum.
+    expect(
+      Math.round(searchMetrics.height * 1000) / 1000,
+    ).toBeGreaterThanOrEqual(44);
     await locationBrowser
       .getByRole('button', { name: 'IT Closet ITC', exact: true })
       .click();

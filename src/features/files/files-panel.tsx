@@ -755,7 +755,7 @@ function BoundFilesPanel({
             </li>
           ))}
       </ul>
-      {!loading && cards.length === 0 && !message && (
+      {!loading && !busy && cards.length === 0 && !message && (
         <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
           {parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.'}
         </p>

@@ -162,6 +162,10 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     await files.getByRole('button', { name: 'Upload and review' }).click();
     await firstRequest;
     await expect(files.getByRole('button', { name: 'Working…' })).toBeVisible();
+    await expect(files.getByText('File request in progress…')).toBeVisible();
+    await expect(files.getByText('No photo yet.', { exact: true })).toHaveCount(
+      0,
+    );
     await testInfo.attach('pending-photo-validation-mobile', {
       body: await page.screenshot({
         path: richStatePath('pending-photo-validation-mobile'),

@@ -785,6 +785,114 @@ describe('replacement selection and reviewed upload intent', () => {
 });
 
 describe('task-first file presentation', () => {
+  it.each(['quantity', 'asset'] as const)(
+    'keeps an empty %s collection out of the active upload and refresh states',
+    async (parentType) => {
+      let releaseValidation!: () => void;
+      const validation = new Promise<void>((resolve) => {
+        releaseValidation = resolve;
+      });
+      let releaseRefresh!: () => void;
+      const refresh = new Promise<void>((resolve) => {
+        releaseRefresh = resolve;
+      });
+      let cardReads = 0;
+      const published = {
+        ...pending,
+        name: 'first.png',
+        filename: 'first.png',
+        state: 'ready',
+      };
+      mocks.rpc.mockImplementation(async (name: string) => {
+        if (name === 'inventory_file_cards') {
+          if (++cardReads === 1)
+            return { data: { revision: '1', files: [] }, error: null };
+          await refresh;
+          return {
+            data: { revision: '2', files: [published] },
+            error: null,
+          };
+        }
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_reserve')
+          return {
+            data: { id, path: 's/fictional-reservation' },
+            error: null,
+          };
+        if (name === 'inventory_file_uploaded')
+          return { data: null, error: null };
+        if (name === 'inventory_file_read')
+          return { data: null, error: { message: 'Unavailable' } };
+        throw new Error(`Unexpected RPC: ${name}`);
+      });
+      mocks.fetch.mockImplementation(async (url: string) => {
+        if (url.includes('/validate')) {
+          await validation;
+          return { ok: true, json: async () => ({}) };
+        }
+        return {
+          ok: true,
+          json: async () => ({ deleted: 0, pending: false }),
+        };
+      });
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType={parentType}
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      const empty =
+        parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.';
+      expect(await screen.findByText(empty)).toBeVisible();
+      fireEvent.change(
+        screen.getByLabelText(
+          parentType === 'quantity'
+            ? 'Add recognition photo'
+            : 'Add photo or PDF',
+        ),
+        {
+          target: {
+            files: [
+              new File(['fictional photo'], 'first.png', { type: 'image/png' }),
+            ],
+          },
+        },
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Upload and review' }),
+      );
+      try {
+        await waitFor(() =>
+          expect(mocks.fetch).toHaveBeenCalledWith(
+            '/api/inventory-files/validate',
+            expect.any(Object),
+          ),
+        );
+        expect(screen.getByText('File request in progress…')).toBeVisible();
+        expect(screen.getByRole('button', { name: 'Working…' })).toBeDisabled();
+        expect(screen.queryByText(empty)).not.toBeInTheDocument();
+        await act(async () => releaseValidation());
+        await waitFor(() => expect(cardReads).toBe(2));
+        expect(screen.getByText('File request in progress…')).toBeVisible();
+        expect(screen.queryByText(empty)).not.toBeInTheDocument();
+      } finally {
+        await act(async () => {
+          releaseValidation();
+          releaseRefresh();
+        });
+      }
+      expect(await screen.findByText('Ready')).toBeVisible();
+      expect(screen.getByRole('alert')).toHaveTextContent('File published.');
+      expect(screen.queryByText(empty)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('File request in progress…'),
+      ).not.toBeInTheDocument();
+    },
+  );
   it('shows pending review as a next step rather than an empty ready collection', async () => {
     render(
       <FilesPanel
