@@ -121,6 +121,41 @@ function emittedMetrics(requests: Intake[], expectedPath: string): Metric[] {
   return metrics;
 }
 
+async function waitForNativeMetrics(requests: Intake[]) {
+  // A transport request can arrive before the separately flushed CLS batch.
+  // Wait for both native metrics before taking the assertion snapshot.
+  await expect
+    .poll(() =>
+      requests.flatMap((request) => {
+        const body = JSON.parse(request.body ?? '') as { metrics: Metric[] };
+        return body.metrics.map((metric) => metric.type);
+      }),
+    )
+    .toEqual(expect.arrayContaining(['INP', 'CLS']));
+}
+
+test('native telemetry readiness waits for a later CLS intake batch', async () => {
+  const requests: Intake[] = [];
+  const captureMetric = (type: string) =>
+    requests.push({
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ metrics: [{ type }] }),
+    });
+  captureMetric('INP');
+  let ready = false;
+  const readiness = waitForNativeMetrics(requests).then(() => {
+    ready = true;
+  });
+  // Give the first readiness check a turn while CLS has not arrived.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const readyBeforeCls = ready;
+  captureMetric('CLS');
+  await readiness;
+  expect(readyBeforeCls).toBe(false);
+  expect(ready).toBe(true);
+});
+
 for (const path of measuredRoutes) {
   test(`${path} sends only static route and redacted search URL`, async ({
     page,
@@ -271,7 +306,7 @@ test('native INP and CLS attribution emits only opaque element identifiers', asy
   // the second drains it without unloading the intercepted request's page.
   await flush(page);
   await flush(page);
-  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  await waitForNativeMetrics(requests);
   const metrics = emittedMetrics(requests, '/inventory');
   const nativeShifts = await page.evaluate(
     () =>

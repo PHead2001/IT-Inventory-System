@@ -3,10 +3,15 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { captureE2eEvidence } from '../../scripts/e2e-diagnostics';
 
-test.use({ video: 'on', viewport: { width: 1440, height: 900 } });
+test.use({ viewport: { width: 1440, height: 900 } });
 
 async function saveRecording(page: Page, name: string) {
+  if (!captureE2eEvidence()) {
+    await page.close();
+    return;
+  }
   const video = page.video();
   expect(video).not.toBeNull();
   const directory = resolve('.local-tools/experience-visual/recordings');

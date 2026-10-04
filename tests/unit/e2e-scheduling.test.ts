@@ -15,7 +15,11 @@ type DiscoveredSuite = {
   suites?: DiscoveredSuite[];
 };
 
-function discover(fullSuite: boolean, args: string[] = []) {
+function discover(
+  fullSuite: boolean,
+  args: string[] = [],
+  captureEvidence = false,
+) {
   const npmCli = process.env.npm_execpath;
   if (!npmCli) throw new Error('Run scheduling checks through npm run test.');
   const result = spawnSync(
@@ -23,7 +27,11 @@ function discover(fullSuite: boolean, args: string[] = []) {
     [npmCli, 'run', 'test:e2e:list', '--', '--reporter=json', ...args],
     {
       encoding: 'utf8',
-      env: { ...process.env, E2E_FULL_SUITE: fullSuite ? '1' : '0' },
+      env: {
+        ...process.env,
+        E2E_FULL_SUITE: fullSuite ? '1' : '0',
+        E2E_CAPTURE_EVIDENCE: captureEvidence ? '1' : '0',
+      },
       timeout: 30_000,
       maxBuffer: 4 * 1024 * 1024,
     },
@@ -52,6 +60,12 @@ describe('browser scheduling', () => {
   it('discovers exactly the same tests once in both modes and retains focused selection', () => {
     const baseline = discover(false);
     const scheduled = discover(true);
+    expect(discover(false, [], true)).toEqual(baseline);
+    expect(discover(true, [], true)).toEqual(scheduled);
+    const recordings = baseline.filter(
+      (entry) => entry.file === 'experience-recordings.spec.ts',
+    );
+    expect(recordings).toHaveLength(2);
     expect(baseline.length).toBeGreaterThan(0);
     expect(new Set(scheduled.map((entry) => entry.key)).size).toBe(
       scheduled.length,

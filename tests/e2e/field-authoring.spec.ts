@@ -13,8 +13,6 @@ import { chooseLocation } from './location-picker';
 import { instantMicros } from '../../src/features/metadata/field-value-validation';
 
 test.use({
-  video: 'on',
-  trace: 'on',
   actionTimeout: 15_000,
   viewport: { width: 1440, height: 960 },
 });

@@ -5,7 +5,6 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 
-test.use({ trace: 'on' });
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);

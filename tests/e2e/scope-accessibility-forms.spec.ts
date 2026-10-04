@@ -3,7 +3,6 @@ import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
-test.use({ trace: 'on' });
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);

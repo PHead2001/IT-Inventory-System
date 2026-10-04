@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { e2eScheduling } from './scripts/e2e-scheduling';
+import { e2eDiagnostics } from './scripts/e2e-diagnostics';
 const scheduling = e2eScheduling(process.env.E2E_FULL_SUITE === '1');
 export default defineConfig({
   testDir: './tests/e2e',
@@ -16,8 +17,7 @@ export default defineConfig({
   ],
   use: {
     baseURL: 'http://localhost:3000',
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    ...e2eDiagnostics(),
   },
   projects: scheduling.projects.map((project) => ({
     ...project,

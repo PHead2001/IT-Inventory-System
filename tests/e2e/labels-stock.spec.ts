@@ -14,7 +14,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
 const rootCode = 'ITC';
-test.use({ deviceScaleFactor: 2, trace: 'on' });
+test.use({ deviceScaleFactor: 2 });
 
 test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
   page,
