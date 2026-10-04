@@ -1,12 +1,14 @@
-// Reviewed files use unique records/categories and browser-context storage.
+// Reviewed mutable workflows target owned records/categories and browser-context storage.
+// Immutable seeded reference reads are safe only while no parallel spec mutates them.
 // Files absent from this allowlist run exclusively, including future specs.
+// experience-visual reads the first global inventory/category/site records: it must
+// finish before another spec can archive, retire, rename, or remove its selection.
 export const parallelSpecs = [
   'creation-recovery.spec.ts',
   'experience-completion.spec.ts',
   'experience-designer-acceptance.spec.ts',
   'experience-overhaul.spec.ts',
   'experience-recordings.spec.ts',
-  'experience-visual.spec.ts',
   'field-authoring.spec.ts',
   'inventory.spec.ts',
   'labels-stock.spec.ts',

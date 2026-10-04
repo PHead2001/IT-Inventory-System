@@ -82,6 +82,18 @@ describe('browser scheduling', () => {
     });
   });
 
+  it('runs visual readers of unowned global records before concurrent record mutations', () => {
+    const visual = discover(true, ['tests/e2e/experience-visual.spec.ts']);
+    expect(visual.length).toBeGreaterThan(0);
+    for (const entry of visual) {
+      expect(entry.file).toBe('experience-visual.spec.ts');
+      expect(entry.project).toBe('chromium-exclusive');
+    }
+    const [exclusive, parallel] = e2eScheduling(true).projects;
+    expect(exclusive.workers).toBe(1);
+    expect(parallel.dependencies).toContain(exclusive.name);
+  }, 60_000);
+
   it('caps full-suite concurrency and finishes exclusive files first', () => {
     const scheduling = e2eScheduling(true);
     expect(scheduling.workers).toBe(2);
@@ -107,6 +119,7 @@ describe('browser scheduling', () => {
       expect.arrayContaining([
         'configuration.spec.ts',
         'custody.spec.ts',
+        'experience-visual.spec.ts',
         'files.spec.ts',
         'files-recovery.spec.ts',
         'foundation.spec.ts',
