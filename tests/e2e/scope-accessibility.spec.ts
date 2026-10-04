@@ -177,6 +177,45 @@ async function assertFits(page: Page) {
     ),
   ).toBe(true);
 }
+async function keepDelayedFetchAlive(
+  page: Page,
+  pathname: string,
+  query: Record<string, string | string[]>,
+  rsc = false,
+) {
+  // Intentionally deliver superseded responses to exercise the generation guard.
+  // Chromium may otherwise abort the route before Playwright can fulfill it.
+  await page.addInitScript(
+    ({ pathname, query, rsc }) => {
+      const fetch = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        const url = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.href,
+        );
+        const headers = new Headers(
+          init?.headers ??
+            (input instanceof Request ? input.headers : undefined),
+        );
+        const method = (
+          init?.method ?? (input instanceof Request ? input.method : 'GET')
+        ).toUpperCase();
+        const delayed =
+          method === 'GET' &&
+          url.origin === window.location.origin &&
+          url.pathname === pathname &&
+          Object.entries(query).every(([key, value]) =>
+            Array.isArray(value)
+              ? value.includes(url.searchParams.get(key) ?? '')
+              : url.searchParams.get(key) === value,
+          ) &&
+          (!rsc || headers.get('rsc') === '1');
+        return fetch(input, delayed ? { ...init, signal: null } : init);
+      };
+    },
+    { pathname, query, rsc },
+  );
+}
 function csvRows(text: string) {
   return text
     .replace(/^\uFEFF/, '')
@@ -198,6 +237,12 @@ test('location status, holding scope, matching rows and real CSV agree across na
   const setup = await scopeFixture();
   let releaseScope = () => {};
   try {
+    await keepDelayedFetchAlive(
+      page,
+      '/locations/ITC-BLACK',
+      { q: setup.prefix, status: 'all' },
+      true,
+    );
     await signIn(page);
     await page.setViewportSize({ width: 1180, height: 757 });
     const scoped = '/locations/ITC-BLACK?q=' + encodeURIComponent(setup.prefix);
@@ -230,8 +275,8 @@ test('location status, holding scope, matching rows and real CSV agree across na
         await route.continue();
         return;
       }
-      const response = await route.fetch();
       slowStarted = true;
+      const response = await route.fetch();
       await slowScope;
       await route.fulfill({ response });
       slowDelivered = true;
@@ -310,8 +355,11 @@ test('location status, holding scope, matching rows and real CSV agree across na
     });
   } finally {
     releaseScope();
-    await page.unroute('**/locations/ITC-BLACK?**');
-    await setup.cleanup();
+    try {
+      await page.unrouteAll({ behavior: 'wait' });
+    } finally {
+      await setup.cleanup();
+    }
   }
 });
 
@@ -385,17 +433,70 @@ test('Spaces preserves current contents across slow responses and uses coherent 
 }, testInfo) => {
   test.setTimeout(180_000);
   const setup = await scopeFixture();
-  const pending: Array<{ code: string; release: () => void }> = [];
+  const pending: Array<{
+    code: string;
+    release: () => void;
+    delivered: boolean;
+  }> = [];
+  let draining = false;
   try {
+    await keepDelayedFetchAlive(page, '/api/room/contents', {
+      space: 'it-closet',
+      location: ['ITC-BLACK', 'ITC-RED'],
+      page: '1',
+    });
     await signIn(page);
     await page.route('**/api/room/contents?**', async (route) => {
-      const response = await route.fetch();
       const code = new URL(route.request().url()).searchParams.get('location')!;
-      await new Promise<void>((release) => pending.push({ code, release }));
+      const request = { code, release: () => {}, delivered: false };
+      const delay = new Promise<void>((release) => {
+        request.release = release;
+      });
+      pending.push(request);
+      if (draining) request.release();
+      const response = await route.fetch();
+      await delay;
       await route.fulfill({ response });
+      request.delivered = true;
     });
     await page.goto('/room?space=it-closet&location=ITC-BLACK');
     await expect.poll(() => pending.length).toBe(1);
+    // The delayed-response simulation must leave ordinary fetch cancellation intact.
+    expect(
+      await page.evaluate(async () => {
+        const controller = new AbortController();
+        controller.abort();
+        try {
+          await fetch(
+            '/api/room/contents?space=it-office&location=ITO&page=1',
+            {
+              signal: controller.signal,
+            },
+          );
+          return 'resolved';
+        } catch (error) {
+          return error instanceof Error ? error.name : 'unknown';
+        }
+      }),
+    ).toBe('AbortError');
+    expect(
+      await page.evaluate(async () => {
+        const controller = new AbortController();
+        controller.abort();
+        try {
+          await fetch(
+            new Request(
+              window.location.origin +
+                '/api/room/contents?space=it-closet&location=ITC-BLACK&page=1',
+              { method: 'POST', signal: controller.signal },
+            ),
+          );
+          return 'resolved';
+        } catch (error) {
+          return error instanceof Error ? error.name : 'unknown';
+        }
+      }),
+    ).toBe('AbortError');
     const browser = page.getByRole('navigation', { name: 'Location browser' });
     const search = browser.getByRole('searchbox', { name: 'Browse locations' });
     await search.fill('ITC-RED');
@@ -423,11 +524,17 @@ test('Spaces preserves current contents across slow responses and uses coherent 
     ).toBeVisible();
     pending[0].release();
     pending[1].release();
+    await expect
+      .poll(() => pending.map((request) => request.code))
+      .toEqual(['ITC-BLACK', 'ITC-RED', 'ITC-BLACK']);
+    await expect
+      .poll(() => pending.every((request) => request.delivered))
+      .toBe(true);
     await expect(
       panel.getByRole('heading', { name: 'Black Container' }),
     ).toBeVisible();
     await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
-    await page.unroute('**/api/room/contents?**');
+    await page.unrouteAll({ behavior: 'wait' });
     await page.getByRole('button', { name: 'Clear selection' }).click();
     await page.getByRole('button', { name: 'Hide room' }).click();
     await expect(
@@ -450,9 +557,13 @@ test('Spaces preserves current contents across slow responses and uses coherent 
       path: testInfo.outputPath('unmodeled-office-phone.png'),
     });
   } finally {
+    draining = true;
     for (const request of pending) request.release();
-    await page.unroute('**/api/room/contents?**');
-    await setup.cleanup();
+    try {
+      await page.unrouteAll({ behavior: 'wait' });
+    } finally {
+      await setup.cleanup();
+    }
   }
 });
 
@@ -506,6 +617,9 @@ test('Office codes, compact duplicate child links and empty destination remain a
         exact: true,
       })
       .click();
+    // The parent page also renders this code and may have the same empty state.
+    // Finish navigation before focusing the destination's scrollable code.
+    await expect(page).toHaveURL('http://localhost:3000/locations/' + longCode);
     await expect(page.getByText('No active inventory here.')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Pagination' }),

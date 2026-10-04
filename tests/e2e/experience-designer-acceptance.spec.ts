@@ -557,18 +557,40 @@ test('duplicate section names use distinct UUID destinations and removal can be 
   const initialSectionCount = await designer
     .locator('[data-section-id]')
     .count();
-  await designer.getByRole('button', { name: 'Add section' }).click();
-  await designer.getByRole('button', { name: 'Add section' }).click();
   const sections = designer.locator('[data-section-id]');
-  const first = sections.nth(initialSectionCount);
-  const second = sections.nth(initialSectionCount + 1);
-  await first.getByLabel('Section heading').fill('Duplicate details');
-  await second.getByLabel('Section heading').fill('Duplicate details');
-  const firstId = await first.getAttribute('data-section-id');
-  const secondId = await second.getAttribute('data-section-id');
-  expect(firstId).toBeTruthy();
-  expect(secondId).toBeTruthy();
+
+  async function addDuplicateSection(index: number) {
+    await designer.getByRole('button', { name: 'Add section' }).click();
+    await expect(sections).toHaveCount(index + 1);
+    const added = sections.nth(index);
+    // Add focuses the new heading in a frame callback. Settle that operation
+    // before fill's separate focus/select and keyboard insertion steps.
+    await expect(added.getByLabel('Section heading')).toBeFocused();
+    const id = await added.getAttribute('data-section-id');
+    expect(id).toBeTruthy();
+    const section = designer.locator(`[data-section-id="${id}"]`);
+    await section.getByLabel('Section heading').fill('Duplicate details');
+    await expect(
+      section.getByRole('button', {
+        name: 'Drag section Duplicate details',
+        exact: true,
+      }),
+    ).toBeVisible();
+    return { section, id };
+  }
+
+  const { section: first, id: firstId } =
+    await addDuplicateSection(initialSectionCount);
+  const { section: second, id: secondId } = await addDuplicateSection(
+    initialSectionCount + 1,
+  );
   expect(firstId).not.toBe(secondId);
+  await expect(first.getByLabel('Section heading')).toHaveValue(
+    'Duplicate details',
+  );
+  await expect(second.getByLabel('Section heading')).toHaveValue(
+    'Duplicate details',
+  );
   await first.getByText('Section options').click();
   await first.getByRole('button', { name: 'Remove section' }).click();
   let dialog = designer.getByRole('dialog', {
@@ -590,6 +612,12 @@ test('duplicate section names use distinct UUID destinations and removal can be 
   await expect(sections).toHaveCount(initialSectionCount + 1);
   await designer.getByRole('button', { name: 'Undo edit' }).click();
   await expect(sections).toHaveCount(initialSectionCount + 2);
-  await expect(first).toHaveAttribute('data-section-id', firstId!);
-  await expect(second).toHaveAttribute('data-section-id', secondId!);
+  await expect(sections.nth(initialSectionCount)).toHaveAttribute(
+    'data-section-id',
+    firstId!,
+  );
+  await expect(sections.nth(initialSectionCount + 1)).toHaveAttribute(
+    'data-section-id',
+    secondId!,
+  );
 });
