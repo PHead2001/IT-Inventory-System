@@ -3,13 +3,16 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
+  BarcodeFormat,
   BinaryBitmap,
+  DecodeHintType,
   HybridBinarizer,
   MultiFormatReader,
   RGBLuminanceSource,
 } from '@zxing/library';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 
 const code = (prefix: string) =>
   prefix + '-' + randomUUID().slice(0, 12).toUpperCase();
@@ -69,19 +72,31 @@ async function submitCustody(form: Locator, title: string) {
 function decodeQrDataUrl(source: string) {
   expect(source).toMatch(/^data:image\/png;base64,/);
   const image = PNG.sync.read(Buffer.from(source.split(',')[1], 'base64'));
+  const rgba = new Uint8ClampedArray(image.data);
+  const canvas = {
+    width: image.width,
+    height: image.height,
+    getContext: () => ({
+      getImageData: () => ({
+        data: rgba,
+        width: image.width,
+        height: image.height,
+      }),
+    }),
+  } as unknown as HTMLCanvasElement;
   const gray = new Uint8ClampedArray(image.width * image.height);
   for (let index = 0; index < gray.length; index++)
     gray[index] = image.data[index * 4];
-  return new MultiFormatReader()
-    .decode(
+  return decodeInventoryFrame(canvas, () =>
+    new MultiFormatReader().decode(
       new BinaryBitmap(
         new HybridBinarizer(
           new RGBLuminanceSource(gray, image.width, image.height),
         ),
       ),
-      new Map(),
-    )
-    .getText();
+      new Map([[DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]]]),
+    ),
+  ).getText();
 }
 async function noHorizontalOverflow(page: Page) {
   const layout = await page.evaluate(() => ({
