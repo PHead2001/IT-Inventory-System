@@ -107,6 +107,7 @@ const item = {
   needsMetadata: false,
 };
 const props = {
+  creationDraftId: firstRevision,
   actorId: '00000000-0000-4000-8000-000000000009',
   recoveryBackend: 'http://127.0.0.1:54321',
   kind: 'quantity' as const,
@@ -232,6 +233,86 @@ describe('published metadata form', () => {
     expect(unload.defaultPrevented).toBe(true);
     failure.mockRestore();
   });
+  it('keeps canonical creation controls behind the barrier until URL normalization remounts the durable instance', () => {
+    const first = render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByText('Checking creation recovery…')).toBeInTheDocument();
+    expect(replace).toHaveBeenCalledTimes(1);
+    const id = new URL(
+      replace.mock.calls[0][0],
+      'http://localhost',
+    ).searchParams.get('draft')!;
+    first.unmount();
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={id}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toBeEnabled();
+  });
+  it('offers an explicit retry when canonical URL normalization does not remount and retains the same durable instance', () => {
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    const initialURL = replace.mock.calls[0][0];
+    const retry = screen.getByRole('button', {
+      name: 'Retry creation recovery',
+    });
+    replace.mockImplementationOnce(() => {
+      throw new Error('Interrupted navigation');
+    });
+    fireEvent.click(retry);
+    expect(screen.getByRole('alert')).toHaveTextContent('creation URL');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(retry);
+    expect(replace.mock.calls.map(([url]) => url)).toEqual([
+      initialURL,
+      initialURL,
+      initialURL,
+    ]);
+    expect(
+      Object.keys(sessionStorage).filter((key) =>
+        key.startsWith('inventory-creation-v1:'),
+      ),
+    ).toHaveLength(1);
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+  });
+  it('never remounts an unstored canonical creation after a material edit when storage is unavailable', () => {
+    const failure = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('quota', 'QuotaExceededError');
+      });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={undefined}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Retain this in memory' },
+    });
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Name')).toHaveValue('Retain this in memory');
+    failure.mockRestore();
+  });
   it('offers another pending draft explicitly while canonical entry starts empty and another actor sees none', () => {
     const first = render(
       <MetadataForm
@@ -249,6 +330,7 @@ describe('published metadata form', () => {
       <MetadataForm
         {...props}
         item={undefined}
+        creationDraftId={undefined}
         forms={{ [categoryId]: form() }}
       />,
     );
@@ -752,6 +834,7 @@ describe('published metadata form', () => {
       <MetadataForm
         actorId={props.actorId}
         recoveryBackend={props.recoveryBackend}
+        creationDraftId={firstRevision}
         kind="quantity"
         categories={props.categories}
         locations={[]}
@@ -802,6 +885,7 @@ describe('published metadata form', () => {
       <MetadataForm
         actorId={props.actorId}
         recoveryBackend={props.recoveryBackend}
+        creationDraftId={firstRevision}
         kind="asset"
         categories={props.categories}
         locations={[]}
@@ -1544,6 +1628,7 @@ describe('published metadata form', () => {
         {...props}
         item={undefined}
         forms={{ [categoryId]: current }}
+        creationDraftId={secondRevision}
       />,
     );
     push.mockClear();

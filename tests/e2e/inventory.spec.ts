@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+test.use({ trace: 'on' });
 
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -81,6 +82,30 @@ async function createQuantity(
   ).toBe(true);
 }
 
+async function archiveFixture(
+  page: Page,
+  detailUrl: string,
+  finalVersion?: number,
+) {
+  await page.goto(detailUrl);
+  const form = await openForm(
+    page,
+    'Archive quantity definition and clear stock',
+  );
+  await form
+    .getByLabel('Reason (required)')
+    .fill('Checkpoint fictional fixture cleanup');
+  await form.getByRole('checkbox', { name: /I understand/ }).check();
+  await form
+    .getByRole('button', { name: 'Review archive and clear stock' })
+    .click();
+  await form
+    .getByRole('button', { name: 'Confirm archive and clear stock' })
+    .click();
+  await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  if (finalVersion !== undefined) await version(page, finalVersion);
+}
+
 test('quantity move rejects an overdraw and retains committed receipt through data refresh and reload', async ({
   page,
 }) => {
@@ -94,70 +119,58 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     'ITC-RED',
   );
   const detailUrl = page.url();
-  let form = await openForm(page, 'Move stock');
-  await choose(form, 'Destination location', 'ITC-BLACK');
-  const amount = form.getByLabel('Quantity to move');
-  await expect(
-    form.getByText('Recorded source availability: 2 units.'),
-  ).toBeVisible();
-  await amount.fill('3');
-  await form.getByRole('button', { name: 'Review move stock' }).click();
-  await expect(form.getByRole('alert')).toContainText('only 2 units');
-  await expect(amount).toBeFocused();
-  await expect(amount).toHaveAttribute('aria-invalid', 'true');
-  await expect(
-    form.getByRole('button', { name: 'Confirm move stock' }),
-  ).toHaveCount(0);
-  await amount.fill('1');
-  await confirm(form, 'Move stock');
-  await version(page, 2);
-  await expect(form.getByRole('status')).toContainText(
-    'Moved 1 unit from Red Container to Black Container',
-  );
-  await expect(form.getByRole('status')).toContainText(
-    'After this move: Red Container 1 unit; Black Container 1 unit',
-  );
-  await expect(form.getByRole('status')).toBeFocused();
-  await form.getByRole('button', { name: 'Refresh balances' }).click();
-  await expect(form.getByRole('status')).toContainText('move completed');
-  await expect(
-    form.getByRole('button', { name: 'Review move stock' }),
-  ).toHaveCount(0);
-  await page.reload();
-  form = await openForm(page, 'Move stock');
-  await expect(form.getByRole('status')).toContainText(
-    'After this move: Red Container 1 unit; Black Container 1 unit',
-  );
-  await form.getByRole('button', { name: 'Move more' }).click();
-  await expect(form.getByLabel('Quantity to move')).toHaveValue('');
-  await choose(form, 'Source location', 'ITC-RED');
-  await choose(form, 'Destination location', 'ITC-BLACK');
-  await form.getByLabel('Quantity to move').fill('1');
-  await confirm(form, 'Move stock');
-  await version(page, 3);
-  await expect(form.getByRole('status')).toContainText(
-    'After this move: Red Container 0 units; Black Container 2 units',
-  );
-  await page.getByRole('link', { name: 'View all item history' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Physically moved', exact: true }),
-  ).toHaveCount(2);
-  await page.goto(detailUrl);
-  const archive = await openForm(
-    page,
-    'Archive quantity definition and clear stock',
-  );
-  await archive
-    .getByLabel('Reason (required)')
-    .fill('Checkpoint fictional fixture cleanup');
-  await archive.getByRole('checkbox', { name: /I understand/ }).check();
-  await archive
-    .getByRole('button', { name: 'Review archive and clear stock' })
-    .click();
-  await archive
-    .getByRole('button', { name: 'Confirm archive and clear stock' })
-    .click();
-  await version(page, 4);
+  try {
+    let form = await openForm(page, 'Move stock');
+    await choose(form, 'Destination location', 'ITC-BLACK');
+    const amount = form.getByLabel('Quantity to move');
+    await expect(
+      form.getByText('Recorded source availability: 2 units.'),
+    ).toBeVisible();
+    await amount.fill('3');
+    await form.getByRole('button', { name: 'Review move stock' }).click();
+    await expect(form.getByRole('alert')).toContainText('only 2 units');
+    await expect(amount).toBeFocused();
+    await expect(amount).toHaveAttribute('aria-invalid', 'true');
+    await expect(
+      form.getByRole('button', { name: 'Confirm move stock' }),
+    ).toHaveCount(0);
+    await amount.fill('1');
+    await confirm(form, 'Move stock');
+    await version(page, 2);
+    await expect(form.getByRole('status')).toContainText(
+      'Moved 1 unit from Red Container to Black Container',
+    );
+    await expect(form.getByRole('status')).toContainText(
+      'After this move: Red Container 1 unit; Black Container 1 unit',
+    );
+    await expect(form.getByRole('status')).toBeFocused();
+    await form.getByRole('button', { name: 'Refresh balances' }).click();
+    await expect(form.getByRole('status')).toContainText('move completed');
+    await expect(
+      form.getByRole('button', { name: 'Review move stock' }),
+    ).toHaveCount(0);
+    await page.reload();
+    form = await openForm(page, 'Move stock');
+    await expect(form.getByRole('status')).toContainText(
+      'After this move: Red Container 1 unit; Black Container 1 unit',
+    );
+    await form.getByRole('button', { name: 'Move more' }).click();
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+    await choose(form, 'Source location', 'ITC-RED');
+    await choose(form, 'Destination location', 'ITC-BLACK');
+    await form.getByLabel('Quantity to move').fill('1');
+    await confirm(form, 'Move stock');
+    await version(page, 3);
+    await expect(form.getByRole('status')).toContainText(
+      'After this move: Red Container 0 units; Black Container 2 units',
+    );
+    await page.getByRole('link', { name: 'View all item history' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Physically moved', exact: true }),
+    ).toHaveCount(2);
+  } finally {
+    await archiveFixture(page, detailUrl);
+  }
 });
 
 test('a separate authenticated writer changes stock after move review and rejection keeps unsaved intent', async ({
@@ -173,12 +186,12 @@ test('a separate authenticated writer changes stock after move review and reject
     'ITC-RED',
   );
   const detailUrl = page.url();
-  const form = await openForm(page, 'Move stock');
-  await choose(form, 'Destination location', 'ITC-BLACK');
-  await form.getByLabel('Quantity to move').fill('2');
-  await form.getByRole('button', { name: 'Review move stock' }).click();
   const context = await browser.newContext();
   try {
+    const form = await openForm(page, 'Move stock');
+    await choose(form, 'Destination location', 'ITC-BLACK');
+    await form.getByLabel('Quantity to move').fill('2');
+    await form.getByRole('button', { name: 'Review move stock' }).click();
     const writer = await context.newPage();
     await login(writer);
     await writer.goto(detailUrl);
@@ -214,10 +227,98 @@ test('a separate authenticated writer changes stock after move review and reject
       }),
     ).toHaveCount(1);
   } finally {
-    await context.close();
+    try {
+      await context.close();
+    } finally {
+      await archiveFixture(page, detailUrl);
+    }
   }
 });
 
+test('a real committed move with a lost response retries the original command once after rapid double confirmation', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await login(page);
+  await createQuantity(
+    page,
+    'Checkpoint lost move ' + crypto.randomUUID(),
+    2,
+    'ITC-RED',
+  );
+  const detailUrl = page.url();
+  const itemId = detailUrl.split('/').at(-1)!;
+  const actionUrl = '**/inventory/quantity/' + itemId;
+  let release = () => {};
+  try {
+    const form = await openForm(page, 'Move stock');
+    await choose(form, 'Destination location', 'ITC-BLACK');
+    await form.getByLabel('Quantity to move').fill('1');
+    await form.getByRole('button', { name: 'Review move stock' }).click();
+    const commands: string[] = [];
+    let acknowledge!: () => void;
+    let rejectAcknowledgment!: (error: unknown) => void;
+    const acknowledged = new Promise<void>((resolve, reject) => {
+      acknowledge = resolve;
+      rejectAcknowledgment = reject;
+    });
+    const responseBarrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(actionUrl, async (route) => {
+      const request = route.request();
+      const body = request.postData();
+      if (request.method() !== 'POST' || !body?.includes('quantity_move')) {
+        await route.continue();
+        return;
+      }
+      commands.push(body);
+      if (commands.length !== 1) {
+        await route.continue();
+        return;
+      }
+      try {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        const committedResponse = await response.text();
+        expect(committedResponse).toContain('"ok":true');
+        expect(committedResponse).toContain('"eventId":');
+        acknowledge();
+        await responseBarrier;
+        await route.abort('failed');
+      } catch (error) {
+        rejectAcknowledgment(error);
+        throw error;
+      }
+    });
+    await form.getByRole('button', { name: 'Confirm move stock' }).dblclick();
+    await acknowledged;
+    expect(commands).toHaveLength(1);
+    release();
+    await expect(
+      form.getByRole('button', { name: 'Retry this move safely' }),
+    ).toBeEnabled();
+    await expect(form.getByLabel('Quantity to move')).toBeDisabled();
+    await form.getByRole('button', { name: 'Retry this move safely' }).click();
+    await expect(form.getByRole('status')).toContainText(
+      'After this move: Red Container 1 unit; Black Container 1 unit',
+    );
+    expect(commands).toHaveLength(2);
+    expect(commands[1]).toBe(commands[0]);
+    await version(page, 2);
+    await page.getByRole('link', { name: 'View all item history' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Physically moved', exact: true }),
+    ).toHaveCount(1);
+  } finally {
+    release();
+    try {
+      await page.unroute(actionUrl);
+    } finally {
+      await archiveFixture(page, detailUrl);
+    }
+  }
+});
 test('archiving stocked quantity clears every location in one reviewed operation', async ({
   page,
 }) => {
@@ -355,6 +456,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 3);
   await page.reload();
   form = await openForm(page, 'Move stock');
+  await form.getByRole('button', { name: 'Move more' }).click();
   await choose(form, 'Source location', 'ITC-S1A');
   await choose(form, 'Destination location', 'ITC-S1C');
   await form.getByLabel('Move All from this source location').check();

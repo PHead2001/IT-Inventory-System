@@ -12,7 +12,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 
 const rootCode = 'ITC';
-test.use({ deviceScaleFactor: 2 });
+test.use({ deviceScaleFactor: 2, trace: 'on' });
 
 test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
   page,
@@ -33,13 +33,16 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
     .locator('summary')
     .filter({ hasText: /^Retire asset$/ })
     .click();
-  const retire = page.getByRole('form', { name: 'Retire asset', exact: true });
+  const retire = page.getByRole('form', {
+    name: 'Retire asset',
+    exact: true,
+  });
   await retire
     .getByLabel('Reason (required)')
     .fill('Checkpoint fictional retired label fixture');
   await retire.getByRole('button', { name: 'Review retire asset' }).click();
   await retire.getByRole('button', { name: 'Confirm retire asset' }).click();
-  await expect(page.getByText(/Retired · Version 2/)).toBeVisible();
+  await expect(page.getByText(/retired · Version 2/)).toBeVisible();
   await page.getByRole('link', { name: 'Print asset label' }).click();
   await expect(page).toHaveURL(/\/labels$/);
   const queue = page.getByRole('region', { name: 'Label queue' });
@@ -77,7 +80,6 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
   await expect(queue).toContainText('0 distinct records · 0 labels');
   await expect(page).toHaveURL(/\/labels\?keep=state#sheet$/);
 });
-
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);
@@ -86,6 +88,15 @@ async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await expect(
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
+}
+
+async function addSearchRecord(page: Page, name: string) {
+  const row = page
+    .getByRole('region', { name: 'Search result records' })
+    .locator(':scope > div')
+    .filter({ has: page.getByRole('link', { name, exact: true }) });
+  await expect(row).toHaveCount(1);
+  await row.getByRole('button', { name: 'Add to queue', exact: true }).click();
 }
 
 async function openEditForm(
@@ -732,11 +743,11 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await addSearchRecord(page, quantityName);
   await search.getByRole('textbox').fill(assetName);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: assetName })).toBeVisible();
-  await page.getByRole('button', { name: 'Add to queue' }).click();
+  await addSearchRecord(page, assetName);
   await chooseLocation(
     page.locator('section').filter({ hasText: 'Add a location' }).first(),
     'Location',

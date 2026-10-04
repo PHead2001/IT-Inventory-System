@@ -289,6 +289,7 @@ export function MetadataForm({
   const recovery = useRef<CreationEnvelope | null>(null);
   const recoveredEditing = useRef(false);
   const recoveryHydrated = useRef(false);
+  const recoveryURLQueued = useRef(false);
   const liveMount = useRef(true);
   useEffect(() => {
     liveMount.current = true;
@@ -313,6 +314,28 @@ export function MetadataForm({
     if (recoveryHydrated.current && recovery.current?.status === 'editing')
       inputsSnapshot.current = currentInputs;
   });
+  const bindCreationURL = (instance: string) => {
+    recoveryURLQueued.current = true;
+    setRecoveryReady(false);
+    try {
+      router.replace(creationURL(instance), { scroll: false });
+    } catch {
+      setRecoveryError(
+        'The creation URL could not be opened. Retry creation recovery to reopen this same durable draft.',
+      );
+    }
+  };
+  const retryCreationURL = () => {
+    const active = recovery.current;
+    if (!active || routeDraftId || recoveryReady || recoveryBlocked) return;
+    const stored = readCreation(active.scope, active.instance);
+    if (!stored.envelope || stored.error) {
+      setRecoveryError(stored.error || recoveryLimitation);
+      return;
+    }
+    setRecoveryError('');
+    bindCreationURL(active.instance);
+  };
   const persistInputs = (patch: Partial<CreationInputs> = {}) => {
     if (!recoveryEnabled) return true;
     const existing = recovery.current;
@@ -332,6 +355,9 @@ export function MetadataForm({
       return false;
     }
     setRecoveryError('');
+    if (!routeDraftId && !recoveryURLQueued.current) {
+      bindCreationURL(existing.instance);
+    }
     return true;
   };
   const persistInputsRef = useRef(persistInputs);
@@ -415,13 +441,17 @@ export function MetadataForm({
       setUncertain(true);
     } else if (envelope.status === 'saved' || envelope.status === 'discarded')
       setTerminalDraft(envelope);
-    if (stored.error || (!stored.envelope && !writeCreation(envelope)))
-      setRecoveryError(recoveryLimitation);
+    const durable =
+      !stored.error && (!!stored.envelope || writeCreation(envelope));
+    if (!durable) setRecoveryError(recoveryLimitation);
     setOtherDrafts(pendingCreations(scope, instance));
-    if (!routeDraftId) {
-      router.replace(creationURL(instance), { scroll: false });
+    if (!routeDraftId && durable) {
+      bindCreationURL(instance);
     }
-    setRecoveryReady(true);
+    // A canonical route replaces its component key when the supported router
+    // binds this instance. Keep controls disabled until that remount has read
+    // durable state; never remount a storage-failed in-memory draft.
+    setRecoveryReady(!!routeDraftId || !durable);
   });
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
@@ -1443,7 +1473,14 @@ export function MetadataForm({
       onSubmit={preview ? (event) => event.preventDefault() : submit}
     >
       {recoveryEnabled && !recoveryReady && !recoveryBlocked && (
-        <p role="status">Checking creation recovery…</p>
+        <div role="status">
+          <p>Checking creation recovery…</p>
+          {!routeDraftId && (
+            <Button type="button" variant="outline" onClick={retryCreationURL}>
+              Retry creation recovery
+            </Button>
+          )}
+        </div>
       )}
       {recoveryError && (
         <p
