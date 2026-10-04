@@ -2208,7 +2208,7 @@ export function MetadataSettings({
               className="min-w-0 space-y-4 lg:[&_input]:scroll-mt-56 lg:[&_button]:scroll-mt-56 lg:[&_select]:scroll-mt-56 lg:[&_textarea]:scroll-mt-56 lg:[&_[data-control-id]]:scroll-mt-56"
             >
               <nav
-                className="flex flex-wrap gap-2 lg:hidden"
+                className="flex flex-wrap gap-2 min-[1152px]:hidden"
                 aria-label="Designer panels"
               >
                 {(['library', 'canvas', 'inspector'] as const).map((panel) => (
@@ -2320,11 +2320,11 @@ export function MetadataSettings({
               >
                 <div
                   data-testid="designer-panes"
-                  className="grid min-w-0 gap-4 lg:grid-cols-[minmax(10rem,1fr)_minmax(0,2.5fr)_minmax(13rem,1fr)]"
+                  className="grid min-w-0 gap-4 min-[1152px]:grid-cols-[minmax(10rem,1fr)_minmax(0,2.5fr)_minmax(13rem,1fr)]"
                 >
                   <div
                     data-testid="designer-library"
-                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
+                    className={`${mobilePanel === 'library' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
                   >
                     <h3 className="font-semibold">Field library</h3>
                     <Button
@@ -2379,7 +2379,7 @@ export function MetadataSettings({
                   </div>
                   <div
                     data-testid="designer-canvas"
-                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
+                    className={`${mobilePanel === 'canvas' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
                   >
                     <h3 className="font-semibold">Form canvas</h3>
                     <Button
@@ -2798,7 +2798,7 @@ export function MetadataSettings({
                   </div>
                   <aside
                     data-testid="designer-inspector"
-                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 lg:block`}
+                    className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
                     aria-label="Designer inspector"
                   >
                     <h3 className="font-semibold">Inspector</h3>

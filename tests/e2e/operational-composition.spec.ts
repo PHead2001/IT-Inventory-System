@@ -616,6 +616,21 @@ test('CP3 U08 designer starts with useful canvas and supports keyboard recovery,
   await page.getByRole('link', { name: category, exact: true }).click();
   await page.setViewportSize({ width: 1180, height: 757 });
   const designer = page.getByRole('region', { name: 'Forms and fields' });
+  await expect(
+    designer.getByRole('heading', { name: 'Field library', exact: true }),
+  ).toBeVisible();
+  await expect(
+    designer.getByRole('complementary', {
+      name: 'Designer inspector',
+      exact: true,
+    }),
+  ).toBeVisible();
+  const canvasWidth = await designer
+    .getByRole('heading', { name: 'Form canvas', exact: true })
+    .evaluate(
+      (heading) => heading.parentElement!.getBoundingClientRect().width,
+    );
+  expect(canvasWidth).toBeGreaterThanOrEqual(400);
   const field = designer.locator('[aria-label="Select Name control"]');
   await expect(field).toBeVisible();
   const box = await field.boundingBox();

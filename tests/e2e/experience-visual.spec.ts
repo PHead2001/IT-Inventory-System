@@ -365,7 +365,7 @@ test('configuration, site custody, and location browsing remain legible at deskt
       { path: '/settings', heading: 'Settings', file: 'settings' },
       {
         path: '/settings/sites',
-        heading: 'Manage sites',
+        heading: 'Properties & sites',
         file: 'manage-sites',
       },
       {

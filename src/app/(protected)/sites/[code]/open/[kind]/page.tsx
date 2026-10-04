@@ -54,8 +54,7 @@ export default async function SiteOpeningPage({
       <p className="experience-eyebrow mt-3">Site / Opening record</p>
       <h1 className="experience-heading my-3 break-words">
         Record existing{' '}
-        {kind === 'asset' ? 'serialized asset' : 'quantity holding'} at{' '}
-        {site.name}
+        {kind === 'asset' ? 'individual asset' : 'quantity item'} at {site.name}
       </h1>
       <p className="mb-5 max-w-3xl text-sm leading-6 text-slate-300">
         Use this only for equipment already at the site before it was recorded

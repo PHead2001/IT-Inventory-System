@@ -312,7 +312,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
       files
         .locator('ul')
         .first()
-        .getByText(/^ready/),
+        .getByText(/^Ready\b/),
     ).toBeVisible();
     const publishedVariant = await db.query<{ bytes: string }>(
       `select fo.bytes::text bytes from private.file_objects fo

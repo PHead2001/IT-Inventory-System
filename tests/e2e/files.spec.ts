@@ -17,6 +17,23 @@ function richStatePath(name: string) {
   mkdirSync(directory, { recursive: true });
   return join(directory, name + '.png');
 }
+async function expectRemovedFile(files: Locator, filename: string) {
+  await expect(
+    files
+      .getByRole('alert')
+      .or(files.getByRole('status'))
+      .filter({ hasText: /^File removed\./ }),
+  ).toBeVisible();
+  await expect(files.locator('ul').first().getByRole('listitem')).toHaveCount(
+    0,
+  );
+  await expect(
+    files.locator('ul').first().getByText(filename, { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    files.getByRole('button', { name: 'Remove', exact: true }),
+  ).toHaveCount(0);
+}
 
 async function login(page: Page, role: 'staff' | 'viewer') {
   await page.goto('/login');
@@ -295,9 +312,7 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   ).toBeVisible();
   await expect(cards.getByText('first.png', { exact: true })).toHaveCount(0);
   await files.getByRole('button', { name: 'Remove' }).click();
-  await expect(
-    files.getByText(/^(No photo yet|No attachments yet)\./),
-  ).toBeVisible();
+  await expectRemovedFile(files, 'second.png');
   await expect(
     page.getByRole('heading', {
       name: 'Current stock — 0 available in storage',
@@ -357,7 +372,11 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   await submitCustody(assign, 'Assign asset to a site');
   await page.reload();
   await expect(
-    page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
+    page
+      .locator('dt')
+      .filter({ hasText: /^Current custody$/ })
+      .locator('xpath=following-sibling::dd')
+      .getByRole('link', { name: `${siteName} (${siteCode})`, exact: true }),
   ).toBeVisible();
   await expect(cards.getByText('manual.pdf', { exact: true })).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
@@ -423,9 +442,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     sha256(replacementBytes),
   );
   await files.getByRole('button', { name: 'Remove' }).click();
-  await expect(
-    files.getByText(/^(No photo yet|No attachments yet)\./),
-  ).toBeVisible();
+  await expectRemovedFile(files, 'replacement.pdf');
 });
 
 test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
@@ -545,9 +562,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
       sha256(nearLimit),
     );
     await files.getByRole('button', { name: 'Remove' }).click();
-    await expect(
-      files.getByText(/^(No photo yet|No attachments yet)\./),
-    ).toBeVisible();
+    await expectRemovedFile(files, 'large-manual.pdf');
     published = true;
   } catch (error) {
     primaryError = error;

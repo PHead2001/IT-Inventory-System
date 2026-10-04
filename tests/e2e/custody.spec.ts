@@ -304,11 +304,19 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     .selectOption({ label: `${siteName} (${siteCode})` });
   await assign.getByRole('button', { name: 'Assign asset to a site' }).click();
   await expect(
-    page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
+    page
+      .locator('dt')
+      .filter({ hasText: /^Current custody$/ })
+      .locator('xpath=following-sibling::dd')
+      .getByRole('link', { name: `${siteName} (${siteCode})`, exact: true }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole('link', { name: `Assigned to ${siteName} (${siteCode})` }),
+    page
+      .locator('dt')
+      .filter({ hasText: /^Current custody$/ })
+      .locator('xpath=following-sibling::dd')
+      .getByRole('link', { name: `${siteName} (${siteCode})`, exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Custody history' }),
@@ -345,7 +353,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('region', { name: 'Grouped current holdings' }),
   ).toContainText('1 distinct serialized device');
   await expect(
-    page.getByText('Current serialized assets').locator('..'),
+    page.getByText('Current individual assets').locator('..'),
   ).toContainText('1');
   // The browse filter uses site UUIDs. Search by unique asset name here, and
   // verify the row links to the site rather than claiming a closet drawer.

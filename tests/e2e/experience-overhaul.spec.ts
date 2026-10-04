@@ -155,7 +155,7 @@ test('Settings deep links retain active navigation through Back and Forward and 
     ['Categories', '/settings/categories', 'Categories'],
     ['Forms & fields', '/settings/forms', 'Forms & fields'],
     ['Storage locations', '/settings/locations', 'Manage logical locations'],
-    ['Properties & sites', '/settings/sites', 'Manage sites'],
+    ['Properties & sites', '/settings/sites', 'Properties & sites'],
     ['Labels & printing', '/settings/labels', 'Labels & printing defaults'],
   ] as const) {
     await navigation.getByRole('link', { name: label, exact: true }).click();

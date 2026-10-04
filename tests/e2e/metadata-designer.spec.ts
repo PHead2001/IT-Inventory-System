@@ -512,14 +512,14 @@ test('a pre-existing server draft remains reviewable and can be explicitly disca
   );
   expect(saved.error).toBeNull();
   await page.reload();
-  await expect(designer.getByText('Legacy draft available')).toBeVisible();
   await expect(designer.getByLabel('Section heading').first()).toHaveValue(
     'Recovered server draft section',
   );
-  page.once('dialog', (dialog) => dialog.accept());
   await designer
     .getByRole('button', { name: 'Recovery & advanced', exact: true })
     .click();
+  await expect(designer.getByText('Legacy draft available')).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
   await designer.getByRole('button', { name: 'Discard saved draft' }).click();
   await expect(
     designer.getByRole('status').filter({ hasText: 'Saved draft discarded.' }),
