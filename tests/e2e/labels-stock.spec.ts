@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
   BinaryBitmap,
+  BarcodeFormat,
+  DecodeHintType,
   HybridBinarizer,
   MultiFormatReader,
   RGBLuminanceSource,
@@ -110,7 +112,11 @@ async function openEditForm(
   return form;
 }
 
-async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
+async function decodeScreenshot(
+  _page: Page,
+  png: Buffer,
+  format?: BarcodeFormat,
+): Promise<string> {
   const image = PNG.sync.read(png);
   const rgba = new Uint8ClampedArray(image.data);
   const canvas = {
@@ -133,7 +139,9 @@ async function decodeScreenshot(_page: Page, png: Buffer): Promise<string> {
           new RGBLuminanceSource(gray, image.width, image.height),
         ),
       ),
-      new Map(),
+      format === undefined
+        ? new Map()
+        : new Map([[DecodeHintType.POSSIBLE_FORMATS, [format]]]),
     );
   }).getText();
 }
@@ -620,11 +628,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await readyPreview(page, 1);
   const card = page.locator('.label-card').filter({ hasText: originalName });
   await expect(card).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath('asset-before-move.png') });
+  const renderedQr = card.getByRole('img', { name: /QR code for/ });
   const initialCode = await decodeScreenshot(
     page,
-    await card.screenshot({
-      path: testInfo.outputPath('asset-before-move.png'),
-    }),
+    await renderedQr.screenshot(),
+    BarcodeFormat.QR_CODE,
   );
   expect(initialCode).toBe(process.env.APP_ORIGIN + '/inventory/assets/' + id);
   const located = await local
@@ -680,12 +689,12 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   await page.goto('/labels?asset=' + id);
   await readyPreview(page, 1);
   await expect(card).toContainText('Renamed Label asset');
+  await card.screenshot({ path: testInfo.outputPath('asset-after-move.png') });
   expect(
     await decodeScreenshot(
       page,
-      await card.screenshot({
-        path: testInfo.outputPath('asset-after-move.png'),
-      }),
+      await renderedQr.screenshot(),
+      BarcodeFormat.QR_CODE,
     ),
   ).toBe(initialCode);
   await page.goto('/scan');
