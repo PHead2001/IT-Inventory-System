@@ -114,9 +114,9 @@ test('failed and delayed category requests retain dirty and pending input and sa
   const modal = page.getByRole('dialog', { name: 'Add field', exact: true });
   await modal.getByLabel('Field name').fill('Pending during failed load');
   release();
-  await expect(designer.locator('[role="status"]')).toContainText(
-    'could not be opened',
-  );
+  await expect(
+    designer.getByRole('status').filter({ hasText: 'could not be opened' }),
+  ).toContainText('could not be opened');
   await expect(modal.getByLabel('Field name')).toHaveValue(
     'Pending during failed load',
   );

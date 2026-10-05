@@ -1,4 +1,8 @@
-import { openRecordTask } from './record-task-controls';
+import {
+  beginNewRecordTransaction,
+  expectStableReceiptAction,
+  openRecordTask,
+} from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
@@ -176,6 +180,9 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectStableReceiptAction(page, 'New transaction');
+  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 
@@ -202,6 +209,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 4$/)).toBeVisible();
+    await beginNewRecordTransaction(page, 'New transaction');
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
@@ -221,6 +229,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 6$/)).toBeVisible();
+    await beginNewRecordTransaction(page, 'New transaction');
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
       converged,
@@ -250,6 +259,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 7$/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
   // A successful category change establishes its own complete baseline too.
@@ -260,6 +270,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     .check();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 8$/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(metadataReviewButton(editForm)).toBeEnabled();
   await editForm

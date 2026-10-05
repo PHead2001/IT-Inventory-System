@@ -143,13 +143,13 @@ test('a serialized control excluded by its section can recover through a compati
     destination.getByRole('button', { name: 'Drag Serial Number' }),
   ).toBeVisible();
   await expect(control.getByTitle('Form types using this field')).toHaveText(
-    'Serialized',
+    'Individual asset',
   );
   await saveDesigner(designer);
   await openDesigner(page, category);
   const restored = fieldControl(designer, 'Serial Number');
   await expect(restored.getByTitle('Form types using this field')).toHaveText(
-    'Serialized',
+    'Individual asset',
   );
 });
 
@@ -507,7 +507,7 @@ test('hidden sections and preview exclusions remain distinct through save and re
   await openHiddenFields(library);
   await expect(
     library.getByRole('heading', {
-      name: /Excluded from Serialized preview \([1-9]/,
+      name: /Excluded from Individual asset preview \([1-9]/,
     }),
   ).toBeVisible();
   await expect(

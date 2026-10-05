@@ -241,7 +241,11 @@ export function ArchiveQuantityForm({
         <>
           <p role="status">Stock removed and quantity item archived.</p>
           {resetTask && (
-            <Button type="button" onClick={resetTask}>
+            <Button
+              type="button"
+              className="hover:translate-y-0 active:scale-100"
+              onClick={resetTask}
+            >
               New transaction
             </Button>
           )}

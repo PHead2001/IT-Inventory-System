@@ -478,6 +478,7 @@ function CustodyFields(latest: Props) {
       {completed ? (
         <Button
           type="button"
+          className="hover:translate-y-0 active:scale-100"
           onClick={() => {
             if (resetTask) {
               resetTask();

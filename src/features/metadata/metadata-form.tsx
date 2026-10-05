@@ -2190,7 +2190,12 @@ export function MetadataForm({
         <>
           <p role="status">Metadata saved.</p>
           {resetTask && (
-            <Button type="button" disabled={pending} onClick={resetTask}>
+            <Button
+              type="button"
+              className="hover:translate-y-0 active:scale-100"
+              disabled={pending}
+              onClick={resetTask}
+            >
               New transaction
             </Button>
           )}

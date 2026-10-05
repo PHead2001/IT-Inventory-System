@@ -1368,6 +1368,7 @@ function MutationFormFields({
       {completed && !moving ? (
         <Button
           type="button"
+          className="hover:translate-y-0 active:scale-100"
           onClick={() => {
             if (resetTask) {
               resetTask();
@@ -1398,6 +1399,7 @@ function MutationFormFields({
             type="button"
             disabled={pending}
             onClick={() => refreshMove(true)}
+            className="hover:translate-y-0 active:scale-100"
           >
             Move more
           </Button>

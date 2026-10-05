@@ -1,4 +1,8 @@
-import { openRecordTask } from './record-task-controls';
+import {
+  beginNewRecordTransaction,
+  expectStableReceiptAction,
+  openRecordTask,
+} from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -33,14 +37,22 @@ async function confirm(form: Locator, name: string) {
     await metadataSaveButton(form).click();
     return;
   }
+  const action =
+    name === 'Restore quantity definition' ? 'Restore quantity item' : name;
   await form
-    .getByRole('button', { name: 'Review ' + name.toLowerCase(), exact: true })
+    .getByRole('button', {
+      name: 'Review ' + action.toLowerCase(),
+      exact: true,
+    })
     .click();
   await expect(
     form.getByRole('region', { name: 'Review changes' }),
   ).toBeVisible();
   await form
-    .getByRole('button', { name: 'Confirm ' + name.toLowerCase(), exact: true })
+    .getByRole('button', {
+      name: 'Confirm ' + action.toLowerCase(),
+      exact: true,
+    })
     .click();
 }
 async function version(page: Page, value: number) {
@@ -151,7 +163,9 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(form.getByRole('status')).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
-    await form.getByRole('button', { name: 'Move more' }).click();
+    await expectStableReceiptAction(page, 'Move more');
+    await version(page, 2);
+    await beginNewRecordTransaction(page, 'Move more');
     await expect(form.getByLabel('Quantity to move')).toHaveValue('');
     await choose(form, 'Source location', 'ITC-RED');
     await choose(form, 'Destination location', 'ITC-BLACK');
@@ -487,6 +501,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await form.getByLabel('Reason (required)').fill('Verified physical count');
   await confirm(form, 'Correct physical count');
   await version(page, 5);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit quantity metadata');
   await expect(metadataReviewButton(form)).toBeEnabled();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
@@ -554,6 +569,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 9);
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Restore quantity definition');
   await form.getByLabel('Reason (required)').fill('Needed again');
   await confirm(form, 'Restore quantity definition');
@@ -638,16 +654,19 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await choose(form, 'Destination location', 'ITC-D01');
   await confirm(form, 'Move asset');
   await version(page, 2);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Correct recorded location');
   await choose(form, 'Destination location', 'ITC-D02');
   await form.getByLabel('Reason (required)').fill('Found in adjacent drawer');
   await confirm(form, 'Correct recorded location');
   await version(page, 3);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit asset metadata');
   await expect(metadataReviewButton(form)).toBeEnabled();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Retire asset');
   await form.getByLabel('Reason (required)').fill('Removed from service');
   await confirm(form, 'Retire asset');
@@ -732,6 +751,8 @@ test('overlapping two-page edits renew field choices after further races and vie
   // Each new overlapping commit invalidates the previous choice. A stale "mine"
   // decision must never silently overwrite a subsequently observed value.
   for (const nextVersion of [3, 4]) {
+    await beginNewRecordTransaction(other, 'New transaction');
+    await openForm(other, 'Edit quantity metadata');
     await otherForm
       .getByLabel('Name', { exact: true })
       .fill(name + ' concurrent ' + nextVersion);

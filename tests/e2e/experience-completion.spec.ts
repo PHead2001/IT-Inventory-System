@@ -26,7 +26,10 @@ async function reviewMetadata(form: Locator) {
     await expect(
       form.getByRole('status').filter({ hasText: /^Metadata saved\.$/ }),
     ).toBeVisible();
-    await expect(metadataReviewButton(form)).toBeEnabled();
+    await expect(metadataReviewButton(form)).toBeDisabled();
+    await expect(
+      form.getByRole('button', { name: 'New transaction', exact: true }),
+    ).toBeEnabled();
     await expect(
       form.getByRole('button', { name: 'Retry saved record refresh' }),
     ).toHaveCount(0);
@@ -154,12 +157,7 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await unchanged();
 
   await page.goto(detail);
-  const issue = page.locator('form').filter({
-    has: page.getByRole('heading', {
-      name: 'Issue stock to a site',
-      exact: true,
-    }),
-  });
+  const issue = await openRecordTask(page, 'Issue stock to a site');
   await chooseLocation(issue, 'Storage source', 'ITC-S1B');
   await issue
     .getByLabel('Destination site')
@@ -175,9 +173,7 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await unchanged();
 
   await page.goto(detail);
-  const returned = page.locator('form').filter({
-    has: page.getByRole('heading', { name: 'Return to storage', exact: true }),
-  });
+  const returned = await openRecordTask(page, 'Return to storage');
   await returned
     .getByLabel('Source site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
