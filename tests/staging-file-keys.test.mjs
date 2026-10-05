@@ -577,6 +577,46 @@ test('invalid bounds refuse before stage', async () => {
   );
   assert.deepEqual(f.writes, []);
 });
+test('current baseline guard refuses retained proof even when its SHA differs from the candidate', async () => {
+  const f = fixture();
+  const runtime = f.options.vercel.runtimeBinding;
+  const purposes = [];
+  f.options.vercel.runtimeBinding = async (id, purpose) => {
+    purposes.push(purpose);
+    return { ...(await runtime(id)), verificationMode: 'retained' };
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_RUNTIME_PENDING',
+  );
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(purposes, ['current']);
+});
+test('only prior completion reconciliation requests historical purpose; guard and activation request current', async () => {
+  const f = fixture();
+  await provisionStagingFiles(f.options);
+  const priorId = f.state.current.id;
+  f.options.expectedCurrentDeployment = priorId;
+  f.options.expectedSha = 'e'.repeat(40);
+  const runtime = f.options.vercel.runtimeBinding;
+  const calls = [];
+  f.options.vercel.runtimeBinding = async (id, purpose) => {
+    calls.push({ id, purpose });
+    return runtime(id);
+  };
+  await provisionStagingFiles(f.options);
+  assert.ok(calls.some((call) => call.purpose === 'prior-completion'));
+  assert.ok(
+    calls
+      .filter((call) => call.purpose === 'prior-completion')
+      .every((call) => call.id === priorId),
+  );
+  assert.ok(
+    calls
+      .filter((call) => call.id === f.state.current.id)
+      .every((call) => call.purpose === 'current'),
+  );
+});
 test('ambiguous deployments refuse recovery and never activate', async () => {
   const f = fixture();
   await provisionStagingFiles(f.options);

@@ -169,9 +169,11 @@ export async function provisionStagingFiles(options) {
   let deployment;
   let key;
   let context;
-  const verifyRuntime = async (row) => {
-    const proof = await vercel.runtimeBinding(row.id);
+  const verifyRuntime = async (row, purpose = 'current') => {
+    const proof = await vercel.runtimeBinding(row.id, purpose);
     if (!proof) fail('STAGING_RUNTIME_PENDING', true);
+    if (purpose === 'current' && proof.verificationMode === 'retained')
+      fail('STAGING_RUNTIME_PENDING', true);
     if (
       proof.hostname !== STAGING_PINS.hostname ||
       proof.deploymentId !== row.id ||
@@ -229,7 +231,7 @@ export async function provisionStagingFiles(options) {
       current.readyState !== 'READY'
     )
       fail('STAGING_CURRENT_DENIED');
-    await verifyRuntime(current);
+    await verifyRuntime(current, 'current');
   };
   // Recover a prior POST before checking the alias: Vercel may have already
   // advanced staging to that unique persisted operation's candidate.
@@ -264,7 +266,8 @@ export async function provisionStagingFiles(options) {
       fail('STAGING_PRIOR_PENDING', true);
     if (!['READY', 'ERROR', 'CANCELED'].includes(fresh.readyState))
       fail('STAGING_DEPLOYMENT_UNCERTAIN', true);
-    if (fresh.readyState === 'READY') await verifyRuntime(fresh);
+    if (fresh.readyState === 'READY')
+      await verifyRuntime(fresh, 'prior-completion');
   };
   await guard();
   await reconcilePrior();
@@ -432,7 +435,7 @@ export async function provisionStagingFiles(options) {
   await hydrate();
   if (deployment.readyState !== 'READY')
     fail('STAGING_DEPLOYMENT_PENDING', true);
-  await verifyRuntime(deployment);
+  await verifyRuntime(deployment, 'current');
   const finalKey = await freshGuards();
   if (!finalKey.accepts_new) {
     try {
