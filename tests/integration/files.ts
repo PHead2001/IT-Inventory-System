@@ -1223,6 +1223,36 @@ async function finalizeCancelRace(
     'failed finalize leaves no completed receipt',
   );
   if (cancelWins) {
+    // Cancellation has only a file-ID argument, not a receipt/request token.
+    // Both an identical retry and a fresh invocation on this terminal file must
+    // report invalid_transition without repeating its committed side effects.
+    const cancelArgs = { p_file_id: file.id };
+    await denied(staff.client, 'inventory_file_cancel', cancelArgs, 'P1008');
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { ...cancelArgs },
+      'P1008',
+    );
+    eq(
+      (
+        await db.query(
+          `select f.state,f.version::text,o.cleanup_state,c.revision::text,
+          (select count(*)::text from public.inventory_file_events where file_id=f.id) events,
+          (select count(*)::text from private.file_receipts where actor_id=$2 and request_id=$3 and result is not null) receipts
+          from public.inventory_files f join private.file_objects o on o.file_id=f.id
+          join public.inventory_file_collections c on c.asset_id=f.asset_id where f.id=$1`,
+          [file.id, staff.id, requestId],
+        )
+      ).rows[0],
+      readback,
+      'repeated cancellation retains terminal state/version, collection, objects and event/receipt counts',
+    );
+    eq(
+      sha(await bytesAt(admin, file.path)),
+      sha(bytes),
+      'repeated cancellation leaves physical source for truthful normal cleanup',
+    );
     await denied(
       staff.client,
       'inventory_file_finalize',
@@ -1287,6 +1317,38 @@ async function finalizeCancelRace(
     });
   }
   if (cancelWins) {
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { p_file_id: file.id },
+      'P1008',
+    );
+    for (let repeat = 0; repeat < 2; repeat++) {
+      eq(
+        await okay(staff.client, 'inventory_file_cleanup_claim_parent', {
+          p_parent_type: 'asset',
+          p_parent_id: parent,
+          p_limit: 20,
+          p_key_id: keyId,
+          ...serverProof(secret, staff.id, 'cleanup_claim', [
+            'asset',
+            parent,
+            '20',
+            keyId,
+          ]),
+        }),
+        [],
+        'repeated cleanup claims no objects after cancelled source deletion',
+      );
+      eq(
+        await okay(staff.client, 'inventory_file_cleanup_status', {
+          p_parent_type: 'asset',
+          p_parent_id: parent,
+        }),
+        { outstanding: 0, blocked: 0 },
+        'authoritative repeated cleanup status is zero work',
+      );
+    }
     await denied(
       staff.client,
       'inventory_file_finalize',
