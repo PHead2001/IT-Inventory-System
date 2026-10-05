@@ -185,7 +185,7 @@ export async function provisionStagingFiles(options) {
     )
       fail('STAGING_RUNTIME_DENIED');
   };
-  const guard = async () => {
+  const guard = async (requireCandidate = false) => {
     assertStagingBranch(await management.branches(PRODUCTION_REF));
     assertProject(await vercel.project());
     const fresh = await vercel.assertBackend(
@@ -217,7 +217,11 @@ export async function provisionStagingFiles(options) {
     if (
       !current?.id ||
       (current.id !== expectedCurrentDeployment &&
-        current.id !== deployment?.id)
+        current.id !== deployment?.id) ||
+      (requireCandidate &&
+        (!deployment ||
+          current.id !== deployment.id ||
+          current.gitSource?.sha !== expectedSha))
     )
       fail('STAGING_DEPLOYMENT_CHANGED');
     if (
@@ -340,8 +344,8 @@ export async function provisionStagingFiles(options) {
     if (freshKey?.secret !== key.secret) fail('STAGING_KEY_CHANGED');
     return freshKey;
   };
-  const freshGuards = async () => {
-    await guard();
+  const freshGuards = async (requireCandidate = false) => {
+    await guard(requireCandidate);
     await reconcilePrior();
     return exact();
   };
@@ -437,20 +441,17 @@ export async function provisionStagingFiles(options) {
   if (deployment.readyState !== 'READY')
     fail('STAGING_DEPLOYMENT_PENDING', true);
   await verifyRuntime(deployment, 'current');
-  const finalKey = await freshGuards();
+  const finalKey = await freshGuards(true);
   if (!finalKey.accepts_new) {
     try {
       await database.activate(STAGING_REF, STAGING_KEY_ID, key.secret);
     } catch {
       /* Exact readback proves uncertain activation. */
     }
-    const active = assertKey(
-      await database.read(STAGING_REF, STAGING_KEY_ID),
-      STAGING_KEY_ID,
-    );
-    if (!active?.accepts_new || active.secret !== key.secret)
-      fail('STAGING_ACTIVATION_UNCERTAIN', true);
   }
+  const active = await freshGuards(true);
+  if (!active.accepts_new || active.secret !== key.secret)
+    fail('STAGING_ACTIVATION_UNCERTAIN', true);
   return {
     branch: STAGING_BRANCH,
     backend: STAGING_REF,

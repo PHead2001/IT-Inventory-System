@@ -29,6 +29,7 @@ export function migrationRevision(rows) {
 export const STAGING_FILE_MIGRATIONS = Object.freeze([
   '20261005142029',
   '20261005153057',
+  '20261005163814',
 ]);
 // Migration history alone is insufficient: the current RPC/permission contract
 // must also be present before a validator secret can enable file operations.

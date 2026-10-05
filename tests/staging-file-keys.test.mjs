@@ -226,6 +226,20 @@ test('CP5 schema without the pending-capacity followup and matching digest canno
   );
   assert.deepEqual(f.writes, []);
 });
+
+test('CP5 schema without staging-allocation accounting and a matching digest cannot write', async () => {
+  const f = fixture();
+  f.state.schemaReady = false;
+  f.state.revision = migrationRevision(
+    STAGING_FILE_MIGRATIONS.slice(0, 2).map((version) => ({ version })),
+  );
+  f.options.expectedMigrationRevision = f.state.revision;
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, []);
+});
 test('schema contract drift after staging prevents environment/deployment/activation writes', async () => {
   const f = fixture();
   const stage = f.options.database.stage;
@@ -310,6 +324,70 @@ test('matching active key survives a new candidate SHA without automatic rotatio
   assert.deepEqual(f.writes, ['env', 'deploy']);
   assert.equal(f.state.key.secret, secret);
   assert.equal(f.state.key.accepts_new, true);
+});
+
+test('rollback to the baseline after candidate runtime proof prevents activation', async () => {
+  const f = fixture();
+  const runtime = f.options.vercel.runtimeBinding;
+  f.options.vercel.runtimeBinding = async (id, purpose) => {
+    const proof = await runtime(id, purpose);
+    if (id === 'dpl_candidate_0') f.state.current = f.original;
+    return proof;
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_DEPLOYMENT_CHANGED',
+  );
+  assert.deepEqual(f.writes, ['stage', 'env', 'deploy']);
+  assert.equal(f.state.key.accepts_new, false);
+});
+
+test('already active rerun cannot report success while the alias serves the baseline', async () => {
+  const f = fixture();
+  await provisionStagingFiles(f.options);
+  f.writes.length = 0;
+  f.state.current = f.original;
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_DEPLOYMENT_CHANGED',
+  );
+  assert.deepEqual(f.writes, []);
+  assert.equal(f.state.key.accepts_new, true);
+});
+
+test('rollback after activation cannot pass final success readback', async () => {
+  const f = fixture();
+  const activate = f.options.database.activate;
+  f.options.database.activate = async (...args) => {
+    await activate(...args);
+    f.state.current = f.original;
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_DEPLOYMENT_CHANGED',
+  );
+  assert.deepEqual(f.writes, ['stage', 'env', 'deploy', 'activate']);
+  assert.equal(f.state.key.accepts_new, true);
+});
+
+test('candidate alias with another SHA after runtime proof cannot activate', async () => {
+  const f = fixture();
+  const runtime = f.options.vercel.runtimeBinding;
+  f.options.vercel.runtimeBinding = async (id, purpose) => {
+    const proof = await runtime(id, purpose);
+    if (id === 'dpl_candidate_0')
+      f.state.current = {
+        ...f.state.current,
+        gitSource: { ...f.state.current.gitSource, sha: 'e'.repeat(40) },
+      };
+    return proof;
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_DEPLOYMENT_CHANGED',
+  );
+  assert.equal(f.state.key.accepts_new, false);
+  assert.equal(f.writes.includes('activate'), false);
 });
 for (const [label, change, code] of [
   [
