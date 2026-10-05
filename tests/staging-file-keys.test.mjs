@@ -17,6 +17,8 @@ import {
   STAGING_FILE_MIGRATIONS,
 } from '../scripts/staging-file-keys-providers.mjs';
 import { fingerprint } from '../scripts/preview-file-keys.mjs';
+import routineManifest from '../scripts/staging-file-routines.json' with { type: 'json' };
+import { assertStagingRoutineManifest } from '../scripts/staging-file-routines.mjs';
 import {
   STAGING_REF,
   PRODUCTION_REF,
@@ -254,6 +256,93 @@ test('schema contract drift after staging prevents environment/deployment/activa
   assert.deepEqual(f.writes, ['stage']);
   assert.equal(f.state.key.accepts_new, false);
 });
+
+test('portable routine manifest rejects missing, duplicate, foreign or unsafe catalog expectations', () => {
+  for (const mutate of [
+    (rows) => rows.pop(),
+    (rows) => {
+      rows[0] = structuredClone(rows[1]);
+    },
+    (rows) => {
+      rows[0].signature = 'private.foreign()';
+    },
+    (rows) => {
+      rows[0].external_body = true;
+    },
+    (rows) => {
+      rows[0].public_execute = true;
+    },
+    (rows) => {
+      rows[0].config.push('statement_timeout=1s');
+    },
+  ]) {
+    const changed = structuredClone(routineManifest);
+    mutate(changed.routines);
+    assert.throws(() => assertStagingRoutineManifest(changed));
+  }
+});
+
+for (const phase of ['initial', 'stage', 'env', 'deploy', 'candidate-proof']) {
+  test(`routine contract refusal at ${phase} stops every subsequent setup/activation write`, async () => {
+    const f = fixture();
+    let intact = phase !== 'initial';
+    let schemaReads = 0;
+    const providers = stagingFileProviders({
+      managementToken: 'synthetic-management',
+      vercelToken: 'synthetic-vercel',
+      currentDeployment: async () => {},
+      runtimeBinding: async () => {},
+      request: async (_url, options) => {
+        assert.equal(options.body.read_only, true);
+        if (options.body.query === SQL.schema) return [{ ready: true }];
+        assert.equal(options.body.query, STAGING_SCHEMA_SQL);
+        schemaReads++;
+        return [{ ready: intact }];
+      },
+    });
+    f.options.database.schema = providers.database.schema;
+    const wrap = (adapter, name) => {
+      const original = adapter[name];
+      adapter[name] = async (...args) => {
+        const value = await original(...args);
+        intact = false;
+        return value;
+      };
+    };
+    if (phase === 'stage') wrap(f.options.database, 'stage');
+    if (phase === 'env') wrap(f.options.vercel, 'writeEnv');
+    if (phase === 'deploy') wrap(f.options.vercel, 'createDeployment');
+    if (phase === 'candidate-proof') {
+      const binding = f.options.vercel.runtimeBinding;
+      f.options.vercel.runtimeBinding = async (...args) => {
+        const proof = await binding(...args);
+        if (args[0] === f.state.deployments[0]?.id) intact = false;
+        return proof;
+      };
+    }
+    await rejectsCode(
+      () => provisionStagingFiles(f.options),
+      'STAGING_SCHEMA_DENIED',
+    );
+    assert.ok(schemaReads > 0);
+    assert.deepEqual(
+      f.writes,
+      phase === 'initial'
+        ? []
+        : phase === 'stage'
+          ? ['stage']
+          : phase === 'env'
+            ? ['stage', 'env']
+            : ['stage', 'env', 'deploy'],
+    );
+    assert.notEqual(f.state.key?.accepts_new, true);
+    assert.equal(
+      f.state.revision,
+      revision,
+      'matching migration digest does not override routine drift',
+    );
+  });
+}
 
 test('staging provider requires base schema and the full canonical RPC/grant contract', async () => {
   for (const response of [

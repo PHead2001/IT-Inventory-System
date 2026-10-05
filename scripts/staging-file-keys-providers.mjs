@@ -10,6 +10,11 @@ import {
   STAGING_KEY_ID,
   parseStagingIntent,
 } from './staging-file-keys.mjs';
+import routineManifest from './staging-file-routines.json' with { type: 'json' };
+import {
+  STAGING_ROUTINE_CATALOG_CTE,
+  stagingRoutineComparisonSql,
+} from './staging-file-routines.mjs';
 
 const fail = (code) => {
   throw new PreviewAccessError(code, 'Staging file provider refused');
@@ -31,31 +36,12 @@ export const STAGING_FILE_MIGRATIONS = Object.freeze([
   '20261005153057',
   '20261005163814',
 ]);
-// Migration history alone is insufficient: the current RPC/permission contract
-// must also be present before a validator secret can enable file operations.
-export const STAGING_SCHEMA_SQL = `with required(signature,authenticated,return_type) as (values
-  ('private.file_parent_staff(text,uuid)',false,'void'),
-  ('private.file_reserve_ready(text,uuid,bigint,text,text,bigint,uuid,bigint)',false,'jsonb'),
-  ('public.inventory_file_reserve_ready(text,uuid,bigint,text,text,bigint,uuid,bigint,text,text,bigint,text)',true,'jsonb'),
-  ('public.inventory_file_cleanup_status(text,uuid)',true,'jsonb'),
-  ('public.inventory_file_cleanup_claim_parent(text,uuid,integer,text,text,bigint,text)',true,'jsonb')
-), routines as (
-  select required.*,p.* from required left join pg_proc p on p.oid=to_regprocedure(required.signature)
-), legacy(signature,message) as (values
-  ('public.inventory_file_reserve(text,uuid,bigint,text,text,bigint,uuid,bigint)','file_upload_requires_current_application'),
-  ('public.inventory_file_cleanup_claim(integer,text,text,bigint,text)','file_cleanup_requires_current_application')
-)
+// Version history and signatures cannot prove the CP5 implementation. Compare
+// the reviewed portable manifest at each fresh guard, including legacy wrappers.
+export const STAGING_SCHEMA_SQL = `with ${STAGING_ROUTINE_CATALOG_CTE}
 select (
-  (select count(*)=${STAGING_FILE_MIGRATIONS.length} from supabase_migrations.schema_migrations where version in (${STAGING_FILE_MIGRATIONS.map((version) => `'${version}'`).join(',')}))
-  and (select coalesce(bool_and(oid is not null and prosecdef and prorettype=to_regtype(return_type)
-    and exists(select 1 from unnest(proconfig) setting where setting in ('search_path=""','search_path='))
-    and has_function_privilege('authenticated',oid,'EXECUTE')=authenticated
-    and not has_function_privilege('anon',oid,'EXECUTE')
-    and not has_function_privilege('service_role',oid,'EXECUTE')
-    and not exists(select 1 from aclexplode(coalesce(proacl,acldefault('f',proowner))) acl where acl.grantee=0)),false) from routines)
-  and not exists(select 1 from legacy left join pg_proc p on p.oid=to_regprocedure(legacy.signature)
-    where p.oid is null or regexp_replace(p.prosrc,'[[:space:]]','','g') is distinct from
-      'beginperformprivate.file_staff();raiseexceptionusingerrcode=''P1014'',message='''||legacy.message||''';end')
+  (select pg_catalog.count(*)=${STAGING_FILE_MIGRATIONS.length} from supabase_migrations.schema_migrations where version in (${STAGING_FILE_MIGRATIONS.map((version) => `'${version}'`).join(',')}))
+  and ${stagingRoutineComparisonSql(routineManifest)}
 ) as ready`;
 
 // Runtime/current alias observations come from the caller's supported verified

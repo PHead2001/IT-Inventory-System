@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { SQL } from '../../scripts/preview-file-providers.mjs';
+import { verifyStagingRoutineContract } from './staging-file-routines.mjs';
 
 const connectionString = process.env.LOCAL_DB_URL;
 assert.ok(connectionString);
@@ -46,6 +47,7 @@ async function blockedActivation(change) {
 try {
   await owner.connect();
   await worker.connect();
+  await verifyStagingRoutineContract(owner);
   assert.equal((await owner.query(SQL.schema)).rows[0].ready, true);
   assert.equal(
     (

@@ -25,6 +25,7 @@
     "db:reset": "node scripts/db.mjs reset",
     "db:types": "node scripts/db.mjs types",
     "db:types:check": "node scripts/db.mjs types-check",
+    "db:staging-file-routines": "node scripts/generate-staging-file-routines.mjs",
     "db:deliver:production": "node scripts/production-db.mjs",
     "test:db": "node scripts/db.mjs test",
     "test:db:form-save": "node scripts/db.mjs test-form-save",
