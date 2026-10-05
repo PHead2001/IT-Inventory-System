@@ -1,4 +1,5 @@
 'use client';
+import { OperationalTimestamp } from '@/components/operational-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
@@ -680,9 +681,10 @@ function BoundFilesPanel({
                   <p className="text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
                     {formatFileSize(card.bytes)} · {fileType(card.type)} ·{' '}
                     {card.uploader} ·{' '}
-                    {new Date(
-                      card.ready_at ?? card.created_at,
-                    ).toLocaleString()}
+                    {card.ready_at ? 'Published: ' : 'Uploaded: '}
+                    <OperationalTimestamp
+                      value={card.ready_at ?? card.created_at}
+                    />
                   </p>
                 </div>
               </div>
@@ -862,7 +864,7 @@ function BoundFilesPanel({
           <ol className="mt-2 space-y-2">
             {history.map((event) => (
               <li key={event.id} className="text-sm text-slate-300">
-                {new Date(event.created_at).toLocaleString()} ·{' '}
+                <OperationalTimestamp value={event.created_at} /> ·{' '}
                 {event.actor_name} {event.action}{' '}
                 {event.before_title && event.before_title !== event.title
                   ? `${event.before_title} → `

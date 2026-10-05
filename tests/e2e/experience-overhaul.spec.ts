@@ -1003,7 +1003,7 @@ test('automatic label sheet retains readable codes across rapid layout edits and
   const card = page.locator('.label-card').first();
   await expect(card).toHaveAttribute('data-code-ready', 'true');
   const size = page.getByRole('combobox', { name: 'Label size' });
-  const paperChoice = page.getByRole('combobox', { name: 'Page' });
+  const paperChoice = page.getByRole('combobox', { name: 'Paper size' });
   for (const labelSize of ['70x35', '90x50'] as const) {
     for (const paper of ['A4', 'letter'] as const) {
       await size.selectOption(labelSize);
@@ -1040,7 +1040,7 @@ test('automatic label sheet retains readable codes across rapid layout edits and
   await expect(page.locator('.label-card')).toHaveCount(20);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
   const print = page.getByRole('button', { name: /Print selected labels/ });
-  const format = page.getByRole('combobox', { name: 'Code' });
+  const format = page.getByRole('combobox', { name: 'Barcode type' });
   let measuredReflows = 0;
   for (const [labelSize, paper, code] of [
     ['70x35', 'A4', 'qr'],

@@ -106,7 +106,7 @@ test('category Rename preserves keyboard focus through invalid, Cancel, Escape a
   } finally {
     await page.goto('/settings/categories');
     if (await row.count()) {
-      await row.getByRole('button', { name: 'Remove', exact: true }).click();
+      await row.getByRole('button', { name: /^Remove /, exact: true }).click();
       await row
         .getByRole('button', { name: 'Review impact', exact: true })
         .click();

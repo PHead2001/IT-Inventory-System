@@ -4,9 +4,17 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { OperationalTimestamp } from '@/components/operational-time';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
 import type { RemovalReview } from './contracts';
+import {
+  labelSettingText,
+  labelSizeOptions,
+  paperSizeOptions,
+  barcodeTypeOptions,
+  barcodeTypeHelp,
+} from '@/features/labels/setting-options';
 import {
   RequiredFieldsNote,
   RequiredMark,
@@ -154,11 +162,11 @@ export function SettingsPanel({
         </p>
       )}
       {mode !== 'labels' && (
-        <section aria-labelledby="categories-heading" className="space-y-4">
+        <section aria-label="Category configuration" className="space-y-4">
           <div>
-            <h2 id="categories-heading" className="text-xl font-semibold">
-              Categories
-            </h2>
+            {mode === 'both' && (
+              <h2 className="text-xl font-semibold">Categories</h2>
+            )}
             <p className="text-sm text-slate-400">
               Names appear in inventory lists, detail pages and exports. Codes
               remain fixed after creation.
@@ -195,15 +203,18 @@ export function SettingsPanel({
                   </div>
                   {canManage && category.active && (
                     <div className="flex flex-wrap gap-2">
-                      <Link
-                        className="inline-flex min-h-10 items-center rounded border border-cyan-700 px-3 text-sm text-cyan-200 hover:bg-cyan-950"
-                        href={`/settings/forms/${encodeURIComponent(category.id)}`}
-                      >
-                        Edit form
-                      </Link>
+                      <Button asChild className="px-3">
+                        <Link
+                          aria-label={'Edit form for ' + category.name}
+                          href={`/settings/forms/${encodeURIComponent(category.id)}`}
+                        >
+                          Edit form
+                        </Link>
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
+                        className="px-3"
                         disabled={pending}
                         aria-label={'Rename ' + category.name}
                         ref={(element) => {
@@ -225,6 +236,8 @@ export function SettingsPanel({
                       <Button
                         type="button"
                         variant="outline"
+                        className="border-red-400/50 bg-transparent px-3 text-red-200 hover:border-red-300 hover:bg-red-950/40"
+                        aria-label={'Remove ' + category.name}
                         disabled={pending}
                         onClick={() => startRemoval(category.id)}
                       >
@@ -407,7 +420,7 @@ export function SettingsPanel({
                         )}
                         <p className="text-sm text-slate-400">
                           This review expires at{' '}
-                          {new Date(review.expires_at).toLocaleTimeString()}.
+                          <OperationalTimestamp value={review.expires_at} />.
                           New or changed records require another review.
                         </p>
                         {reviewedHasReferences && !review.target_id ? (
@@ -520,7 +533,7 @@ export function SettingsPanel({
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="space-y-1 text-sm">
-              Size
+              {labelSettingText.size}
               <select
                 className="experience-field min-h-11 w-full px-3"
                 value={size}
@@ -529,12 +542,15 @@ export function SettingsPanel({
                   setSize(event.target.value as LabelDefaults['size'])
                 }
               >
-                <option value="90x50">90 × 50 mm</option>
-                <option value="70x35">70 × 35 mm</option>
+                {labelSizeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              Page
+              {labelSettingText.page}
               <select
                 className="experience-field min-h-11 w-full px-3"
                 value={page}
@@ -543,13 +559,17 @@ export function SettingsPanel({
                   setPage(event.target.value as LabelDefaults['page'])
                 }
               >
-                <option value="letter">US Letter</option>
-                <option value="A4">A4</option>
+                {paperSizeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              Format
+              {labelSettingText.format}
               <select
+                aria-describedby="shared-barcode-help"
                 className="experience-field min-h-11 w-full px-3"
                 value={format}
                 disabled={!canManage || pending}
@@ -557,11 +577,17 @@ export function SettingsPanel({
                   setFormat(event.target.value as LabelDefaults['format'])
                 }
               >
-                <option value="qr">QR URL</option>
-                <option value="code128">Code 128 when it fits</option>
+                {barcodeTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
+          <p id="shared-barcode-help" className="text-sm text-slate-400">
+            {barcodeTypeHelp}
+          </p>
           {canManage && (
             <Button
               type="button"

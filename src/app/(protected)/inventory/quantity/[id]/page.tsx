@@ -235,10 +235,7 @@ export default async function QuantityPage({
               · {event.from_label || 'Opening'} →{' '}
               {event.to_label || 'No destination'} ·{' '}
               {countLabel(event.quantity ?? 0, 'unit')}· {event.actor_name} ·{' '}
-              {new Date(event.created_at).toLocaleString('en-US', {
-                timeZone: 'UTC',
-              })}{' '}
-              UTC
+              <OperationalTimestamp value={event.created_at} />
               {event.reason && (
                 <span className="mt-1 block">Reason: {event.reason}</span>
               )}
@@ -259,3 +256,4 @@ export default async function QuantityPage({
     </>
   );
 }
+import { OperationalTimestamp } from '@/components/operational-time';

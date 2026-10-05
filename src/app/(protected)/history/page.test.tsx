@@ -4,6 +4,7 @@ const m = vi.hoisted(() => ({
   history: vi.fn(),
   identity: vi.fn(),
   redirect: vi.fn(),
+  custom: vi.fn(),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getHistory: m.history,
@@ -11,15 +12,81 @@ vi.mock('@/features/inventory/queries.server', () => ({
   getLocations: async () => [],
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
-  getEventCustomPage: vi.fn(),
+  getEventCustomPage: m.custom,
 }));
 vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect: m.redirect }));
 import Page from './page';
+import { OperationalTimeProvider } from '@/components/operational-time';
+import * as operationalTime from '@/lib/operational-time';
 const id = '00000000-0000-4000-8000-000000000001';
 beforeEach(() => {
   m.history.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 25 });
   m.identity.mockResolvedValue({ id, name: 'Adapters', kind: 'quantity' });
 });
+it.each([
+  ['datetime', '2026-10-03T05:23:06.123456Z'],
+  ['date', '2024-02-29'],
+  ['short_text', '2026-10-03T05:23:06.123456Z'],
+])(
+  'displays only typed %s snapshot instants while retaining raw recorded JSON',
+  async (fieldType, value) => {
+    const zone = vi
+      .spyOn(operationalTime, 'browserDisplayTimeZone')
+      .mockReturnValue({ timeZone: 'America/Los_Angeles', fallback: false });
+    const snapshot = {
+      field_id: id,
+      label: 'Recorded field',
+      legacy: false,
+      present: true,
+      field_type: fieldType,
+      value,
+      validated_revision_id: id,
+      owner_category_id: id,
+      option_paths: [],
+      next_option_offset: null,
+    };
+    const before = structuredClone(snapshot);
+    m.custom.mockResolvedValue(snapshot);
+    try {
+      const { container } = render(
+        <OperationalTimeProvider>
+          {await Page({
+            searchParams: Promise.resolve({
+              event: 'asset:' + id,
+              side: 'after',
+              field: id,
+            }),
+          })}
+        </OperationalTimeProvider>,
+      );
+      expect(m.custom).toHaveBeenCalledWith({
+        kind: 'asset',
+        eventId: id,
+        side: 'after',
+        fieldId: id,
+        optionOffset: 0,
+      });
+      expect(container.querySelector('pre')?.textContent).toBe(
+        JSON.stringify(value),
+      );
+      expect(container.querySelectorAll('time')).toHaveLength(
+        fieldType === 'datetime' ? 1 : 0,
+      );
+      if (fieldType === 'datetime') {
+        expect(container.querySelector('time')).toHaveAttribute(
+          'datetime',
+          value,
+        );
+        expect(
+          screen.getByText(/2 Oct 2026, 22:23:06 UTC-07:00/),
+        ).toBeVisible();
+      }
+      expect(snapshot).toEqual(before);
+    } finally {
+      zone.mockRestore();
+    }
+  },
+);
 it('locks the actual record kind, explains contradiction and preserves location when clearing', async () => {
   render(
     await Page({

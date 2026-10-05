@@ -29,6 +29,13 @@ import styles from './label-workspace.module.css';
 import { countLabel } from '@/lib/count';
 import { consumedLabelUrl } from './add-intent';
 import {
+  labelSettingText,
+  labelSizeOptions,
+  paperSizeOptions,
+  barcodeTypeOptions,
+  barcodeTypeHelp,
+} from './setting-options';
+import {
   addEntry,
   defaultFilters,
   defaultJob,
@@ -884,7 +891,7 @@ function LabelDesignerWorkspace({
       ) {
         setFallbackPending(true);
         setMessage(
-          'Some Code 128 labels use QR. Acknowledge the format change before printing.',
+          'Some Code 128 labels use QR. Acknowledge the QR fallback before printing.',
         );
         return;
       }
@@ -1517,14 +1524,14 @@ function LabelDesignerWorkspace({
             <p className={styles.eyebrow}>04 / Prepare & print</p>
             <h2 className={styles.title}>Print preview</h2>
             <p className={styles.subtle}>
-              Paper and code choices update this sheet automatically. Record
-              details refresh before printing.
+              Label size, paper size and barcode type update this sheet
+              automatically. Record details refresh before printing.
             </p>
           </div>
         </div>
         <div className={styles.settings}>
           <label className={styles.settingLabel}>
-            Label size{' '}
+            {labelSettingText.size}{' '}
             <select
               value={job.size}
               disabled={busy}
@@ -1537,12 +1544,15 @@ function LabelDesignerWorkspace({
               }}
               className={styles.settingSelect}
             >
-              <option value="90x50">90 × 50 mm</option>
-              <option value="70x35">70 × 35 mm</option>
+              {labelSizeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className={styles.settingLabel}>
-            Page{' '}
+            {labelSettingText.page}{' '}
             <select
               value={job.page}
               disabled={busy}
@@ -1555,13 +1565,17 @@ function LabelDesignerWorkspace({
               }}
               className={styles.settingSelect}
             >
-              <option value="letter">US Letter</option>
-              <option value="A4">A4</option>
+              {paperSizeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className={styles.settingLabel}>
-            Code{' '}
+            {labelSettingText.format}{' '}
             <select
+              aria-describedby="job-barcode-help"
               value={job.format}
               disabled={busy}
               onChange={(event) => {
@@ -1575,11 +1589,17 @@ function LabelDesignerWorkspace({
               }}
               className={styles.settingSelect}
             >
-              <option value="qr">QR URL</option>
-              <option value="code128">Code 128 when suitable</option>
+              {barcodeTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
         </div>
+        <p id="job-barcode-help" className={styles.subtle}>
+          {barcodeTypeHelp}
+        </p>
         <p className={styles.subtle}>
           New jobs start with the shared choices in Settings. Print at actual
           size / 100%. Code 128 asset tags require reprinting if the tag

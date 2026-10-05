@@ -154,21 +154,21 @@ export default async function InventoryPage({
               <Download size={15} aria-hidden="true" /> Export CSV
             </summary>
             <div role="group" aria-label="CSV export options">
-              <a href={'/api/exports/inventory?' + exportParams}>
+              <ExportLink href={'/api/exports/inventory?' + exportParams}>
                 Filtered inventory
-              </a>
-              <a
+              </ExportLink>
+              <ExportLink
                 href={'/api/exports/inventory?export=low_stock&' + exportParams}
               >
                 Matching low-stock items
-              </a>
-              <a
+              </ExportLink>
+              <ExportLink
                 href={
                   '/api/exports/inventory?customFields=true&' + exportParams
                 }
               >
                 Inventory with custom fields
-              </a>
+              </ExportLink>
             </div>
           </details>
         </div>
@@ -219,3 +219,4 @@ export default async function InventoryPage({
     </>
   );
 }
+import { ExportLink } from '@/components/operational-time';

@@ -1,4 +1,5 @@
 import type { Metadata } from '@/features/inventory/contracts-ui';
+import { OperationalTimestamp } from '@/components/operational-time';
 import { formatCustomValue } from './contracts';
 
 export function CustomMetadataList({
@@ -37,7 +38,11 @@ export function CustomMetadataList({
                 )}
               </dt>
               <dd className="mt-1 whitespace-pre-wrap break-words text-sm">
-                {formatCustomValue(entry.value, entry.option_paths)}
+                {entry.field_type === 'datetime' ? (
+                  <OperationalTimestamp value={entry.value} />
+                ) : (
+                  formatCustomValue(entry.value, entry.option_paths)
+                )}
               </dd>
               <dd>
                 <details className="mt-2 text-xs text-slate-400">
@@ -48,6 +53,11 @@ export function CustomMetadataList({
                     Field {id} · validated revision{' '}
                     {entry.validated_revision_id}
                   </span>
+                  {entry.field_type === 'datetime' && (
+                    <span className="mt-1 block break-all">
+                      Recorded timestamp: {formatCustomValue(entry.value, [])}
+                    </span>
+                  )}
                 </details>
               </dd>
             </div>

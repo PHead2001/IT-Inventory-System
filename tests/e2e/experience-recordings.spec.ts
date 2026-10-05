@@ -137,7 +137,9 @@ test('records modeled space selection, manual camera control, and label print pr
   await page
     .getByRole('combobox', { name: 'Label size' })
     .selectOption('90x50');
-  await page.getByRole('combobox', { name: 'Code' }).selectOption('code128');
+  await page
+    .getByRole('combobox', { name: 'Barcode type' })
+    .selectOption('code128');
   await expect(card).toHaveAttribute('data-code-ready', 'true');
   await expect(
     page.getByRole('button', { name: /Print selected labels/ }),

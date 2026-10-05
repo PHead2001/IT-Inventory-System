@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  resolveDisplayTimeZone,
+  displayTimeZoneLabel,
+  formatOperationalTimestamp,
+} from '@/lib/operational-time';
 
 const text = z.string().nullable();
 const identity = z.uuid();
@@ -116,12 +121,17 @@ export function exportCsv(
   includeCustom = false,
   checkDeadline: () => void = () => {},
   onRow?: (bytes: number) => void,
+  displayTimeZone: unknown = 'UTC',
 ): { csv: string; exportedAt: string } {
   checkDeadline();
+  const displayContext = resolveDisplayTimeZone(displayTimeZone);
   if (type === 'inventory') {
     const parsed = snapshot(inventoryRow).parse(input);
     checkDeadline();
     const { rows, exported_at: exportedAt } = parsed;
+    const displayExportedAt =
+      formatOperationalTimestamp(exportedAt, displayContext)?.text ??
+      'Time unavailable';
     const headers = [
       'Record ID',
       'Type',
@@ -148,6 +158,8 @@ export function exportCsv(
       'Assigned to Sites (Item-wide)',
       'Total Recorded (Item-wide)',
       'Item Code (SKU)',
+      'Display timezone',
+      'Exported at (display zone)',
     ];
     function* lines() {
       yield headers.map(csvText).join(',');
@@ -181,6 +193,8 @@ export function exportCsv(
           csvNumber(row.assigned_quantity),
           csvNumber(row.recorded_quantity),
           csvText(row.item_code),
+          csvText(displayTimeZoneLabel(displayContext)),
+          csvText(displayExportedAt),
         );
         yield cells.join(',');
       }
@@ -193,6 +207,9 @@ export function exportCsv(
   const parsed = snapshot(lowStockRow).parse(input);
   checkDeadline();
   const { rows, exported_at: exportedAt } = parsed;
+  const displayExportedAt =
+    formatOperationalTimestamp(exportedAt, displayContext)?.text ??
+    'Time unavailable';
   const headers = [
     'Record ID',
     'Type',
@@ -211,6 +228,8 @@ export function exportCsv(
     'Available in Storage',
     'Assigned to Sites',
     'Item Code (SKU)',
+    'Display timezone',
+    'Exported at (display zone)',
   ];
   function* lines() {
     yield headers.map(csvText).join(',');
@@ -240,6 +259,8 @@ export function exportCsv(
         csvNumber(row.available_quantity),
         csvNumber(row.assigned_quantity),
         csvText(row.item_code),
+        csvText(displayTimeZoneLabel(displayContext)),
+        csvText(displayExportedAt),
       );
       yield cells.join(',');
     }

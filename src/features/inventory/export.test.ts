@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { csvText, exportCsv, ExportTooLargeError } from './export';
+import {
+  formatOperationalTimestamp,
+  resolveDisplayTimeZone,
+} from '@/lib/operational-time';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const at = '2026-09-24T15:18:37+00:00';
@@ -36,6 +40,125 @@ const legacyLowStockHeaders = [
   'Environment',
 ];
 describe('inventory CSV', () => {
+  it.each(['inventory', 'low_stock'] as const)(
+    'appends display metadata after all existing %s fields, preserving UTC source and custom opt-in',
+    (type) => {
+      for (const custom of [false, true]) {
+        const row = {
+          entity_id: id,
+          kind: 'quantity',
+          name: '=Formula item',
+          category_name: 'Parts',
+          manufacturer: null,
+          model: null,
+          status: 'active',
+          asset_tag: null,
+          serial_number: null,
+          quantity: 0,
+          location_name: null,
+          location_code: null,
+          breadcrumb: null,
+          recorded_total: '0',
+          reorder_threshold: 1,
+          stock_state: 'out_of_stock',
+          holding_context: 'Unlocated',
+          item_code: '0001-A',
+          custom_fields: {
+            date: '2024-02-29',
+            datetime: '2026-10-03T05:23:06.123456Z',
+          },
+        };
+        const input = { rows: [row], total: '1', exported_at: at };
+        const before = structuredClone(input);
+        const result = exportCsv(
+          type,
+          input,
+          'Preview',
+          custom,
+          undefined,
+          undefined,
+          'America/Los_Angeles',
+        );
+        const headers = result.csv
+          .slice(1)
+          .split('\r\n')[0]
+          .split(',')
+          .map((value) => JSON.parse(value));
+        const original =
+          type === 'inventory'
+            ? [
+                ...legacyInventoryHeaders,
+                ...(custom ? ['Custom Fields JSON'] : []),
+                'Location ID',
+                'Custody',
+                'Site ID',
+                'Site Code',
+                'Site Name',
+                'Available in Storage (Item-wide)',
+                'Assigned to Sites (Item-wide)',
+                'Total Recorded (Item-wide)',
+                'Item Code (SKU)',
+              ]
+            : [
+                ...legacyLowStockHeaders,
+                ...(custom ? ['Custom Fields JSON'] : []),
+                'Available in Storage',
+                'Assigned to Sites',
+                'Item Code (SKU)',
+              ];
+        expect(headers).toEqual([
+          ...original,
+          'Display timezone',
+          'Exported at (display zone)',
+        ]);
+        expect(result.exportedAt).toBe(at);
+        expect(result.csv).toContain(csvText(at) + ',"Preview"');
+        expect(result.csv).toContain(csvText(row.name));
+        expect(result.csv).toContain(
+          '"0001-A","America/Los_Angeles",' +
+            csvText(
+              formatOperationalTimestamp(
+                at,
+                resolveDisplayTimeZone('America/Los_Angeles'),
+              )!.text,
+            ),
+        );
+        expect(
+          result.csv.includes(csvText(JSON.stringify(row.custom_fields))),
+        ).toBe(custom);
+        expect(input).toEqual(before);
+      }
+    },
+  );
+  it('uses explicit bounded UTC fallback for an invalid supplied display zone', () => {
+    const row = {
+      entity_id: id,
+      kind: 'quantity',
+      name: 'Cable',
+      category_name: 'Parts',
+      manufacturer: null,
+      model: null,
+      status: 'active',
+      asset_tag: null,
+      serial_number: null,
+      quantity: 0,
+      location_name: null,
+      location_code: null,
+      breadcrumb: null,
+    };
+    const csv = exportCsv(
+      'inventory',
+      { rows: [row], total: '1', exported_at: at },
+      'Preview',
+      false,
+      undefined,
+      undefined,
+      '=CMD()',
+    ).csv;
+    expect(csv).toContain('"UTC (UTC fallback)"');
+    expect(csv).toContain('UTC (UTC fallback)');
+    expect(csv).not.toContain('=CMD()');
+  });
   it('quotes comma, quotes and newlines while neutralizing formula prefixes', () => {
     expect(csvText('a,"b"\nc')).toBe('"a,""b""\nc"');
     for (const value of [
@@ -86,8 +209,18 @@ describe('inventory CSV', () => {
     expect(header.split(',').slice(0, 15)).toEqual(
       legacyInventoryHeaders.map(csvText),
     );
-    expect(header.endsWith('"Item Code (SKU)"')).toBe(true);
-    expect(body.endsWith('"\'=SKU-0001"')).toBe(true);
+    expect(header.split(',').slice(-3)).toEqual(
+      ['Item Code (SKU)', 'Display timezone', 'Exported at (display zone)'].map(
+        csvText,
+      ),
+    );
+    expect(
+      body.endsWith(
+        ['=SKU-0001', 'UTC', '24 Sept 2026, 15:18:37 UTC']
+          .map(csvText)
+          .join(','),
+      ),
+    ).toBe(true);
   });
   it('exports one low-stock row per definition and no global total in holding rows', () => {
     const low = exportCsv(
@@ -436,6 +569,18 @@ describe('inventory CSV', () => {
     ).toBe(3 * 1024 * 1024);
     expect(() =>
       exportCsv('inventory', input(boundaryName + 'A'), 'Preview'),
+    ).toThrow(ExportTooLargeError);
+    // A longer display context must fit the same exact budget, not an extra allowance.
+    expect(() =>
+      exportCsv(
+        'inventory',
+        input(boundaryName),
+        'Preview',
+        false,
+        undefined,
+        undefined,
+        'America/Los_Angeles',
+      ),
     ).toThrow(ExportTooLargeError);
   });
   it('samples cumulative UTF-8 bytes for each appended CSV line without changing the file', () => {

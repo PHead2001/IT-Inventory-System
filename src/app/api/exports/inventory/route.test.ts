@@ -56,6 +56,74 @@ beforeEach(() => {
   });
 });
 describe('authenticated inventory downloads', () => {
+  it.each([
+    [
+      'America/Los_Angeles',
+      'America/Los_Angeles',
+      '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)',
+    ],
+    [
+      'invalid-zone',
+      'UTC (UTC fallback)',
+      '3 Oct 2026, 05:23:06 UTC (UTC fallback)',
+    ],
+    [
+      'A'.repeat(129),
+      'UTC (UTC fallback)',
+      '3 Oct 2026, 05:23:06 UTC (UTC fallback)',
+    ],
+  ])(
+    'formats the DB generation instant in supplied zone %s without altering the filename or snapshot payload',
+    async (zone, label, display) => {
+      const at = '2026-10-03T05:23:06.123456Z';
+      mocks.snapshot.mockResolvedValue({
+        data: {
+          rows: [
+            {
+              entity_id: id,
+              kind: 'quantity',
+              name: 'Cable',
+              category_name: 'Parts',
+              manufacturer: null,
+              model: null,
+              status: 'active',
+              asset_tag: null,
+              serial_number: null,
+              quantity: 0,
+              location_name: null,
+              location_code: null,
+              breadcrumb: null,
+            },
+          ],
+          total: '1',
+          exported_at: at,
+        },
+      });
+      const response = await GET(
+        request('?q=Cable&displayTimeZone=' + encodeURIComponent(zone)),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Disposition')).toBe(
+        'attachment; filename="preview-inventory-20261003T052306Z.csv"',
+      );
+      expect(response.headers.get('Cache-Control')).toContain('no-store');
+      const csv = await response.text();
+      expect(csv).toContain('"' + at + '","Preview"');
+      expect(csv).toContain('"' + label + '","' + display + '"');
+      expect(mocks.snapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            p_query: 'Cable',
+            p_export_type: 'inventory',
+            p_include_custom: false,
+          }),
+        }),
+      );
+      expect(mocks.snapshot.mock.calls[0][0].payload).not.toHaveProperty(
+        'displayTimeZone',
+      );
+    },
+  );
   it('denies anonymous and inactive members before querying inventory', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
     const anonymous = await GET(request());
