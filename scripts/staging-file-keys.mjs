@@ -206,7 +206,8 @@ export async function provisionStagingFiles(options) {
     )
       fail('STAGING_BACKEND_CHANGED');
     backend = fresh;
-    await database.schema(STAGING_REF);
+    if ((await database.schema(STAGING_REF)) !== true)
+      fail('STAGING_SCHEMA_DENIED');
     if (
       (await database.migrationRevision(STAGING_REF)) !==
       expectedMigrationRevision

@@ -360,6 +360,387 @@ async function reserve(
   })) as { id: string; path: string };
 }
 
+async function expiredTransitionBarrier(
+  staff: Actor,
+  parent: string,
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const source = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'delayed-upload.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const validated = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'delayed-validation.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  for (const file of [source, validated]) {
+    const upload = await staff.client.storage
+      .from('inventory-files')
+      .upload(file.path, bytes, { contentType: 'application/pdf' });
+    assert.equal(
+      upload.error,
+      null,
+      'expiry barrier source physically uploads',
+    );
+  }
+  await okay(staff.client, 'inventory_file_uploaded', {
+    p_file_id: validated.id,
+  });
+  const requestId = randomUUID();
+  const begun = await okay(staff.client, 'inventory_file_begin', {
+    p_file_id: validated.id,
+    p_request_id: requestId,
+    p_key_id: keyId,
+    ...serverProof(secret, staff.id, 'begin', [validated.id, requestId, keyId]),
+  });
+  const uploadTxn = new Client({ connectionString: dbUrl });
+  const validatedTxn = new Client({ connectionString: dbUrl });
+  const guard = new Client({ connectionString: dbUrl });
+  await Promise.all([
+    uploadTxn.connect(),
+    validatedTxn.connect(),
+    guard.connect(),
+  ]);
+  let transitions: Promise<(string | null)[]> | undefined;
+  try {
+    for (const client of [uploadTxn, validatedTxn]) {
+      await client.query('begin');
+      await client.query("select set_config('request.jwt.claims',$1,true)", [
+        JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+      ]);
+      await client.query('set local role authenticated');
+    }
+    const deadline = await db.query<{ expires: Date }>(
+      "select clock_timestamp()+interval '100 milliseconds' expires",
+    );
+    const expires = deadline.rows[0].expires;
+    await db.query(
+      'update public.inventory_files set reserve_expires_at=$1 where id=$2',
+      [expires, source.id],
+    );
+    await db.query(
+      'update public.inventory_files set validation_lease_until=$1 where id=$2',
+      [expires, validated.id],
+    );
+    const attestation = await db.query<{ statement: string }>(
+      'select private.file_attestation_message(f,$2,$3,$4,$5,$6) statement from public.inventory_files f where id=$1',
+      [
+        validated.id,
+        begun.source_id,
+        begun.source_version,
+        'application/pdf',
+        bytes.length,
+        sha(bytes),
+      ],
+    );
+    // Real wall clock ages both pre-existing transactions beyond lease grace.
+    // This is separate from controlled fixture aging in the admission race.
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, expires.getTime() + 31000 - Date.now())),
+    );
+    const elapsed = await db.query<{ closed: boolean }>(
+      "select clock_timestamp()>$1::timestamptz+interval '30 seconds' closed",
+      [expires],
+    );
+    eq(
+      elapsed.rows[0].closed,
+      true,
+      'both original capabilities are expired beyond real grace',
+    );
+    for (let index = 0; index < 3; index++)
+      await reserve(
+        staff,
+        'asset',
+        parent,
+        1,
+        `after-expiry-${index}.pdf`,
+        'application/pdf',
+        16,
+      );
+    await guard.query('begin');
+    const holder = await guard.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guard.query('select private.file_guard_lock()');
+    transitions = Promise.all([
+      uploadTxn
+        .query('select public.inventory_file_uploaded($1)', [source.id])
+        .then(
+          () => null,
+          (error: { code?: string }) => error.code ?? 'unknown',
+        ),
+      validatedTxn
+        .query(
+          'select public.inventory_file_validated($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [
+            validated.id,
+            begun.generation,
+            keyId,
+            begun.source_id,
+            begun.source_version,
+            'application/pdf',
+            bytes.length,
+            sha(bytes),
+            mac(secret, attestation.rows[0].statement),
+          ],
+        )
+        .then(
+          () => null,
+          (error: { code?: string }) => error.code ?? 'unknown',
+        ),
+    ]);
+    const waitUntil = performance.now() + 10000;
+    let queued = false;
+    while (performance.now() < waitUntil) {
+      const waiting = await db.query<{ count: string }>(
+        `with recursive queue(pid) as (
+          select pid from pg_stat_activity where $1::integer=any(pg_blocking_pids(pid))
+          union select activity.pid from pg_stat_activity activity join queue holder on holder.pid=any(pg_blocking_pids(activity.pid))
+        ) select count(*) from pg_stat_activity where pid in(select pid from queue) and wait_event_type='Lock'
+          and (query ilike '%inventory_file_uploaded%' or query ilike '%inventory_file_validated%')`,
+        [holder.rows[0].pid],
+      );
+      if (Number(waiting.rows[0].count) === 2) {
+        queued = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      queued,
+      'both aged independent transactions are observed behind the guard',
+    );
+    checks++;
+    await guard.query('commit');
+    eq(
+      await transitions,
+      ['P1008', 'P1008'],
+      'fresh wall clock rejects stale uploaded and validated transitions',
+    );
+    const rows = await db.query<{ state: string; version: string }>(
+      'select state,version::text from public.inventory_files where id=any($1::uuid[]) order by state',
+      [[source.id, validated.id]],
+    );
+    eq(
+      rows.rows,
+      [
+        { state: 'reserved', version: '1' },
+        { state: 'validating', version: '3' },
+      ],
+      'rejected transitions do not revive state or change versions',
+    );
+    const count = await db.query<{ count: string }>(
+      'select count(*) from public.inventory_files f where uploader_id=$1 and private.file_pending_active(f,clock_timestamp())',
+      [staff.id],
+    );
+    eq(
+      count.rows[0].count,
+      '3',
+      'stale transactions cannot revive a fourth or fifth active slot',
+    );
+    eq(
+      sha(await bytesAt(staff.client, source.path)),
+      sha(bytes),
+      'failed upload notification preserves physical bytes for scoped cleanup',
+    );
+  } finally {
+    await guard.query('rollback').catch(() => undefined);
+    await transitions?.catch(() => undefined);
+    await Promise.all([
+      uploadTxn.query('rollback'),
+      validatedTxn.query('rollback'),
+    ]);
+    await Promise.all([uploadTxn.end(), validatedTxn.end(), guard.end()]);
+  }
+  await cleanupFailedFixture(staff, keyId, secret);
+}
+
+async function pendingAdmissionRace(
+  staff: Actor,
+  independent: SupabaseClient,
+  parent: string,
+  retainedParent: string,
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const expired = await reserve(
+    staff,
+    'asset',
+    retainedParent,
+    1,
+    'renew.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const uploaded = await staff.client.storage
+    .from('inventory-files')
+    .upload(expired.path, bytes, { contentType: 'application/pdf' });
+  assert.equal(uploaded.error, null, 'renewal race source physically uploads');
+  await okay(staff.client, 'inventory_file_uploaded', {
+    p_file_id: expired.id,
+  });
+  // Controlled aging sets up abandoned work. Natural wall-clock completion
+  // fencing remains covered by files-completion.ts; no absence is inferred.
+  await db.query(
+    "update public.inventory_files set reserve_expires_at=clock_timestamp()-interval '2 hours' where id=$1",
+    [expired.id],
+  );
+  await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'active-one.pdf',
+    'application/pdf',
+    16,
+  );
+  await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'active-two.pdf',
+    'application/pdf',
+    16,
+  );
+  const guard = new Client({ connectionString: dbUrl });
+  await guard.connect();
+  const requestId = randomUUID();
+  let requests: Promise<Awaited<ReturnType<typeof rpc>>[]> | undefined;
+  try {
+    await guard.query('begin');
+    const holder = await guard.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guard.query('select private.file_guard_lock()');
+    requests = Promise.all([
+      rpc(staff.client, 'inventory_file_begin', {
+        p_file_id: expired.id,
+        p_request_id: requestId,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'begin', [
+          expired.id,
+          requestId,
+          keyId,
+        ]),
+      }),
+      rpc(independent, 'inventory_file_reserve', {
+        p_parent_type: 'asset',
+        p_parent_id: parent,
+        p_expected_revision: 1,
+        p_name: 'new-racer.pdf',
+        p_type: 'application/pdf',
+        p_bytes: 16,
+        p_replaces: null,
+        p_expected_file_version: null,
+      }),
+    ]);
+    const deadline = performance.now() + 10000;
+    let queued = false;
+    while (performance.now() < deadline) {
+      const waiting = await db.query<{ count: string }>(
+        `with recursive queue(pid) as (
+          select pid from pg_stat_activity where $1::integer=any(pg_blocking_pids(pid))
+          union
+          select activity.pid from pg_stat_activity activity join queue holder
+            on holder.pid=any(pg_blocking_pids(activity.pid))
+        ) select count(*) from pg_stat_activity where pid in(select pid from queue)
+          and wait_event_type='Lock'
+          and (query ilike '%inventory_file_begin%' or query ilike '%inventory_file_reserve_ready%')`,
+        [holder.rows[0].pid],
+      );
+      if (Number(waiting.rows[0].count) === 2) {
+        queued = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      queued,
+      'independent reserve and renewal both queue at file_guard',
+    );
+    checks++;
+    await guard.query('commit');
+    const results = await requests;
+    eq(
+      results.filter((result) => !result.error).length,
+      1,
+      'only reserve or expired renewal can take third active slot',
+    );
+    eq(
+      results.filter((result) => result.error?.code === 'P1012').length,
+      1,
+      'loser is quota-denied without bypass',
+    );
+    const active = await db.query<{ count: string }>(
+      'select count(*) from public.inventory_files f where uploader_id=$1 and private.file_pending_active(f,clock_timestamp())',
+      [staff.id],
+    );
+    eq(
+      active.rows[0].count,
+      '3',
+      'exactly three active pending files remain after race across parents',
+    );
+    const state = await db.query<{
+      state: string;
+      validation_generation: number;
+      validation_lease_until: string | null;
+    }>(
+      'select state,validation_generation,validation_lease_until from public.inventory_files where id=$1',
+      [expired.id],
+    );
+    if (results[0].error) {
+      eq(
+        state.rows[0],
+        {
+          state: 'uploaded',
+          validation_generation: 0,
+          validation_lease_until: null,
+        },
+        'losing renewal rolls back generation and lease',
+      );
+    } else {
+      eq(
+        state.rows[0].state,
+        'validating',
+        'winning renewal is admitted under fresh lease',
+      );
+      eq(
+        state.rows[0].validation_generation,
+        1,
+        'winning renewal creates exactly one new generation',
+      );
+    }
+    eq(
+      sha(await bytesAt(staff.client, expired.path)),
+      sha(bytes),
+      'capacity accounting preserves expired source physical bytes',
+    );
+  } finally {
+    await guard.query('rollback').catch(() => undefined);
+    await requests?.catch(() => undefined);
+    await guard.end();
+  }
+  await cleanupFailedFixture(staff, keyId, secret);
+}
+
 async function cleanupFailedFixture(
   staff: Actor,
   keyId: string,
@@ -749,6 +1130,15 @@ async function main() {
     await guardHolder.end();
   }
   const independent = await independentSession(staff);
+  await pendingAdmissionRace(
+    staff,
+    independent,
+    parent,
+    await asset(staff, cat.id, loc.id),
+    keyId,
+    secret,
+  );
+  await expiredTransitionBarrier(staff, parent, keyId, secret);
   const uploadCancel = await reserve(
     staff,
     'asset',

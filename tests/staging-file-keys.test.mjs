@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { boundedJsonRequest } from '../scripts/preview-file-providers.mjs';
+import { boundedJsonRequest, SQL } from '../scripts/preview-file-providers.mjs';
 import {
   provisionStagingFiles,
   STAGING_PINS,
@@ -13,6 +13,8 @@ import {
 import {
   stagingFileProviders,
   migrationRevision,
+  STAGING_SCHEMA_SQL,
+  STAGING_FILE_MIGRATIONS,
 } from '../scripts/staging-file-keys-providers.mjs';
 import { fingerprint } from '../scripts/preview-file-keys.mjs';
 import {
@@ -23,7 +25,9 @@ import {
 const sha = 'a'.repeat(40);
 const secret = 'b'.repeat(64); // Synthetic fixture only.
 const backend = { fingerprint: 'c'.repeat(64), updatedAt: 10 };
-const revision = migrationRevision([{ version: '20261001000000' }]);
+const revision = migrationRevision(
+  STAGING_FILE_MIGRATIONS.map((version) => ({ version })),
+);
 function fixture() {
   const writes = [];
   const original = {
@@ -48,6 +52,7 @@ function fixture() {
     revision,
     nextState: 'READY',
     missingRuntime: null,
+    schemaReady: true,
     branch: {
       name: 'staging',
       project_ref: STAGING_REF,
@@ -87,7 +92,10 @@ function fixture() {
       },
     },
     database: {
-      schema: async (child) => assert.equal(child, STAGING_REF),
+      schema: async (child) => {
+        assert.equal(child, STAGING_REF);
+        return state.schemaReady;
+      },
       migrationRevision: async (child) => {
         assert.equal(child, STAGING_REF);
         return state.revision;
@@ -183,6 +191,95 @@ function fixture() {
 }
 const rejectsCode = (action, code) =>
   assert.rejects(action, (error) => error.code === code);
+
+test('older file schema with a matching old migration digest cannot stage, deploy or activate', async () => {
+  const f = fixture();
+  f.state.schemaReady = false;
+  f.state.revision = migrationRevision([{ version: '20261001000000' }]);
+  f.options.expectedMigrationRevision = f.state.revision;
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, []);
+  assert.equal(f.state.key, null);
+});
+test('base-only adapter without explicit CP5 readiness cannot write', async () => {
+  const f = fixture();
+  f.options.database.schema = async () => {};
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, []);
+});
+test('CP5 schema without the pending-capacity followup and matching digest cannot write', async () => {
+  const f = fixture();
+  f.state.schemaReady = false;
+  f.state.revision = migrationRevision([
+    { version: STAGING_FILE_MIGRATIONS[0] },
+  ]);
+  f.options.expectedMigrationRevision = f.state.revision;
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, []);
+});
+test('schema contract drift after staging prevents environment/deployment/activation writes', async () => {
+  const f = fixture();
+  const stage = f.options.database.stage;
+  f.options.database.stage = async (...args) => {
+    await stage(...args);
+    f.state.schemaReady = false;
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, ['stage']);
+  assert.equal(f.state.key.accepts_new, false);
+});
+
+test('staging provider requires base schema and the full canonical RPC/grant contract', async () => {
+  for (const response of [
+    [{ ready: false }],
+    [{ ready: null }],
+    [],
+    [{ ready: true }, { ready: true }],
+    [{ ready: true }],
+  ]) {
+    const calls = [];
+    const providers = stagingFileProviders({
+      managementToken: 'synthetic-management',
+      vercelToken: 'synthetic-vercel',
+      currentDeployment: async () => {},
+      runtimeBinding: async () => {},
+      request: async (url, options) => {
+        calls.push({ url, ...options });
+        assert.equal(options.body.read_only, true);
+        assert.deepEqual(options.body.parameters, []);
+        return options.body.query === SQL.schema ? [{ ready: true }] : response;
+      },
+    });
+    if (response.length === 1 && response[0].ready === true)
+      assert.equal(await providers.database.schema(STAGING_REF), true);
+    else
+      await rejectsCode(
+        () => providers.database.schema(STAGING_REF),
+        'STAGING_SCHEMA_DENIED',
+      );
+    assert.deepEqual(
+      calls.map((call) => call.body.query),
+      [SQL.schema, STAGING_SCHEMA_SQL],
+    );
+    assert.ok(
+      calls.every((call) =>
+        call.url.includes(`/projects/${STAGING_REF}/database/query`),
+      ),
+    );
+  }
+});
 
 test('staging stages inactive key, installs branch-only env, proves READY/runtime, activates; rerun makes no writes', async () => {
   const f = fixture();
@@ -637,7 +734,7 @@ test('provider pins DB target, reuses staged SQL, reads bounded migrations and s
     runtimeBinding: async () => {},
     request: async (url, options) => {
       calls.push({ url, ...options });
-      return [{ version: '20261001000000' }];
+      return STAGING_FILE_MIGRATIONS.map((version) => ({ version }));
     },
   });
   await providers.database.stage(STAGING_REF, STAGING_KEY_ID, secret);
