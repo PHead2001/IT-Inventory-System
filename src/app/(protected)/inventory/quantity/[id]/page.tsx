@@ -8,17 +8,14 @@ import {
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
-import { OperationPanel } from '@/features/inventory/components/mutation-form';
-import { MetadataForm } from '@/features/metadata/metadata-form';
+import { DetailTasks } from '@/features/inventory/components/detail-tasks';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
-import { ArchiveQuantityPanel } from '@/features/inventory/components/archive-quantity-form';
 import {
   getSites,
   getEntitySiteHoldings,
   getEntityAssignments,
 } from '@/features/custody/queries.server';
-import { CustodyChangeForm } from '@/features/custody/custody-change-form';
 import { FilesPanel } from '@/features/files/files-panel';
 import {
   HistoryList,
@@ -66,7 +63,7 @@ export default async function QuantityPage({
         <div className={`${styles.detailHead} mt-4`}>
           <div className={styles.detailTitle}>
             <p className="experience-eyebrow">
-              {item.categoryName} · Quantity inventory
+              {item.categoryName} · Quantity item
             </p>
             <h1 className="experience-heading mt-2">{item.name}</h1>
             <p className="experience-muted mt-2 text-sm">
@@ -124,6 +121,22 @@ export default async function QuantityPage({
           </p>
         )}
       </section>
+      {member.role === 'staff' && (
+        <DetailTasks
+          key={member.user_id + ':' + item.id}
+          actorId={member.user_id}
+          backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
+          canManageConfiguration={member.can_manage_configuration}
+          item={item}
+          balances={balances}
+          siteHoldings={siteHoldings}
+          archiveReview={archiveReview}
+          categories={categories}
+          locations={locations}
+          sites={sites}
+          forms={forms}
+        />
+      )}
       <div className={styles.recordGrid}>
         <div className={styles.recordMain}>
           <section className={panel + ' my-5'}>
@@ -177,7 +190,7 @@ export default async function QuantityPage({
             aria-label="Assigned site holdings"
           >
             <h2 className="text-xl font-semibold">
-              Assigned to properties / sites
+              Assigned to Properties & sites
             </h2>
             {siteHoldings.length ? (
               <ul className="space-y-3">
@@ -203,6 +216,7 @@ export default async function QuantityPage({
         </div>
         <aside className={styles.recordAside} aria-label="Record attachments">
           <FilesPanel
+            actorId={member.user_id}
             parentType="quantity"
             parentId={item.id}
             active={!item.archived}
@@ -210,104 +224,6 @@ export default async function QuantityPage({
           />
         </aside>
       </div>
-      {member.role === 'staff' && (
-        <section aria-label="Quantity actions" className="mb-8 space-y-3">
-          <h2 className="text-xl font-semibold">Manage quantity inventory</h2>
-          {(item.archived
-            ? (['quantity_restore'] as const)
-            : ([
-                'quantity_update',
-                'quantity_receive',
-                'quantity_move',
-                'quantity_adjust',
-              ] as const)
-          ).map((operation) =>
-            operation === 'quantity_update' ? (
-              <details
-                key={operation}
-                className={`${panel} ${styles.editDisclosure}`}
-              >
-                <summary>Edit quantity metadata</summary>
-                <MetadataForm
-                  actorId={member.user_id}
-                  kind="quantity"
-                  item={item}
-                  categories={categories}
-                  locations={locations}
-                  forms={forms}
-                />
-              </details>
-            ) : (
-              <OperationPanel
-                actorId={member.user_id}
-                backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
-                key={operation}
-                operation={operation}
-                item={item}
-                balances={balances}
-                categories={categories}
-                locations={locations}
-              />
-            ),
-          )}
-          {siteHoldings.length > 0 && (
-            <p className={panel + ' text-amber-200'}>
-              Archive is blocked while site holdings remain. Return, transfer,
-              or write off every outstanding assignment first; no site
-              obligation is erased by archive-and-clear.
-            </p>
-          )}
-          {archiveReview &&
-            !archiveReview.archived &&
-            siteHoldings.length === 0 && (
-              <ArchiveQuantityPanel review={archiveReview} />
-            )}
-          {!item.archived && (
-            <section className="space-y-3" aria-label="Site custody actions">
-              <h3 className="text-xl font-semibold">
-                Site custody and opening holdings
-              </h3>
-              {(
-                [
-                  'issue',
-                  'return',
-                  'transfer',
-                  'opening',
-                  'correct',
-                  'write_off',
-                ] as const
-              ).map((action) => {
-                if (
-                  action === 'issue' &&
-                  !balances.some((row) => row.quantity > 0)
-                )
-                  return null;
-                if (
-                  ['return', 'transfer', 'correct', 'write_off'].includes(
-                    action,
-                  ) &&
-                  !siteHoldings.length
-                )
-                  return null;
-                return (
-                  <CustodyChangeForm
-                    canManageConfiguration={member.can_manage_configuration}
-                    key={action}
-                    kind="quantity"
-                    action={action}
-                    entityId={item.id}
-                    version={String(item.version)}
-                    locations={locations}
-                    sites={sites}
-                    storageBalances={balances}
-                    siteHoldings={siteHoldings}
-                  />
-                );
-              })}
-            </section>
-          )}
-        </section>
-      )}
       {assignments.length > 0 && (
         <section className="my-6 space-y-3" aria-label="Custody history">
           <h2 className="text-xl font-semibold">Custody history</h2>
@@ -332,7 +248,7 @@ export default async function QuantityPage({
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
       <div className={styles.history}>
-        <HistoryList events={history} />
+        <HistoryList events={history} compact />
       </div>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"

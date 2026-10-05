@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { countLabel } from '@/lib/count';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import type {
   LocationRef,
   QuantityItem,
 } from '../contracts-ui';
+import { useReportTaskState, useTaskReset } from './task-state';
 import { field, panel } from './read-ui';
 import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
 
@@ -36,9 +37,9 @@ const labels: Record<string, string> = {
   quantity_move: 'Move stock',
   quantity_adjust: 'Correct physical count',
   quantity_update: 'Edit quantity metadata',
-  quantity_archive: 'Archive quantity definition',
-  quantity_restore: 'Restore quantity definition',
-  asset_create: 'Create serialized asset',
+  quantity_archive: 'Archive quantity item',
+  quantity_restore: 'Restore quantity item',
+  asset_create: 'Add individual asset',
   asset_move: 'Move asset',
   asset_correct_location: 'Correct recorded location',
   asset_update: 'Edit asset metadata',
@@ -64,7 +65,16 @@ export function MutationForm(props: Props) {
         {...props}
       />
     );
-  return <MutationFormFields {...props} />;
+  return (
+    <MutationFormFields
+      key={[
+        props.actorId,
+        props.item?.id ?? props.asset?.id,
+        props.operation,
+      ].join(':')}
+      {...props}
+    />
+  );
 }
 function MoveRecovery(props: Props) {
   const itemId = props.item!.id;
@@ -84,6 +94,15 @@ function MoveRecovery(props: Props) {
   > | null>(null);
   const [recoveryPending, startRecovery] = useTransition();
   const router = useRouter();
+  useReportTaskState(
+    {
+      dirty: false,
+      pending: !loaded && !error,
+      uncertain: !loaded && Boolean(error),
+      completed: false,
+    },
+    !loaded,
+  );
   useEffect(() => {
     let current = true;
     queueMicrotask(async () => {
@@ -240,6 +259,7 @@ function MutationFormFields({
   initialStorageWarning?: string;
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
+  const resetTask = useTaskReset();
   const router = useRouter();
   const validation = useFormValidation();
   // The editable values and their optimistic-concurrency baseline travel together.
@@ -303,7 +323,14 @@ function MutationFormFields({
   const [completedError, setCompletedError] = useState('');
   const [reviewKey, setReviewKey] = useState('');
   const completionRef = useRef<HTMLDivElement>(null);
-  const completed = operation === 'quantity_move' && state?.ok === true;
+  const completed = state?.ok === true;
+  const [initialValues, setInitialValues] = useState(values);
+  const reportTask = useReportTaskState({
+    dirty: JSON.stringify(values) !== JSON.stringify(initialValues),
+    pending,
+    uncertain,
+    completed,
+  });
   useEffect(() => {
     if (completed) completionRef.current?.focus();
   }, [completed]);
@@ -323,6 +350,9 @@ function MutationFormFields({
   }
   if (
     refreshRequested &&
+    !uncertain &&
+    !pending &&
+    !completed &&
     latestEntity &&
     latestEntity.version !== entity?.version
   ) {
@@ -404,15 +434,19 @@ function MutationFormFields({
     'asset_retire',
     'asset_restore',
   ].includes(operation);
-  const update = (name: string, value: string) => {
-    setValues((v) => ({ ...v, [name]: value }));
-    if (name === 'reorder_threshold') setThresholdTouched(true);
-    setReview(false);
-    setState(null);
-    setLocationError('');
-    setAmountError('');
-    if (name === 'serial_number') setDuplicates([]);
-  };
+  const update = useCallback(
+    (name: string, value: string) => {
+      if (pending || inFlight.current || uncertain || completed) return;
+      setValues((v) => ({ ...v, [name]: value }));
+      if (name === 'reorder_threshold') setThresholdTouched(true);
+      setReview(false);
+      setState(null);
+      setLocationError('');
+      setAmountError('');
+      if (name === 'serial_number') setDuplicates([]);
+    },
+    [pending, uncertain, completed],
+  );
   const input = (
     name: string,
     label: string,
@@ -841,11 +875,12 @@ function MutationFormFields({
           } as MutationCommand);
     submitted.current = command;
     inFlight.current = true;
+    reportTask({ pending: true });
     startTransition(async () => {
       try {
         const result = await submitInventory(command);
         setState(result);
-        if (moving) {
+        {
           const unresolved =
             !result.ok &&
             (result.kind === 'unexpected' ||
@@ -877,7 +912,6 @@ function MutationFormFields({
               );
             }
           }
-          if (!moving && entity && result.changed) setRefreshRequested(true);
           try {
             router.refresh();
           } catch {
@@ -895,7 +929,7 @@ function MutationFormFields({
             );
         }
       } catch {
-        if (moving) setUncertain(true);
+        setUncertain(true);
         setState({
           ok: false,
           kind: 'unexpected',
@@ -940,12 +974,14 @@ function MutationFormFields({
               );
             }
           }
-          setValues((v) => ({
-            ...v,
+          const newValues = {
+            ...values,
             quantity: '',
             move_all: 'false',
             reason: '',
-          }));
+          };
+          setValues(newValues);
+          setInitialValues(newValues);
           setState(null);
           setReceipt(null);
           submitted.current = null;
@@ -989,7 +1025,7 @@ function MutationFormFields({
       noValidate
     >
       <fieldset
-        disabled={pending || (moving && uncertain)}
+        disabled={pending || uncertain}
         className="space-y-4"
         hidden={completed}
       >
@@ -1329,12 +1365,41 @@ function MutationFormFields({
           {storageWarning}
         </p>
       )}
-      {completed ? (
+      {completed && !moving ? (
+        <Button
+          type="button"
+          className="hover:translate-y-0 active:scale-100"
+          onClick={() => {
+            if (resetTask) {
+              resetTask();
+              return;
+            }
+            setBaseline({
+              item: latestItem,
+              asset: latestAsset,
+              currentLocation: latestLocation,
+              balances: latestBalances ?? [],
+              locations: latestLocations,
+            });
+            setState(null);
+            setReceipt(null);
+            submitted.current = null;
+            setUncertain(false);
+            setRefreshRequested(false);
+            setReview(false);
+            setValues((v) => ({ ...v, quantity: '1', reason: '' }));
+            setInitialValues({ ...values, quantity: '1', reason: '' });
+          }}
+        >
+          New transaction
+        </Button>
+      ) : completed ? (
         <div className="flex flex-wrap gap-3">
           <Button
             type="button"
             disabled={pending}
             onClick={() => refreshMove(true)}
+            className="hover:translate-y-0 active:scale-100"
           >
             Move more
           </Button>
@@ -1368,8 +1433,10 @@ function MutationFormFields({
           <Button type="submit" disabled={pending || refreshRequested}>
             {pending
               ? 'Saving…'
-              : moving && uncertain
-                ? 'Retry this move safely'
+              : uncertain
+                ? moving
+                  ? 'Retry this move safely'
+                  : 'Retry same transaction'
                 : validReview
                   ? 'Confirm ' + labels[operation].toLowerCase()
                   : 'Review ' + labels[operation].toLowerCase()}

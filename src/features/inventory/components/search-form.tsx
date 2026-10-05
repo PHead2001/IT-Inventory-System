@@ -71,7 +71,7 @@ export function SearchForm({
       key === 'q'
         ? `Search: ${value}`
         : key === 'type'
-          ? `Type: ${value === 'asset' ? 'Serialized assets' : 'Quantity'}`
+          ? `Type: ${value === 'asset' ? 'Individual assets' : 'Quantity items'}`
           : key === 'status'
             ? `Status: ${value === 'all' ? 'All' : 'Archived / retired'}`
             : key === 'category'
@@ -118,8 +118,8 @@ export function SearchForm({
               defaultValue={filters.type === 'all' ? '' : filters.type}
             >
               <option value="">All types</option>
-              <option value="quantity">Quantity</option>
-              <option value="asset">Serialized assets</option>
+              <option value="quantity">Quantity items</option>
+              <option value="asset">Individual assets</option>
             </select>
           </div>
           <div className="min-w-0">
@@ -191,7 +191,7 @@ export function SearchForm({
             />
             <div>
               <label htmlFor="inventory-site" className="text-sm">
-                Property / site
+                Property/site
               </label>
               <select
                 className={field}

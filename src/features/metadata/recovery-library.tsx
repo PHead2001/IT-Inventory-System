@@ -258,7 +258,8 @@ export function RecoveryLibrary({
         </div>
         <div>
           <h4 className="font-medium">
-            Excluded from {previewKind === 'asset' ? 'Serialized' : 'Quantity'}{' '}
+            Excluded from{' '}
+            {previewKind === 'asset' ? 'Individual asset' : 'Quantity item'}{' '}
             preview ({excluded.length})
           </h4>
           {excluded.length === 0 && (

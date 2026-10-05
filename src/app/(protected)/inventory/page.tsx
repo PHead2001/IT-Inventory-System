@@ -101,16 +101,38 @@ export default async function InventoryPage({
       </p>
       {member.role === 'staff' && (
         <div className="my-3 flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href={'/inventory/quantity/new?' + createQuery}>
-              Create quantity inventory
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={'/inventory/assets/new?' + createQuery}>
-              Create serialized asset
-            </Link>
-          </Button>
+          <div className="min-w-0 flex-1 basis-64">
+            <Button asChild>
+              <Link
+                href={'/inventory/quantity/new?' + createQuery}
+                aria-describedby="quantity-choice-description"
+              >
+                Add quantity item
+              </Link>
+            </Button>
+            <p
+              id="quantity-choice-description"
+              className="mt-2 text-sm text-slate-300"
+            >
+              Track interchangeable items by count, such as cables and adapters.
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 basis-64">
+            <Button asChild variant="outline">
+              <Link
+                href={'/inventory/assets/new?' + createQuery}
+                aria-describedby="asset-choice-description"
+              >
+                Add individual asset
+              </Link>
+            </Button>
+            <p
+              id="asset-choice-description"
+              className="mt-2 text-sm text-slate-300"
+            >
+              Track one specific device, such as a laptop or switch.
+            </p>
+          </div>
         </div>
       )}
       <div className="mt-4">

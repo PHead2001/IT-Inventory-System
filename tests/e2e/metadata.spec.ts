@@ -1,3 +1,9 @@
+import {
+  beginNewRecordTransaction,
+  expectStableReceiptAction,
+  openRecordTask,
+} from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -137,18 +143,18 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await signIn(page);
   await page.goto('/inventory/quantity/new');
   const createForm = page.getByRole('form', {
-    name: 'Create quantity inventory',
+    name: 'Add quantity item',
   });
   await createForm
     .getByLabel('Name', { exact: true })
     .fill('Metadata ' + suffix);
   await createForm.getByLabel('Category').selectOption(categoryId);
   await createForm.getByLabel(/Tracking note/).fill('hello');
-  await createForm.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(createForm).click();
   await expect(
     createForm.getByRole('region', { name: 'Metadata review' }),
   ).toContainText('Metadata ' + suffix);
-  await createForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(createForm).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await expect(page.getByText('hello', { exact: true })).toBeVisible();
   const detailUrl = page.url();
@@ -168,21 +174,26 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expect(page.locator('pre')).toContainText('hello');
   await page.goto(detailUrl);
 
-  await page
-    .locator('summary')
-    .filter({ hasText: 'Edit quantity metadata' })
-    .click();
-  const editForm = page.getByRole('form', { name: 'Edit quantity metadata' });
+  await openRecordTask(page, 'Edit quantity metadata');
+  const editForm = await openRecordTask(page, 'Edit quantity metadata');
   await editForm.getByLabel(/Tracking note/).fill('world');
-  await editForm.getByRole('button', { name: 'Review metadata' }).click();
-  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(editForm).click();
+  await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectStableReceiptAction(page, 'New transaction');
+  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
+  await expect(
+    page.getByRole('region', { name: 'Record tasks' }).getByRole('button', {
+      name: 'Edit details',
+      exact: true,
+    }),
+  ).toBeFocused();
+  await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('world');
-  await expect(
-    editForm.getByRole('button', { name: 'Review metadata' }),
-  ).toBeEnabled();
+  await expect(metadataReviewButton(editForm)).toBeEnabled();
   await expect(editForm.getByText(/changed from version/)).toHaveCount(0);
   await expect(
     editForm.getByRole('button', { name: /Use reviewed .* version/ }),
@@ -192,20 +203,20 @@ test('published custom fields preserve independent concurrent edits, refresh own
   const other = await context.newPage();
   try {
     await other.goto(detailUrl);
-    await other.getByText('Edit quantity metadata', { exact: true }).click();
-    const otherEdit = other.getByRole('form', {
-      name: 'Edit quantity metadata',
-    });
+    await openRecordTask(other, 'Edit quantity metadata');
+    const otherEdit = await openRecordTask(other, 'Edit quantity metadata');
     await editForm
       .getByLabel('Name', { exact: true })
       .fill('Independent ' + suffix);
     await otherEdit.getByLabel(/Tracking note/).fill('newer');
-    await otherEdit.getByRole('button', { name: 'Review metadata' }).click();
-    await otherEdit.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataReviewButton(otherEdit).click();
+    await metadataSaveButton(otherEdit).click();
     await expect(other.getByText(/Version 3$/)).toBeVisible();
-    await editForm.getByRole('button', { name: 'Review metadata' }).click();
-    await editForm.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataReviewButton(editForm).click();
+    await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 4$/)).toBeVisible();
+    await beginNewRecordTransaction(page, 'New transaction');
+    await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
       'Independent ' + suffix,
@@ -214,16 +225,18 @@ test('published custom fields preserve independent concurrent edits, refresh own
       editForm.getByRole('button', { name: /Keep latest|Use my .* edit/ }),
     ).toHaveCount(0);
     await other.reload();
-    await other.getByText('Edit quantity metadata', { exact: true }).click();
+    await openRecordTask(other, 'Edit quantity metadata');
     const converged = 'Converged ' + suffix;
     await editForm.getByLabel('Name', { exact: true }).fill(converged);
     await otherEdit.getByLabel('Name', { exact: true }).fill(converged);
-    await otherEdit.getByRole('button', { name: 'Review metadata' }).click();
-    await otherEdit.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataReviewButton(otherEdit).click();
+    await metadataSaveButton(otherEdit).click();
     await expect(other.getByText(/Version 5$/)).toBeVisible();
-    await editForm.getByRole('button', { name: 'Review metadata' }).click();
-    await editForm.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataReviewButton(editForm).click();
+    await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 6$/)).toBeVisible();
+    await beginNewRecordTransaction(page, 'New transaction');
+    await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
       converged,
     );
@@ -238,8 +251,8 @@ test('published custom fields preserve independent concurrent edits, refresh own
   const stricter = structuredClone(definition);
   stricter.fields[0].rules.maxLength = 4;
   await publishDefinition(client, actorId, categoryId, stricter);
-  await editForm.getByRole('button', { name: 'Review metadata' }).click();
-  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(editForm).click();
+  await metadataSaveButton(editForm).click();
   await expect(
     editForm
       .getByRole('alert')
@@ -249,26 +262,28 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await editForm.getByRole('button', { name: 'Review updated fields' }).click();
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('five5');
   await editForm.getByLabel(/Tracking note/).fill('okay');
-  await editForm.getByRole('button', { name: 'Review metadata' }).click();
-  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(editForm).click();
+  await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 7$/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
+  await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
   // A successful category change establishes its own complete baseline too.
   await editForm.getByLabel('Category').selectOption({ label: 'Cables' });
-  await editForm.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(editForm).click();
   await editForm
     .getByRole('checkbox', { name: /existing custom values.*legacy values/ })
     .check();
-  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 8$/)).toBeVisible();
-  await expect(
-    editForm.getByRole('button', { name: 'Review metadata' }),
-  ).toBeEnabled();
+  await beginNewRecordTransaction(page, 'New transaction');
+  await openRecordTask(page, 'Edit quantity metadata');
+  await expect(metadataReviewButton(editForm)).toBeEnabled();
   await editForm
     .getByLabel('Name', { exact: true })
     .fill('After category ' + suffix);
-  await editForm.getByRole('button', { name: 'Review metadata' }).click();
-  await editForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(editForm).click();
+  await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 9$/)).toBeVisible();
   await page.reload();
   await expect(

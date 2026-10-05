@@ -111,7 +111,7 @@ describe('inventory operation forms', () => {
   it.each([
     ['quantity_receive', 'Receive at', 'Review receive stock'],
     ['asset_move', 'Destination location', 'Review move asset'],
-    ['asset_create', 'Destination location', 'Review create serialized asset'],
+    ['asset_create', 'Destination location', 'Review add individual asset'],
   ] as const)(
     'associates the missing destination error with the actual %s picker',
     async (operation, label, reviewName) => {
@@ -325,7 +325,14 @@ describe('inventory operation forms', () => {
     expect(screen.getByRole('treeitem', { name: /1A/ })).toBeVisible();
   });
   it('preserves input and request identity after an uncertain failure, changing identity when input changes', async () => {
-    mocks.submit.mockRejectedValue(new Error('network'));
+    mocks.submit
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Definitive stale rejection',
+      });
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_receive" />);
     await chooseLocation(user, 'Receive at', '1B');
@@ -334,18 +341,29 @@ describe('inventory operation forms', () => {
       screen.getByRole('button', { name: 'Review receive stock' }),
     );
     await user.click(
-      screen.getByRole('button', { name: 'Confirm receive stock' }),
+      screen.getByRole('button', {
+        name: /Confirm receive stock|Retry same transaction/,
+      }),
     );
     await screen.findByRole('alert');
     const first = mocks.submit.mock.calls[0][0].requestId;
     expect(screen.getByLabelText('Reason (required)')).toHaveValue('Restocked');
     await user.click(
-      screen.getByRole('button', { name: 'Confirm receive stock' }),
+      screen.getByRole('button', { name: 'Retry same transaction' }),
     );
     await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
     expect(mocks.submit.mock.calls[1][0].requestId).toBe(first);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Quantity to receive')).toBeEnabled(),
+    );
     await user.clear(screen.getByLabelText('Quantity to receive'));
     await user.type(screen.getByLabelText('Quantity to receive'), '2');
+    mocks.submit.mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'fixture',
+      message: 'Test captured',
+    });
     await user.click(
       screen.getByRole('button', { name: 'Review receive stock' }),
     );
@@ -355,6 +373,93 @@ describe('inventory operation forms', () => {
     await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
     expect(mocks.submit.mock.calls[2][0].requestId).not.toBe(first);
   });
+  it.each(['quantity_receive', 'asset_move', 'asset_retire'] as const)(
+    'freezes %s command and keeps authentication rejection uncertain across parent refresh',
+    async (operation) => {
+      mocks.submit
+        .mockRejectedValueOnce(new Error('response lost'))
+        .mockResolvedValueOnce({
+          ok: false,
+          kind: 'domain',
+          code: 'actor_changed',
+          message: 'Actor unavailable',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          entityId: item.id,
+          version: '3',
+          changed: true,
+        });
+      const user = userEvent.setup();
+      const actorId = '00000000-0000-4000-8000-000000000099';
+      const asset = {
+        ...item,
+        status: 'active' as const,
+        assetTag: null,
+        serialNumber: null,
+      };
+      const props = {
+        ...defaults,
+        actorId,
+        operation,
+        item: operation === 'quantity_receive' ? item : undefined,
+        asset: operation === 'quantity_receive' ? undefined : asset,
+        currentLocation: location,
+      };
+      const view = render(<MutationForm {...props} />);
+      if (operation !== 'asset_retire')
+        await chooseLocation(
+          user,
+          operation === 'quantity_receive'
+            ? 'Receive at'
+            : 'Destination location',
+          '1B',
+        );
+      if (operation !== 'asset_move')
+        await user.type(
+          screen.getByLabelText('Reason (required)'),
+          'Reviewed reason',
+        );
+      await user.click(screen.getByRole('button', { name: /^Review / }));
+      await user.click(screen.getByRole('button', { name: /^Confirm / }));
+      await screen.findByRole('alert');
+      const first = mocks.submit.mock.calls[0][0];
+      expect(first).toMatchObject({
+        expectedActorId: actorId,
+        payload: { expected_version: 2 },
+      });
+      view.rerender(
+        <MutationForm
+          {...props}
+          item={
+            props.item ? { ...item, version: 3, archived: true } : undefined
+          }
+          asset={
+            props.asset
+              ? { ...asset, version: 3, status: 'retired' }
+              : undefined
+          }
+          locations={[]}
+        />,
+      );
+      await user.click(
+        screen.getByRole('button', { name: 'Retry same transaction' }),
+      );
+      await screen.findByText('Actor unavailable');
+      expect(mocks.submit.mock.calls[1][0]).toEqual(first);
+      expect(
+        screen.getByRole('button', { name: 'Retry same transaction' }),
+      ).toBeEnabled();
+      await user.click(
+        screen.getByRole('button', { name: 'Retry same transaction' }),
+      );
+      await screen.findByText('Saved successfully.');
+      expect(mocks.submit.mock.calls[2][0]).toEqual(first);
+      expect(
+        screen.getByRole('button', { name: 'New transaction' }),
+      ).toBeVisible();
+    },
+  );
   it('surfaces stale conflicts and retains observed count on refresh', async () => {
     mocks.submit.mockResolvedValue({
       ok: false,
@@ -401,12 +506,12 @@ describe('inventory operation forms', () => {
     await user.type(screen.getByLabelText('Reason (required)'), 'Unused');
     await user.click(
       screen.getByRole('button', {
-        name: 'Review archive quantity definition',
+        name: 'Review archive quantity item',
       }),
     );
     await user.click(
       screen.getByRole('button', {
-        name: 'Confirm archive quantity definition',
+        name: 'Confirm archive quantity item',
       }),
     );
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
@@ -551,7 +656,7 @@ it('automatically warns about duplicate serials before saving without blocking c
   await user.type(screen.getByLabelText('Serial number'), '001-A');
   await chooseLocation(user, 'Destination location', '1A');
   await user.click(
-    screen.getByRole('button', { name: 'Review create serialized asset' }),
+    screen.getByRole('button', { name: 'Review add individual asset' }),
   );
   expect(
     await screen.findByText(/Other switch \(SW-2, retired\)/),
@@ -559,7 +664,7 @@ it('automatically warns about duplicate serials before saving without blocking c
   expect(mocks.submit).not.toHaveBeenCalled();
   await user.click(
     await screen.findByRole('button', {
-      name: 'Confirm create serialized asset',
+      name: 'Confirm add individual asset',
     }),
   );
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());

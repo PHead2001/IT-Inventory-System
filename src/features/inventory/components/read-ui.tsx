@@ -123,8 +123,8 @@ export function InventoryRows({
                   <p className={styles.meta}>
                     {row.categoryName} ·{' '}
                     {row.kind === 'quantity'
-                      ? 'Quantity inventory'
-                      : 'Serialized asset'}{' '}
+                      ? 'Quantity item'
+                      : 'Individual asset'}{' '}
                     · <span className={styles.status}>{row.status}</span>
                   </p>
                   {row.kind === 'quantity' && row.itemCode && (
@@ -305,7 +305,14 @@ const eventNames: Record<string, string> = {
   site_written_off: 'Written off at site',
   site_retired: 'Retired at site',
 };
-export function HistoryList({ events }: { events: HistoryEvent[] }) {
+export function HistoryList({
+  events,
+  compact = false,
+}: {
+  events: HistoryEvent[];
+  compact?: boolean;
+}) {
+  const DetailTag = compact ? 'details' : 'div';
   if (!events.length)
     return <p className={panel}>No history matches these filters.</p>;
   return (
@@ -338,92 +345,119 @@ export function HistoryList({ events }: { events: HistoryEvent[] }) {
             </Link>{' '}
             · {event.actorName}
           </p>
-          {event.reason && (
-            <p className="mt-2 whitespace-pre-wrap break-words text-sm">
-              Reason: {event.reason}
+          {compact && (
+            <p className="mt-2 text-sm">
+              {event.assignment
+                ? [
+                    event.assignment.from.label ?? 'No recorded source',
+                    event.assignment.to.label ?? 'No recorded destination',
+                  ].join(' → ')
+                : event.eventType === 'created'
+                  ? 'Record created'
+                  : event.fromLocation || event.toLocation
+                    ? [
+                        event.fromLocation?.breadcrumb ?? 'No recorded source',
+                        event.toLocation?.breadcrumb ??
+                          'No recorded destination',
+                      ].join(' → ')
+                    : event.metadataChanges.length
+                      ? 'Record details updated'
+                      : 'Recorded inventory change'}
             </p>
           )}
-          {event.assignment && (
-            <div className="mt-3 space-y-1 text-sm">
-              <p className="min-w-0 [overflow-wrap:anywhere]">
-                Custody: {event.assignment.from.label ?? 'No recorded source'}
-                {' → '}
-                {event.assignment.to.label ?? 'No recorded destination'}
+          <DetailTag>
+            {compact && (
+              <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
+                View event details
+              </summary>
+            )}
+            {event.reason && (
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm">
+                Reason: {event.reason}
               </p>
-              {event.assignment.quantity !== null && (
-                <p>
-                  Custody quantity:{' '}
-                  {countLabel(event.assignment.quantity, 'unit')}
+            )}
+            {event.assignment && (
+              <div className="mt-3 space-y-1 text-sm">
+                <p className="min-w-0 [overflow-wrap:anywhere]">
+                  Custody: {event.assignment.from.label ?? 'No recorded source'}
+                  {' → '}
+                  {event.assignment.to.label ?? 'No recorded destination'}
+                </p>
+                {event.assignment.quantity !== null && (
+                  <p>
+                    Custody quantity:{' '}
+                    {countLabel(event.assignment.quantity, 'unit')}
+                  </p>
+                )}
+                {event.assignment.reference && (
+                  <p className="whitespace-pre-wrap break-words">
+                    Ticket number reference: {event.assignment.reference}
+                  </p>
+                )}
+              </div>
+            )}
+            {event.kind === 'quantity' &&
+              event.eventType === 'archived' &&
+              event.lines.length > 0 && (
+                <p className="mt-2 text-sm text-amber-100">
+                  Removed{' '}
+                  {countLabel(
+                    event.lines
+                      .reduce((total, line) => total + BigInt(-line.delta), 0n)
+                      .toLocaleString('en-US'),
+                    'unit',
+                  )}{' '}
+                  across {countLabel(event.lines.length, 'location')}.
                 </p>
               )}
-              {event.assignment.reference && (
-                <p className="whitespace-pre-wrap break-words">
-                  Ticket number reference: {event.assignment.reference}
+            {!event.assignment &&
+              event.eventType !== 'metadata_updated' &&
+              event.fromLocation && (
+                <p className="mt-2 text-sm">
+                  From: <LocationLink location={event.fromLocation} />
                 </p>
               )}
-            </div>
-          )}
-          {event.kind === 'quantity' &&
-            event.eventType === 'archived' &&
-            event.lines.length > 0 && (
-              <p className="mt-2 text-sm text-amber-100">
-                Removed{' '}
-                {countLabel(
-                  event.lines
-                    .reduce((total, line) => total + BigInt(-line.delta), 0n)
-                    .toLocaleString('en-US'),
-                  'unit',
-                )}{' '}
-                across {countLabel(event.lines.length, 'location')}.
+            {!event.assignment &&
+              event.eventType !== 'metadata_updated' &&
+              event.toLocation && (
+                <p className="mt-2 text-sm">
+                  To: <LocationLink location={event.toLocation} />
+                </p>
+              )}
+            {event.lines.map((line) => (
+              <p className="mt-2 text-sm" key={line.location.id}>
+                <LocationLink location={line.location} />: {line.before} →{' '}
+                {countLabel(line.after, 'unit')} ({line.delta > 0 ? '+' : ''}
+                {line.delta})
+              </p>
+            ))}
+            {event.metadataChanges.length > 0 && (
+              <dl className="mt-3 space-y-2 text-sm">
+                {event.metadataChanges.map((change) => (
+                  <div key={change.field}>
+                    <dt className="font-medium capitalize">
+                      {change.field.replaceAll('_', ' ')}
+                    </dt>
+                    <dd className="whitespace-pre-wrap break-words text-slate-400">
+                      {change.before || 'Not set'} → {change.after || 'Not set'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {event.customMetadataPresent && (
+              <p className="mt-3 text-sm">
+                <Link
+                  className="text-cyan-300 underline"
+                  href={`/history?event=${event.kind}:${event.id}`}
+                >
+                  {event.customMetadataChanged
+                    ? 'Custom metadata changed — inspect before and after'
+                    : 'Inspect custom metadata snapshots'}
+                </Link>
               </p>
             )}
-          {!event.assignment &&
-            event.eventType !== 'metadata_updated' &&
-            event.fromLocation && (
-              <p className="mt-2 text-sm">
-                From: <LocationLink location={event.fromLocation} />
-              </p>
-            )}
-          {!event.assignment &&
-            event.eventType !== 'metadata_updated' &&
-            event.toLocation && (
-              <p className="mt-2 text-sm">
-                To: <LocationLink location={event.toLocation} />
-              </p>
-            )}
-          {event.lines.map((line) => (
-            <p className="mt-2 text-sm" key={line.location.id}>
-              <LocationLink location={line.location} />: {line.before} →{' '}
-              {countLabel(line.after, 'unit')} ({line.delta > 0 ? '+' : ''}
-              {line.delta})
-            </p>
-          ))}
-          {event.metadataChanges.length > 0 && (
-            <dl className="mt-3 space-y-2 text-sm">
-              {event.metadataChanges.map((change) => (
-                <div key={change.field}>
-                  <dt className="font-medium capitalize">
-                    {change.field.replaceAll('_', ' ')}
-                  </dt>
-                  <dd className="whitespace-pre-wrap break-words text-slate-400">
-                    {change.before || 'Not set'} → {change.after || 'Not set'}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {event.customMetadataPresent && (
-            <p className="mt-3 text-sm">
-              <Link
-                className="text-cyan-300 underline"
-                href={`/history?event=${event.kind}:${event.id}`}
-              >
-                {event.customMetadataChanged
-                  ? 'Custom metadata changed — inspect before and after'
-                  : 'Inspect custom metadata snapshots'}
-              </Link>
-            </p>
-          )}
+          </DetailTag>
         </li>
       ))}
     </ol>

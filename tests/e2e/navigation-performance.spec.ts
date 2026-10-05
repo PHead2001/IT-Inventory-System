@@ -35,7 +35,7 @@ test('click before partial prefetch completes gives immediate feedback and compl
   try {
     const link = page
       .getByRole('navigation', { name: 'Main navigation' })
-      .getByRole('link', { name: 'Properties / sites', exact: true });
+      .getByRole('link', { name: 'Properties & sites', exact: true });
     await link.hover();
     await requested;
     await link.click();
@@ -47,7 +47,7 @@ test('click before partial prefetch completes gives immediate feedback and compl
     expect(new URL(page.url()).pathname).toBe('/inventory');
     release();
     await expect(
-      page.getByRole('heading', { name: 'Properties and sites', exact: true }),
+      page.getByRole('heading', { name: 'Properties & sites', exact: true }),
     ).toBeVisible();
     await expect(link).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('[data-navigation-pending="true"]')).toHaveCount(

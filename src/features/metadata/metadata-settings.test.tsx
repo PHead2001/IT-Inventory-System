@@ -106,6 +106,13 @@ function addField(name = 'New field') {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Add to form' }));
 }
 
+function openRecoveryTools() {
+  if (!screen.queryByRole('dialog', { name: 'Recovery & advanced' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Recovery & advanced' }),
+    );
+}
+
 describe('category form designer', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
@@ -118,6 +125,79 @@ describe('category form designer', () => {
     vi.mocked(saveMetadataForm).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockReset();
     vi.mocked(verifyMetadataDesignerIdentity).mockResolvedValue({ ok: true });
+  });
+  it('keeps publication controls together and opens recovery tools without losing edits, restoring focus on close and Escape', () => {
+    mount();
+    const toolbar = screen.getByRole('toolbar', { name: 'Form designer' });
+    expect(within(toolbar).getByLabelText('Designer category')).toHaveValue(
+      id(1),
+    );
+    expect(
+      within(toolbar).getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    expect(
+      within(toolbar).getByRole('button', { name: 'Save changes' }),
+    ).toBeDisabled();
+    expect(
+      within(toolbar).getByRole('button', { name: 'Undo edit' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Refresh from server' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Discard unsaved edits' }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Section heading'), {
+      target: { value: 'Cable details' },
+    });
+    expect(
+      within(toolbar).getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Unsaved changes');
+    const trigger = within(toolbar).getByRole('button', {
+      name: 'Recovery & advanced',
+    });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Recovery & advanced' });
+    expect(
+      within(dialog).getByRole('button', { name: 'Refresh from server' }),
+    ).toBeEnabled();
+    expect(within(dialog).getByText('Advanced JSON recovery')).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Close recovery tools' }),
+    );
+    expect(trigger).toHaveFocus();
+    expect(screen.getByLabelText('Section heading')).toHaveValue(
+      'Cable details',
+    );
+    fireEvent.click(trigger);
+    fireEvent(dialog, new Event('cancel', { bubbles: true }));
+    expect(trigger).toHaveFocus();
+    expect(
+      screen.queryByRole('dialog', { name: 'Recovery & advanced' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Undo edit' }));
+    expect(screen.getByLabelText('Section heading')).toHaveValue('Details');
+    expect(
+      within(toolbar).getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    expect(saveMetadataForm).not.toHaveBeenCalled();
+  });
+  it('treats a staged field as unsaved without implying that it has been published', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Unsaved changes');
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Add field' })).getByRole(
+        'button',
+        { name: 'Cancel' },
+      ),
+    );
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    expect(saveMetadataForm).not.toHaveBeenCalled();
   });
   it.each([
     'Undo edit',
@@ -171,11 +251,14 @@ describe('category form designer', () => {
       const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
       try {
         if (action === 'Apply JSON to visual editor') {
+          openRecoveryTools();
           fireEvent.click(screen.getByText('Advanced JSON recovery'));
           fireEvent.change(screen.getByLabelText('Form definition JSON'), {
             target: { value: JSON.stringify(savedForm.published_definition) },
           });
         }
+        if (['Discard unsaved edits', 'Refresh from server'].includes(action))
+          openRecoveryTools();
         fireEvent.click(screen.getByRole('button', { name: action }));
         if (action === 'Refresh from server')
           rerender(
@@ -437,7 +520,7 @@ describe('category form designer', () => {
     const canvas = screen.getByTestId('designer-canvas');
     const inspector = screen.getByTestId('designer-inspector');
     expect(Array.from(panes.children)).toEqual([library, canvas, inspector]);
-    expect(panes.className).toContain('minmax(28rem,2.5fr)');
+    expect(within(canvas).getByText('Form canvas')).toBeInTheDocument();
     const nameRow = screen
       .getAllByTestId('designer-control-name')
       .find((node) => node.textContent?.startsWith('Name'));
@@ -600,11 +683,11 @@ describe('category form designer', () => {
       within(control as HTMLElement).getByTitle('Form types using this field'),
     ).toHaveTextContent('Quantity');
     fireEvent.click(
-      screen.getByText(/Try form · quantity items or serialized assets/),
+      screen.getByText(/Try form · quantity items or individual assets/),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Asset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Individual asset' }));
     expect(
-      within(library).getByText('Excluded from Serialized preview (1)'),
+      within(library).getByText('Excluded from Individual asset preview (1)'),
     ).toBeInTheDocument();
   });
   it('keeps identity and retirement in Advanced and moves visible placements', () => {
@@ -675,6 +758,7 @@ describe('category form designer', () => {
       data: { version: '1', draft_id: id(11) },
     });
     mount();
+    openRecoveryTools();
     fireEvent.click(screen.getByText('Advanced JSON recovery'));
     fireEvent.click(
       screen.getByRole('button', { name: 'Load current document JSON' }),
@@ -825,7 +909,8 @@ describe('category form designer', () => {
     );
     expect(
       within(moved).getByTitle('Form types using this field'),
-    ).toHaveTextContent('Serialized');
+    ).toHaveTextContent('Individual asset');
+    openRecoveryTools();
     fireEvent.click(screen.getByText('Advanced JSON recovery'));
     fireEvent.click(
       screen.getByRole('button', { name: 'Load current document JSON' }),
@@ -1012,7 +1097,126 @@ describe('category form designer', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Save failed');
+    expect(
+      screen.getByRole('button', { name: 'Review recovery options' }),
+    ).toBeVisible();
     expect(screen.getByText(/Published revision 1/)).toBeInTheDocument();
+  });
+  it('replaces a failed save state with confirmed active publication after retry', async () => {
+    vi.mocked(saveMetadataForm)
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'P1012',
+        message: 'Save was rejected.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { status: 'saved', version: '2', published_revision_id: id(22) },
+      });
+    mount();
+    addField('Connector');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Save was rejected.');
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Save failed');
+    const original = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    expect(original.payload).toMatchObject({
+      expected_draft_id: null,
+      expected_draft_version: '0',
+      expected_published_revision_id: id(2),
+    });
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
+    // Error feedback precedes release of the React transition. Exercise the
+    // user's retry only when its actual control becomes enabled.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Save changes' }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved active form revision 2.');
+    expect(saveMetadataForm).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(original);
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connector');
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    expect(
+      screen.queryByRole('button', { name: 'Review recovery options' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+  it('clears a failed save treatment when editing, adopting an explicit refresh or entering another category', async () => {
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: false,
+      code: 'P1002',
+      message: 'Stale form.',
+    });
+    const properties = {
+      memberId: id(50),
+      categories: [
+        { id: id(1), name: 'Cables', active: true },
+        { id: id(20), name: 'Adapters', active: true },
+      ],
+      forms: { [id(1)]: form, [id(20)]: { ...form, category_id: id(20) } },
+    };
+    const { rerender } = render(
+      <MetadataSettings
+        key="cables"
+        {...properties}
+        selectedCategoryId={id(1)}
+      />,
+    );
+    addField('Connector');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Stale form.');
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Updated connector' },
+    });
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Unsaved changes');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Stale form.');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    openRecoveryTools();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh from server' }),
+    );
+    rerender(
+      <MetadataSettings
+        key="cables"
+        {...properties}
+        forms={{
+          ...properties.forms,
+          [id(1)]: { ...form, published_number: '2' },
+        }}
+        selectedCategoryId={id(1)}
+      />,
+    );
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    addField('Another connector');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Stale form.');
+    rerender(
+      <MetadataSettings
+        key="adapters"
+        {...properties}
+        selectedCategoryId={id(20)}
+      />,
+    );
+    expect(screen.getByLabelText('Designer category')).toHaveValue(id(20));
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Active form saved');
+    expect(screen.queryByText('Stale form.')).not.toBeInTheDocument();
+    confirm.mockRestore();
   });
   it('asks before dropping unsaved edits on category switch', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -1093,9 +1297,9 @@ describe('category form designer', () => {
       },
     );
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Form could not be loaded',
-      ),
+      expect(
+        screen.getByText('Form could not be loaded. Retry.'),
+      ).toBeVisible(),
     );
     expect(screen.getByLabelText('Field name')).toHaveValue('Keep this input');
     expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull();
@@ -1279,6 +1483,7 @@ describe('category form designer', () => {
       screen.getByLabelText('Designer category', { exact: true }),
     ).toBeDisabled();
     expect(screen.getByLabelText('Field name')).toBeDisabled();
+    openRecoveryTools();
     for (const name of [
       'Save changes',
       'Discard unsaved edits',
@@ -1811,6 +2016,9 @@ describe('category form designer', () => {
         screen.getByText(/save outcome could not be confirmed/),
       ).toBeVisible(),
     );
+    expect(
+      screen.getByRole('status', { name: 'Form save state' }),
+    ).toHaveTextContent('Save outcome unconfirmed');
     const original = vi.mocked(saveMetadataForm).mock.calls[0][0];
     await waitFor(() =>
       expect(readDesignerRecovery(id(50), id(1)).item?.receipt?.id).toBe(
@@ -1865,6 +2073,7 @@ describe('category form designer', () => {
       message: 'Still uncertain.',
     });
     expect(screen.getByLabelText('Field name')).toBeDisabled();
+    openRecoveryTools();
     expect(
       screen.getByRole('button', { name: 'Discard unsaved edits' }),
     ).toBeDisabled();
@@ -1998,6 +2207,7 @@ describe('category form designer', () => {
           readDesignerRecovery(id(50), id(1)).item?.definition.fields[0].label,
         ).toBe('Discard me'),
       );
+      openRecoveryTools();
       fireEvent.click(
         screen.getByRole('button', { name: 'Refresh from server' }),
       );
@@ -2006,6 +2216,7 @@ describe('category form designer', () => {
       );
       expect(readDesignerRecovery(id(50), id(1)).item).not.toBeNull();
       confirm.mockReturnValue(true);
+      openRecoveryTools();
       fireEvent.click(
         screen.getByRole('button', { name: 'Refresh from server' }),
       );

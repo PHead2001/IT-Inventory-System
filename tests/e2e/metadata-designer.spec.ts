@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -131,7 +133,7 @@ test('phone designer edits publish with one save and render in quantity and asse
   await inspectControl(connectorControl);
   await chooseControlSection(connectorControl, 'Specifications');
   await designer
-    .getByText('Try form · quantity items or serialized assets')
+    .getByText('Try form · quantity items or individual assets')
     .click();
   const preview = designer.getByRole('form', {
     name: 'Preview quantity metadata',
@@ -150,30 +152,29 @@ test('phone designer edits publish with one save and render in quantity and asse
   await expect(designer.getByText(/Saved active form revision/)).toBeVisible();
 
   await page.goto('/inventory/quantity/new');
-  const create = page.getByRole('form', { name: 'Create quantity inventory' });
+  const create = page.getByRole('form', { name: 'Add quantity item' });
   await create.getByLabel('Category').selectOption({ label: category });
   await expect(create.getByLabel('Connector type')).toBeVisible();
   await create
     .getByLabel('Name', { exact: true })
     .fill(`Designer item ${category}`);
   await create.getByLabel('Connector type').fill('USB-C');
-  await create.getByRole('button', { name: 'Review metadata' }).click();
-  await create.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(create).click();
+  await metadataSaveButton(create).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await expect(page.getByText('USB-C', { exact: true })).toBeVisible();
   const quantityUrl = page.url();
-  await page.getByText('Edit quantity metadata', { exact: true }).click();
-  const edit = page.getByRole('form', { name: 'Edit quantity metadata' });
+  const edit = await openRecordTask(page, 'Edit quantity metadata');
   await edit.getByLabel('Connector type').fill('USB-A');
-  await edit.getByRole('button', { name: 'Review metadata' }).click();
-  await edit.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(edit).click();
+  await metadataSaveButton(edit).click();
   await expect(page.getByText('USB-A', { exact: true })).toBeVisible();
   await page.goto(quantityUrl);
   await expect(page.getByText('USB-A', { exact: true })).toBeVisible();
 
   await page.goto('/inventory/assets/new');
   const createAsset = page.getByRole('form', {
-    name: 'Create asset inventory',
+    name: 'Add individual asset',
   });
   await createAsset.getByLabel('Category').selectOption({ label: category });
   await expect(createAsset.getByLabel('Connector type')).toBeVisible();
@@ -183,16 +184,15 @@ test('phone designer edits publish with one save and render in quantity and asse
   await createAsset.getByLabel('Asset tag').fill(`D-${Date.now()}`);
   await chooseLocation(createAsset, 'Current location', 'ITC-RACK');
   await createAsset.getByLabel('Connector type').fill('DisplayPort');
-  await createAsset.getByRole('button', { name: 'Review metadata' }).click();
-  await createAsset.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(createAsset).click();
+  await metadataSaveButton(createAsset).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   await expect(page.getByText('DisplayPort', { exact: true })).toBeVisible();
   const assetUrl = page.url();
-  await page.getByText('Edit asset metadata', { exact: true }).click();
-  const editAsset = page.getByRole('form', { name: 'Edit asset metadata' });
+  const editAsset = await openRecordTask(page, 'Edit asset metadata');
   await editAsset.getByLabel('Connector type').fill('HDMI');
-  await editAsset.getByRole('button', { name: 'Review metadata' }).click();
-  await editAsset.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataReviewButton(editAsset).click();
+  await metadataSaveButton(editAsset).click();
   await expect(page.getByText('HDMI', { exact: true })).toBeVisible();
   await page.goto(assetUrl);
   await expect(page.getByText('HDMI', { exact: true })).toBeVisible();
@@ -277,7 +277,7 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
   for (const name of ['Flag one', 'Flag two', 'Flag three'])
     await addField('boolean', name);
   await designer
-    .getByText('Try form · quantity items or serialized assets')
+    .getByText('Try form · quantity items or individual assets')
     .click();
   await designer.getByRole('button', { name: 'Phone width' }).click();
   const preview = designer.getByRole('form', {
@@ -414,9 +414,11 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
     .focus();
   await page.keyboard.press('Enter');
   await designer.getByRole('button', { name: 'Save changes' }).click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
   await page.reload();
   await expect(designer.getByLabel('Section heading').last()).toHaveValue(
     'Persisted section',
@@ -451,6 +453,9 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
     'Unsaved navigation edit',
   );
   page.once('dialog', (dialog) => dialog.accept());
+  await designer
+    .getByRole('button', { name: 'Recovery & advanced', exact: true })
+    .click();
   await designer.getByRole('button', { name: 'Refresh from server' }).click();
   await expect(designer.getByLabel('Section heading').last()).toHaveValue(
     'Persisted section',
@@ -507,15 +512,18 @@ test('a pre-existing server draft remains reviewable and can be explicitly disca
   );
   expect(saved.error).toBeNull();
   await page.reload();
-  await expect(designer.getByText('Legacy draft available')).toBeVisible();
   await expect(designer.getByLabel('Section heading').first()).toHaveValue(
     'Recovered server draft section',
   );
+  await designer
+    .getByRole('button', { name: 'Recovery & advanced', exact: true })
+    .click();
+  await expect(designer.getByText('Legacy draft available')).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
   await designer.getByRole('button', { name: 'Discard saved draft' }).click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved draft discarded.',
-  );
+  await expect(
+    designer.getByRole('status').filter({ hasText: 'Saved draft discarded.' }),
+  ).toContainText('Saved draft discarded.');
   await expect(designer.getByText('Legacy draft available')).toHaveCount(0);
   await expect(designer.getByLabel('Section heading').first()).not.toHaveValue(
     'Recovered server draft section',

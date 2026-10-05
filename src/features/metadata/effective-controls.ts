@@ -70,8 +70,8 @@ export function kindLabel(kinds: FormKind[]): string {
   return kinds.length === 2
     ? 'Both'
     : kinds[0] === 'quantity'
-      ? 'Quantity'
+      ? 'Quantity item'
       : kinds[0] === 'asset'
-        ? 'Serialized'
+        ? 'Individual asset'
         : 'No form type';
 }

@@ -1,3 +1,4 @@
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -65,16 +66,16 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await category.getByRole('button', { name: 'Save name' }).click();
     await expect(category).toContainText(renamed);
     await page.goto('/inventory/quantity/new');
-    const form = page.getByRole('form', { name: 'Create quantity inventory' });
+    const form = page.getByRole('form', { name: 'Add quantity item' });
     await form
       .getByLabel('Name', { exact: true })
       .fill('Settings referenced ' + unique);
     await form.getByLabel('Category').selectOption({ label: renamed });
-    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await metadataReviewButton(form).click();
     await expect(
       form.getByRole('region', { name: 'Metadata review' }),
     ).toBeVisible();
-    await form.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataSaveButton(form).click();
     await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
     await page.goto('/settings/categories');
     const current = page.locator('li').filter({ hasText: code });
@@ -85,7 +86,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     await current.getByRole('button', { name: 'Review impact' }).click();
     await expect(
       current.getByRole('region', { name: 'Removal impact review' }),
-    ).toContainText('1 current quantity definitions');
+    ).toContainText('1 current quantity items');
     await noHorizontalOverflow(page);
     await current.getByRole('button', { name: 'Confirm removal' }).click();
     await expect(current).toContainText('Removed');

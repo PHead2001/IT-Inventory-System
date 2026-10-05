@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import {
   HistoryList,
@@ -369,4 +369,40 @@ it('renders historical custody labels and quantity on the full item history page
   expect(
     screen.getByText('Custody: Old closet label → Old site label'),
   ).toHaveClass('[overflow-wrap:anywhere]');
+});
+
+it('keeps created snapshots and bounded custom history accessible behind compact event details', () => {
+  render(
+    <HistoryList
+      compact
+      events={[
+        {
+          id: 'created-event',
+          kind: 'asset',
+          entityId: 'asset',
+          entityName: 'Original name',
+          eventType: 'created',
+          at: '2026-09-05T12:00:00Z',
+          actorName: 'Original actor',
+          reason: null,
+          assignment: null,
+          lines: [],
+          fromLocation: null,
+          toLocation: location,
+          metadataChanges: [
+            { field: 'Serial number', before: null, after: 'Original serial' },
+          ],
+          customMetadataPresent: true,
+          customMetadataChanged: false,
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText('Record created')).toBeVisible();
+  expect(screen.getByText(/Original serial/)).not.toBeVisible();
+  fireEvent.click(screen.getByText('View event details'));
+  expect(screen.getByText(/Original serial/)).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: /custom metadata/i }),
+  ).toHaveAttribute('href', '/history?event=asset:created-event');
 });

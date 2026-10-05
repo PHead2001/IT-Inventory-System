@@ -238,3 +238,63 @@ it('transfers only the specified site-held quantity with stable version and no s
   expect(payload).not.toHaveProperty('source_location_id');
   expect(payload).not.toHaveProperty('destination_location_id');
 });
+
+it('replays the exact uncertain command despite newer custody and unavailable destinations, retaining auth uncertainty', async () => {
+  vi.mocked(submitCustody)
+    .mockRejectedValueOnce(new Error('lost response'))
+    .mockResolvedValueOnce({
+      ok: false,
+      code: 'actor_changed',
+      message: 'Actor changed',
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: id(1),
+      version: '2',
+      changed: true,
+    });
+  const initial = {
+    kind: 'asset' as const,
+    action: 'assign' as const,
+    entityId: id(1),
+    actorId: id(8),
+    version: '1',
+    locations: [location],
+    sites: [site],
+    currentLocation: location,
+  };
+  const view = render(<CustodyChangeForm {...initial} />);
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Assign asset to a site' }),
+  );
+  await screen.findByText(/result could not be confirmed/);
+  const first = vi.mocked(submitCustody).mock.calls[0][0];
+  expect(first).toMatchObject({
+    expectedActorId: id(8),
+    payload: { expected_version: '1' },
+  });
+  view.rerender(
+    <CustodyChangeForm
+      {...initial}
+      version="2"
+      sites={[]}
+      currentLocation={null}
+      currentSite={site}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  );
+  await screen.findByText('Actor changed');
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(first);
+  expect(screen.getByLabelText('Reason (optional)')).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  );
+  await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(3));
+  expect(vi.mocked(submitCustody).mock.calls[2][0]).toEqual(first);
+  expect(screen.getByRole('button', { name: 'New transaction' })).toBeVisible();
+});

@@ -1,4 +1,4 @@
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import QuantityPage from '@/app/(protected)/inventory/quantity/[id]/page';
 import AssetPage from '@/app/(protected)/inventory/assets/[id]/page';
@@ -50,7 +50,21 @@ vi.mock('@/features/custody/queries.server', () => ({
   getEntityAssignments: async () => [],
 }));
 vi.mock('@/features/files/files-panel', () => ({
-  FilesPanel: () => null,
+  FilesPanel: ({
+    parentType,
+    staff,
+  }: {
+    parentType: 'quantity' | 'asset';
+    staff: boolean;
+  }) => (
+    <section
+      aria-label={
+        parentType === 'quantity' ? 'Quantity photo' : 'Asset attachments'
+      }
+    >
+      {staff ? 'File controls' : 'Read-only files'}
+    </section>
+  ),
 }));
 vi.mock('../queries.server', () => ({
   getQuantityDetail: async () => ({
@@ -103,31 +117,45 @@ beforeEach(() => {
   fixture.role = 'viewer';
   fixture.forms.mockClear();
 });
-it('viewers can read both detail types and history links without mutation panels', async () => {
-  render(await QuantityPage({ params: Promise.resolve({ id: 'item' }) }));
-  expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
-  expect(
-    screen.getByText(/Needs restocking.*available in storage 2/),
-  ).toBeVisible();
-  expect(
-    screen.getByRole('link', { name: 'View all item history' }),
-  ).toBeVisible();
-  expect(
-    screen.queryByRole('region', { name: 'Quantity actions' }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.queryByText('Manage quantity inventory'),
-  ).not.toBeInTheDocument();
-  cleanup();
-  render(await AssetPage({ params: Promise.resolve({ id: 'item' }) }));
-  expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
-  expect(
-    screen.getByRole('link', { name: 'View all asset history' }),
-  ).toBeVisible();
-  expect(screen.queryByText('Manage serialized asset')).not.toBeInTheDocument();
-  expect(screen.queryByRole('form')).not.toBeInTheDocument();
-  expect(fixture.forms).not.toHaveBeenCalled();
-});
+it.each(['quantity', 'asset'] as const)(
+  'viewer %s details retain read surfaces without task or write launchers',
+  async (kind) => {
+    const Page = kind === 'quantity' ? QuantityPage : AssetPage;
+    render(await Page({ params: Promise.resolve({ id: 'item' }) }));
+    expect(screen.getByRole('heading', { name: 'Cable' })).toBeVisible();
+    if (kind === 'quantity') {
+      expect(
+        screen.getByText(/Needs restocking.*available in storage 2/),
+      ).toBeVisible();
+      expect(screen.getByText('Available in storage')).toBeVisible();
+    } else expect(screen.getByText('Current custody')).toBeVisible();
+    expect(
+      screen.getByRole('link', {
+        name:
+          kind === 'quantity'
+            ? 'View all item history'
+            : 'View all asset history',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('region', {
+        name: kind === 'quantity' ? 'Quantity photo' : 'Asset attachments',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText('Read-only files')).toBeVisible();
+    expect(
+      screen.queryByRole('region', { name: 'Record tasks' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: /^(Receive stock|Move stock|Move asset|Edit details|Issue stock|Assign asset|Return to storage|Transfer between sites|Correct|Record existing|Archive|Restore|Retire|Write off)/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    expect(screen.queryByText('File controls')).not.toBeInTheDocument();
+    expect(fixture.forms).not.toHaveBeenCalled();
+  },
+);
 it('staff pages fetch only the initially selected category form', async () => {
   fixture.role = 'staff';
   await NewQuantityPage();
@@ -141,26 +169,20 @@ it('staff pages fetch only the initially selected category form', async () => {
   for (const [ids] of fixture.forms.mock.calls)
     expect(ids).toEqual(['category']);
 });
-it('keeps metadata edit form mounted inside a discoverable disclosure', async () => {
+it('lazy mounts metadata edit through the task launcher', async () => {
   fixture.role = 'staff';
   const page = render(
     await QuantityPage({ params: Promise.resolve({ id: 'item' }) }),
   );
-  const summary = screen.getByText('Edit quantity metadata', {
-    selector: 'summary',
-  });
-  expect(summary.closest('details')).not.toHaveAttribute('open');
-  fireEvent.click(summary);
-  expect(summary.closest('details')).toHaveAttribute('open');
+  expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
   expect(
     screen.getByRole('form', { name: 'Edit quantity metadata' }),
   ).toBeVisible();
   page.unmount();
   render(await AssetPage({ params: Promise.resolve({ id: 'item' }) }));
-  const assetSummary = screen.getByText('Edit asset metadata', {
-    selector: 'summary',
-  });
-  fireEvent.click(assetSummary);
+  expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
   expect(
     screen.getByRole('form', { name: 'Edit asset metadata' }),
   ).toBeVisible();

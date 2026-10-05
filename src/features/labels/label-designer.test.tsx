@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { defaultFilters, defaultJob, queueStorageKey } from './queue-model';
 import type { LiveLabel } from './queue.server';
@@ -111,6 +112,26 @@ const props = {
 const printButton = () =>
   screen.getByRole('button', { name: /Print selected labels/ });
 
+async function reviewAndAcknowledge(name = 'Laptop') {
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  const row = within(notice).getByRole('heading', {
+    name: new RegExp('^' + name),
+  }).parentElement!;
+  await waitFor(() =>
+    expect(
+      within(row).getByRole('button', { name: 'Review item' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(within(row).getByRole('button', { name: 'Review item' }));
+  const historical = within(row).queryByRole('checkbox');
+  if (historical) fireEvent.click(historical);
+  fireEvent.click(
+    within(row).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+}
+
 beforeEach(() => {
   mocks.query = '';
   mocks.replace.mockReset();
@@ -188,16 +209,16 @@ it('removes the last lifecycle warning immediately when its queued record is rem
   const retired = { ...asset, state: 'retired' };
   mocks.getQueueRecords.mockResolvedValue([retired]);
   render(<LabelDesigner {...props} initial={[retired]} />);
-  await screen.findByRole('button', { name: 'Acknowledge changes' });
+  await screen.findByRole('button', { name: 'Review item' });
   fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
   expect(
-    screen.queryByRole('button', { name: 'Acknowledge changes' }),
+    screen.queryByRole('button', { name: 'Review item' }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByText(/Tag or lifecycle state changed for/),
+    screen.queryByRole('alert', { name: 'Label item decisions' }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByText(/A tag or lifecycle state needs review/),
+    screen.queryByText('Review required before printing'),
   ).not.toBeInTheDocument();
 });
 
@@ -449,13 +470,11 @@ it('removing one historical record preserves the remaining record lifecycle safe
     archived = { ...quantity, state: 'archived' };
   mocks.getQueueRecords.mockResolvedValue([retired, archived]);
   render(<LabelDesigner {...props} initial={[retired, archived]} />);
-  await screen.findByRole('button', { name: 'Acknowledge changes' });
+  await screen.findAllByRole('button', { name: 'Review item' });
   fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]);
   expect(screen.getByRole('alert')).toHaveTextContent('Adapters');
   expect(screen.getByRole('alert')).not.toHaveTextContent('Laptop');
-  expect(
-    screen.getByRole('button', { name: 'Acknowledge changes' }),
-  ).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Review item' })).toBeVisible();
   expect(printButton()).toBeDisabled();
 });
 it('reports that removal may not survive reload when queue persistence fails', async () => {
@@ -909,13 +928,11 @@ it.each(['archived', 'retired'])(
     mocks.getQueueRecords.mockResolvedValue([quantity, historical]);
     render(<LabelDesigner {...props} initial={[quantity, historical]} />);
     expect(
-      await screen.findByRole('button', { name: 'Acknowledge changes' }),
+      await screen.findByRole('button', { name: 'Review item' }),
     ).toBeVisible();
     expect(printButton()).toBeDisabled();
     expect(window.print).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Acknowledge changes' }),
-    );
+    await reviewAndAcknowledge();
     await waitFor(() => expect(printButton()).toBeEnabled());
     expect(window.print).not.toHaveBeenCalled();
   },
@@ -927,7 +944,11 @@ it('rejects a same-count final response with different selected identities', asy
   const otherAsset = { ...asset, key: '8d05f5f0-f737-47c0-b28b-c703c60bed74' };
   mocks.getQueueRecords.mockResolvedValueOnce([quantity, otherAsset]);
   fireEvent.click(printButton());
-  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      /Some queued records are unavailable to this account/,
+    ),
+  ).toBeInTheDocument();
   expect(printButton()).toBeDisabled();
   expect(window.print).not.toHaveBeenCalled();
 });
@@ -1136,7 +1157,11 @@ it('blocks unavailable rows and offers a bounded explicit retry after read failu
   await waitFor(() => expect(printButton()).toBeEnabled());
   mocks.getQueueRecords.mockResolvedValueOnce([quantity]);
   fireEvent.click(printButton());
-  expect(await screen.findByText(/Unavailable: asset:/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      /Some queued records are unavailable to this account/,
+    ),
+  ).toBeInTheDocument();
   expect(printButton()).toBeDisabled();
   expect(window.print).not.toHaveBeenCalled();
 });
@@ -1153,9 +1178,7 @@ it('requires acknowledgement of changed tag and then revalidates automatically',
     quantity,
     { ...asset, tag: 'lap-002', barcode: 'lap-002' },
   ]);
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'Acknowledge changes' }),
-  );
+  await reviewAndAcknowledge();
   expect(printButton()).toBeDisabled();
   await waitFor(() => expect(printButton()).toBeEnabled());
   expect(window.print).not.toHaveBeenCalled();
@@ -1240,3 +1263,589 @@ it('keeps printing disabled until the sheet font is ready', async () => {
     else Reflect.deleteProperty(document, 'fonts');
   }
 });
+
+it('shows one named decision on returning to a changed item and invalidates review after successive lifecycle transitions', async () => {
+  let current = asset;
+  mocks.getQueueRecords.mockImplementation(async () => [quantity, current]);
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  current = { ...asset, state: 'retired' };
+  fireEvent(window, new Event('focus'));
+  let notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(notice).toHaveTextContent('Laptop');
+  expect(notice).toHaveTextContent('Individual asset');
+  expect(notice).toHaveTextContent('Lifecycle changed from active to retired.');
+  expect(
+    screen.queryByText('Review required before printing'),
+  ).not.toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  let snapshot = within(notice).getByRole('region', { name: 'Review Laptop' });
+  expect(snapshot).toHaveTextContent('Current authorized snapshot: retired');
+  expect(
+    within(snapshot).getByRole('link', { name: 'View item details' }),
+  ).toHaveAttribute('href', asset.path);
+  expect(
+    within(snapshot).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  ).toBeDisabled();
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(within(snapshot).getByRole('checkbox'));
+  fireEvent.click(
+    within(snapshot).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  current = asset;
+  fireEvent(window, new Event('focus'));
+  notice = await screen.findByRole('alert', { name: 'Label item decisions' });
+  expect(notice).toHaveTextContent('Lifecycle changed from retired to active.');
+  expect(within(notice).queryByRole('region')).not.toBeInTheDocument();
+  await reviewAndAcknowledge();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  current = { ...asset, state: 'retired' };
+  fireEvent(window, new Event('focus'));
+  notice = await screen.findByRole('alert', { name: 'Label item decisions' });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  snapshot = within(notice).getByRole('region', { name: 'Review Laptop' });
+  expect(within(snapshot).getByRole('checkbox')).not.toBeChecked();
+  expect(
+    within(snapshot).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  ).toBeDisabled();
+  expect(printButton()).toBeDisabled();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('requires fresh review when the acknowledgment read returns a different tag or lifecycle', async () => {
+  let current = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockImplementation(async () => [current]);
+  render(<LabelDesigner {...props} initial={[asset]} />);
+  let notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  fireEvent.click(within(notice).getByRole('checkbox'));
+  current = { ...asset, state: 'active', tag: 'lap-002', barcode: 'lap-002' };
+  fireEvent.click(
+    within(notice).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: 'Review Laptop' }),
+    ).not.toBeInTheDocument(),
+  );
+  notice = screen.getByRole('alert', { name: 'Label item decisions' });
+  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Identifier changed.');
+  expect(printButton()).toBeDisabled();
+  const stored = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(stored.entries[0].baselineTag).toBe('lap-001');
+  expect(stored.entries[0].baselineState).toBe('active');
+  await reviewAndAcknowledge();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('reviews affected items individually while preserving unrelated copies and print settings', async () => {
+  const retired = { ...asset, state: 'retired' };
+  const archived = { ...quantity, state: 'archived' };
+  mocks.getQueueRecords.mockResolvedValue([retired, archived]);
+  render(<LabelDesigner {...props} initial={[asset, quantity]} />);
+  await screen.findAllByRole('button', { name: 'Review item' });
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[1], {
+    target: { value: '3' },
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Page' }), {
+    target: { value: 'A4' },
+  });
+  await reviewAndAcknowledge('Laptop');
+  await waitFor(() =>
+    expect(screen.getAllByRole('button', { name: 'Review item' })).toHaveLength(
+      1,
+    ),
+  );
+  expect(
+    screen.getByRole('alert', { name: 'Label item decisions' }),
+  ).toHaveTextContent('Adapters');
+  expect(
+    screen.getByRole('alert', { name: 'Label item decisions' }),
+  ).not.toHaveTextContent('Laptop');
+  expect(printButton()).toBeDisabled();
+  expect(screen.getAllByRole('spinbutton', { name: 'Copies' })[1]).toHaveValue(
+    3,
+  );
+  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  await reviewAndAcknowledge('Adapters');
+  await waitFor(() => expect(printButton()).toBeEnabled());
+});
+
+it('does not resurrect a removed final entry or its lifecycle warning from a delayed focus refresh', async () => {
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  const view = render(<LabelDesigner {...props} initial={[asset]} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent(window, new Event('focus'));
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  await act(async () => finish([{ ...asset, state: 'retired' }]));
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeInTheDocument();
+  expect(
+    screen.queryByRole('alert', { name: 'Label item decisions' }),
+  ).not.toBeInTheDocument();
+  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
+  expect(printButton()).toBeDisabled();
+  view.unmount();
+  render(<LabelDesigner {...props} initial={[]} />);
+  expect(
+    await screen.findByText('0 distinct records · 0 labels'),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole('alert', { name: 'Label item decisions' }),
+  ).not.toBeInTheDocument();
+});
+
+it('clears formerly readable names and sheet content when a reviewed item becomes inaccessible', async () => {
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  render(<LabelDesigner {...props} initial={[asset]} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValue([{ ...asset, state: 'retired' }]);
+  fireEvent(window, new Event('focus'));
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  fireEvent.click(within(notice).getByRole('checkbox'));
+  mocks.getQueueRecords.mockResolvedValue([]);
+  fireEvent.click(
+    within(notice).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+  await screen.findByText(
+    /Some queued records are unavailable to this account/,
+  );
+  expect(screen.queryByText(/Laptop/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('alert', { name: 'Label item decisions' }),
+  ).not.toBeInTheDocument();
+  expect(document.querySelectorAll('.label-card')).toHaveLength(0);
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Remove unavailable item from queue' }),
+  );
+  expect(screen.getByText('0 distinct records · 0 labels')).toBeInTheDocument();
+  expect(
+    screen.queryByText(/Some queued records are unavailable/),
+  ).not.toBeInTheDocument();
+});
+
+it('does not retain a checkbox decision across collapse, focus refresh or screen reentry', async () => {
+  const retired = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockResolvedValue([retired]);
+  const view = render(<LabelDesigner {...props} initial={[asset]} />);
+  let notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  fireEvent.click(within(notice).getByRole('checkbox'));
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  expect(within(notice).queryByRole('region')).not.toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  expect(within(notice).getByRole('checkbox')).not.toBeChecked();
+  fireEvent(window, new Event('focus'));
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(
+      within(
+        screen.getByRole('alert', { name: 'Label item decisions' }),
+      ).getByRole('button', { name: 'Review item' }),
+    ).toBeEnabled(),
+  );
+  expect(
+    screen.queryByRole('region', { name: 'Review Laptop' }),
+  ).not.toBeInTheDocument();
+  view.unmount();
+  render(<LabelDesigner {...props} initial={[]} />);
+  notice = await screen.findByRole('alert', { name: 'Label item decisions' });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  expect(within(notice).getByRole('checkbox')).not.toBeChecked();
+  expect(printButton()).toBeDisabled();
+});
+
+it('rejects a delayed acknowledgment after focus advances the queue validation generation', async () => {
+  const retired = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockResolvedValue([retired]);
+  render(<LabelDesigner {...props} initial={[asset]} />);
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  fireEvent.click(within(notice).getByRole('checkbox'));
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(
+    within(notice).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  fireEvent(window, new Event('focus'));
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(3));
+  await act(async () => finish([retired]));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Review item' })).toBeEnabled(),
+  );
+  expect(printButton()).toBeDisabled();
+  const stored = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(stored.entries[0].baselineState).toBe('active');
+  expect(stored.entries[0].lifecycleAcknowledged).toBe(false);
+  expect(
+    screen.getByRole('alert', { name: 'Label item decisions' }),
+  ).toHaveTextContent('Current state: active.');
+  expect(
+    screen.queryByText(/Current authorized snapshot: retired/),
+  ).not.toBeInTheDocument();
+  await reviewAndAcknowledge();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  'keeps only an unchanged surviving historical review after removal and authorized revalidation (changed survivor: %s)',
+  async (changed) => {
+    const retired = { ...asset, state: 'retired' };
+    const archived = { ...quantity, state: 'archived' };
+    mocks.getQueueRecords.mockResolvedValue([retired, archived]);
+    render(<LabelDesigner {...props} initial={[asset, quantity]} />);
+    const notice = await screen.findByRole('alert', {
+      name: 'Label item decisions',
+    });
+    const row = within(notice).getByRole('heading', {
+      name: /^Adapters/,
+    }).parentElement!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Review item' }));
+    fireEvent.click(within(row).getByRole('checkbox'));
+    let finish!: (rows: LiveLabel[]) => void;
+    mocks.getQueueRecords.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(
+      within(
+        within(notice).getByRole('heading', { name: /^Laptop/ }).parentElement!,
+      ).getByRole('button', { name: 'Remove from queue' }),
+    );
+    // Remove using its explicit row action, not an acknowledgment or print path.
+    await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+    expect(within(row).getByRole('checkbox')).toBeChecked();
+    expect(
+      within(row).getByRole('button', { name: 'Acknowledge reviewed item' }),
+    ).toBeDisabled();
+    await act(async () =>
+      finish([{ ...archived, ...(changed ? { state: 'active' } : {}) }]),
+    );
+    if (changed) {
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('region', { name: 'Review Adapters' }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.getByRole('alert', { name: 'Label item decisions' }),
+      ).toHaveTextContent('Current state: active');
+    } else {
+      await waitFor(() =>
+        expect(
+          within(row).getByRole('button', {
+            name: 'Acknowledge reviewed item',
+          }),
+        ).toBeEnabled(),
+      );
+      expect(within(row).getByRole('checkbox')).toBeChecked();
+    }
+    expect(
+      screen.getByRole('alert', { name: 'Label item decisions' }),
+    ).not.toHaveTextContent('Laptop');
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+  },
+);
+
+it('persists outstanding review when an observed retirement returns to active before acknowledgment', async () => {
+  let current = asset;
+  mocks.getQueueRecords.mockImplementation(async () => [current]);
+  const view = render(<LabelDesigner {...props} initial={[asset]} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  current = { ...asset, state: 'retired' };
+  fireEvent(window, new Event('focus'));
+  await screen.findByRole('alert', { name: 'Label item decisions' });
+  current = asset;
+  fireEvent(window, new Event('focus'));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('alert', { name: 'Label item decisions' }),
+    ).toHaveTextContent('Current state: active.'),
+  );
+  expect(printButton()).toBeDisabled();
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries[0].lifecycleAcknowledged,
+  ).toBe(false);
+  view.unmount();
+  render(<LabelDesigner {...props} initial={[]} />);
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  expect(notice).toHaveTextContent('Current state: active.');
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  expect(within(notice).queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(
+    within(notice).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('latches another item changed in an acknowledgment read even when it restores before the next refresh', async () => {
+  const archived = { ...quantity, state: 'archived' };
+  const retired = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockResolvedValue([archived, asset]);
+  render(<LabelDesigner {...props} initial={[archived, asset]} />);
+  await screen.findByRole('alert', { name: 'Label item decisions' });
+  mocks.getQueueRecords.mockResolvedValueOnce([archived, retired]);
+  await reviewAndAcknowledge('Adapters');
+  await waitFor(() =>
+    expect(
+      screen.getByRole('alert', { name: 'Label item decisions' }),
+    ).toHaveTextContent('Laptop'),
+  );
+  const notice = screen.getByRole('alert', { name: 'Label item decisions' });
+  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).not.toHaveTextContent('Adapters');
+  const stored = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(
+    stored.entries.find((entry: { key: string }) => entry.key === assetId)
+      .lifecycleAcknowledged,
+  ).toBe(false);
+  expect(printButton()).toBeDisabled();
+  await reviewAndAcknowledge('Laptop');
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('retains a surviving item lifecycle observation beside a missing sibling through removal and restoration', async () => {
+  mocks.getQueueRecords.mockResolvedValue([quantity, asset]);
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValueOnce([{ ...asset, state: 'retired' }]);
+  fireEvent(window, new Event('focus'));
+  await screen.findByText(
+    /Some queued records are unavailable to this account/,
+  );
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Remove unavailable item from queue' }),
+  );
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  expect(notice).toHaveTextContent('Laptop');
+  expect(notice).toHaveTextContent('Current state: active.');
+  expect(
+    screen.queryByText(/Some queued records are unavailable/),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText('1 distinct record · 1 label')).toBeInTheDocument();
+  const stored = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(stored.entries[0].key).toBe(assetId);
+  expect(stored.entries[0].lifecycleAcknowledged).toBe(false);
+  expect(printButton()).toBeDisabled();
+  await reviewAndAcknowledge('Laptop');
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('invalidates an already latched checked review immediately when a duplicate linked lookup observes a new snapshot', async () => {
+  const retired = { ...asset, state: 'retired' };
+  mocks.getQueueRecords.mockResolvedValue([retired]);
+  const view = render(<LabelDesigner {...props} initial={[retired]} />);
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
+  fireEvent.click(within(notice).getByRole('checkbox'));
+  expect(
+    within(notice).getByRole('button', { name: 'Acknowledge reviewed item' }),
+  ).toBeEnabled();
+  let finish!: (rows: LiveLabel[]) => void;
+  const delayed = new Promise<LiveLabel[]>((resolve) => {
+    finish = resolve;
+  });
+  mocks.getQueueRecords
+    .mockResolvedValue([asset])
+    .mockImplementationOnce(() => delayed);
+  mocks.query = 'asset=' + assetId;
+  view.rerender(
+    <LabelDesigner
+      {...props}
+      initial={[retired]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  await screen.findByText('Adding linked records after restoring this queue…');
+  await act(async () => finish([asset]));
+  expect(
+    screen.queryByRole('region', { name: 'Review Laptop' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Acknowledge reviewed item' }),
+  ).not.toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(
+      screen.getByRole('alert', { name: 'Label item decisions' }),
+    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Review item' }));
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('region', { name: 'Review Laptop' }),
+  ).toHaveTextContent('Current authorized snapshot: active');
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it('retains review debt when an overlapping manual lookup observes a second change after a linked add', async () => {
+  const retired = { ...asset, state: 'retired' };
+  mocks.query = 'asset=' + assetId;
+  mocks.searchLabelRecords.mockResolvedValue({
+    rows: [
+      {
+        kind: 'asset',
+        key: assetId,
+        name: asset.name,
+        categoryName: 'Computers',
+        status: 'active',
+        assetTag: asset.tag,
+        itemCode: null,
+        serialNumber: null,
+        manufacturer: null,
+        model: null,
+        holdingContext: asset.holdingContext,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
+  let finishLinked!: (rows: LiveLabel[]) => void;
+  let finishManual!: (rows: LiveLabel[]) => void;
+  const linked = new Promise<LiveLabel[]>((resolve) => {
+    finishLinked = resolve;
+  });
+  const manual = new Promise<LiveLabel[]>((resolve) => {
+    finishManual = resolve;
+  });
+  mocks.getQueueRecords
+    .mockResolvedValue([retired])
+    .mockImplementationOnce(() => linked)
+    .mockImplementationOnce(() => manual);
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[{ kind: 'asset', key: assetId }]}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledTimes(2));
+  await act(async () => finishLinked([retired]));
+  const notice = await screen.findByRole('alert', {
+    name: 'Label item decisions',
+  });
+  expect(
+    within(notice).getByRole('button', { name: 'Review item' }),
+  ).toBeDisabled();
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  await act(async () => finishManual([asset]));
+  expect(
+    screen.queryByRole('region', { name: 'Review Laptop' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Acknowledge reviewed item' }),
+  ).not.toBeInTheDocument();
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(
+      screen.getByRole('alert', { name: 'Label item decisions' }),
+    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+  );
+  expect(screen.getByText('1 distinct record · 1 label')).toBeVisible();
+  expect(window.print).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['quantity', 'Quantity item', quantityId, 'Cables'],
+  ['asset', 'Individual asset', assetId, 'Computers'],
+] as const)(
+  'labels ordinary search kinds as %s without changing record routes',
+  async (kind, display, key, categoryName) => {
+    mocks.searchLabelRecords.mockResolvedValueOnce({
+      rows: [
+        {
+          kind,
+          key,
+          name: 'Type presentation record',
+          categoryName,
+          status: 'active',
+          holdingContext: 'Shelf 1A',
+          itemCode: null,
+          assetTag: null,
+          serialNumber: null,
+          manufacturer: null,
+          model: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+    render(<LabelDesigner {...props} />);
+    const result = await screen.findByRole('link', {
+      name: 'Type presentation record',
+    });
+    expect(result).toHaveAttribute(
+      'href',
+      `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${key}`,
+    );
+    const results = screen.getByRole('region', {
+      name: 'Search result records',
+    });
+    expect(
+      within(results).getByText(`${display} · ${categoryName} · active`),
+    ).toBeVisible();
+    expect(
+      within(results).queryByText(`${kind} · ${categoryName} · active`),
+    ).toBeNull();
+  },
+);

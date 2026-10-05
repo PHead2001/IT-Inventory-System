@@ -18,15 +18,12 @@ export default async function CategoryFormPage({
   );
   if (!category) notFound();
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <Link href="/settings/forms" className="text-cyan-300 underline">
         All category forms
       </Link>
-      <div>
+      <div className={canManage ? 'sr-only' : undefined}>
         <h1 className="text-3xl font-semibold">{category.name} form</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Category form and field configuration
-        </p>
       </div>
       {canManage ? (
         <MetadataSettings

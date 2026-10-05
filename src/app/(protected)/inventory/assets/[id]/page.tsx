@@ -6,15 +6,13 @@ import {
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
-import { OperationPanel } from '@/features/inventory/components/mutation-form';
-import { MetadataForm } from '@/features/metadata/metadata-form';
+import { DetailTasks } from '@/features/inventory/components/detail-tasks';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
 import {
   getSites,
   getEntityAssignments,
 } from '@/features/custody/queries.server';
-import { CustodyChangeForm } from '@/features/custody/custody-change-form';
 import { FilesPanel } from '@/features/files/files-panel';
 import {
   HistoryList,
@@ -50,7 +48,7 @@ export default async function AssetPage({
         <div className={`${styles.detailHead} mt-4`}>
           <div className={styles.detailTitle}>
             <p className="experience-eyebrow">
-              {asset.categoryName} · Serialized asset
+              {asset.categoryName} · Individual asset
             </p>
             <h1 className="experience-heading mt-2">{asset.name}</h1>
             <p className="experience-muted mt-2 text-sm capitalize">
@@ -73,26 +71,52 @@ export default async function AssetPage({
             <dd>{asset.serialNumber || 'Not set'}</dd>
           </div>
           <div className={styles.fact}>
-            <dt>Current custody</dt>
+            <dt>
+              {asset.status === 'retired'
+                ? 'Last recorded custody'
+                : 'Current custody'}
+            </dt>
             <dd>
-              {site ? site.name : location ? location.breadcrumb : 'Unassigned'}
+              {site ? (
+                <Link
+                  className="text-cyan-300 underline"
+                  href={'/sites/' + encodeURIComponent(site.code)}
+                >
+                  {site.name} ({site.code})
+                </Link>
+              ) : location ? (
+                <LocationLink location={location} />
+              ) : (
+                'No recorded storage or site assignment'
+              )}
             </dd>
           </div>
         </dl>
       </section>
+      {member.role === 'staff' && (
+        <DetailTasks
+          key={member.user_id + ':' + asset.id}
+          actorId={member.user_id}
+          backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}
+          canManageConfiguration={member.can_manage_configuration}
+          asset={asset}
+          currentLocation={location}
+          currentSite={
+            site
+              ? (sites.find((candidate) => candidate.id === site.id) ?? null)
+              : null
+          }
+          categories={categories}
+          locations={locations}
+          sites={sites}
+          forms={forms}
+        />
+      )}
       <div className={styles.recordGrid}>
         <div className={styles.recordMain}>
           <section className={panel + ' my-5'}>
             <h2 className="font-semibold">Asset details</h2>
             <dl className="mt-3 space-y-2 break-words">
-              <div>
-                <dt className="text-sm text-slate-400">Asset tag</dt>
-                <dd>{asset.assetTag || 'Not set'}</dd>
-              </div>
-              <div>
-                <dt className="text-sm text-slate-400">Serial number</dt>
-                <dd>{asset.serialNumber || 'Not set'}</dd>
-              </div>
               <div>
                 <dt className="text-sm text-slate-400">Manufacturer / model</dt>
                 <dd>
@@ -133,34 +157,10 @@ export default async function AssetPage({
               </ul>
             </aside>
           )}
-          <section className={panel + ' mb-6'}>
-            <h2 className="mb-2 font-semibold">
-              {asset.status === 'retired'
-                ? 'Last recorded storage / custody'
-                : 'Current custody'}
-            </h2>
-            {site ? (
-              <Link
-                className="text-cyan-300 underline"
-                href={`/sites/${encodeURIComponent(site.code)}`}
-              >
-                Assigned to {site.name} ({site.code})
-              </Link>
-            ) : location ? (
-              <LocationLink location={location} />
-            ) : (
-              <span>No current storage or site assignment</span>
-            )}
-            {site && (
-              <p className="mt-2 text-sm text-slate-400">
-                This asset is at a site and is not currently in a storage
-                drawer. The site has no 3D room model.
-              </p>
-            )}
-          </section>
         </div>
         <aside className={styles.recordAside} aria-label="Record attachments">
           <FilesPanel
+            actorId={member.user_id}
             parentType="asset"
             parentId={asset.id}
             active={asset.status === 'active'}
@@ -168,76 +168,6 @@ export default async function AssetPage({
           />
         </aside>
       </div>
-      {member.role === 'staff' && (
-        <section aria-label="Asset actions" className="mb-8 space-y-3">
-          <h2 className="text-xl font-semibold">Manage serialized asset</h2>
-          {(asset.status === 'retired'
-            ? (['asset_update', 'asset_restore'] as const)
-            : site
-              ? (['asset_update'] as const)
-              : ([
-                  'asset_update',
-                  'asset_move',
-                  'asset_correct_location',
-                  'asset_retire',
-                ] as const)
-          ).map((operation) =>
-            operation === 'asset_update' ? (
-              <details
-                key={operation}
-                className={`${panel} ${styles.editDisclosure}`}
-              >
-                <summary>Edit asset metadata</summary>
-                <MetadataForm
-                  actorId={member.user_id}
-                  kind="asset"
-                  asset={asset}
-                  categories={categories}
-                  locations={locations}
-                  forms={forms}
-                />
-              </details>
-            ) : (
-              <OperationPanel
-                key={operation}
-                operation={operation}
-                asset={asset}
-                currentLocation={location ?? undefined}
-                categories={categories}
-                locations={locations}
-              />
-            ),
-          )}
-          {asset.status === 'active' &&
-            (site
-              ? ([
-                  'return',
-                  'transfer',
-                  'correct',
-                  'write_off',
-                  'retire',
-                ] as const)
-              : (['assign'] as const)
-            ).map((action) => (
-              <CustodyChangeForm
-                canManageConfiguration={member.can_manage_configuration}
-                key={action}
-                kind="asset"
-                action={action}
-                entityId={asset.id}
-                version={String(asset.version)}
-                locations={locations}
-                sites={sites}
-                currentLocation={location}
-                currentSite={
-                  site
-                    ? sites.find((candidate) => candidate.id === site.id)
-                    : null
-                }
-              />
-            ))}
-        </section>
-      )}
       {assignments.length > 0 && (
         <section className="mb-6 space-y-3" aria-label="Custody history">
           <h2 className="text-xl font-semibold">Custody history</h2>
@@ -261,7 +191,7 @@ export default async function AssetPage({
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
       <div className={styles.history}>
-        <HistoryList events={history} />
+        <HistoryList events={history} compact />
       </div>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"

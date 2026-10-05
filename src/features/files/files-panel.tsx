@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
+import { formatFileSize } from '@/lib/file-size';
 
 const bucket = 'inventory-files';
 type Card = {
@@ -10,7 +11,7 @@ type Card = {
   uploader: string;
   ready_at: string | null;
   type: string;
-  bytes: number;
+  bytes: number | null;
   purpose: string;
   state: string;
   created_at: string;
@@ -30,6 +31,82 @@ type FileHistory = {
   collection_revision: string;
 };
 type CardsEnvelope = { revision: string; files: Card[] };
+function fileState(state: string) {
+  switch (state) {
+    case 'ready':
+      return { label: 'Ready', detail: '' };
+    case 'reserved':
+      return {
+        label: 'Waiting for upload confirmation',
+        detail:
+          'If bytes were uploaded, confirm them before review. Otherwise cancel this pending file and choose the file again.',
+      };
+    case 'uploaded':
+      return {
+        label: 'Uploaded · review required',
+        detail:
+          'Choose Review and publish to validate this file. It is not available to view yet.',
+      };
+    case 'validating':
+      return {
+        label: 'Validation in progress',
+        detail:
+          'This file is being checked. If interrupted, retry review after the validation lease expires.',
+      };
+    case 'validated':
+      return {
+        label: 'Awaiting publication',
+        detail:
+          'Choose Review and publish to renew validation and publish this file.',
+      };
+    case 'rejected':
+      return {
+        label: 'File rejected',
+        detail:
+          'This file could not be published. Choose a supported file and add it again; byte cleanup remains unconfirmed.',
+      };
+    case 'removed':
+      return {
+        label: 'Removed',
+        detail:
+          'This file is no longer available. Byte cleanup remains unconfirmed.',
+      };
+    case 'cancelled':
+      return {
+        label: 'Cancelled',
+        detail: 'This upload was cancelled. Byte cleanup remains unconfirmed.',
+      };
+    case 'expired':
+      return {
+        label: 'Upload expired',
+        detail:
+          'Choose the file again to start a new upload. Byte cleanup remains unconfirmed.',
+      };
+    default:
+      return {
+        label: 'File unavailable',
+        detail: 'Refresh this record to check its current file state.',
+      };
+  }
+}
+const pendingStates = new Set([
+  'reserved',
+  'uploaded',
+  'validating',
+  'validated',
+]);
+function fileType(type: string) {
+  return (
+    (
+      {
+        'image/jpeg': 'JPEG photo',
+        'image/png': 'PNG photo',
+        'image/webp': 'WebP photo',
+        'application/pdf': 'PDF document',
+      } as Record<string, string>
+    )[type] ?? type
+  );
+}
 function cleanupStatus(deleted: number | null) {
   return deleted === null
     ? 'Byte cleanup could not be confirmed; retry later.'
@@ -44,6 +121,30 @@ type Rpc = (
 }>;
 
 export function FilesPanel({
+  parentType,
+  parentId,
+  active,
+  staff,
+  actorId,
+}: {
+  parentType: 'asset' | 'quantity';
+  parentId: string;
+  active: boolean;
+  staff: boolean;
+  actorId: string;
+}) {
+  return (
+    <BoundFilesPanel
+      key={`${actorId}:${parentType}:${parentId}:${staff}`}
+      parentType={parentType}
+      parentId={parentId}
+      active={active}
+      staff={staff}
+    />
+  );
+}
+
+function BoundFilesPanel({
   parentType,
   parentId,
   active,
@@ -70,11 +171,23 @@ export function FilesPanel({
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [historyError, setHistoryError] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
-  const [preview, setPreview] = useState<{ name: string; url: string } | null>(
-    null,
-  );
+  const [preview, setPreview] = useState<{
+    id: string;
+    name: string;
+    url: string;
+  } | null>(null);
   const [rpc] = useState(() => client.rpc.bind(client) as unknown as Rpc);
+  const mounted = useRef(true);
+  const invalidatedFiles = useRef(new Set<string>());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const load = useCallback(async (): Promise<CardsEnvelope | null> => {
     const { data, error } = await rpc('inventory_file_cards', {
       p_parent_type: parentType,
@@ -120,6 +233,7 @@ export function FilesPanel({
       p_parent_id: parentId,
     }).then(({ data, error }) => {
       if (cancelled) return;
+      setLoading(false);
       if (error) setMessage('Files could not be loaded.');
       else {
         const envelope = data as CardsEnvelope;
@@ -138,7 +252,9 @@ export function FilesPanel({
       p_parent_id: parentId,
       p_page: historyPage,
     }).then(({ data, error }) => {
-      if (cancelled || error) return;
+      if (cancelled) return;
+      setHistoryError(Boolean(error));
+      if (error) return;
       const result = data as { rows?: FileHistory[]; has_more?: boolean };
       setHistory((previous) =>
         historyPage === 1
@@ -168,11 +284,13 @@ export function FilesPanel({
       p_file_id: card.id,
       p_variant: variant,
     });
+    if (!mounted.current || invalidatedFiles.current.has(card.id)) return;
     if (error || typeof path !== 'string') {
       setMessage('This file is unavailable.');
       return;
     }
     const response = await client.storage.from(bucket).download(path);
+    if (!mounted.current || invalidatedFiles.current.has(card.id)) return;
     if (response.error || !response.data) {
       setMessage('This file could not be downloaded.');
       return;
@@ -184,7 +302,7 @@ export function FilesPanel({
       link.download = card.filename;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } else setPreview({ name: card.name, url });
+    } else setPreview({ id: card.id, name: card.name, url });
   }
 
   async function validate(
@@ -211,6 +329,8 @@ export function FilesPanel({
     } = await response.json();
     if (!response.ok) {
       if (body.terminalRejected) {
+        invalidatedFiles.current.add(fileId);
+        setCards((current) => current.filter((card) => card.id !== fileId));
         setCleanupPending(true);
         await load();
         throw new Error(
@@ -219,8 +339,12 @@ export function FilesPanel({
       }
       throw new Error(body.message ?? 'Validation could not be confirmed.');
     }
-    if (replacedId)
+    if (replacedId) {
+      invalidatedFiles.current.add(replacedId);
       setReplace((current) => (current === replacedId ? '' : current));
+      setCards((current) => current.filter((card) => card.id !== replacedId));
+      setPreview((current) => (current?.id === replacedId ? null : current));
+    }
     const refreshed = await load();
     setHistoryPage(1);
     setHistoryRefresh((value) => value + 1);
@@ -236,6 +360,15 @@ export function FilesPanel({
         ? `File published. ${cleanupStatus(deleted)}`
         : `File published, but files could not be refreshed. Reload this record. ${cleanupStatus(deleted)}`,
     );
+  }
+
+  function beginPicker(target: string) {
+    if (busy) return;
+    // A new picker intent must not reuse bytes if the native picker is cancelled.
+    setFile(null);
+    if (fileInput.current) fileInput.current.value = '';
+    setReplace(target);
+    fileInput.current?.click();
   }
 
   async function upload() {
@@ -310,12 +443,14 @@ export function FilesPanel({
         replacement?.id ?? null,
       );
     } catch (error) {
-      setMessage(
+      const operationError =
         error instanceof Error
           ? error.message
-          : 'Upload could not be confirmed.',
+          : 'Upload could not be confirmed.';
+      const refreshed = await load();
+      setMessage(
+        `${operationError}${refreshed ? '' : ' Files could not be refreshed; reload this record.'}`,
       );
-      await load();
     } finally {
       setBusy(false);
     }
@@ -382,6 +517,8 @@ export function FilesPanel({
           p_file_id: card.id,
         });
         if (error) throw new Error('The pending file could not be cancelled.');
+        invalidatedFiles.current.add(card.id);
+        setCards((current) => current.filter((entry) => entry.id !== card.id));
         await load();
         setCleanupPending(true);
         setMessage('File cancelled. Checking byte cleanup…');
@@ -413,13 +550,20 @@ export function FilesPanel({
           : 'Removal could not be confirmed.',
       );
     else {
-      await load();
+      invalidatedFiles.current.add(card.id);
+      setCards((current) => current.filter((entry) => entry.id !== card.id));
+      setPreview((current) => (current?.id === card.id ? null : current));
+      const refreshed = await load();
       setHistoryPage(1);
       setHistoryRefresh((value) => value + 1);
       setCleanupPending(true);
-      setMessage('File removed. Checking byte cleanup…');
+      setMessage(
+        `File removed.${refreshed ? '' : ' Files could not be refreshed; reload this record.'} Checking byte cleanup…`,
+      );
       const deleted = await cleanupTerminalFiles();
-      setMessage(`File removed. ${cleanupStatus(deleted)}`);
+      setMessage(
+        `File removed.${refreshed ? '' : ' Files could not be refreshed; reload this record.'} ${cleanupStatus(deleted)}`,
+      );
     }
     setBusy(false);
   }
@@ -461,6 +605,26 @@ export function FilesPanel({
           ? 'Recognition photo'
           : 'Photos and documents'}
       </h2>
+      {staff && (
+        <button
+          type="button"
+          disabled={busy}
+          className="mt-3 min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+          onClick={() =>
+            beginPicker(
+              parentType === 'quantity'
+                ? (cards.find((card) => card.state === 'ready')?.id ?? '')
+                : '',
+            )
+          }
+        >
+          {parentType === 'quantity'
+            ? cards.some((card) => card.state === 'ready')
+              ? 'Replace photo'
+              : 'Add photo'
+            : 'Add attachment'}
+        </button>
+      )}
       <p className="experience-muted mt-2 text-sm">
         {parentType === 'quantity'
           ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
@@ -479,23 +643,16 @@ export function FilesPanel({
           File request in progress…
         </p>
       )}
-      {staff && (
-        <button
-          type="button"
-          disabled={busy}
-          className="mt-3 min-h-11 text-cyan-300 underline disabled:opacity-50"
-          onClick={() => {
-            void cleanupTerminalFiles().then((deleted) =>
-              setMessage(cleanupStatus(deleted)),
-            );
-          }}
-        >
-          {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
-        </button>
+      {loading && (
+        <p role="status" className="mt-3 text-sm">
+          Loading files…
+        </p>
       )}
       <ul className="mt-3 space-y-2">
         {cards
-          .filter((card) => card.state === 'ready' || staff)
+          .toSorted(
+            (a, b) => Number(b.state === 'ready') - Number(a.state === 'ready'),
+          )
           .map((card) => (
             <li
               key={card.id}
@@ -510,16 +667,19 @@ export function FilesPanel({
                     {card.name}
                   </p>
                   <span className="mt-1 inline-block rounded-full border border-cyan-200/20 px-2 py-0.5 text-xs text-cyan-100">
-                    {card.state === 'ready'
-                      ? 'Validated'
-                      : `Pending · ${card.state}`}
+                    {fileState(card.state).label}
                   </span>
+                  {fileState(card.state).detail && (
+                    <p className="mt-2 text-sm text-amber-100">
+                      {fileState(card.state).detail}
+                    </p>
+                  )}
                   <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
                     Original: {card.filename}
                   </p>
                   <p className="text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]">
-                    {card.state} · {(card.bytes / 1048576).toFixed(1)} MiB ·{' '}
-                    {card.type} · {card.uploader} ·{' '}
+                    {formatFileSize(card.bytes)} · {fileType(card.type)} ·{' '}
+                    {card.uploader} ·{' '}
                     {new Date(
                       card.ready_at ?? card.created_at,
                     ).toLocaleString()}
@@ -549,6 +709,16 @@ export function FilesPanel({
                     type="button"
                     disabled={busy}
                     className="min-h-11 text-cyan-300 underline disabled:opacity-50"
+                    onClick={() => beginPicker(card.id)}
+                  >
+                    Replace
+                  </button>
+                )}
+                {staff && card.state === 'ready' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                     onClick={() => void rename(card)}
                   >
                     Rename
@@ -564,7 +734,7 @@ export function FilesPanel({
                     Remove
                   </button>
                 )}
-                {staff && card.state !== 'ready' && (
+                {staff && pendingStates.has(card.state) && (
                   <>
                     <button
                       type="button"
@@ -590,9 +760,9 @@ export function FilesPanel({
             </li>
           ))}
       </ul>
-      {!cards.some((card) => card.state === 'ready') && (
+      {!loading && !busy && cards.length === 0 && !message && (
         <p className="experience-muted mt-3 rounded-lg border border-dashed border-cyan-100/20 px-3 py-2 text-sm">
-          No ready files yet.
+          {parentType === 'quantity' ? 'No photo yet.' : 'No attachments yet.'}
         </p>
       )}
       {staff && (
@@ -664,9 +834,29 @@ export function FilesPanel({
       )}
       <details className="mt-4 border-t border-cyan-100/15 pt-3">
         <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-          File history{history.length > 0 ? ` · ${history.length} shown` : ''}
+          File activity{history.length > 0 ? ` · ${history.length} shown` : ''}
+          {cleanupPending ? ' · cleanup unconfirmed' : ''}
         </summary>
-        {history.length === 0 ? (
+        {staff && (
+          <button
+            type="button"
+            disabled={busy}
+            className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
+            onClick={() => {
+              setBusy(true);
+              void cleanupTerminalFiles()
+                .then((deleted) => setMessage(cleanupStatus(deleted)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {cleanupPending ? 'Retry file cleanup' : 'Check file cleanup'}
+          </button>
+        )}
+        {historyError ? (
+          <p role="alert" className="mt-2 text-sm text-amber-100">
+            File activity could not be loaded. Reload this record to try again.
+          </p>
+        ) : history.length === 0 ? (
           <p className="mt-2 text-sm text-slate-400">No file changes yet.</p>
         ) : (
           <ol className="mt-2 space-y-2">
@@ -758,7 +948,7 @@ function FileThumb({
   if (card.state !== 'ready' || card.type === 'application/pdf')
     return (
       <span className="flex h-16 w-16 items-center justify-center rounded-lg border border-cyan-100/20 bg-slate-950 px-2 text-center text-xs text-slate-300">
-        {card.type === 'application/pdf' ? 'PDF' : card.state}
+        {card.type === 'application/pdf' ? 'PDF' : 'Photo'}
       </span>
     );
   return (

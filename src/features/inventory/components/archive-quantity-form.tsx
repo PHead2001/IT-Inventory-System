@@ -1,6 +1,7 @@
 'use client';
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { useReportTaskState, useTaskReset } from './task-state';
 import { Button } from '@/components/ui/button';
 import { submitInventory } from '../actions';
 import type { MutationState } from '../contracts';
@@ -13,9 +14,12 @@ function displayCount(value: string) {
 
 export function ArchiveQuantityForm({
   latestReview,
+  actorId,
 }: {
   latestReview: QuantityArchiveReview;
+  actorId?: string;
 }) {
+  const resetTask = useTaskReset();
   const router = useRouter();
   const [baseline, setBaseline] = useState(latestReview);
   const [reason, setReason] = useState('');
@@ -28,9 +32,18 @@ export function ArchiveQuantityForm({
     null,
   );
   const [pending, startTransition] = useTransition();
+  const [uncertain, setUncertain] = useState(false);
+  const inFlight = useRef(false);
+  const submitted = useRef<Parameters<typeof submitInventory>[0] | null>(null);
+  const reportTask = useReportTaskState({
+    dirty: reason !== '' || acknowledged,
+    pending,
+    uncertain,
+    completed: done,
+  });
   const newerVersion = latestReview.version !== baseline.version;
 
-  if (refreshRequested && newerVersion) {
+  if (refreshRequested && newerVersion && !uncertain && !pending && !done) {
     setBaseline(latestReview);
     setAcknowledged(false);
     setReviewing(false);
@@ -40,6 +53,7 @@ export function ArchiveQuantityForm({
   }
 
   const refresh = () => {
+    if (uncertain || pending || done) return;
     setReviewing(false);
     setAcknowledged(false);
     setRefreshRequested(true);
@@ -47,9 +61,14 @@ export function ArchiveQuantityForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || done || refreshRequested || newerVersion || !acknowledged)
+    if (
+      pending ||
+      inFlight.current ||
+      done ||
+      (!uncertain && (refreshRequested || newerVersion || !acknowledged))
+    )
       return;
-    if (!reviewing) {
+    if (!reviewing && !uncertain) {
       setReviewing(true);
       setState(null);
       return;
@@ -63,23 +82,44 @@ export function ArchiveQuantityForm({
     const key = JSON.stringify(payload);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
+    const command =
+      uncertain && submitted.current
+        ? submitted.current
+        : {
+            operation: 'quantity_archive_and_clear' as const,
+            requestId,
+            payload,
+            ...(actorId ? { expectedActorId: actorId } : {}),
+          };
+    submitted.current = command;
+    inFlight.current = true;
+    reportTask({ pending: true });
     startTransition(async () => {
       try {
-        const result = await submitInventory({
-          operation: 'quantity_archive_and_clear',
-          requestId,
-          payload,
-        });
+        const result = await submitInventory(command);
+        const unresolved =
+          !result.ok &&
+          (result.kind === 'unexpected' ||
+            (uncertain &&
+              ['forbidden', 'actor_changed', 'idempotency_conflict'].includes(
+                result.code,
+              )));
+        setUncertain(unresolved);
         setState(result);
         if (result.ok) {
           setDone(true);
           setReviewing(false);
-          router.refresh();
+          try {
+            router.refresh();
+          } catch {
+            /* Preserve acknowledged completion. */
+          }
         } else if (result.code === 'stale_version') {
           setReviewing(false);
           setAcknowledged(false);
         }
       } catch {
+        setUncertain(true);
         setState({
           ok: false,
           kind: 'unexpected',
@@ -87,19 +127,21 @@ export function ArchiveQuantityForm({
           message:
             'The result could not be confirmed. Keep this request and retry safely.',
         });
+      } finally {
+        inFlight.current = false;
       }
     });
   };
   return (
     <form
-      aria-label="Archive quantity definition and clear stock"
+      aria-label="Archive quantity item and clear stock"
       className="space-y-4"
       onSubmit={submit}
     >
       <p className="text-sm text-amber-100">
         Archiving removes every recorded balance, including stock at inactive
-        locations. Restoring this definition will return it with zero stock; its
-        reorder threshold is retained.
+        locations. Restoring this quantity item will return it with zero stock;
+        its reorder threshold is retained.
       </p>
       <section className={panel} aria-label="Stock to remove">
         <h3 className="font-semibold">
@@ -122,10 +164,10 @@ export function ArchiveQuantityForm({
           <p className="mt-2 text-sm">No positive balances remain.</p>
         )}
       </section>
-      {newerVersion && (
+      {newerVersion && !uncertain && !done && (
         <div role="alert" className="space-y-2 text-sm text-amber-200">
           <p>
-            This definition changed. Load and review the latest per-location
+            This quantity item changed. Load and review the latest per-location
             counts before archiving.
           </p>
           <Button type="button" variant="outline" onClick={refresh}>
@@ -133,7 +175,11 @@ export function ArchiveQuantityForm({
           </Button>
         </div>
       )}
-      <fieldset disabled={pending || done || refreshRequested || newerVersion}>
+      <fieldset
+        disabled={
+          pending || uncertain || done || refreshRequested || newerVersion
+        }
+      >
         <label className="mb-2 block" htmlFor="archive-clear-reason">
           Reason (required)
         </label>
@@ -172,7 +218,7 @@ export function ArchiveQuantityForm({
         <section aria-label="Review changes" className={panel}>
           <h3 className="font-semibold">Confirm stock removal</h3>
           <p className="mt-2 text-sm">
-            Archive this definition and remove{' '}
+            Archive this quantity item and remove{' '}
             {displayCount(baseline.removed_total)} units from{' '}
             {baseline.locations.length} locations in one recorded operation.
           </p>
@@ -184,23 +230,40 @@ export function ArchiveQuantityForm({
       {state && !state.ok && (
         <div role="alert" className="space-y-2 text-sm text-red-300">
           <p>{state.message}</p>
-          {state.code === 'stale_version' && (
+          {state.code === 'stale_version' && !uncertain && (
             <Button type="button" variant="outline" onClick={refresh}>
               Refresh latest stock review
             </Button>
           )}
         </div>
       )}
-      {state?.ok && <p role="status">Stock removed and definition archived.</p>}
+      {state?.ok && (
+        <>
+          <p role="status">Stock removed and quantity item archived.</p>
+          {resetTask && (
+            <Button
+              type="button"
+              className="hover:translate-y-0 active:scale-100"
+              onClick={resetTask}
+            >
+              New transaction
+            </Button>
+          )}
+        </>
+      )}
       <Button
         type="submit"
-        disabled={pending || done || refreshRequested || newerVersion}
+        disabled={
+          pending || done || (!uncertain && (refreshRequested || newerVersion))
+        }
       >
         {pending
           ? 'Saving…'
-          : reviewing
-            ? 'Confirm archive and clear stock'
-            : 'Review archive and clear stock'}
+          : uncertain
+            ? 'Retry same archive transaction'
+            : reviewing
+              ? 'Confirm archive and clear stock'
+              : 'Review archive and clear stock'}
       </Button>
     </form>
   );
@@ -220,7 +283,7 @@ export function ArchiveQuantityPanel({
       }}
     >
       <summary className="min-h-11 cursor-pointer font-medium">
-        Archive quantity definition and clear stock
+        Archive quantity item and clear stock
       </summary>
       <div className="mt-4">
         {opened && <ArchiveQuantityForm latestReview={review} />}

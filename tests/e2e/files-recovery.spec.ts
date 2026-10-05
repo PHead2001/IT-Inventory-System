@@ -1,3 +1,4 @@
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -40,16 +41,16 @@ async function login(page: Page) {
 
 async function createAsset(page: Page) {
   await page.goto('/inventory/assets/new');
-  const form = page.getByRole('form', { name: 'Create asset inventory' });
+  const form = page.getByRole('form', { name: 'Add individual asset' });
   await form
     .getByLabel('Name', { exact: true })
     .fill('Derived recovery ' + randomUUID());
   await chooseLocation(form, 'Current location', 'ITC-RACK');
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
 }
 
@@ -311,7 +312,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
       files
         .locator('ul')
         .first()
-        .getByText(/^ready/),
+        .getByText(/^Ready\b/),
     ).toBeVisible();
     const publishedVariant = await db.query<{ bytes: string }>(
       `select fo.bytes::text bytes from private.file_objects fo

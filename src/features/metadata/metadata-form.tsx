@@ -53,6 +53,11 @@ import {
 import type { MetadataDefinition, MetadataForm } from './contracts';
 import { controlLayoutStyle } from './control-layout';
 import { controlVisible } from './effective-controls';
+import { creationSummary, normalizeCreationIntent } from './creation-summary';
+import {
+  useReportTaskState,
+  useTaskReset,
+} from '@/features/inventory/components/task-state';
 import { MetadataFieldInput } from './field-value-input';
 import { fieldValueError } from './field-value-validation';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
@@ -248,6 +253,7 @@ export function MetadataForm({
   );
   const [discardOpen, setDiscardOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const creationReviewHeading = useRef<HTMLHeadingElement>(null);
   const [inputGeneration, setInputGeneration] = useState(0);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -276,8 +282,22 @@ export function MetadataForm({
     {},
   );
   const [review, setReview] = useState(false);
+  useLayoutEffect(() => {
+    if (!creating || preview || !review) return;
+    creationReviewHeading.current?.focus({ preventScroll: true });
+    creationReviewHeading.current?.scrollIntoView?.({
+      block: 'start',
+      behavior: 'auto',
+    });
+  }, [creating, preview, review]);
+  const [creationIntent, setCreationIntent] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [ackLegacy, setAckLegacy] = useState(false);
   const [state, setState] = useState<MutationState | CustodyState | null>(null);
+  const resetTask = useTaskReset();
+  const taskCompleted = Boolean(resetTask && state?.ok);
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [openingReason, setOpeningReason] = useState('');
   const [openingReference, setOpeningReference] = useState('');
@@ -714,7 +734,14 @@ export function MetadataForm({
     core.category_id !== baseline.categoryId &&
     Object.keys(baseline.customValues ?? {}).length > 0;
   const updateCore = (name: keyof typeof core, value: string) => {
-    if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
+    if (
+      taskCompleted ||
+      uncertain ||
+      dispatched.current ||
+      actorStale ||
+      refreshNeeded
+    )
+      return;
     const next = { ...core, [name]: value };
     persistInputs({
       core: next,
@@ -736,7 +763,14 @@ export function MetadataForm({
     setState(null);
   };
   const updateCustom = (id: string, value: unknown) => {
-    if (uncertain || dispatched.current || actorStale || refreshNeeded) return;
+    if (
+      taskCompleted ||
+      uncertain ||
+      dispatched.current ||
+      actorStale ||
+      refreshNeeded
+    )
+      return;
     const next =
       value === undefined
         ? Object.fromEntries(
@@ -992,8 +1026,18 @@ export function MetadataForm({
           : '/inventory',
       )
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
+  const reportTask = useReportTaskState({
+    dirty,
+    pending,
+    uncertain,
+    completed: state?.ok === true,
+  });
   const discard = () => {
-    if (pending || uncertain || dispatched.current) return;
+    if (taskCompleted || pending || uncertain || dispatched.current) return;
+    if (resetTask && !creating) {
+      resetTask();
+      return;
+    }
     if (refreshNeeded) {
       const details = formRef.current?.closest('details');
       if (details) {
@@ -1070,7 +1114,7 @@ export function MetadataForm({
     }
   };
   const cancel = () => {
-    if (pending || uncertain || dispatched.current) return;
+    if (taskCompleted || pending || uncertain || dispatched.current) return;
     if (dirty && !refreshNeeded) setDiscardOpen(true);
     else discard();
   };
@@ -1197,6 +1241,7 @@ export function MetadataForm({
   };
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (taskCompleted) return;
     if (!uncertain && !pending && !dispatched.current) {
       const issues: FieldIssue[] = [];
       for (const field of visibleFields) {
@@ -1267,6 +1312,21 @@ export function MetadataForm({
     )
       return;
     if (!review && !uncertain) {
+      if (creating) {
+        const raw = payload();
+        const normalized =
+          raw && normalizeCreationIntent(kind, Boolean(openingSite), raw);
+        if (!normalized) {
+          setState({
+            ok: false,
+            kind: 'validation',
+            code: 'validation',
+            message: 'Check the entered values before reviewing this record.',
+          });
+          return;
+        }
+        setCreationIntent(normalized);
+      }
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
         startTransition(async () => {
@@ -1288,7 +1348,26 @@ export function MetadataForm({
       return;
     }
     if (legacyMigration && !ackLegacy) return;
-    let commandPayload = payload();
+    if (creating && !uncertain) {
+      const raw = payload();
+      const currentIntent =
+        raw && normalizeCreationIntent(kind, Boolean(openingSite), raw);
+      if (
+        !currentIntent ||
+        JSON.stringify(currentIntent) !== JSON.stringify(creationIntent)
+      ) {
+        setReview(false);
+        setState({
+          ok: false,
+          kind: 'validation',
+          code: 'review_changed',
+          message:
+            'The entered values changed. Review this record again before adding it.',
+        });
+        return;
+      }
+    }
+    let commandPayload = creating ? creationIntent : payload();
     let operation =
       openingSite && creating
         ? (`${kind}_site_open` as const)
@@ -1333,6 +1412,7 @@ export function MetadataForm({
     }
     setReceipt({ key, id: requestId });
     dispatched.current = true;
+    reportTask({ pending: true });
     startTransition(async () => {
       let result: MutationState | CustodyState;
       try {
@@ -1560,8 +1640,8 @@ export function MetadataForm({
           ? `Preview ${kind} metadata`
           : creating
             ? openingSite
-              ? `Record opening ${kind} at site`
-              : `Create ${kind} inventory`
+              ? `Record opening ${kind === 'quantity' ? 'quantity item' : 'individual asset'} at site`
+              : `Add ${kind === 'quantity' ? 'quantity item' : 'individual asset'}`
             : `Edit ${kind} metadata`
       }
       onSubmit={preview ? (event) => event.preventDefault() : submit}
@@ -1817,6 +1897,7 @@ export function MetadataForm({
       <fieldset
         hidden={!!terminalDraft}
         disabled={
+          taskCompleted ||
           (recoveryEnabled &&
             (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
           pending ||
@@ -2009,10 +2090,67 @@ export function MetadataForm({
           role="region"
           aria-label="Metadata review"
         >
-          <p>
-            Review {core.name || 'this record'} in{' '}
-            {categories.find((value) => value.id === core.category_id)?.name}.
-          </p>
+          {creating && creationIntent && definition ? (
+            (() => {
+              const summary = creationSummary({
+                kind,
+                intent: creationIntent,
+                categories,
+                locations,
+                definition,
+                touched,
+                openingSite,
+              });
+              return (
+                <>
+                  <h2
+                    ref={creationReviewHeading}
+                    tabIndex={-1}
+                    className="scroll-mt-24 text-lg font-semibold"
+                  >
+                    Review{' '}
+                    {kind === 'quantity' ? 'quantity item' : 'individual asset'}
+                  </h2>
+                  {summary.opening && (
+                    <p className="mt-2 text-sm">{summary.opening}</p>
+                  )}
+                  <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                    {summary.rows.map((row) => (
+                      <div key={row.label} className="min-w-0">
+                        <dt className="text-sm text-slate-400">{row.label}</dt>
+                        <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                          {row.value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <details className="mt-3">
+                    <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+                      Record details & custom answers
+                    </summary>
+                    <dl className="space-y-3">
+                      {summary.details.map((row, index) => (
+                        <div key={`${row.label}:${index}`} className="min-w-0">
+                          <dt className="text-sm text-slate-400">
+                            {row.label}
+                            {row.source ? ` · ${row.source}` : ''}
+                          </dt>
+                          <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {row.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </details>
+                </>
+              );
+            })()
+          ) : (
+            <p>
+              Review {core.name || 'this record'} in{' '}
+              {categories.find((value) => value.id === core.category_id)?.name}.
+            </p>
+          )}
           {legacyMigration && (
             <label className="mt-2 flex items-start gap-2">
               <input
@@ -2031,11 +2169,13 @@ export function MetadataForm({
               serials are allowed.
             </p>
           )}
-          <p className="text-sm text-slate-400">
-            {openingSite
-              ? 'Opening details, custom values and site custody save together as one version and event.'
-              : 'Custom values and core details save together with history.'}
-          </p>
+          {!creating && (
+            <p className="text-sm text-slate-400">
+              {openingSite
+                ? 'Opening details, custom values and site custody save together as one version and event.'
+                : 'Custom values and core details save together with history.'}
+            </p>
+          )}
         </div>
       )}
       {!preview && state && !state.ok && (
@@ -2046,7 +2186,21 @@ export function MetadataForm({
           {state.message}
         </p>
       )}
-      {!preview && state?.ok && <p role="status">Metadata saved.</p>}
+      {!preview && state?.ok && (
+        <>
+          <p role="status">Metadata saved.</p>
+          {resetTask && (
+            <Button
+              type="button"
+              className="hover:translate-y-0 active:scale-100"
+              disabled={pending}
+              onClick={resetTask}
+            >
+              New transaction
+            </Button>
+          )}
+        </>
+      )}
       {!preview && !uncertain && invalidAnswers && (
         <p className="text-sm text-amber-200">
           Complete the required fields and correct highlighted answers before
@@ -2054,9 +2208,15 @@ export function MetadataForm({
         </p>
       )}
       {!preview && !terminalDraft && (
-        <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 rounded bg-slate-950/95 py-3">
+        <div
+          className={
+            (resetTask || creating ? '' : 'sticky bottom-0 z-10 ') +
+            'flex flex-wrap gap-2 rounded bg-slate-950/95 py-3'
+          }
+        >
           <Button
             disabled={
+              taskCompleted ||
               (recoveryEnabled &&
                 (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
               pending ||
@@ -2074,14 +2234,23 @@ export function MetadataForm({
             {uncertain
               ? 'Retry same save'
               : review
-                ? 'Confirm save'
-                : 'Review metadata'}
+                ? creating
+                  ? kind === 'quantity'
+                    ? 'Add quantity item'
+                    : 'Add individual asset'
+                  : 'Confirm save'
+                : creating
+                  ? kind === 'quantity'
+                    ? 'Review quantity item'
+                    : 'Review individual asset'
+                  : 'Review metadata'}
           </Button>
           <Button
             ref={cancelRef}
             type="button"
             variant="outline"
             disabled={
+              taskCompleted ||
               pending ||
               uncertain ||
               !!terminalDraft ||
@@ -2096,9 +2265,13 @@ export function MetadataForm({
               type="button"
               variant="outline"
               disabled={pending || uncertain}
-              onClick={() => setReview(false)}
+              onClick={() => {
+                setReview(false);
+                if (creating)
+                  document.getElementById(scopeId + '-metadata-name')?.focus();
+              }}
             >
-              Edit values
+              {creating ? 'Back to edit' : 'Edit values'}
             </Button>
           )}
         </div>

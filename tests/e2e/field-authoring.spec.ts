@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
@@ -357,13 +359,11 @@ async function addField(
   ).toHaveValue(config.name);
 }
 async function confirm(form: Locator) {
-  await form
-    .getByRole('button', { name: 'Review metadata', exact: true })
-    .click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toBeVisible();
-  await form.getByRole('button', { name: 'Confirm save', exact: true }).click();
+  await metadataSaveButton(form).click();
 }
 function metadataAnswer(page: Page, label: string) {
   return page
@@ -471,16 +471,20 @@ test('authors all twelve types through the UI and preserves their preview, creat
     .getByRole('button', { name: 'Save changes', exact: true })
     .click();
   const impact = designer.getByRole('region', { name: 'Form save impact' });
-  await expect(designer.getByRole('status')).toContainText(
-    /Saved active form revision|Review the effect/,
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: /Saved active form revision|Review the effect/ }),
+  ).toContainText(/Saved active form revision|Review the effect/);
   if (await impact.isVisible())
     await impact
       .getByRole('button', { name: 'Confirm and save changes' })
       .click();
-  await expect(designer.getByRole('status')).toContainText(
-    'Saved active form revision',
-  );
+  await expect(
+    designer
+      .getByRole('status')
+      .filter({ hasText: 'Saved active form revision' }),
+  ).toContainText('Saved active form revision');
   await page.reload();
   for (const config of fields)
     await expect(
@@ -496,7 +500,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
         .getByTestId('designer-control-preview'),
     ).toContainText(config.name);
   await page.goto('/inventory/quantity/new');
-  let form = page.getByRole('form', { name: 'Create quantity inventory' });
+  let form = page.getByRole('form', { name: 'Add quantity item' });
   await form
     .getByLabel('Category', { exact: true })
     .selectOption({ label: category });
@@ -592,11 +596,8 @@ test('authors all twelve types through the UI and preserves their preview, creat
   for (const [label, value] of Object.entries(initialDetail))
     await expect(metadataAnswer(page, label)).toHaveText(value);
   await expect(metadataAnswer(page, 'Appointment')).toContainText('2026');
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Edit quantity metadata$/ })
-    .click();
-  form = page.getByRole('form', { name: 'Edit quantity metadata' });
+  await openRecordTask(page, 'Edit quantity metadata');
+  form = await openRecordTask(page, 'Edit quantity metadata');
   await form
     .getByLabel('Inspection description', { exact: true })
     .fill('Edited connector');
@@ -777,11 +778,8 @@ test('authors all twelve types through the UI and preserves their preview, creat
   ).toEqual(recordedEvent.data!.after_metadata.custom_values[ids.Appointment]);
   await capture(page, info, 'metadata-history');
   await page.goto(quantityUrl);
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Edit quantity metadata$/ })
-    .click();
-  form = page.getByRole('form', { name: 'Edit quantity metadata' });
+  await openRecordTask(page, 'Edit quantity metadata');
+  form = await openRecordTask(page, 'Edit quantity metadata');
   const editedAppointment = form.getByRole('group', {
     name: 'Appointment',
     exact: true,
@@ -924,7 +922,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
     contentType: 'text/csv',
   });
   await page.goto('/inventory/assets/new');
-  form = page.getByRole('form', { name: 'Create asset inventory' });
+  form = page.getByRole('form', { name: 'Add individual asset' });
   await form
     .getByLabel('Category', { exact: true })
     .selectOption({ label: category });
@@ -936,11 +934,8 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   await page.reload();
   await expect(metadataAnswer(page, 'Purchase price')).toHaveText('125.00 USD');
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Edit asset metadata$/ })
-    .click();
-  form = page.getByRole('form', { name: 'Edit asset metadata' });
+  await openRecordTask(page, 'Edit asset metadata');
+  form = await openRecordTask(page, 'Edit asset metadata');
   await form
     .getByLabel('Setup note', { exact: true })
     .fill('Asset note\nSecond line');
@@ -982,17 +977,21 @@ test('authors all twelve types through the UI and preserves their preview, creat
     await designer
       .getByRole('button', { name: 'Save changes', exact: true })
       .click();
-    await expect(designer.getByRole('status')).toContainText(
-      /Saved active form revision|Review the effect/,
-    );
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: /Saved active form revision|Review the effect/ }),
+    ).toContainText(/Saved active form revision|Review the effect/);
     const impact = designer.getByRole('region', { name: 'Form save impact' });
     if (await impact.isVisible())
       await impact
         .getByRole('button', { name: 'Confirm and save changes' })
         .click();
-    await expect(designer.getByRole('status')).toContainText(
-      'Saved active form revision',
-    );
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: 'Saved active form revision' }),
+    ).toContainText('Saved active form revision');
   };
   await page.goto('/settings/forms/' + fieldsRead.data!.id);
   for (const config of fields) {
@@ -1016,10 +1015,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
     [assetUrl, 'asset'],
   ] as const) {
     await page.goto(url);
-    await page
-      .locator('summary')
-      .filter({ hasText: new RegExp('^Edit ' + kind + ' metadata$') })
-      .click();
+    await openRecordTask(page, 'Edit ' + kind + ' metadata');
     const hiddenForm = page.getByRole('form', {
       name: 'Edit ' + kind + ' metadata',
     });
@@ -1063,10 +1059,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
           .locator('dt')
           .filter({ hasText: config.name }),
       ).toHaveCount(1);
-    await page
-      .locator('summary')
-      .filter({ hasText: new RegExp('^Edit ' + kind + ' metadata$') })
-      .click();
+    await openRecordTask(page, 'Edit ' + kind + ' metadata');
     await expect(
       page
         .getByRole('form', { name: 'Edit ' + kind + ' metadata' })
@@ -1079,7 +1072,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await page.goto('/inventory/quantity/new');
   await expect(page.getByText(/Staff membership is required/)).toBeVisible();
   await expect(
-    page.getByRole('form', { name: 'Create quantity inventory' }),
+    page.getByRole('form', { name: 'Add quantity item' }),
   ).toHaveCount(0);
 });
 
@@ -1101,7 +1094,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await expect(
       page.getByRole('link', { name: query + ' 25', exact: true }),
     ).toHaveCount(1);
-    await page.getByRole('link', { name: 'Create quantity inventory' }).click();
+    await page.getByRole('link', { name: 'Add quantity item' }).click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page).toHaveURL(
       new RegExp(
@@ -1113,7 +1106,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/inventory/assets/new');
-    const form = page.getByRole('form', { name: 'Create asset inventory' });
+    const form = page.getByRole('form', { name: 'Add individual asset' });
     await form.getByLabel('Name', { exact: true }).fill(query);
     await noOverflow(page);
     await form.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -1141,7 +1134,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.goto('/settings/sites');
     const siteForm = page.locator('form').filter({
       has: page.getByRole('heading', {
-        name: 'Add property / site',
+        name: 'Add property/site',
         exact: true,
       }),
     });
@@ -1152,7 +1145,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.goto('/sites/' + siteCode);
     await page
       .getByRole('link', {
-        name: 'Record existing quantity holding',
+        name: 'Record existing quantity item',
         exact: true,
       })
       .click();
@@ -1160,7 +1153,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
     await page
       .getByRole('link', {
-        name: 'Record existing serialized asset',
+        name: 'Record existing individual asset',
         exact: true,
       })
       .click();

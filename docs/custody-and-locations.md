@@ -145,3 +145,25 @@ before/after configuration changes without pretending they were inventory
 movements. Historical IDs and event snapshots remain readable after renames or
 deactivation. A production maintainer grant and production migration remain
 separate owner-controlled release actions.
+
+## Detail task workspace
+
+Staff record details use one lazy-mounted task workspace beside stock and custody.
+Ordinary tasks remain visible; opening holdings and consequential lifecycle tasks
+use secondary groups. Opening holdings describe equipment already at a site.
+Viewers retain readable stock, files and history without mutation launchers.
+
+Switching or closing an untouched task is immediate. Dirty drafts require Stay or
+an explicit discard. Pending and unconfirmed transactions block task switching;
+retry replays the exact captured actor, command, version and request identity even
+if current holdings change. A refreshed lifecycle can remove a launcher without
+unmounting its existing unresolved transaction. Auth or retry-identity rejection
+cannot establish failure of an earlier unknown attempt. Confirmed results remain
+visible until New transaction; quantity moves retain their explicit Move more
+and durable receipt recovery flow. Reviewed refresh after a definitive stale
+rejection preserves entered values.
+
+Asset detail has one primary identifier/custody summary. Retired custody is labelled
+last recorded custody. Recent events are compact rows with native expandable full
+before/after values and existing bounded custom snapshot links; historical labels
+come from the original read model rather than current record fields.

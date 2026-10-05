@@ -1,3 +1,5 @@
+import { openRecordTask } from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -13,11 +15,7 @@ async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   ).toBeVisible();
 }
 async function openOperation(page: Page, name: string) {
-  await page
-    .locator('summary')
-    .filter({ hasText: new RegExp('^' + name + '$') })
-    .click();
-  return page.getByRole('form', { name, exact: true });
+  return openRecordTask(page, name);
 }
 async function archive(page: Page, detail: string) {
   await page.goto(detail);
@@ -129,24 +127,20 @@ test('creation and receive keep associated errors, entered values and correction
   await login(page);
   await page.goto('/inventory/quantity/new');
   let form = page.getByRole('form', {
-    name: 'Create quantity inventory',
+    name: 'Add quantity item',
     exact: true,
   });
   const name = 'Accessibility quantity ' + randomUUID();
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(form.getByText(/Fields marked/)).toBeVisible();
-  await form
-    .getByRole('button', { name: 'Review metadata', exact: true })
-    .click();
+  await metadataReviewButton(form).click();
   await associatedError(form.getByLabel('Name', { exact: true }));
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toHaveCount(0);
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Initial quantity').fill('1');
-  await form
-    .getByRole('button', { name: 'Review metadata', exact: true })
-    .click();
+  await metadataReviewButton(form).click();
   await associatedError(form.getByLabel('Initial location', { exact: true }));
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await page.screenshot({
@@ -154,10 +148,8 @@ test('creation and receive keep associated errors, entered values and correction
     fullPage: true,
   });
   await chooseLocation(form, 'Initial location', 'ITC-RED');
-  await form
-    .getByRole('button', { name: 'Review metadata', exact: true })
-    .click();
-  await form.getByRole('button', { name: 'Confirm save', exact: true }).click();
+  await metadataReviewButton(form).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   const detail = page.url();
   try {
@@ -212,7 +204,7 @@ test('creation and receive keep associated errors, entered values and correction
     });
     await page.goto('/settings/sites');
     const siteForm = page.locator('form').filter({
-      has: page.getByRole('heading', { name: 'Add property / site' }),
+      has: page.getByRole('heading', { name: 'Add property/site' }),
     });
     await siteForm
       .getByRole('button', { name: 'Save site', exact: true })
@@ -246,11 +238,11 @@ test('serialized creation leaves asset tag optional and retains invalid values t
   await login(page);
   await page.goto('/inventory/assets/new');
   const form = page.getByRole('form', {
-    name: 'Create asset inventory',
+    name: 'Add individual asset',
     exact: true,
   });
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await associatedError(form.getByLabel('Name', { exact: true }));
   await expect(form.getByLabel('Asset tag')).not.toHaveAttribute(
     'required',

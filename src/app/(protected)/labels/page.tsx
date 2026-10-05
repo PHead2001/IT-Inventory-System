@@ -52,8 +52,8 @@ export default async function LabelsPage({
         Print labels
       </h1>
       <p className="experience-muted mb-7 max-w-3xl text-sm leading-6 print:hidden">
-        Build a sheet from quantity definitions, assets, and locations. Every
-        label opens its current record after sign in.
+        Build a sheet from quantity items, individual assets, and locations.
+        Every label opens its current record after sign in.
       </p>
       <LabelDesigner
         locations={locations}

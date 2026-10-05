@@ -1,3 +1,9 @@
+import {
+  beginNewRecordTransaction,
+  expectStableReceiptAction,
+  openRecordTask,
+} from './record-task-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
@@ -15,34 +21,38 @@ async function choose(form: Locator, label: string, code: string) {
   await chooseLocation(form, label, code);
 }
 async function openForm(page: Page, name: string) {
-  await page
-    .locator('summary')
-    .filter({ hasText: new RegExp('^' + name + '$') })
-    .click();
-  return page.getByRole('form', { name, exact: true });
+  return openRecordTask(page, name);
 }
 async function confirm(form: Locator, name: string) {
   if (
-    name === 'Create quantity inventory' ||
-    name === 'Create serialized asset' ||
+    name === 'Add quantity item' ||
+    name === 'Add individual asset' ||
     name === 'Edit quantity metadata' ||
     name === 'Edit asset metadata'
   ) {
-    await form.getByRole('button', { name: 'Review metadata' }).click();
+    await metadataReviewButton(form).click();
     await expect(
       form.getByRole('region', { name: 'Metadata review' }),
     ).toBeVisible();
-    await form.getByRole('button', { name: 'Confirm save' }).click();
+    await metadataSaveButton(form).click();
     return;
   }
+  const action =
+    name === 'Restore quantity definition' ? 'Restore quantity item' : name;
   await form
-    .getByRole('button', { name: 'Review ' + name.toLowerCase(), exact: true })
+    .getByRole('button', {
+      name: 'Review ' + action.toLowerCase(),
+      exact: true,
+    })
     .click();
   await expect(
     form.getByRole('region', { name: 'Review changes' }),
   ).toBeVisible();
   await form
-    .getByRole('button', { name: 'Confirm ' + name.toLowerCase(), exact: true })
+    .getByRole('button', {
+      name: 'Confirm ' + action.toLowerCase(),
+      exact: true,
+    })
     .click();
 }
 async function version(page: Page, value: number) {
@@ -63,7 +73,7 @@ async function createQuantity(
     ),
   ).toBe(true);
   const form = page.getByRole('form', {
-    name: 'Create quantity inventory',
+    name: 'Add quantity item',
     exact: true,
   });
   await form.getByLabel('Name', { exact: true }).fill(name);
@@ -71,7 +81,7 @@ async function createQuantity(
     await form.getByLabel('Initial quantity').fill(String(count));
     await choose(form, 'Initial location', locationCode);
   }
-  await confirm(form, 'Create quantity inventory');
+  await confirm(form, 'Add quantity item');
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   await version(page, 1);
   expect(
@@ -153,7 +163,9 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(form.getByRole('status')).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
-    await form.getByRole('button', { name: 'Move more' }).click();
+    await expectStableReceiptAction(page, 'Move more');
+    await version(page, 2);
+    await beginNewRecordTransaction(page, 'Move more');
     await expect(form.getByLabel('Quantity to move')).toHaveValue('');
     await choose(form, 'Source location', 'ITC-RED');
     await choose(form, 'Destination location', 'ITC-BLACK');
@@ -293,11 +305,24 @@ test('a real committed move with a lost response retries the original command on
     await form.getByRole('button', { name: 'Confirm move stock' }).dblclick();
     await acknowledged;
     expect(commands).toHaveLength(1);
+    const tasks = page.getByRole('region', { name: 'Record tasks' });
+    await expect(
+      tasks.getByRole('button', { name: 'Receive stock', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      tasks.getByRole('button', { name: 'Close task', exact: true }),
+    ).toBeDisabled();
     release();
     await expect(
       form.getByRole('button', { name: 'Retry this move safely' }),
     ).toBeEnabled();
     await expect(form.getByLabel('Quantity to move')).toBeDisabled();
+    await expect(
+      tasks.getByRole('button', { name: 'Receive stock', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      tasks.getByRole('button', { name: 'Close task', exact: true }),
+    ).toBeDisabled();
     await form.getByRole('button', { name: 'Retry this move safely' }).click();
     await expect(form.getByRole('status')).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
@@ -360,7 +385,7 @@ test('archiving stocked quantity clears every location in one reviewed operation
       name: 'Current stock — 0 available in storage',
     }),
   ).toBeVisible();
-  await expect(page.getByText(/Quantity inventory/).first()).toBeVisible();
+  await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expect(page.getByText(/Archived · Version/)).toBeVisible();
   await page.getByRole('link', { name: 'View all item history' }).click();
   const event = page.locator('li').filter({
@@ -389,7 +414,7 @@ test('inventory destination tree navigates ancestors without accepting them as d
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.goto('/inventory/quantity/new');
-  const form = page.getByRole('form', { name: 'Create quantity inventory' });
+  const form = page.getByRole('form', { name: 'Add quantity item' });
   await form.getByLabel('Initial quantity').fill('1');
   const trigger = form.getByLabel('Initial location', { exact: true }).first();
   await trigger.click();
@@ -476,10 +501,9 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await form.getByLabel('Reason (required)').fill('Verified physical count');
   await confirm(form, 'Correct physical count');
   await version(page, 5);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit quantity metadata');
-  await expect(
-    form.getByRole('button', { name: 'Review metadata' }),
-  ).toBeEnabled();
+  await expect(metadataReviewButton(form)).toBeEnabled();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
@@ -543,8 +567,9 @@ test('quantity core persists multi-location receives, partial and all transfers,
     .getByRole('button', { name: 'Confirm archive and clear stock' })
     .click();
   await version(page, 9);
-  await expect(page.getByText(/Quantity inventory/).first()).toBeVisible();
+  await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Restore quantity definition');
   await form.getByLabel('Reason (required)').fill('Needed again');
   await confirm(form, 'Restore quantity definition');
@@ -600,7 +625,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   async function create(name: string, tag: string) {
     await page.goto('/inventory/assets/new');
     const form = page.getByRole('form', {
-      name: 'Create asset inventory',
+      name: 'Add individual asset',
       exact: true,
     });
     await form.getByLabel('Name', { exact: true }).fill(name);
@@ -610,16 +635,16 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
     return form;
   }
   let form = await create(name, 'A-' + suffix);
-  await confirm(form, 'Create serialized asset');
+  await confirm(form, 'Add individual asset');
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const first = page.url();
   form = await create(name + ' duplicate', 'B-' + suffix);
-  await form.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(form).click();
   await expect(
     form.getByRole('region', { name: 'Metadata review' }),
   ).toContainText(name);
   await expect(form.getByText(/Serial also recorded on/)).toContainText(name);
-  await form.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(form).click();
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   await expect(
     page.getByRole('heading', { name: 'Duplicate serial warning' }),
@@ -629,28 +654,29 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await choose(form, 'Destination location', 'ITC-D01');
   await confirm(form, 'Move asset');
   await version(page, 2);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Correct recorded location');
   await choose(form, 'Destination location', 'ITC-D02');
   await form.getByLabel('Reason (required)').fill('Found in adjacent drawer');
   await confirm(form, 'Correct recorded location');
   await version(page, 3);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit asset metadata');
-  await expect(
-    form.getByRole('button', { name: 'Review metadata' }),
-  ).toBeEnabled();
+  await expect(metadataReviewButton(form)).toBeEnabled();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
+  await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Retire asset');
   await form.getByLabel('Reason (required)').fill('Removed from service');
   await confirm(form, 'Retire asset');
   await version(page, 5);
   await page.reload();
   await expect(
-    page.getByRole('heading', { name: 'Last recorded storage / custody' }),
+    page.locator('dt').filter({ hasText: /^Last recorded custody$/ }),
   ).toBeVisible();
   await expect(
-    page.locator('summary').filter({ hasText: /^Move asset$/ }),
+    page.getByRole('button', { name: 'Move asset', exact: true }),
   ).toHaveCount(0);
   form = await openForm(page, 'Restore asset');
   await choose(form, 'Confirmed current location', 'ITC-RACK');
@@ -661,7 +687,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await version(page, 6);
   await page.reload();
   const currentCustody = page.locator('section').filter({
-    has: page.getByRole('heading', { name: 'Current custody', exact: true }),
+    has: page.locator('dt').filter({ hasText: /^Current custody$/ }),
   });
   await expect(currentCustody).toBeVisible();
   await expect(
@@ -721,12 +747,12 @@ test('overlapping two-page edits renew field choices after further races and vie
     name + ' my edit',
   );
   await firstForm.getByRole('button', { name: 'Use my Name edit' }).click();
-  await expect(
-    firstForm.getByRole('button', { name: 'Review metadata' }),
-  ).toBeEnabled();
+  await expect(metadataReviewButton(firstForm)).toBeEnabled();
   // Each new overlapping commit invalidates the previous choice. A stale "mine"
   // decision must never silently overwrite a subsequently observed value.
   for (const nextVersion of [3, 4]) {
+    await beginNewRecordTransaction(other, 'New transaction');
+    await openForm(other, 'Edit quantity metadata');
     await otherForm
       .getByLabel('Name', { exact: true })
       .fill(name + ' concurrent ' + nextVersion);
@@ -737,23 +763,19 @@ test('overlapping two-page edits renew field choices after further races and vie
       .getByRole('alert')
       .filter({ hasText: 'Name was changed elsewhere' });
     await expect(conflict).toContainText(name + ' concurrent ' + nextVersion);
-    await expect(
-      firstForm.getByRole('button', { name: 'Review metadata' }),
-    ).toBeDisabled();
+    await expect(metadataReviewButton(firstForm)).toBeDisabled();
     await expect(firstForm.getByLabel('Name', { exact: true })).toHaveValue(
       name + ' my edit',
     );
     await firstForm.getByRole('button', { name: 'Use my Name edit' }).click();
-    await expect(
-      firstForm.getByRole('button', { name: 'Review metadata' }),
-    ).toBeEnabled();
+    await expect(metadataReviewButton(firstForm)).toBeEnabled();
   }
   await other.close();
-  await firstForm.getByRole('button', { name: 'Review metadata' }).click();
+  await metadataReviewButton(firstForm).click();
   await expect(
     firstForm.getByRole('region', { name: 'Metadata review' }),
   ).toContainText(name + ' my edit');
-  await firstForm.getByRole('button', { name: 'Confirm save' }).click();
+  await metadataSaveButton(firstForm).click();
   await version(page, 5);
   await page.getByRole('button', { name: 'Sign out' }).click();
   await login(page, 'viewer');
@@ -761,8 +783,13 @@ test('overlapping two-page edits renew field choices after further races and vie
   await expect(
     page.getByRole('heading', { name: name + ' my edit', exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Record tasks' })).toHaveCount(
+    0,
+  );
   await expect(
-    page.getByText('Manage quantity inventory', { exact: true }),
+    page.getByRole('button', {
+      name: /^(Receive stock|Move stock|Edit details)$/,
+    }),
   ).toHaveCount(0);
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
@@ -771,6 +798,6 @@ test('overlapping two-page edits renew field choices after further races and vie
   await page.goto('/inventory/quantity/new');
   await expect(page.getByText(/Read-only access/)).toBeVisible();
   await expect(
-    page.getByRole('form', { name: 'Create quantity inventory' }),
+    page.getByRole('form', { name: 'Add quantity item' }),
   ).toHaveCount(0);
 });

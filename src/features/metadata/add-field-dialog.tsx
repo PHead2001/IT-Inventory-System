@@ -355,7 +355,7 @@ export function AddFieldDialog({
                     >
                       <option value="quantity,asset">Both</option>
                       <option value="quantity">Quantity items</option>
-                      <option value="asset">Serialized assets</option>
+                      <option value="asset">Individual assets</option>
                     </select>
                   </label>
                 }

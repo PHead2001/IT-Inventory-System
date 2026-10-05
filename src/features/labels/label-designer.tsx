@@ -56,6 +56,45 @@ function entryFor(record: LiveLabel): QueueEntry {
     lifecycleAcknowledged: record.state === 'active',
   };
 }
+/** Every authorized observation retains review debt, even beside missing or acknowledged rows. */
+function latchObservedChanges(
+  entries: QueueEntry[],
+  rows: LiveLabel[],
+): QueueEntry[] {
+  const byId = new Map(rows.map((row) => [queueIdentity(row), row]));
+  let changed = false;
+  const next = entries.map((entry) => {
+    const row = byId.get(queueIdentity(entry));
+    if (
+      row &&
+      entry.lifecycleAcknowledged &&
+      (entry.baselineTag !== row.tag || entry.baselineState !== row.state)
+    ) {
+      changed = true;
+      return { ...entry, lifecycleAcknowledged: false };
+    }
+    return entry;
+  });
+  return changed ? next : entries;
+}
+
+function recordKind(kind: QueueKey['kind']) {
+  return kind === 'quantity'
+    ? 'Quantity item'
+    : kind === 'asset'
+      ? 'Individual asset'
+      : 'Location';
+}
+function reviewSnapshot(record: LiveLabel): string {
+  return JSON.stringify([
+    queueIdentity(record),
+    record.tag,
+    record.state,
+    record.barcode,
+    signature(record),
+  ]);
+}
+
 function signature(record: LabelRecord): string {
   return JSON.stringify([
     record.kind,
@@ -96,6 +135,8 @@ function expandLabels(entries: QueueEntry[], rows: LiveLabel[]): LabelRecord[] {
 }
 const emptyInitial: LiveLabel[] = [];
 const emptyIntent: QueueKey[] = [];
+
+type ItemReview = { snapshot: string; generation: number; historical: boolean };
 
 type LabelDesignerProps = {
   locations: LocationRef[];
@@ -154,7 +195,14 @@ function LabelDesignerWorkspace({
     currentEntries.current = next;
     setEntriesState(next);
   }, []);
-  const [live, setLive] = useState<LiveLabel[]>(initial);
+  const [live, setLiveState] = useState<LiveLabel[]>(initial);
+  const currentLive = useRef(initial);
+  const setLive = useCallback((update: SetStateAction<LiveLabel[]>) => {
+    const next =
+      typeof update === 'function' ? update(currentLive.current) : update;
+    currentLive.current = next;
+    setLiveState(next);
+  }, []);
   const [filters, setFilters] = useState<LabelSearchFilters>(defaultFilters);
   const [draft, setDraft] = useState<LabelSearchFilters>(defaultFilters);
   const [job, setJob] = useState<JobSettings>(defaults);
@@ -173,6 +221,8 @@ function LabelDesignerWorkspace({
   const [readySheetKey, setReadySheetKey] = useState('');
   const [retry, setRetry] = useState(0);
   const [pendingChanges, setPendingChanges] = useState<LiveLabel[]>([]);
+  const [reviewed, setReviewed] = useState<Record<string, ItemReview>>({});
+  const removalReviews = useRef<Record<string, ItemReview>>({});
   const [fallbackPending, setFallbackPending] = useState(false);
   const [formatAcknowledged, setFormatAcknowledged] = useState(false);
   const [unavailable, setUnavailable] = useState<string[]>([]);
@@ -265,15 +315,49 @@ function LabelDesignerWorkspace({
     };
   }, [filters, hydrated]);
 
-  const invalidate = useCallback(() => {
-    queueEpoch.current++;
-    activePrintAbort.current?.abort();
-    clearPrintAuthorization.current?.();
-    setRefreshPending(true);
-    setRefreshFailed(false);
-    setFallbackPending(false);
-    setFormatAcknowledged(false);
-  }, [setFallbackPending, setFormatAcknowledged]);
+  const invalidate = useCallback(
+    (preserveRemovalReviews = false) => {
+      queueEpoch.current++;
+      activePrintAbort.current?.abort();
+      clearPrintAuthorization.current?.();
+      if (!preserveRemovalReviews) {
+        removalReviews.current = {};
+        setReviewed({});
+      }
+      setRefreshPending(true);
+      setRefreshFailed(false);
+      setFallbackPending(false);
+      setFormatAcknowledged(false);
+    },
+    [setFallbackPending, setFormatAcknowledged, setReviewed],
+  );
+  // A second observed snapshot invalidates a decision even when its review debt
+  // is already latched. Keep the latest rows available to delayed add responses.
+  const observeRows = useCallback(
+    (rows: LiveLabel[]) => {
+      const observed = latchObservedChanges(currentEntries.current, rows);
+      const previous = new Map(
+        currentLive.current.map((row) => [queueIdentity(row), row]),
+      );
+      const snapshotChanged = rows.some((row) => {
+        const prior = previous.get(queueIdentity(row));
+        return prior && reviewSnapshot(prior) !== reviewSnapshot(row);
+      });
+      const debtChanged = observed !== currentEntries.current;
+      if (debtChanged) setEntries(observed);
+      return debtChanged || snapshotChanged;
+    },
+    [setEntries],
+  );
+  useEffect(() => {
+    const refresh = () => {
+      invalidate();
+      setReviewed({});
+      setRetry((value) => value + 1);
+    };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [invalidate]);
   const consumeIntent = useCallback(() => {
     const next = consumedLabelUrl(
       pathname,
@@ -335,6 +419,10 @@ function LabelDesignerWorkspace({
           rows.some((row) => !requestedIds.has(queueIdentity(row)))
         )
           throw new Error('Unexpected records');
+        if (observeRows(rows)) {
+          invalidate();
+          setRetry((value) => value + 1);
+        }
         const next = [...currentEntries.current];
         const added: LiveLabel[] = [];
         const notices: string[] = [];
@@ -398,11 +486,16 @@ function LabelDesignerWorkspace({
     hydrated,
     intentSignature,
     intentRetry,
+    observeRows,
     consumeIntent,
     invalidate,
     setEntries,
+    setLive,
   ]);
   const removeEntries = (ids: Set<string>, clear = false) => {
+    removalReviews.current = Object.fromEntries(
+      Object.entries(reviewed).filter(([id]) => !clear && !ids.has(id)),
+    );
     if (clear) manualClearEpoch.current++;
     for (const id of ids) cancelledManualAdds.current.add(id);
     for (const key of addIntent) {
@@ -418,11 +511,19 @@ function LabelDesignerWorkspace({
     setPendingChanges((rows) =>
       clear ? [] : rows.filter((row) => !ids.has(queueIdentity(row))),
     );
+    setReviewed((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([id]) => !clear && !ids.has(id)),
+      ),
+    );
+    setLive((rows) =>
+      clear ? [] : rows.filter((row) => !ids.has(queueIdentity(row))),
+    );
     setUnavailable((list) => (clear ? [] : list.filter((id) => !ids.has(id))));
     setPendingIntentKeys((keys) =>
       clear ? [] : keys.filter((key) => !ids.has(queueIdentity(key))),
     );
-    invalidate();
+    invalidate(true);
     setMessage(
       clear ? 'Label queue cleared.' : 'Record removed from the label queue.',
     );
@@ -457,6 +558,10 @@ function LabelDesignerWorkspace({
         setMessage('That record is unavailable to this account.');
         return;
       }
+      if (observeRows(rows)) {
+        invalidate();
+        setRetry((value) => value + 1);
+      }
       if (currentEntries.current.some((entry) => queueIdentity(entry) === id)) {
         setMessage('Already in the queue. Existing copy counts are preserved.');
         return;
@@ -490,18 +595,29 @@ function LabelDesignerWorkspace({
     }
   };
   const prepareFrom = (rows: LiveLabel[], generationKey: string) => {
+    const candidates = removalReviews.current;
+    removalReviews.current = {};
+    setReviewed({});
     const rowMap = new Map(rows.map((row) => [queueIdentity(row), row]));
+    const observed = latchObservedChanges(currentEntries.current, rows);
+    if (observed !== currentEntries.current) setEntries(observed);
     const missing = entries
       .filter((entry) => !rowMap.has(queueIdentity(entry)))
       .map(queueIdentity);
     setUnavailable(missing);
     if (missing.length) {
+      setLive(
+        rows.filter((row) =>
+          entries.some((entry) => queueIdentity(entry) === queueIdentity(row)),
+        ),
+      );
+      setPrintRows(null);
+      setPrepared(null);
+      setReviewed({});
       setPendingChanges([]);
       setRefreshPending(false);
       setValidatedKey('');
-      setMessage(
-        'Some queued records are unavailable. Remove them before printing.',
-      );
+      setMessage('');
       return;
     }
     if (rows.length !== entries.length || rowMap.size !== entries.length) {
@@ -515,11 +631,21 @@ function LabelDesignerWorkspace({
       return;
     }
     setLive(rows);
+    setReviewed(
+      Object.fromEntries(
+        Object.entries(candidates).flatMap(([id, decision]) => {
+          const row = rowMap.get(id);
+          return row && decision.snapshot === reviewSnapshot(row)
+            ? [[id, { ...decision, generation: queueEpoch.current }]]
+            : [];
+        }),
+      ),
+    );
     const changed = entries.flatMap((entry) => {
       const row = rowMap.get(queueIdentity(entry))!;
       return entry.baselineTag !== row.tag ||
         entry.baselineState !== row.state ||
-        (row.state !== 'active' && !entry.lifecycleAcknowledged)
+        !entry.lifecycleAcknowledged
         ? [row]
         : [];
     });
@@ -527,9 +653,7 @@ function LabelDesignerWorkspace({
       setPendingChanges(changed);
       setRefreshPending(false);
       setValidatedKey('');
-      setMessage(
-        'A tag or lifecycle state needs review. Acknowledge before printing.',
-      );
+      setMessage('');
       return;
     }
     setPendingChanges([]);
@@ -573,6 +697,12 @@ function LabelDesignerWorkspace({
           if (generation !== queueEpoch.current) return;
           setRefreshPending(false);
           setRefreshFailed(true);
+          setLive([]);
+          setPrintRows(null);
+          setPrepared(null);
+          setPendingChanges([]);
+          removalReviews.current = {};
+          setReviewed({});
           setValidatedKey('');
           setMessage('Label refresh failed. Printing is blocked; retry.');
         });
@@ -581,27 +711,77 @@ function LabelDesignerWorkspace({
     // Copies and sheet settings only change the local layout, not the validated selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey, hydrated, retry]);
-  const acknowledge = () => {
+  const acknowledge = async (record: LiveLabel) => {
+    const id = queueIdentity(record);
+    const decision = reviewed[id];
+    if (
+      busy ||
+      refreshPending ||
+      refreshFailed ||
+      !decision ||
+      decision.generation !== queueEpoch.current ||
+      decision.snapshot !== reviewSnapshot(record) ||
+      (record.state !== 'active' && !decision.historical)
+    )
+      return;
     invalidate();
-    const current = new Map(
-      pendingChanges.map((row) => [queueIdentity(row), row]),
-    );
-    setEntries((list) =>
-      list.map((entry) => {
-        const row = current.get(queueIdentity(entry));
-        return row
-          ? {
-              ...entry,
-              baselineTag: row.tag,
-              baselineState: row.state,
-              lifecycleAcknowledged: true,
-            }
-          : entry;
-      }),
-    );
-    setPendingChanges([]);
-    setRetry((value) => value + 1);
-    setMessage('Changes acknowledged. Refreshing print preview.');
+    const generation = queueEpoch.current;
+    setBusy(true);
+    try {
+      const rows = await getQueueRecords(
+        currentEntries.current.map(({ kind, key }) => ({ kind, key })),
+      );
+      if (generation !== queueEpoch.current) return;
+      const fresh = rows.find((row) => queueIdentity(row) === id);
+      const identities = new Set(rows.map(queueIdentity));
+      if (
+        !fresh ||
+        reviewSnapshot(fresh) !== decision.snapshot ||
+        rows.length !== currentEntries.current.length ||
+        identities.size !== rows.length ||
+        currentEntries.current.some(
+          (entry) => !identities.has(queueIdentity(entry)),
+        )
+      ) {
+        setReviewed({});
+        prepareFrom(rows, selectionKey);
+        return;
+      }
+      setEntries((list) =>
+        latchObservedChanges(list, rows).map((entry) =>
+          queueIdentity(entry) === id
+            ? {
+                ...entry,
+                baselineTag: fresh.tag,
+                baselineState: fresh.state,
+                lifecycleAcknowledged: true,
+              }
+            : entry,
+        ),
+      );
+      setLive(rows);
+      setReviewed({});
+      setPendingChanges((current) =>
+        current.filter((row) => queueIdentity(row) !== id),
+      );
+      setRetry((value) => value + 1);
+      setMessage('');
+    } catch {
+      if (generation !== queueEpoch.current) return;
+      setReviewed({});
+      setLive([]);
+      setPrintRows(null);
+      setPrepared(null);
+      setPendingChanges([]);
+      setRefreshPending(false);
+      setRefreshFailed(true);
+      setValidatedKey('');
+      setMessage(
+        'Current item could not be verified. Printing is blocked; retry label refresh.',
+      );
+    } finally {
+      setBusy(false);
+    }
   };
   const print = async () => {
     if (
@@ -620,11 +800,15 @@ function LabelDesignerWorkspace({
     const printAbort = new AbortController();
     activePrintAbort.current = printAbort;
     setBusy(true);
+    let currentReadVerified = false;
     try {
       const fresh = await getQueueRecords(
         entries.map(({ kind, key }) => ({ kind, key })),
       );
       if (epoch !== queueEpoch.current) return;
+      currentReadVerified = true;
+      const observed = latchObservedChanges(currentEntries.current, fresh);
+      if (observed !== currentEntries.current) setEntries(observed);
       const rowMap = new Map(fresh.map((row) => [queueIdentity(row), row]));
       const meaningfulChange = entries.some((entry) => {
         const row = rowMap.get(queueIdentity(entry));
@@ -632,7 +816,7 @@ function LabelDesignerWorkspace({
           row &&
           (entry.baselineTag !== row.tag ||
             entry.baselineState !== row.state ||
-            (row.state !== 'active' && !entry.lifecycleAcknowledged))
+            !entry.lifecycleAcknowledged)
         );
       });
       if (
@@ -735,6 +919,13 @@ function LabelDesignerWorkspace({
       if (epoch !== queueEpoch.current) return;
       setValidatedKey('');
       setRefreshFailed(true);
+      if (!currentReadVerified) {
+        setLive([]);
+        setPrintRows(null);
+        setPrepared(null);
+        setPendingChanges([]);
+        setReviewed({});
+      }
       setMessage('Final label check failed. Printing is blocked; retry.');
     } finally {
       printAbort.abort();
@@ -842,7 +1033,7 @@ function LabelDesignerWorkspace({
       )}
       <p className={styles.intro}>
         Queue up to {MAX_DISTINCT} distinct records, {MAX_COPIES} copies each,
-        and {MAX_LABELS} labels total. Quantity results appear once per
+        and {MAX_LABELS} labels total. Quantity item results appear once per
         definition, even with several holdings.
       </p>
       {storageUnavailable && (
@@ -862,7 +1053,7 @@ function LabelDesignerWorkspace({
               <p className={styles.eyebrow}>01 / Find records</p>
               <h2 className={styles.title}>Search inventory</h2>
               <p className={styles.subtle}>
-                Find exact assets or quantity definitions for the sheet.
+                Find quantity items and individual assets for the sheet.
               </p>
             </div>
             <label className={styles.fieldLabel}>
@@ -890,8 +1081,8 @@ function LabelDesignerWorkspace({
                   className={styles.field}
                 >
                   <option value="all">All</option>
-                  <option value="quantity">Quantity</option>
-                  <option value="asset">Asset</option>
+                  <option value="quantity">Quantity item</option>
+                  <option value="asset">Individual asset</option>
                 </select>
               </label>
               <label className={styles.fieldLabel}>
@@ -969,7 +1160,8 @@ function LabelDesignerWorkspace({
                       {record.name}
                     </Link>
                     <p className={styles.resultMeta}>
-                      {record.kind} · {record.categoryName} · {record.status}
+                      {recordKind(record.kind)} · {record.categoryName} ·{' '}
+                      {record.status}
                     </p>
                     <p className={styles.resultMeta}>
                       {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
@@ -1082,6 +1274,165 @@ function LabelDesignerWorkspace({
                 Clear queue
               </button>
             </div>
+            {unavailable.length > 0 && (
+              <div role="alert" className={styles.error}>
+                <p>
+                  Some queued records are unavailable to this account. Remove
+                  them or retry label refresh before printing.
+                </p>
+                {entries
+                  .filter((entry) => unavailable.includes(queueIdentity(entry)))
+                  .map((entry) => (
+                    <div
+                      key={queueIdentity(entry)}
+                      className={styles.queueActions}
+                    >
+                      <span>
+                        Unavailable {recordKind(entry.kind).toLowerCase()}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className={styles.secondaryButton}
+                        onClick={() =>
+                          removeEntries(new Set([queueIdentity(entry)]))
+                        }
+                      >
+                        Remove unavailable item from queue
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {pendingChanges.length > 0 && (
+              <section
+                role="alert"
+                aria-label="Label item decisions"
+                className={styles.warning}
+              >
+                <h3 className={styles.title}>Review changed label items</h3>
+                {pendingChanges
+                  .filter((row) =>
+                    entries.some(
+                      (entry) => queueIdentity(entry) === queueIdentity(row),
+                    ),
+                  )
+                  .map((row) => {
+                    const id = queueIdentity(row);
+                    const entry = entries.find(
+                      (item) => queueIdentity(item) === id,
+                    )!;
+                    const decision = reviewed[id];
+                    const currentReview =
+                      decision?.snapshot === reviewSnapshot(row);
+                    const stateChanged = entry.baselineState !== row.state;
+                    const tagChanged = entry.baselineTag !== row.tag;
+                    return (
+                      <div key={id} className={styles.queueEntry}>
+                        <h4 className={styles.queueName}>
+                          {row.name} · {recordKind(row.kind)}
+                        </h4>
+                        <p className={styles.subtle}>
+                          {stateChanged
+                            ? `Lifecycle changed from ${entry.baselineState} to ${row.state}.`
+                            : `Current state: ${row.state}.`}
+                          {tagChanged ? ' Identifier changed.' : ''}
+                        </p>
+                        <div className={styles.queueActions}>
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            disabled={busy || refreshPending || refreshFailed}
+                            aria-expanded={currentReview}
+                            aria-controls={`label-review-${row.kind}-${row.key}`}
+                            onClick={() =>
+                              setReviewed((current) =>
+                                currentReview
+                                  ? Object.fromEntries(
+                                      Object.entries(current).filter(
+                                        ([identity]) => identity !== id,
+                                      ),
+                                    )
+                                  : {
+                                      ...current,
+                                      [id]: {
+                                        snapshot: reviewSnapshot(row),
+                                        generation: queueEpoch.current,
+                                        historical: false,
+                                      },
+                                    },
+                              )
+                            }
+                          >
+                            Review item
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.textButton}
+                            disabled={busy}
+                            onClick={() => removeEntries(new Set([id]))}
+                          >
+                            Remove from queue
+                          </button>
+                        </div>
+                        {currentReview && (
+                          <div
+                            id={`label-review-${row.kind}-${row.key}`}
+                            role="region"
+                            aria-label={`Review ${row.name}`}
+                          >
+                            <p className={styles.subtle}>
+                              Current authorized snapshot: {row.state}
+                              {row.tag
+                                ? ` · Tag ${row.tag}`
+                                : row.kind === 'asset'
+                                  ? ' · No asset tag'
+                                  : ''}
+                              . {row.holdingContext}
+                            </p>
+                            <Link href={row.path} className={styles.resultLink}>
+                              View item details
+                            </Link>
+                            {row.state !== 'active' && (
+                              <label className={styles.settingLabel}>
+                                <input
+                                  type="checkbox"
+                                  checked={decision.historical}
+                                  disabled={busy || refreshPending}
+                                  onChange={(event) =>
+                                    setReviewed((current) => ({
+                                      ...current,
+                                      [id]: {
+                                        ...decision,
+                                        historical: event.target.checked,
+                                      },
+                                    }))
+                                  }
+                                />
+                                I understand this is a historical record and
+                                want to print its identification label.
+                              </label>
+                            )}
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              disabled={
+                                busy ||
+                                refreshPending ||
+                                refreshFailed ||
+                                (row.state !== 'active' && !decision.historical)
+                              }
+                              onClick={() => void acknowledge(row)}
+                            >
+                              Acknowledge reviewed item
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </section>
+            )}
             {pendingIntentKeys.length > 0 && (
               <div
                 role="region"
@@ -1097,7 +1448,7 @@ function LabelDesignerWorkspace({
                   return (
                     <div key={id} className={styles.queueEntry}>
                       <span className={styles.queueName}>
-                        Pending {key.kind}: {key.key}
+                        Pending {recordKind(key.kind).toLowerCase()}: {key.key}
                       </span>
                       <button
                         type="button"
@@ -1263,41 +1614,6 @@ function LabelDesignerWorkspace({
             )}
           </div>
         )}
-        {unavailable.length > 0 && (
-          <p role="alert" className={styles.error}>
-            Unavailable: {unavailable.join(', ')}. Remove these records before
-            printing.
-          </p>
-        )}
-        {pendingChanges.some((row) =>
-          entries.some((entry) => queueIdentity(entry) === queueIdentity(row)),
-        ) && (
-          <div role="alert" className={styles.warning}>
-            <p>
-              Tag or lifecycle state changed for:{' '}
-              {pendingChanges
-                .filter((row) =>
-                  entries.some(
-                    (entry) => queueIdentity(entry) === queueIdentity(row),
-                  ),
-                )
-                .map(
-                  (row) =>
-                    `${row.name} (${row.key}, ${row.state}${row.tag ? ', tag ' + row.tag : ''})`,
-                )
-                .join('; ')}
-              .
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={acknowledge}
-              className={styles.secondaryButton}
-            >
-              Acknowledge changes
-            </button>
-          </div>
-        )}
         {message && (
           <p role="status" className={styles.notice}>
             {message}
@@ -1358,42 +1674,44 @@ function LabelDesignerWorkspace({
             Print selected labels / Save as PDF
           </button>
         </div>
-        {entries.length > 0 && (
-          <div className={styles.statusLine} role="status">
-            <span
-              className={styles.statusDot}
-              data-ready={
-                !!prepared &&
-                !busy &&
-                !refreshPending &&
-                !refreshFailed &&
-                validatedKey === selectionKey &&
-                readySheetKey === sheetKey &&
-                unavailable.length === 0 &&
-                pendingChanges.length === 0 &&
-                !(
-                  job.format === 'code128' &&
-                  fallbackPending &&
-                  !formatAcknowledged
-                )
-              }
-            />
-            <span className={styles.statusText}>
-              {refreshFailed
-                ? 'Refresh failed — retry before printing'
-                : refreshPending
-                  ? 'Checking current records — printing paused'
-                  : pendingChanges.length ||
-                      unavailable.length ||
-                      fallbackPending
-                    ? 'Review required before printing'
-                    : readySheetKey === sheetKey &&
-                        validatedKey === selectionKey
-                      ? 'Sheet ready for final print check'
-                      : 'Preparing codes and layout — printing paused'}
-            </span>
-          </div>
-        )}
+        {entries.length > 0 &&
+          pendingChanges.length === 0 &&
+          unavailable.length === 0 && (
+            <div className={styles.statusLine} role="status">
+              <span
+                className={styles.statusDot}
+                data-ready={
+                  !!prepared &&
+                  !busy &&
+                  !refreshPending &&
+                  !refreshFailed &&
+                  validatedKey === selectionKey &&
+                  readySheetKey === sheetKey &&
+                  unavailable.length === 0 &&
+                  pendingChanges.length === 0 &&
+                  !(
+                    job.format === 'code128' &&
+                    fallbackPending &&
+                    !formatAcknowledged
+                  )
+                }
+              />
+              <span className={styles.statusText}>
+                {refreshFailed
+                  ? 'Refresh failed — retry before printing'
+                  : refreshPending
+                    ? 'Checking current records — printing paused'
+                    : pendingChanges.length ||
+                        unavailable.length ||
+                        fallbackPending
+                      ? 'Review required before printing'
+                      : readySheetKey === sheetKey &&
+                          validatedKey === selectionKey
+                        ? 'Sheet ready for final print check'
+                        : 'Preparing codes and layout — printing paused'}
+              </span>
+            </div>
+          )}
         {displayRows && (
           <div className={styles.sheetFrame}>
             <LabelSheet

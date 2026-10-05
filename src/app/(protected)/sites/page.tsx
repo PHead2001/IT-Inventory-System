@@ -24,7 +24,7 @@ export default async function SitesPage({
   return (
     <>
       <p className="experience-eyebrow">Inventory · Site custody</p>
-      <h1 className="experience-heading mt-3">Properties and sites</h1>
+      <h1 className="experience-heading mt-3">Properties & sites</h1>
       <p className="experience-muted my-4 max-w-2xl text-sm">
         Sites track deployed equipment custody. They are separate from IT
         storage locations and do not have a room model.

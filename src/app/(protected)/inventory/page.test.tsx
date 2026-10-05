@@ -125,7 +125,7 @@ it('uses an authorized presence probe only for unfiltered empty inventory', asyn
   );
   expect(screen.getByText('No inventory has been recorded yet.')).toBeVisible();
   expect(
-    screen.queryByRole('link', { name: 'Create quantity inventory' }),
+    screen.queryByRole('link', { name: 'Add quantity item' }),
   ).not.toBeInTheDocument();
   expect(mocks.hasRecordedInventory).toHaveBeenCalledOnce();
   mocks.hasRecordedInventory.mockResolvedValue(true);
@@ -150,4 +150,38 @@ it('does not infer catalog emptiness from a filtered page or convert probe failu
   await expect(
     InventoryPage({ searchParams: Promise.resolve({}) }),
   ).rejects.toThrow('Inventory presence could not be loaded.');
+});
+
+it('explains both tracking choices before entry and preserves the selected inventory return context', async () => {
+  mocks.requireMember.mockResolvedValue({ member: { role: 'staff' } });
+  render(
+    await InventoryPage({
+      searchParams: Promise.resolve({
+        q: 'adapter',
+        type: 'quantity',
+        page: '2',
+      }),
+    }),
+  );
+  const quantity = screen.getByRole('link', { name: 'Add quantity item' });
+  const asset = screen.getByRole('link', { name: 'Add individual asset' });
+  expect(quantity).toHaveAccessibleDescription(
+    'Track interchangeable items by count, such as cables and adapters.',
+  );
+  expect(asset).toHaveAccessibleDescription(
+    'Track one specific device, such as a laptop or switch.',
+  );
+  for (const [link, path] of [
+    [quantity, '/inventory/quantity/new'],
+    [asset, '/inventory/assets/new'],
+  ] as const) {
+    const url = new URL(
+      link.getAttribute('href')!,
+      'https://inventory.example.test',
+    );
+    expect(url.pathname).toBe(path);
+    expect(url.searchParams.get('returnTo')).toBe(
+      '/inventory?q=adapter&type=quantity&page=2',
+    );
+  }
 });
