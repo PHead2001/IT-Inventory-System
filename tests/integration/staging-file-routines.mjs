@@ -9,6 +9,8 @@ import { STAGING_SCHEMA_SQL } from '../../scripts/staging-file-keys-providers.mj
 import {
   STAGING_ROUTINE_CATALOG_SQL,
   STAGING_TRIGGER_CATALOG_SQL,
+  STAGING_STORAGE_CATALOG_SQL,
+  STAGING_STORAGE_PROVIDER_BASELINE,
 } from '../../scripts/staging-file-routines.mjs';
 
 const migrationBody = (filename, name) => {
@@ -159,7 +161,8 @@ rollback;
 const storageObservation = (phase) => `select pg_catalog.json_build_object(
   'phase','${phase}','user',current_user,'ready',q.ready,
   'routines',(select pg_catalog.jsonb_agg(r.routine order by r.routine->>'signature') from (${STAGING_ROUTINE_CATALOG_SQL}) r),
-  'triggers',(select pg_catalog.jsonb_agg(t.binding) from (${STAGING_TRIGGER_CATALOG_SQL}) t)
+  'triggers',(select pg_catalog.jsonb_agg(t.binding order by t.binding->>'name' collate "C") from (${STAGING_TRIGGER_CATALOG_SQL}) t),
+  'storage',(select storage_contract from (${STAGING_STORAGE_CATALOG_SQL}) s)
 ) from (${STAGING_SCHEMA_SQL}) q;`;
 export async function verifyStagingRoutineContract(db) {
   let checks = 0;
@@ -172,6 +175,8 @@ export async function verifyStagingRoutineContract(db) {
     (await db.query(STAGING_TRIGGER_CATALOG_SQL)).rows.map(
       (row) => row.binding,
     );
+  const storage = async () =>
+    (await db.query(STAGING_STORAGE_CATALOG_SQL)).rows[0].storage_contract;
   const fixtureConnectionsClosed = async () => {
     const { rows } = await db.query(
       "select pg_catalog.count(*)::int connections from pg_catalog.pg_stat_activity where application_name like 'cp5-storage-binding-%'",
@@ -194,7 +199,12 @@ export async function verifyStagingRoutineContract(db) {
     'canonical Storage trigger matches reviewed binding',
   );
   assert.equal(await ready(), true, 'canonical schema ready');
-  checks += 3;
+  assert.deepEqual(
+    await storage(),
+    manifest.storage,
+    'canonical complete Storage authorization matches',
+  );
+  checks += 4;
   const definition = async (signature) =>
     (
       await db.query(
@@ -224,6 +234,34 @@ export async function verifyStagingRoutineContract(db) {
     }
   };
   for (const expected of manifest.routines) {
+    if (expected.signature.startsWith('storage.')) {
+      const { definition: sql, source } = await definition(expected.signature);
+      try {
+        const observations = localStorageFixture(
+          `reset role; ${sql.replace(source, () => source + '\n-- provider body drift fixture\n')}; set local role postgres; ${storageObservation('tampered')}`,
+        );
+        const changed = observations[0].routines.find(
+          (row) => row.signature === expected.signature,
+        );
+        assert.equal(
+          observations[0].ready,
+          false,
+          'provider body drift is refused',
+        );
+        assert.notEqual(changed.body_sha256, expected.body_sha256);
+        assert.deepEqual(
+          { ...changed, body_sha256: expected.body_sha256 },
+          expected,
+          'provider fixture preserves original owner/ACL/metadata',
+        );
+        checks += 3;
+      } finally {
+        assert.equal(await ready(), true);
+        checks++;
+        await fixtureConnectionsClosed();
+      }
+      continue;
+    }
     await rejected(
       `same-signature body drift denied: ${expected.signature}`,
       async () => {
@@ -244,6 +282,40 @@ export async function verifyStagingRoutineContract(db) {
       },
     );
   }
+  for (const signature of [
+    'public.inventory_file_cancel(uuid)',
+    'public.inventory_file_remove(uuid,bigint,bigint,uuid)',
+    'public.inventory_file_rename(uuid,bigint,bigint,text,uuid)',
+    'public.inventory_file_read(uuid,text)',
+    'public.inventory_file_cards(text,uuid)',
+    'public.inventory_file_history(text,uuid,integer)',
+    'public.inventory_file_list_thumbnails(uuid[],uuid[])',
+  ]) {
+    await rejected(`new file API ACL drift refused: ${signature}`, async () => {
+      await db.query(`grant execute on function ${signature} to anon`);
+    });
+  }
+  for (const { signature } of STAGING_STORAGE_PROVIDER_BASELINE) {
+    try {
+      const rows = localStorageFixture(
+        `reset role; revoke execute on function ${signature} from public; set local role postgres; ${storageObservation('tampered')}`,
+      );
+      assert.equal(rows[0].ready, false, 'provider ACL drift refused');
+      checks++;
+    } finally {
+      assert.equal(await ready(), true);
+      checks++;
+      await fixtureConnectionsClosed();
+    }
+  }
+  await rejected(
+    'unreviewed public file API addition requires explicit review',
+    async () => {
+      await db.query(
+        "create function public.inventory_file_unreviewed(uuid) returns boolean language sql set search_path='' as $$ select true $$",
+      );
+    },
+  );
   await rejected(
     'swapped formal argument names cannot reverse positional helper semantics',
     async () => {
@@ -472,6 +544,115 @@ export async function verifyStagingRoutineContract(db) {
       await fixtureConnectionsClosed();
     }
   }
+  const socketRejected = async (note, mutation) => {
+    try {
+      const observations = localStorageFixture(
+        `${storageObservation('before')} reset role; ${mutation} set local role postgres; ${storageObservation('tampered')}`,
+      );
+      assert.equal(observations[0].ready, true);
+      assert.equal(observations[1].ready, false, note);
+      assert.deepEqual(
+        observations[1].routines,
+        manifest.routines,
+        'Storage wiring/policy fixture leaves pinned functions intact',
+      );
+      checks += 3;
+    } finally {
+      assert.equal(
+        await ready(),
+        true,
+        'local Storage fault transaction rolled back',
+      );
+      checks++;
+      await fixtureConnectionsClosed();
+    }
+  };
+  for (const [note, mutation] of [
+    [
+      'additional AFTER completion mutation trigger',
+      `set local role postgres; create function private.cp5_after_completion() returns trigger language plpgsql set search_path='' as $$ begin update storage.objects set metadata='{}'::jsonb where id=new.id; return new; end $$; reset role; create trigger zz_cp5_after_completion after insert on storage.objects for each row execute function private.cp5_after_completion();`,
+    ],
+    [
+      'additional BEFORE trigger ordered after completion guard',
+      `set local role postgres; create function private.cp5_late_before() returns trigger language plpgsql set search_path='' as $$ begin new.metadata='{}'::jsonb; return new; end $$; reset role; create trigger zz_cp5_late_before before insert or update on storage.objects for each row execute function private.cp5_late_before();`,
+    ],
+    [
+      'changed provider delete trigger',
+      'alter table storage.objects disable trigger protect_objects_delete;',
+    ],
+    [
+      'missing provider update trigger',
+      'drop trigger update_objects_updated_at on storage.objects;',
+    ],
+    [
+      'renamed provider trigger changes order',
+      'alter trigger update_objects_updated_at on storage.objects rename to aaa_provider_update;',
+    ],
+    ['RLS disabled', 'alter table storage.objects disable row level security;'],
+    [
+      'noncanonical forced RLS',
+      'alter table storage.objects force row level security;',
+    ],
+    [
+      'unreviewed PUBLIC policy',
+      'create policy cp5_public_select on storage.objects for select to public using(true);',
+    ],
+    [
+      'unreviewed authenticated policy',
+      'create policy cp5_auth_update on storage.objects for update to authenticated using(true) with check(true);',
+    ],
+    [
+      'changed policy roles',
+      'alter policy inventory_file_select on storage.objects to authenticated,anon;',
+    ],
+    [
+      'changed policy PUBLIC role',
+      'alter policy inventory_file_select on storage.objects to public;',
+    ],
+    [
+      'permissive USING true',
+      'alter policy inventory_file_select on storage.objects using(true);',
+    ],
+    [
+      'permissive CHECK true',
+      'alter policy inventory_file_insert on storage.objects with check(true);',
+    ],
+    [
+      'changed policy name',
+      'alter policy inventory_file_select on storage.objects rename to cp5_renamed_policy;',
+    ],
+    [
+      'changed policy command',
+      'drop policy inventory_file_insert on storage.objects; create policy inventory_file_insert on storage.objects for update to authenticated using(true) with check(private.file_storage_insert(bucket_id,name));',
+    ],
+    [
+      'changed policy mode',
+      'drop policy inventory_file_delete on storage.objects; create policy inventory_file_delete on storage.objects as restrictive for delete to authenticated using(private.file_storage_delete(bucket_id,name));',
+    ],
+    ...manifest.storage.policies.map((policy) => [
+      `missing policy ${policy.name}`,
+      `drop policy ${policy.name} on storage.objects;`,
+    ]),
+  ])
+    await socketRejected(note, mutation);
+  const policySql = (policy) =>
+    `create policy ${policy.name} on storage.objects as ${policy.permissive ? 'permissive' : 'restrictive'} for ${{ r: 'select', a: 'insert', d: 'delete', '*': 'all', w: 'update' }[policy.command]} to ${policy.roles.join(',')} ${policy.using_expression ? `using(${policy.using_expression})` : ''} ${policy.check_expression ? `with check(${policy.check_expression})` : ''};`;
+  // Recreating a canonical policy changes only its local OID.
+  try {
+    const policy = manifest.storage.policies[0];
+    const observation = `select pg_catalog.json_build_object('policy_oid',oid::text) from pg_catalog.pg_policy where polrelid='storage.objects'::pg_catalog.regclass and polname='${policy.name}';`;
+    const [before, after, recreated] = localStorageFixture(
+      `${observation} reset role; drop policy ${policy.name} on storage.objects; ${policySql(policy)} set local role postgres; ${observation} ${storageObservation('recreated')}`,
+    );
+    assert.notEqual(before.policy_oid, after.policy_oid);
+    assert.equal(recreated.ready, true);
+    assert.deepEqual(recreated.storage, manifest.storage);
+    checks += 3;
+  } finally {
+    assert.equal(await ready(), true);
+    checks++;
+    await fixtureConnectionsClosed();
+  }
   // Definition/binding identity is portable: recreating both objects assigns
   // new local OIDs while retaining exactly the reviewed function and trigger.
   try {
@@ -641,6 +822,12 @@ export async function verifyStagingRoutineContract(db) {
     manifest.triggers,
     'trigger tamper fixtures restored',
   );
+  assert.deepEqual(
+    await storage(),
+    manifest.storage,
+    'complete Storage authorization restored',
+  );
+  checks++;
   checks++;
   await db.query('begin');
   try {
@@ -678,12 +865,17 @@ export async function verifyStagingRoutineContract(db) {
         manifest.triggers,
         'qualified trigger binding remains portable across search_path',
       );
+      assert.deepEqual(
+        await storage(),
+        manifest.storage,
+        'fixed-safe-path policy expressions remain portable across caller search_path',
+      );
       assert.equal(
         await ready(),
         true,
         'qualified schema query remains ready across search_path',
       );
-      checks += 3;
+      checks += 4;
     } finally {
       await db.query('rollback');
     }

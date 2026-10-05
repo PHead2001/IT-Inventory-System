@@ -5,9 +5,12 @@ import assert from 'node:assert/strict';
 import { Client } from 'pg';
 import { format } from 'prettier';
 import { localStatus, npm } from './runtime.mjs';
+import { verifyLocalStorageRuntime } from './local-storage-version.mjs';
 import {
   STAGING_ROUTINE_CATALOG_SQL,
   STAGING_TRIGGER_CATALOG_SQL,
+  STAGING_STORAGE_CATALOG_SQL,
+  STAGING_FILE_API_COMPARISON_SQL,
   assertStagingRoutineManifest,
 } from './staging-file-routines.mjs';
 
@@ -19,20 +22,29 @@ if (!write && !(args.length === 1 && args[0] === '--check'))
 const target = new URL('./staging-file-routines.json', import.meta.url);
 // localStatus rejects every nonloopback host/port before reset or connection.
 localStatus();
+verifyLocalStorageRuntime();
 if (write) npm(['run', 'db:reset']);
 const status = localStatus();
 const db = new Client({ connectionString: status.DB_URL });
 try {
   await db.connect();
   await db.query('begin read only');
+  assert.equal(
+    (await db.query(`select ${STAGING_FILE_API_COMPARISON_SQL} as ready`))
+      .rows[0].ready,
+    true,
+    'Unreviewed public file API; update the explicit allowlist before generation',
+  );
   const manifest = assertStagingRoutineManifest({
-    version: 3,
+    version: 4,
     routines: (await db.query(STAGING_ROUTINE_CATALOG_SQL)).rows.map(
       (row) => row.routine,
     ),
     triggers: (await db.query(STAGING_TRIGGER_CATALOG_SQL)).rows.map(
       (row) => row.binding,
     ),
+    storage: (await db.query(STAGING_STORAGE_CATALOG_SQL)).rows[0]
+      .storage_contract,
   });
   await db.query('rollback');
   if (write)

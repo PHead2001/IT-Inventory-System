@@ -61,6 +61,17 @@ export const STAGING_ROUTINE_ALLOWLIST = Object.freeze(
     ['public.inventory_file_cleanup_confirm(uuid,text,text,bigint,text)', true],
     ['private.file_storage_delete(text,text)', true],
     ['private.inventory_file_storage_completion_guard()', false],
+    ['public.inventory_file_cancel(uuid)', true],
+    ['public.inventory_file_remove(uuid,bigint,bigint,uuid)', true],
+    ['public.inventory_file_rename(uuid,bigint,bigint,text,uuid)', true],
+    ['public.inventory_file_read(uuid,text)', true],
+    ['public.inventory_file_cards(text,uuid)', true],
+    ['public.inventory_file_history(text,uuid,integer)', true],
+    ['public.inventory_file_list_thumbnails(uuid[],uuid[])', true],
+    ['storage.protect_delete()', true],
+    ['storage.update_updated_at_column()', true],
+    ['storage.allow_any_operation(text[])', true],
+    ['storage.operation()', true],
   ].map(([signature, authenticated]) =>
     Object.freeze({ signature, authenticated }),
   ),
@@ -69,7 +80,54 @@ export const STAGING_ROUTINE_ALLOWLIST = Object.freeze(
 // Reviewed canonical migration owner, represented by name rather than local OID.
 export const STAGING_ROUTINE_OWNER = 'postgres';
 
-// One explicitly reviewed Storage completion binding, not all table triggers.
+// Reviewed provider source: supabase/storage tag v1.77.9, tenant migrations
+// 0011, 0024, 0055 and 0058. These four signatures alone retain provider ACLs.
+export const STAGING_STORAGE_PROVIDER_BASELINE = Object.freeze(
+  [
+    {
+      signature: 'storage.protect_delete()',
+      language: 'plpgsql',
+      volatility: 'v',
+      return_type: 'trigger',
+      argument_names: null,
+      source: '0055-prevent-direct-deletes.sql',
+      body_sha256:
+        '8c757b3898456c92b28f30e15cdeadb43ff4522c0b9f0526100da3a34b174236',
+    },
+    {
+      signature: 'storage.update_updated_at_column()',
+      language: 'plpgsql',
+      volatility: 'v',
+      return_type: 'trigger',
+      argument_names: null,
+      source: '0011-add-trigger-to-auto-update-updated_at-column.sql',
+      body_sha256:
+        '1e0582c796d58810ca3d1066e97ce7f4a5d55e4174b8185ff8aebe14e61f424f',
+    },
+    {
+      signature: 'storage.allow_any_operation(text[])',
+      language: 'sql',
+      volatility: 's',
+      return_type: 'bool',
+      argument_names: ['expected_operations'],
+      source: '0058-operation-ergonomics.sql',
+      body_sha256:
+        'c54409510ad2ecf68bd6b7da4a526f2d51ecba75d4ff6529dc6f1cc3a72774d6',
+    },
+    {
+      signature: 'storage.operation()',
+      language: 'plpgsql',
+      volatility: 's',
+      return_type: 'text',
+      argument_names: null,
+      source: '0024-operation-function.sql',
+      body_sha256:
+        'b211a4c4b376b7bd1c50cc5fd2876824c7b639717e6e0d6484482411bebc34af',
+    },
+  ].map(Object.freeze),
+);
+
+// Complete reviewed noninternal INSERT/UPDATE/DELETE/TRUNCATE trigger set.
 export const STAGING_STORAGE_TRIGGER = Object.freeze({
   table_schema: 'storage',
   table_name: 'objects',
@@ -91,6 +149,59 @@ export const STAGING_STORAGE_TRIGGER = Object.freeze({
   has_old_transition_table: false,
   has_new_transition_table: false,
 });
+export const STAGING_STORAGE_TRIGGERS = Object.freeze([
+  STAGING_STORAGE_TRIGGER,
+  Object.freeze({
+    ...STAGING_STORAGE_TRIGGER,
+    name: 'protect_objects_delete',
+    routine: 'storage.protect_delete()',
+    type: 10,
+  }),
+  Object.freeze({
+    ...STAGING_STORAGE_TRIGGER,
+    name: 'update_objects_updated_at',
+    routine: 'storage.update_updated_at_column()',
+    type: 19,
+  }),
+]);
+export const STAGING_STORAGE_POLICIES = Object.freeze(
+  [
+    {
+      name: 'inventory_file_cleanup_select',
+      command: 'r',
+      permissive: true,
+      roles: ['authenticated'],
+      using_expression:
+        "(private.file_storage_delete(bucket_id, name) AND storage.allow_any_operation(ARRAY['object.delete'::text, 'object.delete_many'::text]))",
+      check_expression: null,
+    },
+    {
+      name: 'inventory_file_delete',
+      command: 'd',
+      permissive: true,
+      roles: ['authenticated'],
+      using_expression: 'private.file_storage_delete(bucket_id, name)',
+      check_expression: null,
+    },
+    {
+      name: 'inventory_file_insert',
+      command: 'a',
+      permissive: true,
+      roles: ['authenticated'],
+      using_expression: null,
+      check_expression: 'private.file_storage_insert(bucket_id, name)',
+    },
+    {
+      name: 'inventory_file_select',
+      command: 'r',
+      permissive: true,
+      roles: ['authenticated'],
+      using_expression:
+        "(private.file_storage_select(bucket_id, name) AND storage.allow_any_operation(ARRAY['object.get_authenticated'::text, 'object.get_authenticated_info'::text, 'object.head_authenticated_info'::text]))",
+      check_expression: null,
+    },
+  ].map(Object.freeze),
+);
 
 const literal = (value) => `'${value.replaceAll("'", "''")}'`;
 // Only CRLF is normalized: whitespace, comments and literals otherwise remain
@@ -132,7 +243,7 @@ export const STAGING_ROUTINE_CATALOG_SQL = `with ${STAGING_ROUTINE_CATALOG_CTE} 
 export const STAGING_TRIGGER_CATALOG_CTE = `trigger_catalog as (
   select pg_catalog.jsonb_build_object(
     'table_schema',n.nspname,'table_name',c.relname,'name',t.tgname,
-    'routine',case when t.tgfoid=pg_catalog.to_regprocedure(${literal(STAGING_STORAGE_TRIGGER.routine)}) then ${literal(STAGING_STORAGE_TRIGGER.routine)} else null end,
+    'routine',case ${STAGING_STORAGE_TRIGGERS.map((row) => `when t.tgfoid=pg_catalog.to_regprocedure(${literal(row.routine)}) then ${literal(row.routine)}`).join(' ')} else null end,
     'type',t.tgtype,'enabled',t.tgenabled,'internal',t.tgisinternal,
     'has_condition',t.tgqual is not null,'columns_empty',t.tgattr=''::pg_catalog.int2vector,
     'argument_count',t.tgnargs,'arguments_empty',t.tgargs=''::pg_catalog.bytea,
@@ -144,47 +255,95 @@ export const STAGING_TRIGGER_CATALOG_CTE = `trigger_catalog as (
   from (values (1)) required(dummy)
   left join pg_catalog.pg_namespace n on n.nspname=${literal(STAGING_STORAGE_TRIGGER.table_schema)}
   left join pg_catalog.pg_class c on c.relnamespace=n.oid and c.relname=${literal(STAGING_STORAGE_TRIGGER.table_name)}
-  left join pg_catalog.pg_trigger t on t.tgrelid=c.oid and t.tgname=${literal(STAGING_STORAGE_TRIGGER.name)}
+  left join pg_catalog.pg_trigger t on t.tgrelid=c.oid and not t.tgisinternal and (t.tgtype & 60)<>0
 )`;
-export const STAGING_TRIGGER_CATALOG_SQL = `with ${STAGING_TRIGGER_CATALOG_CTE} select binding from trigger_catalog`;
+export const STAGING_TRIGGER_CATALOG_SQL = `with ${STAGING_TRIGGER_CATALOG_CTE} select binding from trigger_catalog order by binding->>'name' collate "C"`;
+
+// Materialized context is evaluated before expression deparsing. Only a
+// transaction-local safe path is set; caller schema visibility cannot rewrite
+// portable textual policy expressions or choose a different helper.
+export const STAGING_STORAGE_CATALOG_CTE = `contract_context as materialized (
+  select pg_catalog.set_config('search_path','pg_catalog',true) as path
+), storage_catalog as (
+  select pg_catalog.jsonb_build_object(
+    'table_schema',n.nspname,'table_name',c.relname,
+    'row_security',c.relrowsecurity,'force_row_security',c.relforcerowsecurity,
+    'policies',coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+      'name',p.polname,'command',p.polcmd,'permissive',p.polpermissive,
+      'roles',array(select role_name from (select case when roleid=0 then 'PUBLIC' else r.rolname::text end role_name
+        from pg_catalog.unnest(p.polroles) roleid left join pg_catalog.pg_roles r on r.oid=roleid) role_names order by role_name collate "C"),
+      'using_expression',pg_catalog.pg_get_expr(p.polqual,p.polrelid,false),
+      'check_expression',pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid,false)) order by p.polname collate "C")
+      from pg_catalog.pg_policy p where p.polrelid=c.oid),'[]'::jsonb)
+  ) storage_contract
+  from contract_context cross join (values (1)) required(dummy)
+  left join pg_catalog.pg_namespace n on n.nspname='storage'
+  left join pg_catalog.pg_class c on c.relnamespace=n.oid and c.relname='objects'
+)`;
+export const STAGING_STORAGE_CATALOG_SQL = `with ${STAGING_STORAGE_CATALOG_CTE} select storage_contract from storage_catalog`;
+
+const sameFields = (actual, expected) =>
+  actual &&
+  Object.keys(actual).length === Object.keys(expected).length &&
+  Object.entries(expected).every(
+    ([field, value]) => JSON.stringify(actual[field]) === JSON.stringify(value),
+  );
 
 export function assertStagingRoutineManifest(manifest) {
   if (
-    manifest?.version !== 3 ||
+    manifest?.version !== 4 ||
     !Array.isArray(manifest.routines) ||
     manifest.routines.length !== STAGING_ROUTINE_ALLOWLIST.length
   )
     throw new Error('Invalid staging routine manifest');
   if (
     !Array.isArray(manifest.triggers) ||
-    manifest.triggers.length !== 1 ||
-    !manifest.triggers[0] ||
-    Object.keys(manifest.triggers[0]).length !==
-      Object.keys(STAGING_STORAGE_TRIGGER).length ||
-    Object.entries(STAGING_STORAGE_TRIGGER).some(
-      ([field, value]) => manifest.triggers[0][field] !== value,
+    manifest.triggers.length !== STAGING_STORAGE_TRIGGERS.length ||
+    STAGING_STORAGE_TRIGGERS.some(
+      (expected, index) => !sameFields(manifest.triggers[index], expected),
     )
   )
     throw new Error('Invalid staging trigger manifest');
+  if (
+    !manifest.storage ||
+    Object.keys(manifest.storage).length !== 5 ||
+    manifest.storage.table_schema !== 'storage' ||
+    manifest.storage.table_name !== 'objects' ||
+    manifest.storage.row_security !== true ||
+    manifest.storage.force_row_security !== false ||
+    !Array.isArray(manifest.storage.policies) ||
+    manifest.storage.policies.length !== STAGING_STORAGE_POLICIES.length ||
+    STAGING_STORAGE_POLICIES.some(
+      (expected, index) =>
+        !sameFields(manifest.storage.policies[index], expected),
+    )
+  )
+    throw new Error('Invalid staging Storage authorization manifest');
   const rows = new Map(manifest.routines.map((row) => [row.signature, row]));
   if (rows.size !== STAGING_ROUTINE_ALLOWLIST.length)
     throw new Error('Invalid staging routine manifest');
   for (const { signature, authenticated } of STAGING_ROUTINE_ALLOWLIST) {
     const row = rows.get(signature);
+    const provider = STAGING_STORAGE_PROVIDER_BASELINE.find(
+      (entry) => entry.signature === signature,
+    );
+    const owner = provider ? 'supabase_storage_admin' : STAGING_ROUTINE_OWNER;
+    const grantees = provider
+      ? ['PUBLIC', owner]
+      : authenticated
+        ? ['authenticated', owner]
+        : [owner];
     if (
       !row ||
-      row.owner !== STAGING_ROUTINE_OWNER ||
+      row.owner !== owner ||
       !Array.isArray(row.acl) ||
-      row.acl.length !== (authenticated ? 2 : 1) ||
+      row.acl.length !== grantees.length ||
       row.acl.some(
         (entry, index) =>
           !entry ||
           Object.keys(entry).length !== 4 ||
-          entry.grantee !==
-            (authenticated
-              ? ['authenticated', STAGING_ROUTINE_OWNER]
-              : [STAGING_ROUTINE_OWNER])[index] ||
-          entry.grantor !== STAGING_ROUTINE_OWNER ||
+          entry.grantee !== grantees[index] ||
+          entry.grantor !== owner ||
           entry.privilege !== 'EXECUTE' ||
           entry.grantable !== false,
       ) ||
@@ -193,10 +352,29 @@ export function assertStagingRoutineManifest(manifest) {
       row.kind !== 'f' ||
       row.external_body !== false ||
       row.authenticated_execute !== authenticated ||
-      row.anon_execute !== false ||
-      row.service_execute !== false ||
-      row.public_execute !== false ||
-      JSON.stringify(row.config) !== JSON.stringify(['search_path=""'])
+      row.anon_execute !== !!provider ||
+      row.service_execute !== !!provider ||
+      row.public_execute !== !!provider ||
+      JSON.stringify(row.config) !==
+        JSON.stringify(provider ? null : ['search_path=""']) ||
+      (provider &&
+        (row.security_definer !== false ||
+          row.strict !== false ||
+          row.default_count !== 0 ||
+          row.defaults !== null ||
+          row.argument_modes !== null ||
+          row.return_schema !== 'pg_catalog' ||
+          row.returns_set !== false ||
+          [
+            'language',
+            'volatility',
+            'return_type',
+            'body_sha256',
+            'argument_names',
+          ].some(
+            (field) =>
+              JSON.stringify(row[field]) !== JSON.stringify(provider[field]),
+          )))
     )
       throw new Error('Invalid staging routine manifest');
   }
@@ -211,5 +389,15 @@ export function stagingRoutineComparisonSql(manifest) {
 
 export function stagingTriggerComparisonSql(manifest) {
   assertStagingRoutineManifest(manifest);
-  return `(select pg_catalog.count(*)=1 from trigger_catalog) and not exists(select 1 from trigger_catalog where binding is distinct from ${literal(JSON.stringify(manifest.triggers[0]))}::jsonb)`;
+  return `(select pg_catalog.jsonb_agg(binding order by binding->>'name' collate "C") from trigger_catalog)=${literal(JSON.stringify(manifest.triggers))}::jsonb`;
 }
+
+export function stagingStorageComparisonSql(manifest) {
+  assertStagingRoutineManifest(manifest);
+  return `(select storage_contract from storage_catalog)=${literal(JSON.stringify(manifest.storage))}::jsonb`;
+}
+export const STAGING_FILE_API_COMPARISON_SQL = `not exists(select 1 from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and pg_catalog.starts_with(p.proname,'inventory_file_') and p.oid not in (${STAGING_ROUTINE_ALLOWLIST.filter(
+  (row) => row.signature.startsWith('public.inventory_file_'),
+)
+  .map((row) => `pg_catalog.to_regprocedure(${literal(row.signature)})`)
+  .join(',')}))`;

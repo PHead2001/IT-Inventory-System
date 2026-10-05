@@ -20,6 +20,10 @@ import { fingerprint } from '../scripts/preview-file-keys.mjs';
 import routineManifest from '../scripts/staging-file-routines.json' with { type: 'json' };
 import { assertStagingRoutineManifest } from '../scripts/staging-file-routines.mjs';
 import { STAGING_STORAGE_TRIGGER } from '../scripts/staging-file-routines.mjs';
+import {
+  STAGING_STORAGE_PROVIDER_BASELINE,
+  STAGING_STORAGE_TRIGGERS,
+} from '../scripts/staging-file-routines.mjs';
 import { localStorageFixture } from './integration/staging-file-routines.mjs';
 import {
   STAGING_REF,
@@ -301,7 +305,7 @@ test('portable routine manifest rejects missing, duplicate, foreign or unsafe ca
   }
 });
 
-test('selected completion binding manifest rejects missing, duplicate, extra or altered semantics', () => {
+test('complete Storage DML trigger manifest rejects missing, duplicate, extra or altered semantics', () => {
   for (const mutate of [
     (manifest) => {
       delete manifest.triggers;
@@ -315,19 +319,92 @@ test('selected completion binding manifest rejects missing, duplicate, extra or 
     (manifest) => {
       manifest.triggers[0].unreviewed_field = false;
     },
-    ...Object.keys(STAGING_STORAGE_TRIGGER).map((field) => (manifest) => {
-      const value = manifest.triggers[0][field];
-      manifest.triggers[0][field] =
-        typeof value === 'boolean'
-          ? !value
-          : typeof value === 'number'
-            ? value + 1
-            : 'unreviewed';
-    }),
+    ...STAGING_STORAGE_TRIGGERS.flatMap((_, index) =>
+      Object.keys(STAGING_STORAGE_TRIGGER).map((field) => (manifest) => {
+        const value = manifest.triggers[index][field];
+        manifest.triggers[index][field] =
+          typeof value === 'boolean'
+            ? !value
+            : typeof value === 'number'
+              ? value + 1
+              : 'unreviewed';
+      }),
+    ),
   ]) {
     const changed = structuredClone(routineManifest);
     mutate(changed);
     assert.throws(() => assertStagingRoutineManifest(changed));
+  }
+});
+
+test('Storage authorization manifest rejects missing or unreviewed policies, RLS and expressions', () => {
+  for (const mutate of [
+    (m) => {
+      delete m.storage;
+    },
+    (m) => {
+      m.storage.row_security = false;
+    },
+    (m) => {
+      m.storage.force_row_security = true;
+    },
+    (m) => {
+      m.storage.policies.pop();
+    },
+    (m) => {
+      m.storage.policies.push(structuredClone(m.storage.policies[0]));
+    },
+    (m) => {
+      m.storage.extra = 'unreviewed';
+    },
+    ...routineManifest.storage.policies.flatMap((_, index) =>
+      Object.keys(routineManifest.storage.policies[index]).map(
+        (field) => (m) => {
+          const value = m.storage.policies[index][field];
+          m.storage.policies[index][field] = Array.isArray(value)
+            ? ['PUBLIC']
+            : typeof value === 'boolean'
+              ? !value
+              : 'unreviewed';
+        },
+      ),
+    ),
+  ]) {
+    const changed = structuredClone(routineManifest);
+    mutate(changed);
+    assert.throws(() => assertStagingRoutineManifest(changed));
+  }
+});
+
+test('four reviewed Storage provider signatures alone accept their exact source/owner/public ACL baseline', () => {
+  assertStagingRoutineManifest(routineManifest);
+  for (const provider of STAGING_STORAGE_PROVIDER_BASELINE) {
+    for (const mutate of [
+      (row) => {
+        row.owner = 'postgres';
+      },
+      (row) => {
+        row.security_definer = true;
+      },
+      (row) => {
+        row.config = ['search_path=public'];
+      },
+      (row) => {
+        row.acl[0].grantable = true;
+      },
+      (row) => {
+        row.body_sha256 = '0'.repeat(64);
+      },
+      (row) => {
+        row.anon_execute = false;
+      },
+    ]) {
+      const changed = structuredClone(routineManifest);
+      mutate(
+        changed.routines.find((row) => row.signature === provider.signature),
+      );
+      assert.throws(() => assertStagingRoutineManifest(changed));
+    }
   }
 });
 
