@@ -7,6 +7,7 @@ import { format } from 'prettier';
 import { localStatus, npm } from './runtime.mjs';
 import {
   STAGING_ROUTINE_CATALOG_SQL,
+  STAGING_TRIGGER_CATALOG_SQL,
   assertStagingRoutineManifest,
 } from './staging-file-routines.mjs';
 
@@ -25,9 +26,12 @@ try {
   await db.connect();
   await db.query('begin read only');
   const manifest = assertStagingRoutineManifest({
-    version: 2,
+    version: 3,
     routines: (await db.query(STAGING_ROUTINE_CATALOG_SQL)).rows.map(
       (row) => row.routine,
+    ),
+    triggers: (await db.query(STAGING_TRIGGER_CATALOG_SQL)).rows.map(
+      (row) => row.binding,
     ),
   });
   await db.query('rollback');

@@ -2,9 +2,14 @@
 // Every mutation is rolled back, including when an assertion fails.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import manifest from '../../scripts/staging-file-routines.json' with { type: 'json' };
 import { STAGING_SCHEMA_SQL } from '../../scripts/staging-file-keys-providers.mjs';
-import { STAGING_ROUTINE_CATALOG_SQL } from '../../scripts/staging-file-routines.mjs';
+import {
+  STAGING_ROUTINE_CATALOG_SQL,
+  STAGING_TRIGGER_CATALOG_SQL,
+} from '../../scripts/staging-file-routines.mjs';
 
 const migrationBody = (filename, name) => {
   const sql = readFileSync(
@@ -18,6 +23,144 @@ const migrationBody = (filename, name) => {
   assert.ok(bodyStart > 1 && bodyEnd > bodyStart);
   return sql.slice(bodyStart, bodyEnd);
 };
+
+// Protected Storage DDL is a disposable-local fault fixture. Ordinary readiness
+// observations still execute as postgres; no owner/privilege changes are made.
+export function localStorageFixture(
+  sql,
+  { environment = process.env, execute = execFileSync } = {},
+) {
+  const target = new URL(environment.LOCAL_DB_URL);
+  assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(target.hostname));
+  assert.equal(target.port, '54322');
+  assert.equal(target.pathname, '/postgres');
+  const container = 'supabase_db_it-inventory';
+  const childEnv = { ...environment };
+  // Resolve Docker's actual context-over-host precedence without contacting a
+  // server. All later daemon commands use that validated endpoint explicitly.
+  delete childEnv.DOCKER_CONTEXT;
+  delete childEnv.DOCKER_HOST;
+  const run = (args, options = {}) => {
+    try {
+      return execute('docker', args, {
+        encoding: 'utf8',
+        timeout: 30000,
+        maxBuffer: 1048576,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: childEnv,
+        ...options,
+      });
+    } catch (error) {
+      const state = /ERROR:\s+([A-Z0-9]{5})\b/.exec(
+        error.stderr?.toString() ?? '',
+      )?.[1];
+      throw new Error(
+        `Disposable local Storage fixture refused (${state ?? 'transport'}); connection closes and rolls back`,
+      );
+    }
+  };
+  const endpoint = environment.DOCKER_CONTEXT
+    ? JSON.parse(
+        run([
+          'context',
+          'inspect',
+          environment.DOCKER_CONTEXT,
+          '--format',
+          '{{json .Endpoints.docker.Host}}',
+        ]),
+      )
+    : environment.DOCKER_HOST ||
+      JSON.parse(
+        run([
+          'context',
+          'inspect',
+          '--format',
+          '{{json .Endpoints.docker.Host}}',
+        ]),
+      );
+  const unix =
+    typeof endpoint === 'string' && endpoint.startsWith('unix:///')
+      ? new URL(endpoint)
+      : null;
+  assert.ok(
+    typeof endpoint === 'string' &&
+      (/^npipe:\/\/\/\/\.\/pipe\/[A-Za-z0-9._-]+$/.test(endpoint) ||
+        (unix &&
+          !unix.hostname &&
+          !unix.username &&
+          !unix.password &&
+          !unix.port &&
+          !unix.search &&
+          !unix.hash)),
+    'fixture Docker socket must be local',
+  );
+  const inspected = JSON.parse(
+    run([
+      '--host',
+      endpoint,
+      'inspect',
+      '--type',
+      'container',
+      container,
+      '--format',
+      '{"name":{{json .Name}},"labels":{{json .Config.Labels}},"ports":{{json .NetworkSettings.Ports}},"running":{{json .State.Running}}}',
+    ]),
+  );
+  assert.equal(inspected.name, '/supabase_db_it-inventory');
+  assert.equal(inspected.labels['com.supabase.cli.project'], 'it-inventory');
+  assert.equal(inspected.running, true);
+  const ports = inspected.ports['5432/tcp'];
+  assert.ok(
+    Array.isArray(ports) &&
+      ports.length > 0 &&
+      ports.every((port) => port.HostPort === '54322'),
+  );
+  const input = `set application_name='cp5-storage-binding-${randomUUID()}';
+begin;
+set local statement_timeout='10s';
+set local lock_timeout='2s';
+set local idle_in_transaction_session_timeout='5s';
+set local role postgres;
+${sql}
+rollback;
+`;
+  // Container-side timeout kills psql itself, even if the Docker client loses
+  // its response. EOF/ON_ERROR_STOP/termination closes the socket transaction.
+  const output = run(
+    [
+      '--host',
+      endpoint,
+      'exec',
+      '-i',
+      container,
+      'timeout',
+      '20s',
+      'psql',
+      '-X',
+      '-qAt',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      'VERBOSITY=sqlstate',
+      '-U',
+      'supabase_admin',
+      '-d',
+      'postgres',
+    ],
+    { input },
+  );
+  return output
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+const storageObservation = (phase) => `select pg_catalog.json_build_object(
+  'phase','${phase}','user',current_user,'ready',q.ready,
+  'routines',(select pg_catalog.jsonb_agg(r.routine order by r.routine->>'signature') from (${STAGING_ROUTINE_CATALOG_SQL}) r),
+  'triggers',(select pg_catalog.jsonb_agg(t.binding) from (${STAGING_TRIGGER_CATALOG_SQL}) t)
+) from (${STAGING_SCHEMA_SQL}) q;`;
 export async function verifyStagingRoutineContract(db) {
   let checks = 0;
   const ready = async () => (await db.query(STAGING_SCHEMA_SQL)).rows[0].ready;
@@ -25,13 +168,33 @@ export async function verifyStagingRoutineContract(db) {
     (await db.query(STAGING_ROUTINE_CATALOG_SQL)).rows.map(
       (row) => row.routine,
     );
+  const triggers = async () =>
+    (await db.query(STAGING_TRIGGER_CATALOG_SQL)).rows.map(
+      (row) => row.binding,
+    );
+  const fixtureConnectionsClosed = async () => {
+    const { rows } = await db.query(
+      "select pg_catalog.count(*)::int connections from pg_catalog.pg_stat_activity where application_name like 'cp5-storage-binding-%'",
+    );
+    assert.equal(
+      rows[0].connections,
+      0,
+      'bounded socket fixture leaves no open backend connection',
+    );
+    checks++;
+  };
   assert.deepEqual(
     await catalog(),
     manifest.routines,
     'fresh canonical catalog must match checked-in manifest',
   );
+  assert.deepEqual(
+    await triggers(),
+    manifest.triggers,
+    'canonical Storage trigger matches reviewed binding',
+  );
   assert.equal(await ready(), true, 'canonical schema ready');
-  checks += 2;
+  checks += 3;
   const definition = async (signature) =>
     (
       await db.query(
@@ -140,6 +303,11 @@ export async function verifyStagingRoutineContract(db) {
       '\nbegin return private.file_reserve_ready(p_parent_type,p_parent_id,p_expected_revision,p_name,p_type,p_bytes,p_replaces,p_expected_file_version); end\n',
     ],
     [
+      'no-op privileged Storage completion guard',
+      'private.inventory_file_storage_completion_guard()',
+      '\nbegin return new; end\n',
+    ],
+    [
       'finalization bypasses attestation, generation and revision validation',
       'public.inventory_file_finalize(uuid,bigint,uuid)',
       "\nbegin update public.inventory_files set state='ready' where id=p_file_id; return '{}'::jsonb; end\n",
@@ -179,6 +347,168 @@ export async function verifyStagingRoutineContract(db) {
     ],
   ]) {
     await rejected(note, () => db.query(sql));
+  }
+  const triggerName = 'inventory_file_storage_completion_guard';
+  const table = 'storage.objects';
+  const triggerRoutine = 'private.inventory_file_storage_completion_guard()';
+  const dropTrigger = `drop trigger ${triggerName} on ${table};`;
+  const installTrigger = (timingEvents, extra = '', routine = triggerRoutine) =>
+    `create trigger ${triggerName} ${timingEvents} on ${table} for each row ${extra} execute function ${routine};`;
+  for (const [note, mutation] of [
+    ['missing completion trigger', dropTrigger],
+    [
+      'disabled completion trigger',
+      `alter table ${table} disable trigger ${triggerName};`,
+    ],
+    [
+      'replica-only completion trigger',
+      `alter table ${table} enable replica trigger ${triggerName};`,
+    ],
+    [
+      'noncanonical always-enabled completion trigger',
+      `alter table ${table} enable always trigger ${triggerName};`,
+    ],
+    [
+      'wrong completion routine',
+      `set local role postgres;
+        create function private.cp5_wrong_completion() returns trigger language plpgsql set search_path='' as $$ begin return new; end $$;
+        reset role;
+        ${dropTrigger}
+        ${installTrigger(
+          'before insert or update',
+          '',
+          'private.cp5_wrong_completion()',
+        )}`,
+    ],
+    [
+      'AFTER instead of BEFORE completion',
+      `${dropTrigger} ${installTrigger('after insert or update')}`,
+    ],
+    [
+      'INSERT-only completion',
+      `${dropTrigger} ${installTrigger('before insert')}`,
+    ],
+    [
+      'UPDATE-only completion',
+      `${dropTrigger} ${installTrigger('before update')}`,
+    ],
+    [
+      'column-restricted completion',
+      `${dropTrigger} ${installTrigger('before insert or update of metadata')}`,
+    ],
+    [
+      'WHEN false completion',
+      `${dropTrigger} ${installTrigger('before insert or update', 'when (false)')}`,
+    ],
+    [
+      'unexpected trigger arguments',
+      `${dropTrigger} ${installTrigger(
+        'before insert or update',
+        '',
+        "private.inventory_file_storage_completion_guard('unexpected')",
+      )}`,
+    ],
+    [
+      'deferred constraint completion',
+      `${dropTrigger} create constraint trigger ${triggerName} after insert or update on ${table} deferrable initially deferred for each row execute function ${triggerRoutine};`,
+    ],
+  ]) {
+    try {
+      const observations = localStorageFixture(`${storageObservation('before')}
+        reset role;
+        ${mutation}
+        set local role postgres;
+        ${storageObservation('tampered')}`);
+      assert.deepEqual(
+        observations.map((row) => [row.phase, row.user]),
+        [
+          ['before', 'postgres'],
+          ['tampered', 'postgres'],
+        ],
+      );
+      assert.equal(observations[0].ready, true);
+      assert.equal(observations[1].ready, false, note);
+      assert.deepEqual(
+        observations[1].routines,
+        manifest.routines,
+        'binding fixture retains every pinned routine definition',
+      );
+      assert.notDeepEqual(
+        observations[1].triggers,
+        manifest.triggers,
+        'binding fixture changes the actual selected catalog binding',
+      );
+      checks += 5;
+    } finally {
+      assert.equal(
+        await ready(),
+        true,
+        'socket fault fixture restores ordinary-caller canonical readiness',
+      );
+      checks++;
+      await fixtureConnectionsClosed();
+    }
+  }
+  for (const [fault, state] of [
+    ['select 1/0;', '22012'],
+    [
+      "set local statement_timeout='100ms'; select pg_catalog.pg_sleep(2);",
+      '57014',
+    ],
+  ]) {
+    try {
+      assert.throws(
+        () => localStorageFixture(`reset role; ${dropTrigger} ${fault}`),
+        (error) => error.message.includes(`(${state})`),
+      );
+      checks++;
+    } finally {
+      assert.equal(
+        await ready(),
+        true,
+        'failed/timed-out protected DDL rolls back',
+      );
+      checks++;
+      await fixtureConnectionsClosed();
+    }
+  }
+  // Definition/binding identity is portable: recreating both objects assigns
+  // new local OIDs while retaining exactly the reviewed function and trigger.
+  try {
+    const { definition: sql } = await definition(triggerRoutine);
+    const oidObservation = `select pg_catalog.json_build_object('function_oid',tgfoid::text,'trigger_oid',oid::text) from pg_catalog.pg_trigger where tgrelid='storage.objects'::pg_catalog.regclass and tgname='${triggerName}';`;
+    const observations = localStorageFixture(`${oidObservation}
+      reset role;
+      ${dropTrigger}
+      set local role postgres;
+      drop function ${triggerRoutine};
+      ${sql};
+      revoke all on function ${triggerRoutine} from public,anon,authenticated,service_role;
+      reset role;
+      ${installTrigger('before insert or update')}
+      set local role postgres;
+      ${oidObservation}
+      ${storageObservation('recreated')}`);
+    const [before, after, recreated] = observations;
+    assert.notEqual(before.function_oid, after.function_oid);
+    assert.notEqual(before.trigger_oid, after.trigger_oid);
+    assert.equal(recreated.user, 'postgres');
+    assert.deepEqual(recreated.triggers, manifest.triggers);
+    assert.deepEqual(recreated.routines, manifest.routines);
+    assert.equal(
+      recreated.ready,
+      true,
+      'canonical binding accepts fresh function/trigger OIDs',
+    );
+    checks += 6;
+  } finally {
+    assert.equal(
+      await ready(),
+      true,
+      'fresh-OID fixture restores ordinary-caller canonical readiness',
+    );
+    checks++;
+    await fixtureConnectionsClosed();
   }
   await rejected(
     'unreviewed role EXECUTE despite unchanged effective known-role flags',
@@ -306,6 +636,12 @@ export async function verifyStagingRoutineContract(db) {
     manifest.routines,
     'all tamper fixtures restored before subsequent integration work',
   );
+  assert.deepEqual(
+    await triggers(),
+    manifest.triggers,
+    'trigger tamper fixtures restored',
+  );
+  checks++;
   await db.query('begin');
   try {
     await replaceBody('private.file_parent_staff(text,uuid)', (source) =>
@@ -337,18 +673,23 @@ export async function verifyStagingRoutineContract(db) {
         manifest.routines,
         'catalog metadata remains portable across search_path',
       );
+      assert.deepEqual(
+        await triggers(),
+        manifest.triggers,
+        'qualified trigger binding remains portable across search_path',
+      );
       assert.equal(
         await ready(),
         true,
         'qualified schema query remains ready across search_path',
       );
-      checks += 2;
+      checks += 3;
     } finally {
       await db.query('rollback');
     }
   }
   checks++;
   console.log(
-    `Staging routine catalog tamper regression passed (${checks} assertions; ${manifest.routines.length} pinned routines).`,
+    `Staging routine catalog tamper regression passed (${checks} assertions; ${manifest.routines.length} pinned routines; ${manifest.triggers.length} pinned trigger).`,
   );
 }

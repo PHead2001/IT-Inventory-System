@@ -13,7 +13,9 @@ import {
 import routineManifest from './staging-file-routines.json' with { type: 'json' };
 import {
   STAGING_ROUTINE_CATALOG_CTE,
+  STAGING_TRIGGER_CATALOG_CTE,
   stagingRoutineComparisonSql,
+  stagingTriggerComparisonSql,
 } from './staging-file-routines.mjs';
 
 const fail = (code) => {
@@ -38,10 +40,11 @@ export const STAGING_FILE_MIGRATIONS = Object.freeze([
 ]);
 // Version history and signatures cannot prove the CP5 implementation. Compare
 // the reviewed portable manifest at each fresh guard, including legacy wrappers.
-export const STAGING_SCHEMA_SQL = `with ${STAGING_ROUTINE_CATALOG_CTE}
+export const STAGING_SCHEMA_SQL = `with ${STAGING_ROUTINE_CATALOG_CTE}, ${STAGING_TRIGGER_CATALOG_CTE}
 select (
   (select pg_catalog.count(*)=${STAGING_FILE_MIGRATIONS.length} from supabase_migrations.schema_migrations where version in (${STAGING_FILE_MIGRATIONS.map((version) => `'${version}'`).join(',')}))
   and ${stagingRoutineComparisonSql(routineManifest)}
+  and ${stagingTriggerComparisonSql(routineManifest)}
 ) as ready`;
 
 // Runtime/current alias observations come from the caller's supported verified

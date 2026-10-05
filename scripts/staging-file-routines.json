@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "routines": [
     {
       "acl": [
@@ -507,6 +507,37 @@
       "service_execute": false,
       "security_definer": true,
       "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.inventory_file_storage_completion_guard()",
+      "volatility": "v",
+      "body_sha256": "e8ee38dac9b0c9089ff95e4794bc93fb410f18b9a7283ca5bd120733170bb53a",
+      "return_type": "trigger",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
     },
     {
       "acl": [
@@ -1186,6 +1217,29 @@
       "service_execute": false,
       "security_definer": true,
       "authenticated_execute": true
+    }
+  ],
+  "triggers": [
+    {
+      "name": "inventory_file_storage_completion_guard",
+      "type": 23,
+      "enabled": "O",
+      "routine": "private.inventory_file_storage_completion_guard()",
+      "internal": false,
+      "deferrable": false,
+      "has_parent": false,
+      "table_name": "objects",
+      "table_schema": "storage",
+      "columns_empty": true,
+      "has_condition": false,
+      "argument_count": 0,
+      "has_constraint": false,
+      "arguments_empty": true,
+      "initially_deferred": false,
+      "has_constraint_index": false,
+      "has_constraint_relation": false,
+      "has_new_transition_table": false,
+      "has_old_transition_table": false
     }
   ]
 }

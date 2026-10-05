@@ -60,6 +60,7 @@ export const STAGING_ROUTINE_ALLOWLIST = Object.freeze(
     ['private.file_storage_insert(text,text)', true],
     ['public.inventory_file_cleanup_confirm(uuid,text,text,bigint,text)', true],
     ['private.file_storage_delete(text,text)', true],
+    ['private.inventory_file_storage_completion_guard()', false],
   ].map(([signature, authenticated]) =>
     Object.freeze({ signature, authenticated }),
   ),
@@ -67,6 +68,29 @@ export const STAGING_ROUTINE_ALLOWLIST = Object.freeze(
 
 // Reviewed canonical migration owner, represented by name rather than local OID.
 export const STAGING_ROUTINE_OWNER = 'postgres';
+
+// One explicitly reviewed Storage completion binding, not all table triggers.
+export const STAGING_STORAGE_TRIGGER = Object.freeze({
+  table_schema: 'storage',
+  table_name: 'objects',
+  name: 'inventory_file_storage_completion_guard',
+  routine: 'private.inventory_file_storage_completion_guard()',
+  type: 23, // ROW | BEFORE | INSERT | UPDATE.
+  enabled: 'O',
+  internal: false,
+  has_condition: false,
+  columns_empty: true,
+  argument_count: 0,
+  arguments_empty: true,
+  has_parent: false,
+  has_constraint: false,
+  has_constraint_relation: false,
+  has_constraint_index: false,
+  deferrable: false,
+  initially_deferred: false,
+  has_old_transition_table: false,
+  has_new_transition_table: false,
+});
 
 const literal = (value) => `'${value.replaceAll("'", "''")}'`;
 // Only CRLF is normalized: whitespace, comments and literals otherwise remain
@@ -105,13 +129,43 @@ export const STAGING_ROUTINE_CATALOG_CTE = `required(signature,authenticated) as
 )`;
 export const STAGING_ROUTINE_CATALOG_SQL = `with ${STAGING_ROUTINE_CATALOG_CTE} select routine from catalog order by signature`;
 
+export const STAGING_TRIGGER_CATALOG_CTE = `trigger_catalog as (
+  select pg_catalog.jsonb_build_object(
+    'table_schema',n.nspname,'table_name',c.relname,'name',t.tgname,
+    'routine',case when t.tgfoid=pg_catalog.to_regprocedure(${literal(STAGING_STORAGE_TRIGGER.routine)}) then ${literal(STAGING_STORAGE_TRIGGER.routine)} else null end,
+    'type',t.tgtype,'enabled',t.tgenabled,'internal',t.tgisinternal,
+    'has_condition',t.tgqual is not null,'columns_empty',t.tgattr=''::pg_catalog.int2vector,
+    'argument_count',t.tgnargs,'arguments_empty',t.tgargs=''::pg_catalog.bytea,
+    'has_parent',t.tgparentid<>0,'has_constraint',t.tgconstraint<>0,
+    'has_constraint_relation',t.tgconstrrelid<>0,'has_constraint_index',t.tgconstrindid<>0,
+    'deferrable',t.tgdeferrable,'initially_deferred',t.tginitdeferred,
+    'has_old_transition_table',t.tgoldtable is not null,'has_new_transition_table',t.tgnewtable is not null
+  ) binding
+  from (values (1)) required(dummy)
+  left join pg_catalog.pg_namespace n on n.nspname=${literal(STAGING_STORAGE_TRIGGER.table_schema)}
+  left join pg_catalog.pg_class c on c.relnamespace=n.oid and c.relname=${literal(STAGING_STORAGE_TRIGGER.table_name)}
+  left join pg_catalog.pg_trigger t on t.tgrelid=c.oid and t.tgname=${literal(STAGING_STORAGE_TRIGGER.name)}
+)`;
+export const STAGING_TRIGGER_CATALOG_SQL = `with ${STAGING_TRIGGER_CATALOG_CTE} select binding from trigger_catalog`;
+
 export function assertStagingRoutineManifest(manifest) {
   if (
-    manifest?.version !== 2 ||
+    manifest?.version !== 3 ||
     !Array.isArray(manifest.routines) ||
     manifest.routines.length !== STAGING_ROUTINE_ALLOWLIST.length
   )
     throw new Error('Invalid staging routine manifest');
+  if (
+    !Array.isArray(manifest.triggers) ||
+    manifest.triggers.length !== 1 ||
+    !manifest.triggers[0] ||
+    Object.keys(manifest.triggers[0]).length !==
+      Object.keys(STAGING_STORAGE_TRIGGER).length ||
+    Object.entries(STAGING_STORAGE_TRIGGER).some(
+      ([field, value]) => manifest.triggers[0][field] !== value,
+    )
+  )
+    throw new Error('Invalid staging trigger manifest');
   const rows = new Map(manifest.routines.map((row) => [row.signature, row]));
   if (rows.size !== STAGING_ROUTINE_ALLOWLIST.length)
     throw new Error('Invalid staging routine manifest');
@@ -153,4 +207,9 @@ export function stagingRoutineComparisonSql(manifest) {
   assertStagingRoutineManifest(manifest);
   return `not exists(select 1 from catalog left join pg_catalog.jsonb_array_elements(${literal(JSON.stringify(manifest.routines))}::jsonb) expected
     on expected->>'signature'=catalog.signature where catalog.routine is distinct from expected)`;
+}
+
+export function stagingTriggerComparisonSql(manifest) {
+  assertStagingRoutineManifest(manifest);
+  return `(select pg_catalog.count(*)=1 from trigger_catalog) and not exists(select 1 from trigger_catalog where binding is distinct from ${literal(JSON.stringify(manifest.triggers[0]))}::jsonb)`;
 }

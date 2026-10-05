@@ -19,6 +19,8 @@ import {
 import { fingerprint } from '../scripts/preview-file-keys.mjs';
 import routineManifest from '../scripts/staging-file-routines.json' with { type: 'json' };
 import { assertStagingRoutineManifest } from '../scripts/staging-file-routines.mjs';
+import { STAGING_STORAGE_TRIGGER } from '../scripts/staging-file-routines.mjs';
+import { localStorageFixture } from './integration/staging-file-routines.mjs';
 import {
   STAGING_REF,
   PRODUCTION_REF,
@@ -297,6 +299,138 @@ test('portable routine manifest rejects missing, duplicate, foreign or unsafe ca
     mutate(changed.routines);
     assert.throws(() => assertStagingRoutineManifest(changed));
   }
+});
+
+test('selected completion binding manifest rejects missing, duplicate, extra or altered semantics', () => {
+  for (const mutate of [
+    (manifest) => {
+      delete manifest.triggers;
+    },
+    (manifest) => {
+      manifest.triggers = [];
+    },
+    (manifest) => {
+      manifest.triggers.push(structuredClone(manifest.triggers[0]));
+    },
+    (manifest) => {
+      manifest.triggers[0].unreviewed_field = false;
+    },
+    ...Object.keys(STAGING_STORAGE_TRIGGER).map((field) => (manifest) => {
+      const value = manifest.triggers[0][field];
+      manifest.triggers[0][field] =
+        typeof value === 'boolean'
+          ? !value
+          : typeof value === 'number'
+            ? value + 1
+            : 'unreviewed';
+    }),
+  ]) {
+    const changed = structuredClone(routineManifest);
+    mutate(changed);
+    assert.throws(() => assertStagingRoutineManifest(changed));
+  }
+});
+
+test('local host plus overriding remote Docker context refuses before daemon inspect/exec', () => {
+  const calls = [];
+  assert.throws(
+    () =>
+      localStorageFixture('select 1;', {
+        environment: {
+          LOCAL_DB_URL:
+            'postgresql://postgres:synthetic@localhost:54322/postgres',
+          DOCKER_HOST: 'unix:///var/run/docker.sock',
+          DOCKER_CONTEXT: 'remote-fixture',
+        },
+        execute: (command, args, options) => {
+          calls.push({ command, args });
+          assert.deepEqual(args, [
+            'context',
+            'inspect',
+            'remote-fixture',
+            '--format',
+            '{{json .Endpoints.docker.Host}}',
+          ]);
+          assert.equal(Object.hasOwn(options.env, 'DOCKER_CONTEXT'), false);
+          assert.equal(Object.hasOwn(options.env, 'DOCKER_HOST'), false);
+          return JSON.stringify('ssh://remote.example.invalid');
+        },
+      }),
+    /must be local/,
+  );
+  assert.equal(
+    calls.length,
+    1,
+    'only context metadata is read; no server contact',
+  );
+});
+
+test('local fixture refuses remote named-pipe/Unix authority and network endpoints before daemon calls', () => {
+  for (const endpoint of [
+    'npipe:////remote/pipe/docker_engine',
+    'npipe://remote/pipe/docker_engine',
+    'unix://remote/var/run/docker.sock',
+    'tcp://127.0.0.1:2375',
+    'ssh://remote.example.invalid',
+  ]) {
+    let calls = 0;
+    assert.throws(
+      () =>
+        localStorageFixture('select 1;', {
+          environment: {
+            LOCAL_DB_URL:
+              'postgresql://postgres:synthetic@localhost:54322/postgres',
+            DOCKER_HOST: endpoint,
+          },
+          execute: () => {
+            calls++;
+            throw new Error('must never contact daemon');
+          },
+        }),
+      /must be local/,
+    );
+    assert.equal(calls, 0);
+  }
+});
+
+test('resolved local context is pinned identically for Docker inspect/exec with ambient overrides removed', () => {
+  const endpoint = 'npipe:////./pipe/docker_engine';
+  const environment = {
+    LOCAL_DB_URL: 'postgresql://postgres:synthetic@localhost:54322/postgres',
+    DOCKER_CONTEXT: 'local-fixture',
+    DOCKER_HOST: 'ssh://remote.example.invalid',
+  };
+  const calls = [];
+  const result = localStorageFixture('select 1;', {
+    environment,
+    execute: (command, args, options) => {
+      assert.equal(command, 'docker');
+      assert.equal(Object.hasOwn(options.env, 'DOCKER_CONTEXT'), false);
+      assert.equal(Object.hasOwn(options.env, 'DOCKER_HOST'), false);
+      calls.push(args);
+      if (args[0] === 'context') return JSON.stringify(endpoint);
+      assert.deepEqual(args.slice(0, 2), ['--host', endpoint]);
+      if (args[2] === 'inspect')
+        return JSON.stringify({
+          name: '/supabase_db_it-inventory',
+          labels: { 'com.supabase.cli.project': 'it-inventory' },
+          ports: { '5432/tcp': [{ HostPort: '54322' }] },
+          running: true,
+        });
+      assert.equal(args[2], 'exec');
+      assert.ok(args.includes('supabase_admin'));
+      assert.ok(options.input.includes('rollback;'));
+      return '{"ready":true}\n';
+    },
+  });
+  assert.deepEqual(result, [{ ready: true }]);
+  assert.equal(calls.length, 3);
+  assert.equal(
+    environment.DOCKER_CONTEXT,
+    'local-fixture',
+    'ambient environment is unchanged',
+  );
+  assert.equal(environment.DOCKER_HOST, 'ssh://remote.example.invalid');
 });
 
 for (const phase of ['initial', 'stage', 'env', 'deploy', 'candidate-proof']) {
