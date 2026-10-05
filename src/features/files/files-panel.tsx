@@ -114,7 +114,7 @@ function cleanupStatus(result: CleanupResult | number | null) {
     if (result.status === 'no_work')
       return 'No file cleanup is needed for this record.';
     if (result.status === 'complete')
-      return `Deleted ${result.deleted} stored object${result.deleted === 1 ? '' : 's'}. File cleanup is complete for this record.`;
+      return 'File cleanup is complete for this record. No stored objects await cleanup.';
     if (result.status === 'partial' || result.status === 'failed')
       return `Deleted ${result.deleted} stored object${result.deleted === 1 ? '' : 's'}. ${result.failed} cleanup confirmation${result.failed === 1 ? '' : 's'} failed; retry later.`;
     return `Deleted ${result.deleted} stored object${result.deleted === 1 ? '' : 's'}. ${result.outstanding} stored object${result.outstanding === 1 ? '' : 's'} still await${result.outstanding === 1 ? 's' : ''} cleanup; retry later.`;

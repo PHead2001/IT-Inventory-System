@@ -89,6 +89,11 @@ export async function cleanupTerminalFiles(
     }
   }
   const after = await status();
+  // A confirmation can commit while its response is lost. Only this fresh,
+  // authorized complete work-set read can settle that ambiguity; acknowledged
+  // deletions remain the count for this request, including concurrent cleanup.
+  if (after.outstanding === 0)
+    return { deleted, failed: 0, ...after, pending: false, status: 'complete' };
   return {
     deleted,
     failed,

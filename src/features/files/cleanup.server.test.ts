@@ -142,4 +142,46 @@ describe('authoritative parent cleanup', () => {
       });
     },
   );
+  it('clears lost confirmation failures only after authorized zero outstanding work', async () => {
+    let reads = 0;
+    mocks.rpc.mockImplementation(async (_client, name) => {
+      if (name === 'inventory_file_cleanup_status')
+        return { outstanding: ++reads === 1 ? 1 : 0, blocked: 0 };
+      if (name === 'inventory_file_active_key') return 'testkey';
+      if (name === 'inventory_file_cleanup_claim_parent') return [claim];
+      if (name === 'inventory_file_cleanup_confirm')
+        throw new Error('response lost after commit');
+    });
+    expect(await cleanupTerminalFiles(actor, parent)).toEqual({
+      deleted: 0,
+      failed: 0,
+      outstanding: 0,
+      blocked: 0,
+      pending: false,
+      status: 'complete',
+    });
+  });
+  it.each([
+    new Error('final status unavailable'),
+    new Error('forbidden'),
+    { outstanding: -1, blocked: 0 },
+    { outstanding: 0, blocked: 1 },
+    null,
+  ])(
+    'never reports complete without valid authorized final status (%s)',
+    async (final) => {
+      let reads = 0;
+      mocks.rpc.mockImplementation(async (_client, name) => {
+        if (name === 'inventory_file_cleanup_status') {
+          if (++reads === 1) return { outstanding: 1, blocked: 0 };
+          if (final instanceof Error) throw final;
+          return final;
+        }
+        if (name === 'inventory_file_active_key') return 'testkey';
+        if (name === 'inventory_file_cleanup_claim_parent') return [claim];
+        return null;
+      });
+      await expect(cleanupTerminalFiles(actor, parent)).rejects.toThrow();
+    },
+  );
 });

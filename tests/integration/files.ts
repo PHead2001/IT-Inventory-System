@@ -192,6 +192,72 @@ async function raceStorageUploadWithCancel(
     });
   }
 }
+async function cleanupWithLostConfirmation(
+  person: Actor,
+  parentId: string,
+  keyId: string,
+  secret: string,
+) {
+  const child = fork(
+    new URL('./files-cleanup-response-loss.ts', import.meta.url),
+    [],
+    {
+      execArgv: ['--conditions=react-server', '--import', 'tsx'],
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      env: { NODE_ENV: 'test', LOCAL_API_URL: url, LOCAL_ANON_KEY: anonKey },
+    },
+  );
+  return new Promise<{
+    result: {
+      status: string;
+      deleted: number;
+      failed: number;
+      outstanding: number;
+      blocked: number;
+      pending: boolean;
+    };
+    committed: number;
+  }>((resolve, reject) => {
+    let result:
+      | {
+          result: {
+            status: string;
+            deleted: number;
+            failed: number;
+            outstanding: number;
+            blocked: number;
+            pending: boolean;
+          };
+          committed: number;
+        }
+      | undefined;
+    const deadline = setTimeout(() => {
+      child.kill();
+      reject(new Error('Cleanup response-loss helper exceeded 30 seconds'));
+    }, 30000);
+    child.once('error', (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    child.on('message', (message: typeof result & { failure?: boolean }) => {
+      if (!message || message.failure) return;
+      result = message;
+    });
+    child.once('exit', (code) => {
+      clearTimeout(deadline);
+      if (code !== 0 || !result)
+        reject(new Error('Cleanup response-loss helper failed'));
+      else resolve(result);
+    });
+    child.send({
+      email: person.email,
+      actorId: person.id,
+      parentId,
+      keyId,
+      secret,
+    });
+  });
+}
 async function rpc(
   client: SupabaseClient,
   name: string,
@@ -2409,22 +2475,33 @@ async function main() {
     ),
     'interrupted deletion is claimable after lease',
   );
-  const deletion = await staff.client.storage
-    .from('inventory-files')
-    .remove([sourceClaim.path]);
-  assert.equal(
-    deletion.error,
-    null,
-    `claimed source deletion: ${deletion.error?.message}`,
+  await db.query(
+    "update private.file_objects set cleanup_lease_until=now()-interval '1 minute' where id=$1",
+    [sourceClaim.object_id],
   );
-  await okay(staff.client, 'inventory_file_cleanup_confirm', {
-    p_object_id: sourceClaim.object_id,
-    p_key_id: keyId,
-    ...serverProof(secret, staff.id, 'cleanup_confirm', [
-      sourceClaim.object_id,
-      keyId,
-    ]),
-  });
+  const lostConfirmation = await cleanupWithLostConfirmation(
+    staff,
+    parent,
+    keyId,
+    secret,
+  );
+  eq(
+    lostConfirmation.committed,
+    1,
+    'real cleanup confirmation committed before response delivery was lost',
+  );
+  eq(
+    lostConfirmation.result,
+    {
+      deleted: 0,
+      failed: 0,
+      outstanding: 0,
+      blocked: 0,
+      pending: false,
+      status: 'complete',
+    },
+    'actual server service settles lost confirmation using authorized final zero work without inferring deleted count',
+  );
   const tombstone = await db.query(
     'select cleanup_state,path from private.file_objects where id=$1',
     [sourceClaim.object_id],

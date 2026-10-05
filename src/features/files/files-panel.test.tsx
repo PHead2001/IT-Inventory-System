@@ -270,6 +270,43 @@ describe('authoritative file readiness and cleanup', () => {
       parentId: id,
     });
   });
+  it('confirms completed cleanup without an inferred deletion count or retry', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'complete',
+        deleted: 0,
+        failed: 0,
+        outstanding: 0,
+        blocked: 0,
+        pending: false,
+      }),
+    });
+    render(
+      <FilesPanel
+        actorId="staff"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByRole('button', { name: 'Add photo' });
+    fireEvent.click(screen.getByText(/File activity/));
+    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
+    await screen.findByText(
+      'File cleanup is complete for this record. No stored objects await cleanup.',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry file cleanup' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Deleted 0 stored objects/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Check file cleanup' }),
+    ).toBeVisible();
+  });
 });
 
 describe('fresh native picker intent', () => {
