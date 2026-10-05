@@ -204,6 +204,27 @@ export const STAGING_STORAGE_POLICIES = Object.freeze(
 );
 
 const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+export const STAGING_STORAGE_BUCKET_TABLE = Object.freeze({
+  table_schema: 'storage',
+  table_name: 'buckets',
+  owner: 'supabase_storage_admin',
+  kind: 'r',
+  row_security: true,
+  force_row_security: false,
+  policies: [],
+});
+export const STAGING_STORAGE_BUCKET = Object.freeze({
+  id: 'inventory-files',
+  name: 'inventory-files',
+  public: false,
+  file_size_limit: 20971520,
+  allowed_mime_types: [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ],
+});
 // Only CRLF is normalized: whitespace, comments and literals otherwise remain
 // exact. OIDs, owner IDs and pg_get_functiondef presentation are not portable.
 export const STAGING_ROUTINE_CATALOG_CTE = `required(signature,authenticated) as (values
@@ -264,9 +285,10 @@ export const STAGING_TRIGGER_CATALOG_SQL = `with ${STAGING_TRIGGER_CATALOG_CTE} 
 // portable textual policy expressions or choose a different helper.
 export const STAGING_STORAGE_CATALOG_CTE = `contract_context as materialized (
   select pg_catalog.set_config('search_path','pg_catalog',true) as path
-), storage_catalog as (
+), storage_tables as (
   select pg_catalog.jsonb_build_object(
     'table_schema',n.nspname,'table_name',c.relname,
+    'owner',owner.rolname,'kind',c.relkind,
     'row_security',c.relrowsecurity,'force_row_security',c.relforcerowsecurity,
     'policies',coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'name',p.polname,'command',p.polcmd,'permissive',p.polpermissive,
@@ -275,10 +297,21 @@ export const STAGING_STORAGE_CATALOG_CTE = `contract_context as materialized (
       'using_expression',pg_catalog.pg_get_expr(p.polqual,p.polrelid,false),
       'check_expression',pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid,false)) order by p.polname collate "C")
       from pg_catalog.pg_policy p where p.polrelid=c.oid),'[]'::jsonb)
-  ) storage_contract
-  from contract_context cross join (values (1)) required(dummy)
+  ) table_contract
+  from contract_context cross join (values ('objects'),('buckets')) required(table_name)
   left join pg_catalog.pg_namespace n on n.nspname='storage'
-  left join pg_catalog.pg_class c on c.relnamespace=n.oid and c.relname='objects'
+  left join pg_catalog.pg_class c on c.relnamespace=n.oid and c.relname=required.table_name
+  left join pg_catalog.pg_roles owner on owner.oid=c.relowner
+), storage_catalog as (
+  select (select table_contract from storage_tables where table_contract->>'table_name'='objects')
+    || pg_catalog.jsonb_build_object(
+      'buckets',(select table_contract from storage_tables where table_contract->>'table_name'='buckets'),
+      'bucket',(select pg_catalog.jsonb_build_object('id',b.id,'name',b.name,'public',b.public,
+        'file_size_limit',b.file_size_limit,
+        'allowed_mime_types',case when b.allowed_mime_types is null then null else
+          array(select mime from pg_catalog.unnest(b.allowed_mime_types) mime order by mime collate "C") end)
+        from storage.buckets b where b.id='inventory-files')
+    ) storage_contract
 )`;
 export const STAGING_STORAGE_CATALOG_SQL = `with ${STAGING_STORAGE_CATALOG_CTE} select storage_contract from storage_catalog`;
 
@@ -291,7 +324,7 @@ const sameFields = (actual, expected) =>
 
 export function assertStagingRoutineManifest(manifest) {
   if (
-    manifest?.version !== 4 ||
+    manifest?.version !== 5 ||
     !Array.isArray(manifest.routines) ||
     manifest.routines.length !== STAGING_ROUTINE_ALLOWLIST.length
   )
@@ -306,9 +339,13 @@ export function assertStagingRoutineManifest(manifest) {
     throw new Error('Invalid staging trigger manifest');
   if (
     !manifest.storage ||
-    Object.keys(manifest.storage).length !== 5 ||
+    Object.keys(manifest.storage).length !== 9 ||
     manifest.storage.table_schema !== 'storage' ||
     manifest.storage.table_name !== 'objects' ||
+    manifest.storage.owner !== 'supabase_storage_admin' ||
+    manifest.storage.kind !== 'r' ||
+    !sameFields(manifest.storage.buckets, STAGING_STORAGE_BUCKET_TABLE) ||
+    !sameFields(manifest.storage.bucket, STAGING_STORAGE_BUCKET) ||
     manifest.storage.row_security !== true ||
     manifest.storage.force_row_security !== false ||
     !Array.isArray(manifest.storage.policies) ||

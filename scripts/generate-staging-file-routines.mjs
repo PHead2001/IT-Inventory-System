@@ -36,7 +36,7 @@ try {
     'Unreviewed public file API; update the explicit allowlist before generation',
   );
   const manifest = assertStagingRoutineManifest({
-    version: 4,
+    version: 5,
     routines: (await db.query(STAGING_ROUTINE_CATALOG_SQL)).rows.map(
       (row) => row.routine,
     ),

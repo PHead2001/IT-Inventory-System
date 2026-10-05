@@ -27,7 +27,7 @@ const migrationBody = (filename, name) => {
 };
 
 // Protected Storage DDL is a disposable-local fault fixture. Ordinary readiness
-// observations still execute as postgres; no owner/privilege changes are made.
+// observations still execute as postgres; owner drift fixtures are rolled back.
 export function localStorageFixture(
   sql,
   { environment = process.env, execute = execFileSync } = {},
@@ -427,7 +427,6 @@ export async function verifyStagingRoutineContract(db) {
   const installTrigger = (timingEvents, extra = '', routine = triggerRoutine) =>
     `create trigger ${triggerName} ${timingEvents} on ${table} for each row ${extra} execute function ${routine};`;
   for (const [note, mutation] of [
-    ['missing completion trigger', dropTrigger],
     [
       'disabled completion trigger',
       `alter table ${table} disable trigger ${triggerName};`,
@@ -556,7 +555,24 @@ export async function verifyStagingRoutineContract(db) {
         manifest.routines,
         'Storage wiring/policy fixture leaves pinned functions intact',
       );
+      if (mutation.includes('owner to postgres')) {
+        const changed = structuredClone(observations[1].storage);
+        const relation = mutation.includes('storage.buckets')
+          ? changed.buckets
+          : changed;
+        assert.equal(relation.owner, 'postgres');
+        relation.owner = 'supabase_storage_admin';
+        assert.deepEqual(
+          changed,
+          manifest.storage,
+          'owner drift preserves all checked RLS, policies and bucket metadata',
+        );
+        assert.deepEqual(observations[1].triggers, manifest.triggers);
+        checks += 3;
+      }
       checks += 3;
+    } catch (error) {
+      throw new Error(`${note}: ${error.message}`);
     } finally {
       assert.equal(
         await ready(),
@@ -568,6 +584,67 @@ export async function verifyStagingRoutineContract(db) {
     }
   };
   for (const [note, mutation] of [
+    [
+      'objects owner drift with intact RLS/policies',
+      'alter table storage.objects owner to postgres;',
+    ],
+    ['buckets owner drift', 'alter table storage.buckets owner to postgres;'],
+    [
+      'buckets RLS disabled',
+      'alter table storage.buckets disable row level security;',
+    ],
+    [
+      'buckets forced RLS',
+      'alter table storage.buckets force row level security;',
+    ],
+    [
+      'buckets writable authenticated policy',
+      'create policy cp5_bucket_update on storage.buckets for update to authenticated using(true) with check(true);',
+    ],
+    [
+      'buckets PUBLIC policy',
+      'create policy cp5_bucket_public on storage.buckets for all to public using(true) with check(true);',
+    ],
+    [
+      'missing private bucket',
+      "set local storage.allow_delete_query='true'; delete from storage.buckets where id='inventory-files';",
+    ],
+    [
+      'public bucket',
+      "update storage.buckets set public=true where id='inventory-files';",
+    ],
+    [
+      'bucket name drift',
+      "update storage.buckets set name='cp5-other' where id='inventory-files';",
+    ],
+    [
+      'bucket size drift',
+      "update storage.buckets set file_size_limit=20971521 where id='inventory-files';",
+    ],
+    [
+      'bucket size missing',
+      "update storage.buckets set file_size_limit=null where id='inventory-files';",
+    ],
+    ...[
+      ['null', 'null'],
+      ['missing', "array['image/jpeg','image/png','image/webp']"],
+      [
+        'extra',
+        "array['application/pdf','image/jpeg','image/png','image/webp','text/plain']",
+      ],
+      [
+        'duplicate',
+        "array['application/pdf','image/jpeg','image/png','image/webp','image/jpeg']",
+      ],
+      [
+        'null entry',
+        "array['application/pdf','image/jpeg','image/png','image/webp',null]",
+      ],
+    ].map(([fault, value]) => [
+      `bucket MIME ${fault}`,
+      `update storage.buckets set allowed_mime_types=${value} where id='inventory-files';`,
+    ]),
+    ['missing completion trigger', dropTrigger],
     [
       'additional AFTER completion mutation trigger',
       `set local role postgres; create function private.cp5_after_completion() returns trigger language plpgsql set search_path='' as $$ begin update storage.objects set metadata='{}'::jsonb where id=new.id; return new; end $$; reset role; create trigger zz_cp5_after_completion after insert on storage.objects for each row execute function private.cp5_after_completion();`,
@@ -635,6 +712,22 @@ export async function verifyStagingRoutineContract(db) {
     ]),
   ])
     await socketRejected(note, mutation);
+  try {
+    const observations = localStorageFixture(
+      `reset role; update storage.buckets set allowed_mime_types=array['image/webp','application/pdf','image/png','image/jpeg'] where id='inventory-files'; set local role postgres; ${storageObservation('reordered')}`,
+    );
+    assert.equal(
+      observations[0].ready,
+      true,
+      'MIME ordering is portable while exact membership remains pinned',
+    );
+    assert.deepEqual(observations[0].storage, manifest.storage);
+    checks += 2;
+  } finally {
+    assert.equal(await ready(), true);
+    checks++;
+    await fixtureConnectionsClosed();
+  }
   const policySql = (policy) =>
     `create policy ${policy.name} on storage.objects as ${policy.permissive ? 'permissive' : 'restrictive'} for ${{ r: 'select', a: 'insert', d: 'delete', '*': 'all', w: 'update' }[policy.command]} to ${policy.roles.join(',')} ${policy.using_expression ? `using(${policy.using_expression})` : ''} ${policy.check_expression ? `with check(${policy.check_expression})` : ''};`;
   // Recreating a canonical policy changes only its local OID.

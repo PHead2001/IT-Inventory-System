@@ -339,6 +339,33 @@ test('complete Storage DML trigger manifest rejects missing, duplicate, extra or
 
 test('Storage authorization manifest rejects missing or unreviewed policies, RLS and expressions', () => {
   for (const mutate of [
+    ...['owner', 'kind'].map((field) => (m) => {
+      m.storage[field] = 'unreviewed';
+    }),
+    ...['buckets', 'bucket'].flatMap((part) => [
+      (m) => {
+        delete m.storage[part];
+      },
+      ...Object.keys(routineManifest.storage[part]).map((field) => (m) => {
+        const value = m.storage[part][field];
+        m.storage[part][field] = Array.isArray(value)
+          ? [...value, 'unreviewed']
+          : typeof value === 'boolean'
+            ? !value
+            : 'unreviewed';
+      }),
+    ]),
+    (m) => {
+      m.storage.bucket.allowed_mime_types = null;
+    },
+    (m) => {
+      m.storage.bucket.allowed_mime_types.pop();
+    },
+    (m) => {
+      m.storage.bucket.allowed_mime_types.push(
+        m.storage.bucket.allowed_mime_types[0],
+      );
+    },
     (m) => {
       delete m.storage;
     },

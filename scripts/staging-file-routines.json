@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "routines": [
     {
       "acl": [
@@ -1703,6 +1703,29 @@
     }
   ],
   "storage": {
+    "kind": "r",
+    "owner": "supabase_storage_admin",
+    "bucket": {
+      "id": "inventory-files",
+      "name": "inventory-files",
+      "public": false,
+      "file_size_limit": 20971520,
+      "allowed_mime_types": [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+      ]
+    },
+    "buckets": {
+      "kind": "r",
+      "owner": "supabase_storage_admin",
+      "policies": [],
+      "table_name": "buckets",
+      "row_security": true,
+      "table_schema": "storage",
+      "force_row_security": false
+    },
     "policies": [
       {
         "name": "inventory_file_cleanup_select",
