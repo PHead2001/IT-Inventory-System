@@ -197,6 +197,60 @@ async function rpc(
   name: string,
   args: Record<string, unknown> = {},
 ) {
+  const person = actors.find((entry) => entry.client === client);
+  // These local-only fixtures exercise the server's signed dispatch contract.
+  // Direct unsigned callers are tested separately below.
+  if (
+    name === 'inventory_file_reserve' &&
+    person &&
+    keyToRetire &&
+    keySecretForCleanup
+  ) {
+    return client.rpc('inventory_file_reserve_ready', {
+      ...args,
+      p_replaces: args.p_replaces ?? null,
+      p_expected_file_version: args.p_expected_file_version ?? null,
+      p_key_id: keyToRetire,
+      ...serverProof(keySecretForCleanup, person.id, 'reserve', [
+        String(args.p_parent_type),
+        String(args.p_parent_id),
+        String(args.p_expected_revision),
+        Buffer.from(String(args.p_name)).toString('hex'),
+        String(args.p_type),
+        String(args.p_bytes),
+        String(args.p_replaces ?? '-'),
+        String(args.p_expected_file_version ?? '-'),
+        keyToRetire,
+      ]),
+    });
+  }
+  if (
+    name === 'inventory_file_cleanup_claim' &&
+    person &&
+    keySecretForCleanup
+  ) {
+    const parents = await db.query<{ kind: string; id: string }>(
+      "select distinct case when asset_id is null then 'quantity' else 'asset' end kind,coalesce(asset_id,quantity_id) id from public.inventory_files where uploader_id=$1 order by id",
+      [person.id],
+    );
+    const claims: { object_id: string; path: string }[] = [];
+    for (const parent of parents.rows) {
+      const result = await client.rpc('inventory_file_cleanup_claim_parent', {
+        ...args,
+        p_parent_type: parent.kind,
+        p_parent_id: parent.id,
+        ...serverProof(keySecretForCleanup, person.id, 'cleanup_claim', [
+          parent.kind,
+          parent.id,
+          String(args.p_limit),
+          String(args.p_key_id),
+        ]),
+      });
+      if (result.error) return result;
+      claims.push(...result.data);
+    }
+    return { data: claims, error: null };
+  }
   return client.rpc(name, args);
 }
 async function okay(
@@ -631,6 +685,69 @@ async function main() {
     'select id from public.locations where active and can_hold_inventory limit 1',
   );
   const parent = await asset(staff, cat.id, loc.id);
+  // A cleanup request waiting on the global file guard must not hold the
+  // inventory parent lock and block an unrelated metadata writer.
+  const guardHolder = new Client({ connectionString: dbUrl });
+  const parentWriter = new Client({ connectionString: dbUrl });
+  await guardHolder.connect();
+  await parentWriter.connect();
+  let waitingClaim: Promise<{ data: unknown; error: unknown }> | undefined;
+  try {
+    await guardHolder.query('begin');
+    const holder = await guardHolder.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guardHolder.query('select id from private.file_guard for update');
+    waitingClaim = Promise.resolve(
+      staff.client.rpc('inventory_file_cleanup_claim_parent', {
+        p_parent_type: 'asset',
+        p_parent_id: parent,
+        p_limit: 1,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'cleanup_claim', [
+          'asset',
+          parent,
+          '1',
+          keyId,
+        ]),
+      }),
+    ).then((result) => ({ data: result.data, error: result.error }));
+    const deadline = performance.now() + 1500;
+    let observed = false;
+    while (performance.now() < deadline) {
+      const blocked = await db.query<{ present: boolean }>(
+        "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike '%inventory_file_cleanup_claim_parent%' and $1::integer=any(pg_blocking_pids(pid))) present",
+        [holder.rows[0].pid],
+      );
+      if (blocked.rows[0].present) {
+        observed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      observed,
+      'scoped cleanup is observed waiting for the global guard',
+    );
+    await parentWriter.query('begin');
+    await parentWriter.query("set local statement_timeout='500ms'");
+    await parentWriter.query(
+      'select id from public.serialized_assets where id=$1 for update',
+      [parent],
+    );
+    await parentWriter.query('commit');
+    await guardHolder.query('commit');
+    const claimed = await waitingClaim;
+    assert.equal(claimed.error, null, 'claim completes after guard release');
+    eq(claimed.data, [], 'empty parent stays empty after lock-order race');
+    checks += 2;
+  } finally {
+    await parentWriter.query('rollback').catch(() => undefined);
+    await guardHolder.query('rollback').catch(() => undefined);
+    await waitingClaim?.catch(() => undefined);
+    await parentWriter.end();
+    await guardHolder.end();
+  }
   const independent = await independentSession(staff);
   const uploadCancel = await reserve(
     staff,

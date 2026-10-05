@@ -7,6 +7,11 @@ import { InvalidFileContentError } from '@/features/files/inspection-error';
 import { cleanupTerminalFiles } from '@/features/files/cleanup.server';
 import { fileError, fileRpc, staffClient } from '@/features/files/rpc.server';
 import { fileKeys, mac, proof } from '@/features/files/keys.server';
+import {
+  fileSigningKey,
+  FileValidationUnavailableError,
+} from '@/features/files/readiness.server';
+import type { CleanupResult, FileParent } from '@/features/files/contract';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -65,6 +70,7 @@ export async function POST(request: Request) {
   const storage = client.storage.from(bucket);
   let generation: number | null = null;
   let validationKey: string | null = null;
+  let parent: FileParent | null = null;
   try {
     // A pending validated file reaches here only after an explicit review
     // against the currently visible collection and replacement file versions.
@@ -75,14 +81,8 @@ export async function POST(request: Request) {
     }).catch((error: unknown) => {
       if ((error as { code?: string }).code !== 'P1008') throw error;
     });
-    const activeKey = z
-      .string()
-      .parse(await fileRpc(client, 'inventory_file_active_key', {}));
-    const activeSecret = keys[activeKey];
-    if (!activeSecret)
-      throw new Error(
-        'File validation is not configured for this environment.',
-      );
+    const { keyId: activeKey, secret: activeSecret } =
+      await fileSigningKey(client);
     const begin = beginSchema.parse(
       await fileRpc(client, 'inventory_file_begin', {
         p_file_id: input.data.fileId,
@@ -140,6 +140,7 @@ export async function POST(request: Request) {
       );
     if (bytes.length !== details.bytes)
       throw new Error('Source length changed.');
+    parent = { parentType: details.parent_type, parentId: details.parent_id };
     const variants = await inspectFile(bytes, details.type);
     const registered: string[] = [];
     if (variants.length) {
@@ -261,9 +262,9 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-      let cleanupDeleted: number | null = null;
+      let cleanupResult: CleanupResult | null = null;
       try {
-        cleanupDeleted = (await cleanupTerminalFiles(actor)).deleted;
+        if (parent) cleanupResult = await cleanupTerminalFiles(actor, parent);
       } catch {
         // The file remains rejected. A later bounded cleanup request retries.
       }
@@ -273,12 +274,15 @@ export async function POST(request: Request) {
           terminalRejected: true,
           // The new terminal source may still be behind validation grace.
           // Claims alone cannot certify that every byte has been removed.
-          cleanupPending: true,
-          cleanupDeleted,
+          cleanupPending: cleanupResult?.pending ?? true,
+          cleanupDeleted: cleanupResult?.deleted ?? null,
+          cleanup: cleanupResult,
         },
         { status: 409 },
       );
     }
+    if (error instanceof FileValidationUnavailableError)
+      return NextResponse.json({ message: error.message }, { status: 503 });
     return NextResponse.json({ message: fileError(error) }, { status: 409 });
   }
 }

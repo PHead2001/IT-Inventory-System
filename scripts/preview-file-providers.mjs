@@ -12,6 +12,7 @@ export async function boundedJsonRequest(url, options = {}) {
       headers: options.headers,
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
+      redirect: 'error',
       signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) refuse(`FILE_HTTP_${response.status}`);

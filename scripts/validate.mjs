@@ -7,6 +7,7 @@ try {
     'test',
     'test:preview-access',
     'test:staging-user-sync',
+    'test:staging-file-keys',
     'test:local-storage',
     'test:performance:contract',
     'test:export:memory',

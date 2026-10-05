@@ -139,11 +139,13 @@ test('Next recovers after a real derived Storage guard rejection', async ({
     await login(page);
     await createAsset(page);
     const files = page.getByRole('region', { name: 'Inventory files' });
-    await page.route('**/rest/v1/rpc/inventory_file_reserve', async (route) => {
+    await page.route('**/api/inventory-files/reserve', async (route) => {
       try {
         const response = await route.fetch();
         expect(response.ok()).toBe(true);
-        const reservation = (await response.json()) as { id: string };
+        const { result: reservation } = (await response.json()) as {
+          result: { id: string };
+        };
         expect(reservation.id).toMatch(
           /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
         );
@@ -221,7 +223,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
       errorCode: 'AccessDenied',
     });
 
-    await page.unroute('**/rest/v1/rpc/inventory_file_reserve');
+    await page.unroute('**/api/inventory-files/reserve');
     await db.query(`drop trigger ${triggerName} on private.file_objects`);
     await db.query(`drop function private.${functionName}()`);
     installed = false;
@@ -285,7 +287,17 @@ test('Next recovers after a real derived Storage guard rejection', async ({
     expect(elapsed.rowCount).toBe(1);
     let ownSourceDeleted = false;
     for (let attempt = 0; attempt < 5 && !ownSourceDeleted; attempt++) {
-      const cleanup = await page.request.post('/api/inventory-files/cleanup');
+      const cleanup = await page.request.post('/api/inventory-files/cleanup', {
+        data: {
+          parentType: 'asset',
+          parentId: (
+            await db.query(
+              'select asset_id from public.inventory_files where id=$1',
+              [fileId],
+            )
+          ).rows[0].asset_id,
+        },
+      });
       expect(cleanup.ok(), JSON.stringify(await cleanup.json())).toBe(true);
       const source = await db.query<{ state: string }>(
         `select cleanup_state state from private.file_objects where file_id=$1 and variant='source'`,
@@ -331,7 +343,7 @@ test('Next recovers after a real derived Storage guard rejection', async ({
   } finally {
     let teardownError: unknown = null;
     try {
-      await page.unroute('**/rest/v1/rpc/inventory_file_reserve');
+      await page.unroute('**/api/inventory-files/reserve');
       if (installed)
         await db.query(
           `drop trigger if exists ${triggerName} on private.file_objects`,
@@ -408,7 +420,18 @@ test('Next recovers after a real derived Storage guard rejection', async ({
           for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
             const cleanup = await page.request.post(
               '/api/inventory-files/cleanup',
-              { timeout: 10_000 },
+              {
+                timeout: 10_000,
+                data: {
+                  parentType: 'asset',
+                  parentId: (
+                    await db.query(
+                      'select asset_id from public.inventory_files where id=$1',
+                      [fileId],
+                    )
+                  ).rows[0].asset_id,
+                },
+              },
             );
             expect(cleanup.ok()).toBe(true);
             const source = await db.query<{ state: string }>(

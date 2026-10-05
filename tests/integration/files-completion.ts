@@ -27,6 +27,7 @@ const db = new Client({
 type Actor = { id: string; email: string; client: SupabaseClient };
 const people: Actor[] = [];
 let assertions = 0;
+let reservationKey: { id: string; secret: string };
 
 function hashStringToInt(value: string) {
   let hash = 5381;
@@ -99,7 +100,19 @@ async function reserve(
     'select revision::text from public.inventory_file_collections where asset_id=$1',
     [parent],
   );
-  return (await okay(person.client, 'inventory_file_reserve', {
+  return (await okay(person.client, 'inventory_file_reserve_ready', {
+    p_key_id: reservationKey.id,
+    ...proof(reservationKey.secret, person.id, 'reserve', [
+      'asset',
+      parent,
+      revision.rows[0]?.revision ?? '1',
+      Buffer.from(name).toString('hex'),
+      type,
+      String(bytes),
+      '-',
+      '-',
+      reservationKey.id,
+    ]),
     p_parent_type: 'asset',
     p_parent_id: parent,
     p_expected_revision: revision.rows[0]?.revision ?? '1',
@@ -213,11 +226,32 @@ async function cleanup(
     "select path from private.file_objects where file_id=$1 and cleanup_state='eligible' order by path",
     [file.id],
   );
-  const claims = (await okay(person.client, 'inventory_file_cleanup_claim', {
-    p_limit: 4,
-    p_key_id: keyId,
-    ...proof(secret, person.id, 'cleanup_claim', ['4', keyId]),
-  })) as { path: string; object_id: string }[];
+  const claims = (await okay(
+    person.client,
+    'inventory_file_cleanup_claim_parent',
+    {
+      p_parent_type: 'asset',
+      p_parent_id: (
+        await db.query(
+          'select asset_id from public.inventory_files where id=$1',
+          [file.id],
+        )
+      ).rows[0].asset_id,
+      p_limit: 4,
+      p_key_id: keyId,
+      ...proof(secret, person.id, 'cleanup_claim', [
+        'asset',
+        (
+          await db.query(
+            'select asset_id from public.inventory_files where id=$1',
+            [file.id],
+          )
+        ).rows[0].asset_id,
+        '4',
+        keyId,
+      ]),
+    },
+  )) as { path: string; object_id: string }[];
   assert.deepEqual(
     claims.map((claim) => claim.path).sort(),
     expectedPaths.rows.map((row) => row.path),
@@ -247,6 +281,7 @@ async function main() {
   await db.connect();
   const keyId = 'completion' + randomBytes(5).toString('hex');
   const secret = randomBytes(48).toString('hex');
+  reservationKey = { id: keyId, secret };
   await db.query(
     "insert into private.file_keys(key_id,secret,accepts_new,verify_until) values($1,$2,true,now()+interval '2 hours')",
     [keyId, secret],

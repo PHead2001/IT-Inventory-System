@@ -37,7 +37,8 @@
     "validate:app": "node scripts/validate.mjs app",
     "validate": "node scripts/validate.mjs all",
     "test:e2e:list": "playwright test --list",
-    "test:staging-user-sync": "node --test tests/staging-user-sync.test.mjs"
+    "test:staging-user-sync": "node --test tests/staging-user-sync.test.mjs",
+    "test:staging-file-keys": "node --test tests/staging-file-keys.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/helpers": "0.5.0",

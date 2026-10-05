@@ -1902,6 +1902,18 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_file_cleanup_claim_parent: {
+        Args: {
+          p_expires: number
+          p_key_id: string
+          p_limit: number
+          p_mac: string
+          p_nonce: string
+          p_parent_id: string
+          p_parent_type: string
+        }
+        Returns: Json
+      }
       inventory_file_cleanup_confirm: {
         Args: {
           p_expires: number
@@ -1911,6 +1923,10 @@ export type Database = {
           p_object_id: string
         }
         Returns: undefined
+      }
+      inventory_file_cleanup_status: {
+        Args: { p_parent_id: string; p_parent_type: string }
+        Returns: Json
       }
       inventory_file_finalize: {
         Args: {
@@ -1996,6 +2012,23 @@ export type Database = {
           p_parent_id: string
           p_parent_type: string
           p_replaces?: string
+          p_type: string
+        }
+        Returns: Json
+      }
+      inventory_file_reserve_ready: {
+        Args: {
+          p_bytes: number
+          p_expected_file_version: number
+          p_expected_revision: number
+          p_expires: number
+          p_key_id: string
+          p_mac: string
+          p_name: string
+          p_nonce: string
+          p_parent_id: string
+          p_parent_type: string
+          p_replaces: string
           p_type: string
         }
         Returns: Json
