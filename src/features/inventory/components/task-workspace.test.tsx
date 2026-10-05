@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { expect, it, vi } from 'vitest';
 import { TaskWorkspace } from './task-workspace';
 import { useReportTaskState, useTaskReset } from './task-state';
 const choices = [
@@ -52,6 +53,69 @@ function Workspace({ tasks = choices }: { tasks?: typeof choices }) {
     </TaskWorkspace>
   );
 }
+it('does not steal focus on the initial clean workspace mount', () => {
+  const outside = document.createElement('button');
+  document.body.append(outside);
+  outside.focus();
+  render(<Workspace />);
+  expect(outside).toHaveFocus();
+  outside.remove();
+});
+it('returns keyboard focus to the enabled launcher after an explicit new transaction', async () => {
+  const user = userEvent.setup();
+  render(<Workspace />);
+  const launcher = screen.getByRole('button', { name: 'Receive stock' });
+  await user.click(launcher);
+  await user.click(screen.getByRole('button', { name: 'complete' }));
+  expect(launcher).toBeDisabled();
+  screen.getByRole('button', { name: 'New transaction' }).focus();
+  await user.keyboard('{Enter}');
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  expect(launcher).toBeEnabled();
+  expect(launcher).toHaveFocus();
+});
+
+it('returns focus to Tasks when the completed task launcher was removed', async () => {
+  const user = userEvent.setup();
+  const view = render(<Workspace />);
+  await user.click(screen.getByRole('button', { name: 'Receive stock' }));
+  await user.click(screen.getByRole('button', { name: 'complete' }));
+  view.rerender(<Workspace tasks={[choices[1]]} />);
+  await user.click(screen.getByRole('button', { name: 'New transaction' }));
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Tasks' })).toHaveFocus();
+});
+
+it('falls back to Tasks when a connected launcher cannot take focus', async () => {
+  const user = userEvent.setup();
+  render(<Workspace />);
+  const launcher = screen.getByRole('button', { name: 'Receive stock' });
+  await user.click(launcher);
+  await user.click(screen.getByRole('button', { name: 'complete' }));
+  // jsdom has no collapsed-details layout: model the browser ignoring focus.
+  const focus = vi.spyOn(launcher, 'focus').mockImplementation(() => {});
+  await user.click(screen.getByRole('button', { name: 'New transaction' }));
+  expect(launcher.isConnected).toBe(true);
+  expect(launcher).toBeEnabled();
+  expect(focus).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('heading', { name: 'Tasks' })).toHaveFocus();
+  focus.mockRestore();
+});
+
+it('keeps focus on the draft after Stay and restores the launcher after explicit discard and close', async () => {
+  const user = userEvent.setup();
+  render(<Workspace />);
+  await user.click(screen.getByRole('button', { name: 'Receive stock' }));
+  await user.type(screen.getByLabelText('receive entry'), 'retained');
+  await user.click(screen.getByRole('button', { name: 'Close task' }));
+  await user.click(screen.getByRole('button', { name: 'Stay with this task' }));
+  expect(screen.getByRole('heading', { name: 'Receive stock' })).toHaveFocus();
+  expect(screen.getByLabelText('receive entry')).toHaveValue('retained');
+  await user.click(screen.getByRole('button', { name: 'Close task' }));
+  await user.click(screen.getByRole('button', { name: 'Discard and close' }));
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toHaveFocus();
+});
 it('mounts lazily, retains a dirty draft on Stay, then discards only explicitly', () => {
   render(<Workspace />);
   expect(screen.queryByLabelText('receive entry')).toBeNull();
@@ -139,6 +203,7 @@ it('keeps completed pending work truthful and locked until the follow-up finishe
   expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));
   expect(screen.getByLabelText('receive entry')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Tasks' })).not.toHaveFocus();
   fireEvent.click(screen.getByRole('button', { name: 'complete' }));
   expect(screen.queryByRole('status')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));

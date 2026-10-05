@@ -183,6 +183,12 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expectStableReceiptAction(page, 'New transaction');
   await expect(page.getByText(/Version 2$/)).toBeVisible();
   await beginNewRecordTransaction(page, 'New transaction');
+  await expect(
+    page.getByRole('region', { name: 'Record tasks' }).getByRole('button', {
+      name: 'Edit details',
+      exact: true,
+    }),
+  ).toBeFocused();
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 

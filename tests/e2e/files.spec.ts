@@ -369,6 +369,23 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',
   });
+  // A collapsed secondary launcher stays connected but cannot receive focus.
+  await openRecordTask(page, 'Correct recorded location');
+  const tasks = page.getByRole('region', { name: 'Record tasks' });
+  await tasks
+    .locator('summary')
+    .filter({ hasText: /^Other tasks$/ })
+    .click();
+  await expect(
+    tasks.getByRole('button', {
+      name: 'Correct recorded location',
+      exact: true,
+    }),
+  ).toBeHidden();
+  await tasks.getByRole('button', { name: 'Close task', exact: true }).click();
+  await expect(
+    tasks.getByRole('heading', { name: 'Tasks', exact: true }),
+  ).toBeFocused();
   const assign = await custodyForm(page, 'Assign asset to a site');
   await assign
     .getByLabel('Destination site')
@@ -414,7 +431,47 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     })
     .first();
   await expect(listRow.getByText('1 PDF')).toBeVisible();
+  const reviewedCards = page.waitForResponse((response) =>
+    response.url().includes('/rpc/inventory_file_cards'),
+  );
   await page.goto(assetUrl);
+  const reviewedFiles = (await (await reviewedCards).json()) as {
+    files: { id: string; version: string }[];
+  };
+  const input = files.getByLabel('Add photo or PDF');
+  let reserves = 0;
+  const countReserve = (request: import('@playwright/test').Request) => {
+    if (request.url().includes('/rpc/inventory_file_reserve')) reserves++;
+  };
+  page.on('request', countReserve);
+  await input.setInputFiles({
+    name: 'abandoned-selection.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(bytes),
+  });
+  await expect(
+    files.getByRole('button', { name: 'Upload and review' }),
+  ).toBeEnabled();
+  // A native picker opened without a new selection is a cancel/no-change intent.
+  const picker = page.waitForEvent('filechooser');
+  await files.getByRole('button', { name: 'Replace', exact: true }).click();
+  await picker;
+  await expect(input).toHaveValue('');
+  expect(
+    await input.evaluate((element: HTMLInputElement) => element.files?.length),
+  ).toBe(0);
+  await expect(
+    files.getByRole('button', { name: 'Upload and review' }),
+  ).toBeDisabled();
+  expect(reserves).toBe(0);
+  const reviewedTarget = await files
+    .getByLabel('Replace a ready file')
+    .inputValue();
+  expect(reviewedTarget).toMatch(/^[0-9a-f-]{36}$/);
+  const reviewedVersion = reviewedFiles.files.find(
+    (file) => file.id === reviewedTarget,
+  )?.version;
+  expect(reviewedVersion).toMatch(/^\d+$/);
   await files
     .getByLabel('Replace a ready file')
     .selectOption({ label: 'Updated manual title' });
@@ -430,7 +487,18 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     (response) => response.url().includes('/api/inventory-files/validate'),
     { timeout: 20_000 },
   );
+  const replaceReserve = page.waitForRequest((request) =>
+    request.url().includes('/rpc/inventory_file_reserve'),
+  );
   await files.getByRole('button', { name: 'Upload and review' }).click();
+  expect((await replaceReserve).postDataJSON()).toMatchObject({
+    p_name: 'replacement.pdf',
+    p_bytes: replacementBytes.length,
+    p_replaces: reviewedTarget,
+    p_expected_file_version: reviewedVersion,
+  });
+  expect(reserves).toBe(1);
+  page.off('request', countReserve);
   expect((await replaceValidation).ok()).toBe(true);
   await expect(
     cards.getByText('replacement.pdf', { exact: true }),

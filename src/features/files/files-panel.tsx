@@ -362,6 +362,15 @@ function BoundFilesPanel({
     );
   }
 
+  function beginPicker(target: string) {
+    if (busy) return;
+    // A new picker intent must not reuse bytes if the native picker is cancelled.
+    setFile(null);
+    if (fileInput.current) fileInput.current.value = '';
+    setReplace(target);
+    fileInput.current?.click();
+  }
+
   async function upload() {
     if (!file) return;
     setBusy(true);
@@ -601,14 +610,13 @@ function BoundFilesPanel({
           type="button"
           disabled={busy}
           className="mt-3 min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
-          onClick={() => {
-            if (parentType === 'quantity')
-              setReplace(
-                cards.find((card) => card.state === 'ready')?.id ?? '',
-              );
-            else setReplace('');
-            fileInput.current?.click();
-          }}
+          onClick={() =>
+            beginPicker(
+              parentType === 'quantity'
+                ? (cards.find((card) => card.state === 'ready')?.id ?? '')
+                : '',
+            )
+          }
         >
           {parentType === 'quantity'
             ? cards.some((card) => card.state === 'ready')
@@ -701,10 +709,7 @@ function BoundFilesPanel({
                     type="button"
                     disabled={busy}
                     className="min-h-11 text-cyan-300 underline disabled:opacity-50"
-                    onClick={() => {
-                      setReplace(card.id);
-                      fileInput.current?.click();
-                    }}
+                    onClick={() => beginPicker(card.id)}
                   >
                     Replace
                   </button>

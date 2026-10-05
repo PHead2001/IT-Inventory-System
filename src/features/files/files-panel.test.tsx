@@ -6,6 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -64,6 +65,191 @@ beforeEach(() => {
     json: async () => ({ deleted: 1, pending: false }),
   });
   vi.stubGlobal('fetch', mocks.fetch);
+});
+
+describe('fresh native picker intent', () => {
+  const first = {
+    ...pending,
+    state: 'ready',
+    purpose: 'asset_photo',
+    version: '3',
+  };
+  const second = {
+    ...first,
+    id: '00000000-0000-4000-8000-000000000002',
+    name: 'Second photo',
+    version: '5',
+  };
+  const image = (name: string) =>
+    new File(['fresh fictional bytes'], name, { type: 'image/png' });
+  function configure(files: (typeof first)[]) {
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'inventory_file_cards')
+        return { data: { revision: '9', files }, error: null };
+      if (name === 'inventory_file_history')
+        return { data: { rows: [], has_more: false }, error: null };
+      if (name === 'inventory_file_read')
+        return {
+          data: null,
+          error: { message: 'No thumbnail in this picker test' },
+        };
+      if (name === 'inventory_file_reserve')
+        return {
+          data: { id: '00000000-0000-4000-8000-000000000003', path: 's/fresh' },
+          error: null,
+        };
+      if (name === 'inventory_file_uploaded') return { data: {}, error: null };
+      throw new Error(`Unexpected RPC: ${name}`);
+    });
+    mocks.fetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ message: 'Fictional validation rejection' }),
+    });
+  }
+  it.each([
+    {
+      kind: 'asset' as const,
+      cards: [first, second],
+      action: 'Add attachment',
+      index: 0,
+      target: '',
+    },
+    {
+      kind: 'quantity' as const,
+      cards: [],
+      action: 'Add photo',
+      index: 0,
+      target: '',
+    },
+    {
+      kind: 'quantity' as const,
+      cards: [{ ...first, purpose: 'quantity_photo' }],
+      action: 'Replace photo',
+      index: 0,
+      target: first.id,
+    },
+    {
+      kind: 'asset' as const,
+      cards: [first, second],
+      action: 'Replace',
+      index: 0,
+      target: first.id,
+    },
+    {
+      kind: 'asset' as const,
+      cards: [first, second],
+      action: 'Replace',
+      index: 1,
+      target: second.id,
+    },
+  ])(
+    'clears old bytes before $kind $action picker, including cancel without a change event',
+    async ({ kind, cards, action, index, target }) => {
+      const user = userEvent.setup();
+      configure(cards);
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType={kind}
+          parentId={id}
+          active
+          staff
+        />,
+      );
+      await screen.findByRole('button', {
+        name:
+          kind === 'quantity'
+            ? cards.length
+              ? 'Replace photo'
+              : 'Add photo'
+            : 'Add attachment',
+      });
+      const input = screen.getByLabelText(
+        kind === 'quantity' ? 'Add recognition photo' : 'Add photo or PDF',
+      ) as HTMLInputElement;
+      if (cards.length)
+        fireEvent.change(screen.getByLabelText('Replace a ready file'), {
+          target: { value: first.id },
+        });
+      await user.upload(input, image('old-staged.png'));
+      expect(input.value).not.toBe('');
+      expect(
+        screen.getByRole('button', { name: 'Upload and review' }),
+      ).toBeEnabled();
+      await user.click(screen.getAllByRole('button', { name: action })[index]);
+      // Cancel/no-change: a new picker intent must not reuse the prior native selection.
+      expect(input.value).toBe('');
+      expect(input.files).toHaveLength(0);
+      if (cards.length)
+        expect(screen.getByLabelText('Replace a ready file')).toHaveValue(
+          target,
+        );
+      expect(
+        screen.getByRole('button', { name: 'Upload and review' }),
+      ).toBeDisabled();
+      expect(
+        mocks.rpc.mock.calls.filter(
+          ([name]) => name === 'inventory_file_reserve',
+        ),
+      ).toHaveLength(0);
+      expect(mocks.upload).not.toHaveBeenCalled();
+      const fresh = image('fresh-selection.png');
+      await user.upload(input, fresh);
+      await user.click(
+        screen.getByRole('button', { name: 'Upload and review' }),
+      );
+      await waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(1));
+      expect(mocks.upload.mock.calls[0][1]).toBe(fresh);
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'inventory_file_reserve',
+        expect.objectContaining({
+          p_name: fresh.name,
+          p_bytes: fresh.size,
+          p_replaces: target || null,
+          p_expected_file_version:
+            target === first.id ? '3' : target === second.id ? '5' : null,
+          p_expected_revision: '9',
+        }),
+      );
+      await screen.findByText('Fictional validation rejection');
+    },
+  );
+
+  it('keeps staged bytes when the visible replacement dropdown deliberately reviews another target', async () => {
+    const user = userEvent.setup();
+    configure([first, second]);
+    render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByRole('button', { name: 'Add attachment' });
+    const fresh = image('reviewed-selection.png');
+    await user.upload(screen.getByLabelText('Add photo or PDF'), fresh);
+    await user.selectOptions(
+      screen.getByLabelText('Replace a ready file'),
+      second.id,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Upload and review' }),
+    ).toBeEnabled();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Upload and review' }));
+    await waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(1));
+    expect(mocks.upload.mock.calls[0][1]).toBe(fresh);
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'inventory_file_reserve',
+      expect.objectContaining({
+        p_replaces: second.id,
+        p_expected_file_version: '5',
+      }),
+    );
+    await screen.findByText('Fictional validation rejection');
+  });
 });
 
 describe('terminal file cancellation cleanup', () => {

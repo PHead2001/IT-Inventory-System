@@ -42,11 +42,30 @@ export function TaskWorkspace({
   const requestedLauncher = useRef<HTMLButtonElement | null>(null);
   const [activeLabel, setActiveLabel] = useState('');
   const heading = useRef<HTMLHeadingElement | null>(null);
+  const tasksHeading = useRef<HTMLHeadingElement | null>(null);
+  const returnFocusRequested = useRef(false);
   useEffect(() => {
     if (selected) heading.current?.focus();
   }, [selected]);
   const launcher = useRef<HTMLButtonElement | null>(null);
   const locked = state.pending || state.uncertain;
+  useEffect(() => {
+    if (
+      selected !== null ||
+      state.dirty ||
+      state.pending ||
+      state.uncertain ||
+      state.completed ||
+      !returnFocusRequested.current
+    )
+      return;
+    // A completed task disables its launcher until this clean commit.
+    returnFocusRequested.current = false;
+    const target = launcher.current;
+    if (target?.isConnected && !target.disabled) target.focus();
+    if (!target || target.ownerDocument.activeElement !== target)
+      tasksHeading.current?.focus();
+  }, [selected, state]);
   const report = useCallback((next: TaskState) => {
     stateRef.current = next;
     setState(next);
@@ -69,7 +88,7 @@ export function TaskWorkspace({
       setSelected(id);
       stateRef.current = clean;
       setState(clean);
-      if (id === null) launcher.current?.focus();
+      if (id === null) returnFocusRequested.current = true;
     }
   };
   return (
@@ -77,7 +96,9 @@ export function TaskWorkspace({
       aria-label="Record tasks"
       className="experience-surface my-5 space-y-4 p-4"
     >
-      <h2 className="text-xl font-semibold">Tasks</h2>
+      <h2 ref={tasksHeading} tabIndex={-1} className="text-xl font-semibold">
+        Tasks
+      </h2>
       {context}
       {(['primary', 'secondary', 'consequential'] as const).map((group) => {
         const tasks = choices.filter(
@@ -187,7 +208,7 @@ export function TaskWorkspace({
               setRequested(undefined);
               stateRef.current = clean;
               setState(clean);
-              if (requested === null) launcher.current?.focus();
+              if (requested === null) returnFocusRequested.current = true;
             }}
           >
             Discard and {requested === null ? 'close' : 'switch'}
@@ -218,7 +239,7 @@ export function TaskWorkspace({
               stateRef.current = clean;
               setSelected(null);
               setState(clean);
-              launcher.current?.focus();
+              returnFocusRequested.current = true;
             }}
           >
             <TaskStateContext.Provider value={report}>
