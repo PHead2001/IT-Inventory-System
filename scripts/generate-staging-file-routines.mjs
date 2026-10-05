@@ -25,7 +25,7 @@ try {
   await db.connect();
   await db.query('begin read only');
   const manifest = assertStagingRoutineManifest({
-    version: 1,
+    version: 2,
     routines: (await db.query(STAGING_ROUTINE_CATALOG_SQL)).rows.map(
       (row) => row.routine,
     ),

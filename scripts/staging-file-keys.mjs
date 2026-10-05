@@ -300,8 +300,17 @@ export async function provisionStagingFiles(options) {
       STAGING_KEY_ID,
     );
     if (!key) fail('STAGING_STAGE_UNCERTAIN');
+    if (key.accepts_new !== false || key.verify_until !== '-infinity')
+      fail('STAGING_KEY_CHANGED');
   }
-  const generation = fingerprint(key.secret);
+  // Primitive copy: adapters must not be able to mutate the admitted lifecycle.
+  const keySnapshot = Object.freeze({
+    key_id: key.key_id,
+    secret: key.secret,
+    accepts_new: key.accepts_new,
+    verify_until: key.verify_until,
+  });
+  const generation = fingerprint(keySnapshot.secret);
   if (
     sameOperation &&
     (prior.backend !== backend.fingerprint ||
@@ -329,7 +338,7 @@ export async function provisionStagingFiles(options) {
   };
   deployment = selectDeployment(await vercel.deployments(context), context);
   if (sameOperation === !deployment) fail('STAGING_DEPLOYMENT_UNCERTAIN', true);
-  const exact = async () => {
+  const exact = async (expectedKey = keySnapshot) => {
     const freshEnv = selectStagingFileEnv(await vercel.envs());
     if (
       freshEnv?.id !== env?.id ||
@@ -341,13 +350,21 @@ export async function provisionStagingFiles(options) {
       await database.read(STAGING_REF, STAGING_KEY_ID),
       STAGING_KEY_ID,
     );
-    if (freshKey?.secret !== key.secret) fail('STAGING_KEY_CHANGED');
+    if (
+      Object.keys(keySnapshot).some(
+        (field) => freshKey?.[field] !== expectedKey[field],
+      )
+    )
+      fail('STAGING_KEY_CHANGED');
     return freshKey;
   };
-  const freshGuards = async (requireCandidate = false) => {
+  const freshGuards = async (
+    requireCandidate = false,
+    expectedKey = keySnapshot,
+  ) => {
     await guard(requireCandidate);
     await reconcilePrior();
-    return exact();
+    return exact(expectedKey);
   };
   let posted = false;
   const installAndPost = async () => {
@@ -356,7 +373,7 @@ export async function provisionStagingFiles(options) {
     try {
       await vercel.writeEnv(oldId, {
         key: FILE_ENV,
-        value: JSON.stringify({ [STAGING_KEY_ID]: key.secret }),
+        value: JSON.stringify({ [STAGING_KEY_ID]: keySnapshot.secret }),
         type: 'sensitive',
         visibility: 'secret',
         target: ['preview'],
@@ -444,13 +461,19 @@ export async function provisionStagingFiles(options) {
   const finalKey = await freshGuards(true);
   if (!finalKey.accepts_new) {
     try {
-      await database.activate(STAGING_REF, STAGING_KEY_ID, key.secret);
+      await database.activate(STAGING_REF, STAGING_KEY_ID, keySnapshot.secret);
     } catch {
       /* Exact readback proves uncertain activation. */
     }
   }
-  const active = await freshGuards(true);
-  if (!active.accepts_new || active.secret !== key.secret)
+  // Only our verified-candidate CAS activation permits this lifecycle successor.
+  const activeSnapshot = Object.freeze({
+    ...keySnapshot,
+    accepts_new: true,
+    verify_until: 'infinity',
+  });
+  const active = await freshGuards(true, activeSnapshot);
+  if (!active.accepts_new || active.secret !== keySnapshot.secret)
     fail('STAGING_ACTIVATION_UNCERTAIN', true);
   return {
     branch: STAGING_BRANCH,

@@ -140,6 +140,11 @@ export async function verifyStagingRoutineContract(db) {
       '\nbegin return private.file_reserve_ready(p_parent_type,p_parent_id,p_expected_revision,p_name,p_type,p_bytes,p_replaces,p_expected_file_version); end\n',
     ],
     [
+      'finalization bypasses attestation, generation and revision validation',
+      'public.inventory_file_finalize(uuid,bigint,uuid)',
+      "\nbegin update public.inventory_files set state='ready' where id=p_file_id; return '{}'::jsonb; end\n",
+    ],
+    [
       'accounting reports zero bytes',
       'private.file_staging_bytes(timestamptz)',
       '\nselect 0::bigint\n',
@@ -174,6 +179,90 @@ export async function verifyStagingRoutineContract(db) {
     ],
   ]) {
     await rejected(note, () => db.query(sql));
+  }
+  await rejected(
+    'unreviewed role EXECUTE despite unchanged effective known-role flags',
+    async () => {
+      await db.query('create role cp5_unreviewed_execute nologin');
+      await db.query(
+        'grant execute on function private.file_parent_staff(text,uuid) to cp5_unreviewed_execute',
+      );
+      const changed = (await catalog()).find(
+        (row) => row.signature === 'private.file_parent_staff(text,uuid)',
+      );
+      assert.equal(changed.authenticated_execute, false);
+      assert.equal(changed.anon_execute, false);
+      assert.equal(changed.service_execute, false);
+      assert.equal(changed.public_execute, false);
+      checks += 4;
+    },
+  );
+  await rejected(
+    'authenticated EXECUTE grant option is not an ordinary grant',
+    () =>
+      db.query(
+        'grant execute on function public.inventory_file_finalize(uuid,bigint,uuid) to authenticated with grant option',
+      ),
+  );
+  await rejected(
+    'routine owner transfer cannot replace reviewed authority',
+    async () => {
+      await db.query('create role cp5_unreviewed_owner nologin');
+      await db.query('grant cp5_unreviewed_owner to postgres with set true');
+      await db.query(
+        'grant usage,create on schema private to cp5_unreviewed_owner',
+      );
+      await db.query(
+        'alter function private.file_parent_staff(text,uuid) owner to cp5_unreviewed_owner',
+      );
+    },
+  );
+  await rejected(
+    'unreviewed default EXECUTE grant is captured on recreation',
+    async () => {
+      const signature = 'private.file_collection_lock(uuid,uuid)';
+      const { definition: sql } = await definition(signature);
+      await db.query('create role cp5_unreviewed_default nologin');
+      await db.query(
+        'alter default privileges for role postgres grant execute on functions to cp5_unreviewed_default',
+      );
+      await db.query(`drop function ${signature}`);
+      await db.query(sql);
+      await db.query(
+        `revoke all on function ${signature} from public,anon,authenticated,service_role`,
+      );
+    },
+  );
+  // Same definition and named ACL survive a fresh routine OID. No local OID is
+  // learned or embedded in expectations, including owner/grantee/grantor OIDs.
+  await db.query('begin');
+  try {
+    const signature = 'private.file_collection_lock(uuid,uuid)';
+    const oldOid = (
+      await db.query('select pg_catalog.to_regprocedure($1)::oid oid', [
+        signature,
+      ])
+    ).rows[0].oid;
+    const { definition: sql } = await definition(signature);
+    await db.query(`drop function ${signature}`);
+    await db.query(sql);
+    await db.query(
+      `revoke all on function ${signature} from public,anon,authenticated,service_role`,
+    );
+    const newOid = (
+      await db.query('select pg_catalog.to_regprocedure($1)::oid oid', [
+        signature,
+      ])
+    ).rows[0].oid;
+    assert.notEqual(oldOid, newOid);
+    assert.equal(
+      await ready(),
+      true,
+      'portable names and exact body permit fresh routine OID',
+    );
+    checks += 2;
+  } finally {
+    await db.query('rollback');
   }
   await rejected('argument default drift without body change', async () => {
     const { definition: sql } = await definition(

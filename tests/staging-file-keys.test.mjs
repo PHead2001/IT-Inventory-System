@@ -273,6 +273,23 @@ test('portable routine manifest rejects missing, duplicate, foreign or unsafe ca
       rows[0].public_execute = true;
     },
     (rows) => {
+      rows[0].owner = 'unreviewed_owner';
+    },
+    (rows) => {
+      rows[0].acl.push({
+        grantee: 'unreviewed_role',
+        grantor: 'postgres',
+        privilege: 'EXECUTE',
+        grantable: false,
+      });
+    },
+    (rows) => {
+      rows[0].acl[0].grantable = true;
+    },
+    (rows) => {
+      rows[0].acl[0].grantor = 'unreviewed_grantor';
+    },
+    (rows) => {
       rows[0].config.push('statement_timeout=1s');
     },
   ]) {
@@ -413,6 +430,121 @@ test('matching active key survives a new candidate SHA without automatic rotatio
   assert.deepEqual(f.writes, ['env', 'deploy']);
   assert.equal(f.state.key.secret, secret);
   assert.equal(f.state.key.accepts_new, true);
+});
+
+for (const phase of [
+  'stage',
+  'before-env',
+  'env',
+  'deploy',
+  'candidate-proof',
+]) {
+  test(`same-secret inactive-to-active lifecycle change at ${phase} refuses subsequent writes`, async () => {
+    const f = fixture();
+    const flip = () =>
+      Object.assign(f.state.key, {
+        accepts_new: true,
+        verify_until: 'infinity',
+      });
+    const wrap = (adapter, name) => {
+      const original = adapter[name];
+      adapter[name] = async (...args) => {
+        const value = await original(...args);
+        flip();
+        return value;
+      };
+    };
+    if (phase === 'stage') wrap(f.options.database, 'stage');
+    if (phase === 'before-env') wrap(f.options.vercel, 'deployments');
+    if (phase === 'env') wrap(f.options.vercel, 'writeEnv');
+    if (phase === 'deploy') wrap(f.options.vercel, 'createDeployment');
+    if (phase === 'candidate-proof') {
+      const binding = f.options.vercel.runtimeBinding;
+      f.options.vercel.runtimeBinding = async (...args) => {
+        const value = await binding(...args);
+        if (args[0] === f.state.deployments[0]?.id) flip();
+        return value;
+      };
+    }
+    await rejectsCode(
+      () => provisionStagingFiles(f.options),
+      'STAGING_KEY_CHANGED',
+    );
+    assert.deepEqual(
+      f.writes,
+      ['stage', 'before-env'].includes(phase)
+        ? ['stage']
+        : phase === 'env'
+          ? ['stage', 'env']
+          : ['stage', 'env', 'deploy'],
+    );
+    assert.equal(f.state.key.secret, secret);
+  });
+}
+for (const newSha of [false, true]) {
+  test(`same-secret active-to-inactive sentinel change refuses ${newSha ? 'new SHA reuse' : 'active retry'} without reactivation`, async () => {
+    const f = fixture();
+    await provisionStagingFiles(f.options);
+    f.writes.length = 0;
+    if (newSha) {
+      f.options.expectedCurrentDeployment = f.state.current.id;
+      f.options.expectedSha = 'e'.repeat(40);
+    }
+    // Return the adapter's live object to prove the primitive snapshot is not
+    // accidentally changed along with an externally mutated row reference.
+    const read = f.options.database.read;
+    f.options.database.read = async (...args) => ({
+      ...(await read(...args)),
+      rows: [f.state.key],
+    });
+    const deployments = f.options.vercel.deployments;
+    let listings = 0;
+    f.options.vercel.deployments = async (...args) => {
+      const result = await deployments(...args);
+      // The first listing reconciles the prior operation before admission;
+      // the second occurs after the immutable lifecycle snapshot is captured.
+      if (++listings === 2)
+        Object.assign(f.state.key, {
+          accepts_new: false,
+          verify_until: '-infinity',
+        });
+      return result;
+    };
+    await rejectsCode(
+      () => provisionStagingFiles(f.options),
+      'STAGING_KEY_CHANGED',
+    );
+    assert.deepEqual(f.writes, []);
+  });
+}
+test('explicit activation without an active successor cannot report success', async () => {
+  const f = fixture();
+  f.options.database.activate = async () => {
+    f.writes.push('activate');
+    throw new Error('synthetic failed or lost activation without commit');
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_KEY_CHANGED',
+  );
+  assert.deepEqual(f.writes, ['stage', 'env', 'deploy', 'activate']);
+  assert.equal(f.state.key.accepts_new, false);
+});
+test('revocation after explicit activation refuses final success', async () => {
+  const f = fixture();
+  const activate = f.options.database.activate;
+  f.options.database.activate = async (...args) => {
+    await activate(...args);
+    Object.assign(f.state.key, {
+      accepts_new: false,
+      verify_until: '-infinity',
+    });
+  };
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_KEY_CHANGED',
+  );
+  assert.deepEqual(f.writes, ['stage', 'env', 'deploy', 'activate']);
 });
 
 test('rollback to the baseline after candidate runtime proof prevents activation', async () => {

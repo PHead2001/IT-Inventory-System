@@ -1,8 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "routines": [
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -31,7 +40,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -53,7 +71,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -75,7 +102,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -97,7 +133,47 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_member()",
+      "volatility": "s",
+      "body_sha256": "b15dd0618a214a977425b929d85658375222566966e89e4f68a98dc6eb7a34e5",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -119,7 +195,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": true,
       "defaults": null,
@@ -141,7 +226,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": "NULL::uuid, NULL::bigint",
@@ -172,7 +266,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -202,7 +305,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": "false",
@@ -224,7 +336,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -246,7 +367,16 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": true,
       "defaults": null,
@@ -268,7 +398,22 @@
       "authenticated_execute": false
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -290,7 +435,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -312,7 +472,96 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_storage_select(text,text)",
+      "volatility": "v",
+      "body_sha256": "e35b4b58060146b7300a30208e30b0270443178108ad3a3b80322a99a358513d",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_bucket", "p_path"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_active_key()",
+      "volatility": "v",
+      "body_sha256": "68f402726b1a2c741db84277151de3012eac8d3ec44ff77431abb902ad031fcf",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -341,7 +590,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -371,7 +635,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -399,7 +678,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -427,7 +721,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -449,7 +758,59 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_finalize(uuid,bigint,uuid)",
+      "volatility": "v",
+      "body_sha256": "aecddc126952128b80278068593859c528a06dc607cd128c9e48e1410b9bc80e",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id", "p_expected_revision", "p_request_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -479,7 +840,112 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_register(uuid,integer,text,text,uuid,bigint,text,text)",
+      "volatility": "v",
+      "body_sha256": "f2eb53028f267f426517c24cdf04817d367d280e342b8bf211244377d087c677",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_variant",
+        "p_path",
+        "p_object_id",
+        "p_bytes",
+        "p_sha256",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_reject(uuid,integer,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "12dd708cd04b76e0a320cd228edfa0b32cba7a7181d0f71e7dbdf21bdf6f43fe",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -514,7 +980,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": "NULL::uuid, NULL::bigint",
@@ -545,7 +1026,100 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "NULL::bigint",
+      "language": "plpgsql",
+      "signature": "public.inventory_file_review(uuid,bigint,bigint)",
+      "volatility": "v",
+      "body_sha256": "c4393a367f8ea7b5c2b9a5cedadcbdd48d2f312fe9802c211d6671096855d190",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 1,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_expected_revision",
+        "p_expected_file_version"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_source_details(uuid)",
+      "volatility": "v",
+      "body_sha256": "d5401267271446350bf9f46d8be13e08c065c8db3b07b42ca0121e3750186cec",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
@@ -567,7 +1141,22 @@
       "authenticated_execute": true
     },
     {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
       "kind": "f",
+      "owner": "postgres",
       "config": ["search_path=\"\""],
       "strict": false,
       "defaults": null,
