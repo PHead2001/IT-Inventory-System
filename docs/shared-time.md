@@ -10,7 +10,7 @@ The original explicit-offset ISO timestamp, including source subseconds, stays u
 
 ## CSV contract
 
-Application export links use `ExportLink` to include `displayTimeZone` in `/api/exports/inventory` while preserving filter values, custom-field opt-in, and fragments. The server accepts only a bounded zone string (at most 128 characters) supported by `Intl.DateTimeFormat`, canonicalizes its IANA name, and uses explicit UTC fallback for missing or invalid direct requests. This parameter changes presentation only; it is absent from the caller-scoped database snapshot RPC.
+Application export links use `ExportLink` to send resolved zones as `displayTimeZone` in `/api/exports/inventory` while preserving filter values, custom-field opt-in, and fragments. A resolved UTC zone is sent as `UTC`. When browser-zone resolution falls back, the link removes or omits any prior `displayTimeZone` override so the endpoint preserves explicit UTC fallback provenance in the CSV labels. The server accepts only a bounded zone string (at most 128 characters) supported by `Intl.DateTimeFormat`, canonicalizes its IANA name, and uses explicit UTC fallback for missing or invalid direct requests. This parameter changes presentation only; it is absent from the caller-scoped database snapshot RPC.
 
 Both inventory and low-stock exports keep every existing column in its existing order, including optional `Custom Fields JSON`, custody/quantity fields, and `Item Code (SKU)`. They append these two columns after SKU:
 

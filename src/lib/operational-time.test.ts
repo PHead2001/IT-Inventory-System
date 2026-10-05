@@ -126,4 +126,14 @@ describe('operational time presentation', () => {
       exportTimeZoneHref('https://other.invalid/api/exports/inventory', 'UTC'),
     ).toBe('https://other.invalid/api/exports/inventory');
   });
+  it('omits fallback zones even when a link already has an override, while retaining resolved UTC', () => {
+    const href =
+      '/api/exports/inventory?q=Cable&displayTimeZone=America%2FNew_York#csv';
+    expect(exportTimeZoneHref(href, { timeZone: 'UTC', fallback: true })).toBe(
+      '/api/exports/inventory?q=Cable#csv',
+    );
+    expect(exportTimeZoneHref(href, { timeZone: 'UTC', fallback: false })).toBe(
+      '/api/exports/inventory?q=Cable&displayTimeZone=UTC#csv',
+    );
+  });
 });

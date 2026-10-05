@@ -127,6 +127,33 @@ it('identifies every category action independently, including long text names', 
   expect(document.querySelector('script')).toBeNull();
 });
 
+it.each([source, target])(
+  'keeps focus on Remove $name when switching from a rename and restores only the next rename trigger',
+  async (category) => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPanel
+        mode="categories"
+        categories={[source, target]}
+        canManage
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Rename Source' }));
+    const remove = screen.getByRole('button', {
+      name: 'Remove ' + category.name,
+    });
+    remove.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.queryByLabelText('New category name')).toBeNull();
+    expect(remove).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Rename Target' }));
+    expect(screen.getByLabelText('New category name')).toHaveFocus();
+    expect(screen.getByLabelText('New category name')).toHaveValue('Target');
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Rename Target' })).toHaveFocus();
+  },
+);
+
 it('saves shared label defaults using the existing version and payload keys', async () => {
   mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
   render(<SettingsPanel mode="labels" labelDefaults={defaults} canManage />);

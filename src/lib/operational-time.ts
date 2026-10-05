@@ -79,14 +79,19 @@ export function formatOperationalTimestamp(
     offset,
   };
 }
-export function exportTimeZoneHref(href: string, timeZone: string) {
+export function exportTimeZoneHref(
+  href: string,
+  context: DisplayTimeZone | string,
+) {
   const base = 'https://inventory.invalid';
   const url = new URL(href, base);
   if (url.origin !== base || url.pathname !== '/api/exports/inventory')
     return href;
-  url.searchParams.set(
-    'displayTimeZone',
-    resolveDisplayTimeZone(timeZone).timeZone,
+  const validated = resolveDisplayTimeZone(
+    typeof context === 'string' ? context : context.timeZone,
   );
+  if (validated.fallback || (typeof context !== 'string' && context.fallback))
+    url.searchParams.delete('displayTimeZone');
+  else url.searchParams.set('displayTimeZone', validated.timeZone);
   return url.pathname + url.search + url.hash;
 }

@@ -132,10 +132,16 @@ for (const fallback of [false, true]) {
         name: 'Filtered inventory',
         exact: true,
       });
-      await expect(exportLink).toHaveAttribute(
-        'href',
-        new RegExp('displayTimeZone=' + encodeURIComponent(zone)),
-      );
+      if (fallback)
+        await expect(exportLink).not.toHaveAttribute(
+          'href',
+          /displayTimeZone=/,
+        );
+      else
+        await expect(exportLink).toHaveAttribute(
+          'href',
+          new RegExp('displayTimeZone=' + encodeURIComponent(zone)),
+        );
       const downloaded = page.waitForEvent('download');
       await exportLink.click();
       const download = await downloaded;
@@ -163,9 +169,12 @@ for (const fallback of [false, true]) {
         'Exported at (display zone)',
       ]);
       expect(row[headers.indexOf('Name')]).toBe(name);
-      expect(row[headers.indexOf('Display timezone')]).toBe(zone);
+      expect(row[headers.indexOf('Display timezone')]).toBe(
+        fallback ? 'UTC (UTC fallback)' : zone,
+      );
       const displayTime = row[headers.indexOf('Exported at (display zone)')];
       expect(displayTime).toContain(zone);
+      if (fallback) expect(displayTime).toContain('UTC (UTC fallback)');
       expect(displayedInstant(displayTime)).toBe(
         Math.floor(
           new Date(row[headers.indexOf('Exported At (UTC)')]).getTime() / 1000,

@@ -57,6 +57,8 @@ beforeEach(() => {
 });
 describe('authenticated inventory downloads', () => {
   it.each([
+    [null, 'UTC (UTC fallback)', '3 Oct 2026, 05:23:06 UTC (UTC fallback)'],
+    ['UTC', 'UTC', '3 Oct 2026, 05:23:06 UTC'],
     [
       'America/Los_Angeles',
       'America/Los_Angeles',
@@ -100,7 +102,12 @@ describe('authenticated inventory downloads', () => {
         },
       });
       const response = await GET(
-        request('?q=Cable&displayTimeZone=' + encodeURIComponent(zone)),
+        request(
+          '?q=Cable' +
+            (zone === null
+              ? ''
+              : '&displayTimeZone=' + encodeURIComponent(zone)),
+        ),
       );
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Disposition')).toBe(

@@ -64,6 +64,9 @@ it('labels unavailable browser-zone fallback and unavailable timestamps without 
       <OperationalTimestamp value={at} />
       <OperationalTimestamp value={null} />
       <OperationalTimestamp value="bad" />
+      <ExportLink href="/api/exports/inventory?q=Cable&displayTimeZone=America%2FNew_York#csv">
+        Export
+      </ExportLink>
     </OperationalTimeProvider>,
   );
   expect(
@@ -71,6 +74,10 @@ it('labels unavailable browser-zone fallback and unavailable timestamps without 
   ).toBeVisible();
   expect(screen.getAllByText('Time unavailable')).toHaveLength(2);
   expect(document.querySelectorAll('time')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: 'Export' })).toHaveAttribute(
+    'href',
+    '/api/exports/inventory?q=Cable#csv',
+  );
 });
 it('leaves actual date-only metadata controls unchanged when the operational display zone changes', () => {
   const resolve = vi

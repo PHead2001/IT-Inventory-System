@@ -54,5 +54,5 @@ export function ExportLink({
   ...props
 }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { href: string }) {
   const context = useContext(TimeZoneContext);
-  return <a {...props} href={exportTimeZoneHref(href, context.timeZone)} />;
+  return <a {...props} href={exportTimeZoneHref(href, context)} />;
 }

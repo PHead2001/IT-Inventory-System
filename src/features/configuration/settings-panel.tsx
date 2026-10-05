@@ -121,6 +121,7 @@ export function SettingsPanel({
     });
   };
   const startRemoval = (categoryId: string) => {
+    returnToCategory.current = null;
     setRemoving(categoryId);
     setReplacement('');
     setReview(null);
