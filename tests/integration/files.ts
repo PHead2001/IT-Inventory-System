@@ -860,6 +860,7 @@ async function validate(
   requestId = randomUUID(),
   parentType: 'asset' | 'quantity' = 'asset',
   replaces: string | null = null,
+  foreignSource?: { id: string; version: string },
 ) {
   const replacedVersion = replaces
     ? (
@@ -1031,6 +1032,36 @@ async function validate(
     sha(bytes),
     registered.sort().join('|'),
   ].join(':');
+  if (foreignSource) {
+    const substituted = statement.split(':');
+    substituted[13] = foreignSource.id;
+    substituted[14] = foreignSource.version;
+    await denied(
+      staff.client,
+      'inventory_file_validated',
+      {
+        p_file_id: file.id,
+        p_generation: begin.generation,
+        p_key_id: keyId,
+        p_source_id: foreignSource.id,
+        p_source_version: foreignSource.version,
+        p_type: type,
+        p_bytes: bytes.length,
+        p_sha256: sha(bytes),
+        p_mac: mac(secret, substituted.join(':')),
+      },
+      'P1012',
+    );
+    eq(
+      (
+        await db.query('select state from public.inventory_files where id=$1', [
+          file.id,
+        ])
+      ).rows[0].state,
+      'validating',
+      'correctly signed foreign source cannot advance validation',
+    );
+  }
   await okay(staff.client, 'inventory_file_validated', {
     p_file_id: file.id,
     p_generation: begin.generation,
@@ -1043,6 +1074,444 @@ async function validate(
     p_mac: mac(secret, statement),
   });
   return requestId;
+}
+
+async function finalizeCancelRace(
+  staff: Actor,
+  parent: string,
+  keyId: string,
+  secret: string,
+  cancelWins: boolean,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const file = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'publish-cancel.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const uploaded = await staff.client.storage
+    .from('inventory-files')
+    .upload(file.path, bytes, { contentType: 'application/pdf' });
+  assert.equal(uploaded.error, null, 'race source physically uploaded');
+  await okay(staff.client, 'inventory_file_uploaded', { p_file_id: file.id });
+  const requestId = await validate(
+    staff,
+    keyId,
+    secret,
+    file,
+    bytes,
+    'application/pdf',
+    parent,
+    1,
+    'asset_document',
+  );
+  const winner = new Client({
+    connectionString: dbUrl,
+    application_name: 'files-transition-winner',
+  });
+  const loser = new Client({
+    connectionString: dbUrl,
+    application_name: 'files-transition-loser',
+  });
+  await winner.connect();
+  await loser.connect();
+  let waiting: Promise<{ code?: string }> | undefined;
+  try {
+    for (const connection of [winner, loser]) {
+      await connection.query('begin');
+      await connection.query("set local statement_timeout='10s'");
+      await connection.query('set local role authenticated');
+      await connection.query(
+        "select set_config('request.jwt.claims',$1,true)",
+        [JSON.stringify({ sub: staff.id, role: 'authenticated' })],
+      );
+    }
+    const winnerPid = (
+      await winner.query<{ pid: number }>('select pg_backend_pid() pid')
+    ).rows[0].pid;
+    const loserPid = (
+      await loser.query<{ pid: number }>('select pg_backend_pid() pid')
+    ).rows[0].pid;
+    eq(
+      winnerPid === loserPid,
+      false,
+      'transition race uses independent connections',
+    );
+    const finalize =
+      'select public.inventory_file_finalize($1::uuid,$2::bigint,$3::uuid)';
+    const cancel = 'select public.inventory_file_cancel($1::uuid)';
+    const finalArgs = [file.id, 1, requestId];
+    await winner.query(
+      cancelWins ? cancel : finalize,
+      cancelWins ? [file.id] : finalArgs,
+    );
+    waiting = loser
+      .query(cancelWins ? finalize : cancel, cancelWins ? finalArgs : [file.id])
+      .then(
+        () => ({}),
+        (error: { code?: string }) => ({ code: error.code }),
+      );
+    const deadline = performance.now() + 3000;
+    let blocked = false;
+    while (performance.now() < deadline) {
+      blocked = (
+        await db.query<{ blocked: boolean }>(
+          "select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock' and $2::integer=any(pg_blocking_pids(pid))) blocked",
+          [loserPid, winnerPid],
+        )
+      ).rows[0].blocked;
+      if (blocked) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    eq(
+      blocked,
+      true,
+      'losing transition waits while winning transition is uncommitted',
+    );
+    await winner.query('commit');
+    eq(
+      (await waiting).code,
+      'P1008',
+      'losing transition fails after winner commits',
+    );
+  } finally {
+    await winner.query('rollback').catch(() => undefined);
+    await waiting;
+    await loser.query('rollback').catch(() => undefined);
+    await winner.end();
+    await loser.end();
+  }
+  const readback = (
+    await db.query(
+      `select f.state,f.version::text,o.cleanup_state,c.revision::text,
+    (select count(*)::text from public.inventory_file_events where file_id=f.id) events,
+    (select count(*)::text from private.file_receipts where actor_id=$2 and request_id=$3 and result is not null) receipts
+    from public.inventory_files f join private.file_objects o on o.file_id=f.id
+    join public.inventory_file_collections c on c.asset_id=f.asset_id where f.id=$1`,
+      [file.id, staff.id, requestId],
+    )
+  ).rows[0];
+  eq(
+    readback.state,
+    cancelWins ? 'cancelled' : 'ready',
+    'committed race winner determines stable file state',
+  );
+  eq(
+    readback.cleanup_state,
+    cancelWins ? 'eligible' : 'held',
+    'only cancelled bytes become cleanup eligible',
+  );
+  eq(
+    readback.revision,
+    cancelWins ? '1' : '2',
+    'only publication increments collection',
+  );
+  eq(
+    readback.events,
+    cancelWins ? '0' : '1',
+    'publication event commits exactly once',
+  );
+  eq(
+    readback.receipts,
+    cancelWins ? '0' : '1',
+    'failed finalize leaves no completed receipt',
+  );
+  if (cancelWins) {
+    await denied(
+      staff.client,
+      'inventory_file_finalize',
+      { p_file_id: file.id, p_expected_revision: 1, p_request_id: requestId },
+      'P1008',
+    );
+    // Teardown ages only this terminal fixture; race ordering above uses real locks.
+    await db.query(
+      "update public.inventory_files set validation_lease_until=clock_timestamp()-interval '31 seconds' where id=$1 and state='cancelled'",
+      [file.id],
+    );
+  } else {
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { p_file_id: file.id },
+      'P1008',
+    );
+    await okay(staff.client, 'inventory_file_finalize', {
+      p_file_id: file.id,
+      p_expected_revision: 1,
+      p_request_id: requestId,
+    });
+  }
+  const claims = (await okay(
+    staff.client,
+    'inventory_file_cleanup_claim_parent',
+    {
+      p_parent_type: 'asset',
+      p_parent_id: parent,
+      p_limit: 20,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_claim', [
+        'asset',
+        parent,
+        '20',
+        keyId,
+      ]),
+    },
+  )) as { object_id: string; path: string }[];
+  eq(
+    claims.map((claim) => claim.path),
+    cancelWins ? [file.path] : [],
+    'cleanup never claims published live source',
+  );
+  for (const claim of claims) {
+    const removed = await staff.client.storage
+      .from('inventory-files')
+      .remove([claim.path]);
+    assert.equal(
+      removed.error,
+      null,
+      'cancel winner deletes its exact physical source',
+    );
+    await okay(staff.client, 'inventory_file_cleanup_confirm', {
+      p_object_id: claim.object_id,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_confirm', [
+        claim.object_id,
+        keyId,
+      ]),
+    });
+  }
+  if (cancelWins) {
+    await denied(
+      staff.client,
+      'inventory_file_finalize',
+      {
+        p_file_id: file.id,
+        p_expected_revision: 1,
+        p_request_id: requestId,
+      },
+      'P1008',
+    );
+  }
+  const finalState = (
+    await db.query(
+      'select state,version::text from public.inventory_files where id=$1',
+      [file.id],
+    )
+  ).rows[0];
+  eq(
+    finalState,
+    { state: readback.state, version: readback.version },
+    'losing retry and cleanup cannot resurrect or mutate winning file',
+  );
+  if (cancelWins) {
+    eq(
+      (
+        await db.query(
+          "select count(*)::text count from storage.objects where bucket_id='inventory-files' and name=$1",
+          [file.path],
+        )
+      ).rows[0].count,
+      '0',
+      'cancelled physical object absent',
+    );
+    assert.ok(
+      (await admin.storage.from('inventory-files').download(file.path)).error,
+      'cancelled physical bytes unavailable through privileged Storage read',
+    );
+    checks++;
+  } else {
+    eq(
+      sha(await bytesAt(staff.client, file.path)),
+      sha(bytes),
+      'published live bytes survive losing cancel and cleanup',
+    );
+  }
+}
+
+async function crossParentStorageSubstitution(
+  staff: Actor,
+  parents: [string, string],
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const files = [];
+  for (const parent of parents) {
+    const file = await reserve(
+      staff,
+      'asset',
+      parent,
+      1,
+      'parent-bound.pdf',
+      'application/pdf',
+      bytes.length,
+    );
+    const uploaded = await staff.client.storage
+      .from('inventory-files')
+      .upload(file.path, bytes, { contentType: 'application/pdf' });
+    assert.equal(
+      uploaded.error,
+      null,
+      'cross-parent source physically uploaded',
+    );
+    await okay(staff.client, 'inventory_file_uploaded', { p_file_id: file.id });
+    files.push(file);
+  }
+  const [target, foreign] = files;
+  const requestId = await validate(
+    staff,
+    keyId,
+    secret,
+    foreign,
+    bytes,
+    'application/pdf',
+    parents[1],
+    1,
+    'asset_document',
+  );
+  await okay(staff.client, 'inventory_file_finalize', {
+    p_file_id: foreign.id,
+    p_expected_revision: 1,
+    p_request_id: requestId,
+  });
+  const identity = (
+    await db.query(
+      "select id,version from storage.objects where bucket_id='inventory-files' and name=$1",
+      [foreign.path],
+    )
+  ).rows[0] as { id: string; version: string };
+  const physicalIdentitySql =
+    "select name,id,version,metadata->>'size' as bytes from storage.objects where bucket_id='inventory-files' and name=any($1::text[]) order by name";
+  const physicalIdentities = (
+    await db.query(physicalIdentitySql, [files.map((file) => file.path)])
+  ).rows;
+  // Same active staff is allowed to read both parents. The boundary is sealed
+  // object identity and parent-bound attestation, not an invented read denial.
+  const foreignBytes = await bytesAt(staff.client, foreign.path);
+  eq(
+    sha(foreignBytes),
+    sha(bytes),
+    'same staff can read foreign ready source before substitution',
+  );
+  const substitutions = [
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .copy(foreign.path, target.path),
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .move(foreign.path, target.path),
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .upload(target.path, foreignBytes, {
+          contentType: 'application/pdf',
+          upsert: true,
+        }),
+  ];
+  for (const [index, operation] of substitutions.entries()) {
+    const result = await operation();
+    assert.ok(
+      result.error,
+      'actual Storage cross-parent sealed path substitution denied',
+    );
+    if (index === 2) {
+      eq(
+        (result.error as { statusCode?: string }).statusCode,
+        '403',
+        'foreign ready bytes cannot overwrite another sealed parent source',
+      );
+    }
+    const error = result.error as {
+      status?: number;
+      statusCode?: string;
+      code?: string;
+    };
+    console.log(
+      'Cross-parent Storage substitution outcome:',
+      JSON.stringify({
+        operation: ['copy', 'move', 'upsert'][index],
+        status: Number.isInteger(error.status) ? error.status : null,
+        statusCode: /^\d{3}$/.test(error.statusCode ?? '')
+          ? error.statusCode
+          : null,
+        code: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(error.code ?? '')
+          ? error.code
+          : null,
+      }),
+    );
+    checks++;
+  }
+  eq(
+    (await db.query(physicalIdentitySql, [files.map((file) => file.path)]))
+      .rows,
+    physicalIdentities,
+    'cross-parent Storage attempts retain both exact object IDs, versions and sizes',
+  );
+  const targetRequest = await validate(
+    staff,
+    keyId,
+    secret,
+    target,
+    bytes,
+    'application/pdf',
+    parents[0],
+    1,
+    'asset_document',
+    randomUUID(),
+    'asset',
+    null,
+    identity,
+  );
+  await okay(staff.client, 'inventory_file_finalize', {
+    p_file_id: target.id,
+    p_expected_revision: 1,
+    p_request_id: targetRequest,
+  });
+  for (const [index, file] of files.entries()) {
+    eq(
+      await okay(staff.client, 'inventory_file_read', {
+        p_file_id: file.id,
+        p_variant: 'source',
+      }),
+      file.path,
+      'ready read resolves its own immutable source',
+    );
+    eq(
+      sha(await bytesAt(staff.client, file.path)),
+      sha(bytes),
+      'cross-parent attempts preserve both physical sources',
+    );
+    eq(
+      (
+        await db.query(
+          'select asset_id,state from public.inventory_files where id=$1',
+          [file.id],
+        )
+      ).rows[0],
+      { asset_id: parents[index], state: 'ready' },
+      'publication retains exact original parent',
+    );
+    eq(
+      (
+        await db.query(
+          'select asset_id from public.inventory_file_events where file_id=$1',
+          [file.id],
+        )
+      ).rows.map((row) => row.asset_id),
+      [parents[index]],
+      'publication history cannot substitute another parent',
+    );
+  }
 }
 
 async function main() {
@@ -1139,6 +1608,21 @@ async function main() {
     secret,
   );
   await expiredTransitionBarrier(staff, parent, keyId, secret);
+  for (const cancelWins of [true, false]) {
+    await finalizeCancelRace(
+      staff,
+      await asset(staff, cat.id, loc.id),
+      keyId,
+      secret,
+      cancelWins,
+    );
+  }
+  await crossParentStorageSubstitution(
+    staff,
+    [await asset(staff, cat.id, loc.id), await asset(staff, cat.id, loc.id)],
+    keyId,
+    secret,
+  );
   const uploadCancel = await reserve(
     staff,
     'asset',
