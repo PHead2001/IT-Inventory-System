@@ -64,7 +64,9 @@ vi.mock('./label-sheet', () => ({
           }
           data-text-overflow="false"
           data-code-fallback={
-            format === 'code128' && record.kind === 'quantity'
+            format === 'code128' &&
+            (record.kind === 'quantity' ||
+              record.name.includes('physical fallback'))
           }
         >
           {record.name} / {record.key}
@@ -158,6 +160,44 @@ it('omits empty search paging without changing the existing label queue', async 
     '2 distinct records · 2 labels',
   );
   await waitFor(() => expect(printButton()).toBeEnabled());
+});
+
+it('shares defaults vocabulary and options while keeping changes in the current job', async () => {
+  const defaults = {
+    size: '70x35' as const,
+    page: 'A4' as const,
+    format: 'code128' as const,
+  };
+  const view = render(<LabelDesigner {...props} defaults={defaults} />);
+  const size = screen.getByRole('combobox', { name: 'Label size' });
+  const paper = screen.getByRole('combobox', { name: 'Paper size' });
+  const barcode = screen.getByRole('combobox', { name: 'Barcode type' });
+  expect(size).toHaveValue('70x35');
+  expect(paper).toHaveValue('A4');
+  expect(barcode).toHaveValue('code128');
+  expect(barcode).toHaveAccessibleDescription(
+    /Scanning a QR code opens the linked inventory record or location/,
+  );
+  expect(
+    within(paper).getByRole('option', { name: 'US Letter (8.5 × 11 in)' }),
+  ).toHaveValue('letter');
+  expect(within(barcode).getByRole('option', { name: 'QR code' })).toHaveValue(
+    'qr',
+  );
+  await waitFor(() => expect(size).toBeEnabled());
+  fireEvent.change(size, { target: { value: '90x50' } });
+  fireEvent.change(paper, { target: { value: 'letter' } });
+  fireEvent.change(barcode, { target: { value: 'qr' } });
+  view.rerender(
+    <LabelDesigner
+      {...props}
+      defaults={{ size: '70x35', page: 'A4', format: 'code128' }}
+    />,
+  );
+  expect(size).toHaveValue('90x50');
+  expect(paper).toHaveValue('letter');
+  expect(barcode).toHaveValue('qr');
+  expect(defaults).toEqual({ size: '70x35', page: 'A4', format: 'code128' });
 });
 
 it('retains nonempty search paging and sends the next page with its filters', async () => {
@@ -965,7 +1005,7 @@ it('reflows copies and paper locally without another inventory read', async () =
   fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
     target: { value: '70x35' },
   });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Page' }), {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Paper size' }), {
     target: { value: 'A4' },
   });
   expect(document.querySelector('.label-print-root')).toHaveAttribute(
@@ -987,7 +1027,9 @@ it('starts from shared job defaults and restores local choices for the same memb
   expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
     '70x35',
   );
-  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  expect(screen.getByRole('combobox', { name: 'Paper size' })).toHaveValue(
+    'A4',
+  );
   fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
     target: { value: '90x50' },
   });
@@ -1004,7 +1046,9 @@ it('starts from shared job defaults and restores local choices for the same memb
   expect(screen.getByRole('combobox', { name: 'Label size' })).toHaveValue(
     '90x50',
   );
-  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  expect(screen.getByRole('combobox', { name: 'Paper size' })).toHaveValue(
+    'A4',
+  );
 });
 
 it('locks print and job settings while adding a record asynchronously', async () => {
@@ -1042,8 +1086,8 @@ it('locks print and job settings while adding a record asynchronously', async ()
   fireEvent.click(add);
   expect(printButton()).toBeDisabled();
   expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
-  expect(screen.getByRole('combobox', { name: 'Page' })).toBeDisabled();
-  expect(screen.getByRole('combobox', { name: 'Code' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Paper size' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toBeDisabled();
   mocks.getQueueRecords.mockResolvedValueOnce([quantity, asset, next]);
   finish([next]);
   await waitFor(() =>
@@ -1187,7 +1231,7 @@ it('requires acknowledgement of changed tag and then revalidates automatically',
 it('requires acknowledgement when Code 128 falls back to QR', async () => {
   render(<LabelDesigner {...props} />);
   await waitFor(() => expect(printButton()).toBeEnabled());
-  fireEvent.change(screen.getByRole('combobox', { name: 'Code' }), {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
     target: { value: 'code128' },
   });
   const fallback = await screen.findByRole('alert');
@@ -1205,6 +1249,32 @@ it('requires acknowledgement when Code 128 falls back to QR', async () => {
   expect(
     screen.queryByRole('button', { name: 'Acknowledge QR fallback' }),
   ).toBeNull();
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+});
+
+it('names the QR fallback when fresh printable content cannot retain Code 128', async () => {
+  mocks.getQueueRecords.mockResolvedValue([asset]);
+  render(<LabelDesigner {...props} initial={[asset]} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  mocks.getQueueRecords.mockResolvedValue([
+    { ...asset, name: 'Laptop physical fallback' },
+  ]);
+  fireEvent.click(printButton());
+  expect(
+    await screen.findByText(
+      'Some Code 128 labels use QR. Acknowledge the QR fallback before printing.',
+    ),
+  ).toBeVisible();
+  expect(window.print).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Acknowledge QR fallback' }),
+  );
+  await waitFor(() => expect(printButton()).toBeEnabled());
   fireEvent.click(printButton());
   await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
 });
@@ -1358,7 +1428,7 @@ it('reviews affected items individually while preserving unrelated copies and pr
   fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[1], {
     target: { value: '3' },
   });
-  fireEvent.change(screen.getByRole('combobox', { name: 'Page' }), {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Paper size' }), {
     target: { value: 'A4' },
   });
   await reviewAndAcknowledge('Laptop');
@@ -1377,7 +1447,9 @@ it('reviews affected items individually while preserving unrelated copies and pr
   expect(screen.getAllByRole('spinbutton', { name: 'Copies' })[1]).toHaveValue(
     3,
   );
-  expect(screen.getByRole('combobox', { name: 'Page' })).toHaveValue('A4');
+  expect(screen.getByRole('combobox', { name: 'Paper size' })).toHaveValue(
+    'A4',
+  );
   await reviewAndAcknowledge('Adapters');
   await waitFor(() => expect(printButton()).toBeEnabled());
 });

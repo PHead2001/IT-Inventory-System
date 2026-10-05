@@ -1,4 +1,5 @@
 'use client';
+import { OperationalTimestamp } from '@/components/operational-time';
 import {
   useCallback,
   useEffect,
@@ -2171,7 +2172,7 @@ export function MetadataSettings({
               </ul>
               <p className="text-xs text-slate-400">
                 Review expires at{' '}
-                {new Date(String(saveReview.expires_at)).toLocaleTimeString()}.
+                <OperationalTimestamp value={saveReview.expires_at} />.
               </p>
               <Button
                 type="button"

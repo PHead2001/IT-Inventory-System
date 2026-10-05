@@ -11,6 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { displayedInstant } from '../helpers/displayed-instant';
 
 function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
@@ -126,6 +127,15 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   browser,
 }, testInfo) => {
   test.setTimeout(120_000);
+  const timezoneSession = await page.context().newCDPSession(page);
+  await timezoneSession.send('Emulation.setTimezoneOverride', {
+    timezoneId: 'America/Los_Angeles',
+  });
+  const timeErrors: string[] = [];
+  page.on('pageerror', (error) => timeErrors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') timeErrors.push(message.text());
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'staff');
   await page.goto('/inventory/quantity/new');
@@ -187,6 +197,49 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     /\b\d+(?:\.\d+)? KiB\b/,
   );
   await expect(cards.getByRole('listitem')).not.toContainText('0.0 MiB');
+  const publishedTime = cards.getByRole('listitem').locator('time');
+  await expect(publishedTime).toContainText('America/Los_Angeles');
+  const publishedAt = await publishedTime.getAttribute('datetime');
+  expect(displayedInstant((await publishedTime.textContent())!)).toBe(
+    Math.floor(Date.parse(publishedAt!) / 1000) * 1000,
+  );
+  await expect(cards.getByRole('listitem')).toContainText('Published:');
+  await files.locator('summary').filter({ hasText: 'File activity' }).click();
+  const activityTimes = files.locator('ol time');
+  await expect(activityTimes.first()).toBeVisible();
+  for (const time of await activityTimes.all()) {
+    await expect(time).toContainText('America/Los_Angeles');
+    expect(displayedInstant((await time.textContent())!)).toBe(
+      Math.floor(Date.parse((await time.getAttribute('datetime'))!) / 1000) *
+        1000,
+    );
+  }
+  await files.screenshot({
+    path: testInfo.outputPath('real-file-published-activity-los-angeles.png'),
+  });
+  await page.reload();
+  await expect(publishedTime).toHaveAttribute('datetime', publishedAt!);
+  await expect(publishedTime).toContainText('America/Los_Angeles');
+  await page.getByRole('link', { name: 'View all item history' }).click();
+  await expect(page).toHaveURL(/\/history\?/);
+  await expect(page.locator('time').first()).toContainText(
+    'America/Los_Angeles',
+  );
+  for (const time of await page.locator('time').all()) {
+    await expect(time).toContainText('America/Los_Angeles');
+    expect(displayedInstant((await time.textContent())!)).toBe(
+      Math.floor(Date.parse((await time.getAttribute('datetime'))!) / 1000) *
+        1000,
+    );
+  }
+  await page.screenshot({
+    path: testInfo.outputPath('real-file-record-history-los-angeles.png'),
+    fullPage: true,
+  });
+  await page.goto(detailUrl);
+  expect(
+    timeErrors.filter((error) => /hydrat|mismatch|uncaught/i.test(error)),
+  ).toEqual([]);
   await expect(
     files.getByRole('button', { name: 'Preview first.png' }).locator('img'),
   ).toBeVisible();

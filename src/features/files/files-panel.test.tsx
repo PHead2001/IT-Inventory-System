@@ -24,6 +24,9 @@ vi.mock('@/lib/supabase/browser', () => ({
 }));
 
 import { FilesPanel } from './files-panel';
+import { OperationalTimeProvider } from '@/components/operational-time';
+import * as operationalTime from '@/lib/operational-time';
+import { HistoryList } from '@/features/inventory/components/read-ui';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const pending = {
@@ -65,6 +68,89 @@ beforeEach(() => {
     json: async () => ({ deleted: 1, pending: false }),
   });
   vi.stubGlobal('fetch', mocks.fetch);
+});
+
+it('labels the actual file upload/activity instants in the one shared display zone and preserves their source fractions', async () => {
+  const zone = vi
+    .spyOn(operationalTime, 'browserDisplayTimeZone')
+    .mockReturnValue({ timeZone: 'America/Los_Angeles', fallback: false });
+  const at = '2026-10-03T05:23:06.123456Z';
+  mocks.rpc.mockImplementation(async (name: string) => {
+    if (name === 'inventory_file_cards')
+      return {
+        data: { revision: '1', files: [{ ...pending, created_at: at }] },
+        error: null,
+      };
+    if (name === 'inventory_file_history')
+      return {
+        data: {
+          rows: [
+            {
+              id,
+              action: 'uploaded',
+              actor_name: 'IT staff',
+              created_at: at,
+              before_title: null,
+              title: 'Fictional damaged image',
+              file_type: 'image/png',
+              file_bytes: 20,
+              collection_revision: '1',
+            },
+          ],
+          has_more: false,
+        },
+        error: null,
+      };
+    throw new Error('Unexpected RPC');
+  });
+  try {
+    const { container } = render(
+      <OperationalTimeProvider>
+        <FilesPanel
+          parentType="asset"
+          parentId={id}
+          active
+          staff={false}
+          actorId="viewer"
+        />
+        <HistoryList
+          events={[
+            {
+              id: 'event',
+              kind: 'asset',
+              entityId: id,
+              entityName: 'Asset',
+              eventType: 'created',
+              at,
+              actorName: 'IT staff',
+              reason: null,
+              assignment: null,
+              lines: [],
+              fromLocation: null,
+              toLocation: null,
+              metadataChanges: [],
+              customMetadataPresent: false,
+              customMetadataChanged: false,
+            },
+          ]}
+        />
+      </OperationalTimeProvider>,
+    );
+    await screen.findByText('Original: damaged.png');
+    const times = container.querySelectorAll('time');
+    expect(times).toHaveLength(3);
+    for (const time of times) {
+      expect(time).toHaveAttribute('datetime', at);
+      expect(time).toHaveTextContent(
+        '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)',
+      );
+    }
+    expect(container.textContent).toContain('Uploaded:');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(zone).toHaveBeenCalledOnce();
+  } finally {
+    zone.mockRestore();
+  }
 });
 
 describe('fresh native picker intent', () => {

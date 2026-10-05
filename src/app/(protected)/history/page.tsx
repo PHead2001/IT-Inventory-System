@@ -19,6 +19,7 @@ import { notFound, redirect } from 'next/navigation';
 import Form from 'next/form';
 import Link from 'next/link';
 import styles from '@/features/inventory/components/inventory-visual.module.css';
+import { OperationalTimestamp } from '@/components/operational-time';
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export default async function HistoryPage({
@@ -104,6 +105,11 @@ export default async function HistoryPage({
                 <p className="mt-2 text-sm">
                   Field owner category: {custom.owner_category_id}
                 </p>
+                {custom.field_type === 'datetime' && (
+                  <p className="mt-2 text-sm">
+                    Display time: <OperationalTimestamp value={custom.value} />
+                  </p>
+                )}
                 <pre className="mt-3 whitespace-pre-wrap break-all text-sm">
                   {JSON.stringify(custom.value)}
                 </pre>

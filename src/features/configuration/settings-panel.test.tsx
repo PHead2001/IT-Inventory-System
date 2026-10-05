@@ -100,6 +100,96 @@ it('focuses the category rename draft on open and restores its stable trigger on
   expect(trigger).toHaveFocus();
 });
 
+it('identifies every category action independently, including long text names', () => {
+  const named = [
+    source,
+    target,
+    {
+      ...source,
+      id: '00000000-0000-4000-8000-000000000004',
+      name:
+        'Long category <script> & "name" ' + 'accessories '.repeat(12).trim(),
+    },
+  ];
+  render(<SettingsPanel mode="categories" categories={named} canManage />);
+  for (const category of named) {
+    expect(
+      screen.getByRole('link', { name: 'Edit form for ' + category.name }),
+    ).toHaveAttribute('href', `/settings/forms/${category.id}`);
+    expect(
+      screen.getByRole('button', { name: 'Rename ' + category.name }),
+    ).toHaveTextContent('Rename');
+    expect(
+      screen.getByRole('button', { name: 'Remove ' + category.name }),
+    ).toHaveTextContent('Remove');
+  }
+  expect(screen.queryByRole('heading', { name: 'Categories' })).toBeNull();
+  expect(document.querySelector('script')).toBeNull();
+});
+
+it.each([source, target])(
+  'keeps focus on Remove $name when switching from a rename and restores only the next rename trigger',
+  async (category) => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPanel
+        mode="categories"
+        categories={[source, target]}
+        canManage
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Rename Source' }));
+    const remove = screen.getByRole('button', {
+      name: 'Remove ' + category.name,
+    });
+    remove.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.queryByLabelText('New category name')).toBeNull();
+    expect(remove).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Rename Target' }));
+    expect(screen.getByLabelText('New category name')).toHaveFocus();
+    expect(screen.getByLabelText('New category name')).toHaveValue('Target');
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Rename Target' })).toHaveFocus();
+  },
+);
+
+it('saves shared label defaults using the existing version and payload keys', async () => {
+  mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
+  render(<SettingsPanel mode="labels" labelDefaults={defaults} canManage />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Label size' }), {
+    target: { value: '70x35' },
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Paper size' }), {
+    target: { value: 'A4' },
+  });
+  const barcode = screen.getByRole('combobox', { name: 'Barcode type' });
+  expect(barcode).toHaveAccessibleDescription(
+    /Scanning a QR code opens the linked inventory record or location/,
+  );
+  expect(within(barcode).getByRole('option', { name: 'QR code' })).toHaveValue(
+    'qr',
+  );
+  expect(screen.getByRole('option', { name: 'A4 (210 × 297 mm)' })).toHaveValue(
+    'A4',
+  );
+  fireEvent.change(barcode, { target: { value: 'code128' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() =>
+    expect(mocks.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'label_defaults_update',
+        payload: {
+          expected_version: '1',
+          size: '70x35',
+          page: 'A4',
+          format: 'code128',
+        },
+      }),
+    ),
+  );
+});
+
 it('retains an invalid rename draft with a durable associated error and input focus', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);
   fireEvent.click(screen.getByRole('button', { name: /^Rename/ }));
@@ -177,18 +267,17 @@ it('returns focus to the surviving list when the renamed row is removed while sa
 
 it('shows category actions and form deep links without label controls in category mode', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);
-  expect(screen.getByRole('link', { name: 'Edit form' })).toHaveAttribute(
-    'href',
-    `/settings/forms/${source.id}`,
-  );
+  expect(
+    screen.getByRole('link', { name: 'Edit form for Source' }),
+  ).toHaveAttribute('href', `/settings/forms/${source.id}`);
   expect(screen.getByRole('button', { name: 'Rename Source' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Remove' })).toBeVisible();
-  expect(screen.queryByRole('combobox', { name: 'Size' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Remove Source' })).toBeVisible();
+  expect(screen.queryByRole('combobox', { name: 'Label size' })).toBeNull();
 });
 
 it('shows only shared print defaults in label mode', () => {
   render(<SettingsPanel mode="labels" labelDefaults={defaults} canManage />);
-  expect(screen.getByRole('combobox', { name: 'Size' })).toBeVisible();
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Add category' })).toBeNull();
 });
 
@@ -204,7 +293,7 @@ it('explains read-only settings without exposing configuration mutations', () =>
     'requires an active staff membership with configuration access',
   );
   expect(screen.getByText('Source')).toBeVisible();
-  expect(screen.getByRole('combobox', { name: 'Size' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Add category' })).toBeNull();
   expect(
     screen.queryByRole('button', { name: 'Save shared defaults' }),
@@ -224,7 +313,7 @@ it('requires a replacement for history-only references and explains tombstone re
     />,
   );
   const row = screen.getByText('Source').closest('li')!;
-  fireEvent.click(within(row).getByRole('button', { name: 'Remove' }));
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove Source' }));
   fireEvent.click(within(row).getByRole('button', { name: 'Review impact' }));
   const review = await within(row).findByRole('region', {
     name: 'Removal impact review',
@@ -259,7 +348,7 @@ it('does not call a currently referenced category unreferenced when no replaceme
     />,
   );
   const row = screen.getByText('Source').closest('li')!;
-  fireEvent.click(within(row).getByRole('button', { name: 'Remove' }));
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove Source' }));
   fireEvent.click(within(row).getByRole('button', { name: 'Review impact' }));
   const review = await within(row).findByRole('region', {
     name: 'Removal impact review',
@@ -291,7 +380,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   const view = render(
     <SettingsPanel categories={[source]} labelDefaults={defaults} canManage />,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Source' }));
   fireEvent.click(screen.getByRole('button', { name: 'Review impact' }));
   await waitFor(() =>
     expect(
@@ -332,7 +421,7 @@ it('keeps an authored form category for history and shows target metadata gaps b
     />,
   );
   const row = screen.getByText('Source').closest('li')!;
-  fireEvent.click(within(row).getByRole('button', { name: 'Remove' }));
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove Source' }));
   fireEvent.change(within(row).getByLabelText(/replacement/i), {
     target: { value: target.id },
   });

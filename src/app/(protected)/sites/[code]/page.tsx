@@ -97,9 +97,9 @@ export default async function SitePage({
         <Link href={`/inventory?site=${site.id}`}>
           View site holdings in inventory
         </Link>
-        <a href={`/api/exports/inventory?site=${site.id}`}>
+        <ExportLink href={`/api/exports/inventory?site=${site.id}`}>
           Download current site holdings CSV
-        </a>
+        </ExportLink>
       </div>
       <dl className="my-5 grid gap-3 sm:grid-cols-2">
         <div className={panel}>
@@ -336,13 +336,8 @@ export default async function SitePage({
                   {event.kind.replaceAll('_', ' ')}
                 </p>
                 <p className="text-sm text-slate-300">
-                  <time dateTime={event.created_at}>
-                    {new Date(event.created_at).toLocaleString('en-US', {
-                      timeZone: 'UTC',
-                    })}{' '}
-                    UTC
-                  </time>{' '}
-                  · {event.actor_name}
+                  <OperationalTimestamp value={event.created_at} /> ·{' '}
+                  {event.actor_name}
                 </p>
                 <p className="mt-1 text-sm">
                   {event.from_label || 'Opening / no source'} →{' '}
@@ -398,3 +393,7 @@ export default async function SitePage({
     </>
   );
 }
+import {
+  OperationalTimestamp,
+  ExportLink,
+} from '@/components/operational-time';

@@ -263,7 +263,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toBeVisible();
   await noHorizontalOverflow(page);
   await page.goto('/labels?location=' + locationCode);
-  await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
+  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',
@@ -329,7 +329,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('link', { name: 'Print asset label' }),
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
-  await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
+  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',
@@ -387,7 +387,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('link', { name: 'Print asset label' }),
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
-  await page.getByRole('combobox', { name: 'Code' }).selectOption('qr');
+  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',

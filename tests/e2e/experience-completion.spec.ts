@@ -188,7 +188,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
   });
   await unchanged();
 
-  await page.getByRole('combobox', { name: 'Code' }).selectOption('code128');
+  await page
+    .getByRole('combobox', { name: 'Barcode type' })
+    .selectOption('code128');
   await expect(card).toHaveAttribute('data-code-fallback', 'true');
   const fallbackMessage = page.getByText(
     /queued record\(s\) will use stable QR links/i,

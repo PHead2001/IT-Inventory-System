@@ -50,7 +50,7 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
     screen.getByRole('link', { name: 'Download location inventory CSV' }),
   ).toHaveAttribute(
     'href',
-    '/api/exports/inventory?q=Cable&status=all&location=ITO',
+    '/api/exports/inventory?q=Cable&status=all&location=ITO&displayTimeZone=UTC',
   );
   expect(
     screen.queryByRole('navigation', { name: 'Pagination' }),

@@ -144,6 +144,7 @@ async function buildExport(
       includeCustom,
       checkDeadline,
       diagnostics?.csvRow,
+      url.searchParams.get('displayTimeZone'),
     );
     checkDeadline();
     if (diagnostics) {

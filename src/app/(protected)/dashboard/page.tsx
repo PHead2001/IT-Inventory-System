@@ -121,12 +121,12 @@ export default async function DashboardPage({
               View filtered inventory{' '}
               <ArrowRight size={14} aria-hidden="true" />
             </Link>
-            <a
+            <ExportLink
               href="/api/exports/inventory?export=low_stock"
               className="inline-flex min-h-11 items-center gap-1 hover:text-white"
             >
               <Download size={14} aria-hidden="true" /> Download low-stock CSV
-            </a>
+            </ExportLink>
           </div>
         </div>
         {result.configuredCount === 0 ? (
@@ -228,3 +228,4 @@ export default async function DashboardPage({
     </div>
   );
 }
+import { ExportLink } from '@/components/operational-time';

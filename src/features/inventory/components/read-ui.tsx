@@ -1,4 +1,5 @@
 import { ShowInRoom } from '@/features/room/show-in-room';
+import { OperationalTimestamp } from '@/components/operational-time';
 import Link from 'next/link';
 import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -326,10 +327,10 @@ export function HistoryList({
             <h3 className="font-semibold">
               {eventNames[event.eventType] ?? event.eventType}
             </h3>
-            <time className="text-sm text-slate-400" dateTime={event.at}>
-              {new Date(event.at).toLocaleString('en-US', { timeZone: 'UTC' })}{' '}
-              UTC
-            </time>
+            <OperationalTimestamp
+              className="text-sm text-slate-400"
+              value={event.at}
+            />
           </div>
           <p className="mt-2 min-w-0 text-sm [overflow-wrap:anywhere]">
             <Link

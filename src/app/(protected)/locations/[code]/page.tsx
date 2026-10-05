@@ -141,12 +141,12 @@ export default async function LocationPage({
         >
           Location history
         </Link>
-        <a
+        <ExportLink
           className="min-h-11 py-3 text-cyan-300 underline"
           href={'/api/exports/inventory?' + scopeParams}
         >
           Download location inventory CSV
-        </a>
+        </ExportLink>
       </div>
       <div className="mb-3">
         <h2 className="font-semibold">
@@ -193,3 +193,4 @@ export default async function LocationPage({
     </>
   );
 }
+import { ExportLink } from '@/components/operational-time';
