@@ -441,13 +441,17 @@ function Assert-RunnerVmResources([string] $Name, [string] $ProfileLabel) {
     if ($memory.Startup -ne $profile.memoryBytes -or $memory.DynamicMemoryEnabled -ne $false) { throw 'VM resource readback differs from the fixed selected profile.' }
 }
 
-function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '', [ValidateSet('job', 'prepare')][string] $Purpose = 'job') {
-    $preparing = $Purpose -ceq 'prepare'
+function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '', [ValidateSet('job', 'prepare', 'verify-image')][string] $Purpose = 'job', $ImageCandidate = $null) {
+    $preparing = $Purpose -cne 'job'
+    if (($Purpose -ceq 'verify-image') -ne ($null -ne $ImageCandidate) -or ($preparing -and $null -ne $PilotAttempt)) { throw 'Image verification requires its explicit candidate and cannot carry a job claim.' }
     $profile = if ($preparing) { Get-RunnerResourceProfile 'it-inventory-heavy' } else { Get-RunnerSessionProfile $Config $ProfileLabel }
     $script:RunnerOperationStage = 'preflight'
     if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-InstalledHost $Config -ForPreparation }
     else { Assert-InstalledHost $Config; [void](Get-OwnerToken) }
-    $image = if ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
+    $image = if ($Purpose -ceq 'verify-image') {
+        $candidateReceipt = Assert-RunnerImageCandidate $ImageCandidate $Config
+        [pscustomobject]@{ path = $ImageCandidate.path; prepared = $true }
+    } elseif ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
     $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
     $script:RunnerSessionName = $name
     $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
@@ -459,6 +463,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         supervisorPid = $PID
         supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
     }
+    if ($Purpose -ceq 'verify-image') { $state.imageCandidate = [ordered]@{ id = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash; bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId } }
     if (-not $preparing) { $state.claimMode = $Config.activation }
     $mutex = Enter-RunnerLock
     try {
@@ -475,6 +480,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Complete-RunnerPilotClaim ([pscustomobject]$state)
         Invoke-RunnerTransitionCheckpoint 'claim-receipt'
     } finally { Exit-RunnerLock $mutex }
+    $verificationReady = $false
     try {
         New-Item -ItemType Directory -Path $instance -Force | Out-Null
         $script:RunnerOperationStage = 'disk-copy'
@@ -544,6 +550,27 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Assert-AdapterRules $name $expectedRules
         Test-GuestIsolation $state $Config
 
+        if ($Purpose -ceq 'verify-image') {
+            $script:RunnerOperationStage = 'image-clone-readiness'
+            Assert-SessionAlive $state
+            $verified = Get-RunnerState
+            Assert-StateIdentity $verified
+            if ($verified.purpose -cne 'verify-image' -or $verified.vmName -cne $state.vmName -or
+                [guid]$verified.vmId -ne [guid]$vm.Id -or
+                $verified.guardianReady -ne $true -or -not (Test-RunnerProcessIdentity $verified.guardianPid $verified.guardianStartUtc) -or
+                $verified.imageCandidate.id -cne $ImageCandidate.id -or $verified.imageCandidate.diskHash -cne $candidateReceipt.diskHash) { throw 'Image verifier session binding changed.' }
+            $verifiedVm = Get-VM -Id ([guid]$verified.vmId) -ErrorAction Stop
+            if ($verifiedVm.Name -cne $verified.vmName -or $verifiedVm.State -cne 'Running' -or $verifiedVm.Notes -cne $script:RunnerTag -or
+                [IO.Path]::GetFullPath($verifiedVm.Path) -ine (Join-Path $instance $verified.vmName)) { throw 'Image verifier VM identity changed after readiness.' }
+            $verificationReady = $true
+            Invoke-RunnerTransitionCheckpoint 'image-clone-ready'
+            return [pscustomobject]@{ schema = 1; candidateId = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash
+                bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId; bundleHash = $candidateReceipt.bundleHash
+                purpose = 'verify-image'; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
+                networkFingerprint = $verified.networkFingerprint
+                sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
+                readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
+        }
         if ($preparing) {
             $script:RunnerOperationStage = 'image-preparation'
             return Invoke-RunnerImageBuild ([pscustomobject]$state) $Config
@@ -601,7 +628,13 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $mutex = Enter-RunnerLock
         try {
             $current = Get-RunnerState
+            $verificationFailure = $null
+            if ($verificationReady) {
+                if ($null -eq $current -or $current.vmName -cne $name -or [guid]$current.vmId -ne [guid]$vm.Id) { throw 'Verifier ownership was cancelled before cleanup.' }
+                try { Assert-SessionAlive $state } catch { $verificationFailure = $_ }
+            }
             if ($null -ne $current -and $current.vmName -eq $name) { Remove-RunnerInstance $current }
+            if ($null -ne $verificationFailure) { throw $verificationFailure }
         } catch {
             Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
             throw

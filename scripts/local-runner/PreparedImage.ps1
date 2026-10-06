@@ -18,7 +18,7 @@ function Get-RunnerImageBinding($Config) {
         $records += "$name|$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)"
     }
     $recipe = (Get-FileHash -LiteralPath (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Image.Inputs.json') -Algorithm SHA256).Hash
-    return [pscustomobject]@{ hash = Get-RunnerBytesHash ([Text.Encoding]::UTF8.GetBytes(($records -join "`n"))); recipeId = $recipe; bundleVersion = $installed.manifest.version }
+    return [pscustomobject]@{ hash = Get-RunnerBytesHash ([Text.Encoding]::UTF8.GetBytes(($records -join "`n"))); recipeId = $recipe; bundleVersion = $installed.manifest.version; bundleHash = $installed.hash }
 }
 
 function Get-RunnerImageRecord {
@@ -57,6 +57,7 @@ function Get-RunnerImageSelection($Config) {
         Write-Host 'Prepared image inputs differ from the installed trusted bundle/base; using the generic base. Prepare image explicitly to refresh.'
         return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false; reason = 'stale-inputs' }
     }
+    Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification
     Assert-RunnerImageDiskUnreferenced $record.path
     return [pscustomobject]@{ path = $record.path; prepared = $true; reason = 'matching-sealed-image' }
 }
@@ -69,6 +70,10 @@ function Show-RunnerImageStatus($Config) {
         $match = $record.receipt.bindingHash -ceq $binding.hash -and $record.receipt.recipeId -ceq $binding.recipeId
         Write-Host "Prepared image: $($record.selector.id); built $($record.receipt.createdUtc); inputs match installed bundle/base: $match."
         Write-Host "Built recipe: $($record.receipt.recipeId); installed recipe: $($binding.recipeId)."
+        if ($record.receipt.PSObject.Properties.Name -contains 'cloneVerification') {
+            Assert-RunnerImageCloneProof $record.receipt $record.receipt.cloneVerification
+            Write-Host "Fresh clone readiness and cleanup verified: $($record.receipt.cloneVerification.readyUtc)."
+        } else { Write-Host 'Fresh clone verification: not recorded by this older image.' }
         Write-Host 'Status verifies metadata/ACL only; full disk hash and offline/reference checks run before pickup.'
         if (-not $match) { Write-Host 'Generic base fallback until explicit image preparation.' }
     } catch { Write-Host 'Prepared image metadata/protection invalid; pickup fails closed. Investigate the protected image before starting.' }
@@ -102,8 +107,23 @@ function Invoke-RunnerPrepareImageCore {
             Remove-RunnerOldImages $retained
         }
         $script:RunnerPreparationAuthorized = $true
-        try { [void](Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare') }
-        finally { $script:RunnerPreparationAuthorized = $false }
+        $candidate = $null
+        try {
+            $candidate = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare'
+            Assert-RunnerControlIdle
+            Invoke-RunnerTransitionCheckpoint 'image-builder-cleaned'
+            [void](Assert-RunnerImageCandidate $candidate $config)
+            $verification = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'verify-image' $candidate
+            # Invoke-RunnerSession returns only after its finally has proven VM
+            # removal and unreferenced instance deletion. Uncertainty throws.
+            Assert-RunnerControlIdle
+            $verification | Add-Member -NotePropertyName cleanupVerified -NotePropertyValue $true -Force
+            Invoke-RunnerTransitionCheckpoint 'image-clone-cleaned'
+            Publish-RunnerPreparedImage $candidate $config $verification
+        } finally {
+            try { if ($null -ne $candidate) { Remove-RunnerImageCandidate $candidate } }
+            finally { $script:RunnerPreparationAuthorized = $false }
+        }
     } finally { Exit-RunnerLock $lifetime }
     if ($resumeActive) {
         Start-RunnerSupervisorCore
@@ -194,11 +214,10 @@ function Invoke-RunnerImageBuild($State, $Config) {
         $current | Add-Member -NotePropertyName imageScrubProof -NotePropertyValue (Get-RunnerJsonEvidence $guest) -Force
         Write-RunnerJson $script:RunnerStatePath $current
     } finally { Exit-RunnerLock $mutex }
-    Publish-RunnerPreparedImage $current $Config $binding $guest
-    return [pscustomobject]@{ outcome = 'image-prepared'; name = $State.vmName }
+    return New-RunnerPreparedImageCandidate $current $Config $binding $guest
 }
 
-function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
+function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     Assert-RunnerPreparationAuthorized
     Assert-RunnerPrepareState $State
     Assert-SessionAlive $State
@@ -216,6 +235,7 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
     Assert-RunnerImageDiskUnreferenced $source
     if ((Get-RunnerImageBinding $Config).hash -cne $Binding.hash -or $Guest.recipeId -cne $Binding.recipeId -or $Guest.scrubbed -ne $true) { throw 'Trusted inputs or scrub proof changed before publication.' }
     $old = Get-RunnerImageRecord
+    $selectorBefore = Get-RunnerFileEvidence (Join-Path $script:RunnerRoot 'prepared-image.json')
     if ($null -ne $old) {
         Assert-RunnerImageDiskUnreferenced $old.path
         if ((Get-FileHash -LiteralPath $old.path -Algorithm SHA256).Hash -cne $old.receipt.diskHash) { throw 'Previous prepared image is corrupt; publication refused.' }
@@ -227,6 +247,7 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
     $id = [guid]::NewGuid().ToString('N')
     $candidate = Assert-OwnedPath (Join-Path $directory ($id + '.vhdx'))
     $receiptPath = Assert-OwnedPath (Join-Path $directory ($id + '.json'))
+    $retained = $false
     try {
         Copy-Item -LiteralPath $source -Destination $candidate -ErrorAction Stop
         Assert-RunnerProtectedPath $candidate
@@ -234,15 +255,15 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
         Invoke-RunnerTransitionCheckpoint 'image-copy'
         $receipt = [ordered]@{ schema = 1; tag = $script:RunnerTag; id = $id; createdUtc = [DateTime]::UtcNow.ToString('o')
             diskHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash; baseHash = $Config.baseSha256
-            bindingHash = $Binding.hash; recipeId = $Binding.recipeId; scrubbed = $true; capabilities = @($Guest.capabilities); guest = $proof }
+            bindingHash = $Binding.hash; recipeId = $Binding.recipeId; bundleHash = $Binding.bundleHash; scrubbed = $true; capabilities = @($Guest.capabilities); guest = $proof
+            builder = [ordered]@{ vmName = $State.vmName; vmId = $State.vmId; guestMac = $current.guestMac
+                sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $State.instancePath 'id_ed25519.pub') -Algorithm SHA256).Hash }; selectorBefore = $selectorBefore }
         Write-RunnerJson $receiptPath $receipt
         Assert-RunnerProtectedPath $receiptPath
         Invoke-RunnerTransitionCheckpoint 'image-receipt'
         Assert-SessionAlive $State
-        $selector = [ordered]@{ schema = 1; tag = $script:RunnerTag; id = $id; previous = $(if ($null -ne $old) { $old.selector.id } else { '' })
-            receiptHash = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash }
         # Bulk copy and all full-disk hashes run outside the guardian's mutex.
-        # Cleanup may win while copying; only a fresh proof can commit selection.
+        # Cleanup may win while copying; only a fresh proof can retain a candidate.
         $mutex = Enter-RunnerLock
         try {
             Assert-SessionAlive $State
@@ -257,20 +278,94 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
             Assert-RunnerInstanceUnreferenced $current
             Assert-RunnerImageDiskUnreferenced $source
             Assert-RunnerImageDiskUnreferenced $candidate
-            Write-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json') $selector
-            Invoke-RunnerTransitionCheckpoint 'image-selector'
+            if (-not (Test-RunnerEvidence (Join-Path $script:RunnerRoot 'prepared-image.json') $selectorBefore)) { throw 'Selection changed during candidate creation.' }
+            $retained = $true
         } finally { Exit-RunnerLock $mutex }
-        Remove-RunnerOldImages ([pscustomobject]$selector)
+        return [pscustomobject]@{ id = $id; path = $candidate; receiptPath = $receiptPath; receiptHash = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash }
     } finally {
-        $selected = Read-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json')
-        if ($null -eq $selected -or $selected.id -cne $id) {
-            foreach ($path in @($candidate, $receiptPath)) {
-                if (Test-Path -LiteralPath $path) {
-                    [void](Assert-OwnedPath $path); Assert-RunnerProtectedPath $path
-                    if ($path -ceq $candidate) { Assert-RunnerImageDiskUnreferenced $path }
-                    Remove-Item -LiteralPath $path -Force -ErrorAction Stop
-                }
-            }
+        if (-not $retained) {
+            Remove-RunnerImageCandidate ([pscustomobject]@{ id = $id })
+        }
+    }
+}
+
+function Assert-RunnerImageCandidate($Candidate, $Config) {
+    Assert-RunnerPreparationAuthorized
+    if ($null -eq $Candidate -or $Candidate.id -cnotmatch '^[0-9a-f]{32}$' -or $Candidate.receiptHash -cnotmatch '^[0-9A-F]{64}$') { throw 'Image candidate identity is invalid.' }
+    $directory = Assert-OwnedPath (Join-Path $script:RunnerRoot 'prepared-images')
+    $disk = Join-Path $directory ($Candidate.id + '.vhdx'); $receiptPath = Join-Path $directory ($Candidate.id + '.json')
+    if ($Candidate.path -cne $disk -or $Candidate.receiptPath -cne $receiptPath) { throw 'Image candidate paths differ from its protected identity.' }
+    foreach ($path in @($directory, $disk, $receiptPath)) { Assert-RunnerProtectedPath $path }
+    if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $Candidate.receiptHash) { throw 'Image candidate receipt changed.' }
+    $receipt = Read-RunnerJson $receiptPath
+    $binding = Get-RunnerImageBinding $Config
+    if ($receipt.schema -ne 1 -or $receipt.tag -cne $script:RunnerTag -or $receipt.id -cne $Candidate.id -or
+        $receipt.scrubbed -ne $true -or $receipt.baseHash -cne $Config.baseSha256 -or $receipt.bindingHash -cne $binding.hash -or $receipt.recipeId -cne $binding.recipeId -or
+        $receipt.bundleHash -cne $binding.bundleHash -or $receipt.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or $receipt.diskHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $receipt.builder.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or [guid]$receipt.builder.vmId -eq [guid]::Empty -or
+        $receipt.builder.sshPublicKeyHash -cnotmatch '^[0-9A-F]{64}$' -or $receipt.builder.guestMac -cnotmatch '^02[0-9A-F]{10}$') { throw 'Image candidate proof/binding is invalid.' }
+    [void](Get-RunnerEvidenceValue $receipt.selectorBefore)
+    if (-not (Test-RunnerEvidence (Join-Path $script:RunnerRoot 'prepared-image.json') $receipt.selectorBefore)) { throw 'Selected image changed while preparing a candidate.' }
+    Assert-RunnerImageStorageReceipt $receipt.guest
+    Assert-RunnerImageDiskUnreferenced $disk
+    # The candidate itself is never booted. Both verifier admission and final
+    # publication hash this original, outside the guardian's state lock.
+    if ((Get-FileHash -LiteralPath $disk -Algorithm SHA256).Hash -cne $receipt.diskHash) { throw 'Unbooted candidate disk changed.' }
+    return $receipt
+}
+
+function Assert-RunnerImageCloneProof($Receipt, $Verification) {
+    if ($null -eq $Verification -or $Verification.schema -ne 1 -or $Verification.purpose -cne 'verify-image' -or
+        $Verification.candidateId -cne $Receipt.id -or $Verification.diskHash -cne $Receipt.diskHash -or
+        $Verification.bindingHash -cne $Receipt.bindingHash -or $Verification.recipeId -cne $Receipt.recipeId -or
+        $Verification.bundleHash -cne $Receipt.bundleHash -or $Verification.cleanupVerified -ne $true -or
+        $Verification.readiness -cne 'cloud-init-and-runner-prerequisites' -or
+        $Verification.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or $Verification.vmName -ceq $Receipt.builder.vmName -or
+        [guid]$Verification.vmId -eq [guid]::Empty -or [guid]$Verification.vmId -eq [guid]$Receipt.builder.vmId -or
+        $Verification.guestMac -cnotmatch '^02[0-9A-F]{10}$' -or $Verification.guestMac -ceq $Receipt.builder.guestMac -or
+        $Verification.sshPublicKeyHash -cnotmatch '^[0-9A-F]{64}$' -or $Verification.sshPublicKeyHash -ceq $Receipt.builder.sshPublicKeyHash -or
+        $Verification.readinessSeconds -lt 0 -or [double]::IsNaN($Verification.readinessSeconds) -or [double]::IsInfinity($Verification.readinessSeconds) -or
+        [DateTime]::Parse($Verification.readyUtc).ToUniversalTime() -gt [DateTime]::UtcNow.AddMinutes(1)) { throw 'Fresh clone readiness/cleanup proof is invalid.' }
+}
+
+function Publish-RunnerPreparedImage($Candidate, $Config, $Verification) {
+    Assert-RunnerPreparationAuthorized
+    Assert-RunnerControlIdle
+    $receipt = Assert-RunnerImageCandidate $Candidate $Config
+    Assert-RunnerImageCloneProof $receipt $Verification
+    if ((Get-HostNetworkFingerprint) -cne $Verification.networkFingerprint) { throw 'Host network changed after clone verification; publication refused.' }
+    $receipt | Add-Member -NotePropertyName cloneVerification -NotePropertyValue $Verification -Force
+    Write-RunnerJson $Candidate.receiptPath $receipt
+    Invoke-RunnerTransitionCheckpoint 'image-verified-receipt'
+    $old = Get-RunnerEvidenceValue $receipt.selectorBefore
+    $selector = [ordered]@{ schema = 1; tag = $script:RunnerTag; id = $Candidate.id
+        previous = $(if ($null -ne $old) { $old.id } else { '' }); receiptHash = (Get-FileHash -LiteralPath $Candidate.receiptPath -Algorithm SHA256).Hash }
+    $mutex = Enter-RunnerLock
+    try {
+        Assert-RunnerPreparationAuthorized
+        Assert-RunnerControlIdle
+        if ((Get-RunnerImageBinding $Config).hash -cne $receipt.bindingHash -or
+            -not (Test-RunnerEvidence (Join-Path $script:RunnerRoot 'prepared-image.json') $receipt.selectorBefore)) { throw 'Trusted inputs/selection changed before verified image publication.' }
+        Assert-RunnerImageDiskUnreferenced $Candidate.path
+        Assert-RunnerProtectedPath $Candidate.receiptPath
+        if ((Get-FileHash -LiteralPath $Candidate.receiptPath -Algorithm SHA256).Hash -cne $selector.receiptHash) { throw 'Verified receipt changed before selector commit.' }
+        Write-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json') $selector
+        Invoke-RunnerTransitionCheckpoint 'image-selector'
+    } finally { Exit-RunnerLock $mutex }
+    Remove-RunnerOldImages ([pscustomobject]$selector)
+}
+
+function Remove-RunnerImageCandidate($Candidate) {
+    if ($Candidate.id -cnotmatch '^[0-9a-f]{32}$') { throw 'Candidate cleanup identity is invalid.' }
+    $selected = Get-RunnerImageRecord
+    if ($null -ne $selected -and ($selected.selector.id -ceq $Candidate.id -or $selected.selector.previous -ceq $Candidate.id)) { return }
+    $directory = Assert-OwnedPath (Join-Path $script:RunnerRoot 'prepared-images')
+    foreach ($extension in @('vhdx', 'json')) {
+        $path = Join-Path $directory ($Candidate.id + '.' + $extension)
+        if (Test-Path -LiteralPath $path) {
+            Assert-RunnerProtectedPath $path
+            if ($extension -ceq 'vhdx') { Assert-RunnerImageDiskUnreferenced $path }
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
     }
 }

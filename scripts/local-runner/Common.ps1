@@ -692,10 +692,16 @@ function Complete-RunnerPilotClaim($State) {
 
 function Assert-StateIdentity($State) {
     if ($State.PSObject.Properties.Name -contains 'purpose') {
-        if ($State.purpose -cnotin @('job', 'prepare') -or
-            ($State.purpose -ceq 'prepare' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
+        if ($State.purpose -cnotin @('job', 'prepare', 'verify-image') -or
+            ($State.purpose -cne 'job' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
             throw 'Session purpose may not carry job authorization in a preparation session.'
         }
+        $hasCandidate = $State.PSObject.Properties.Name -contains 'imageCandidate'
+        if ($State.purpose -ceq 'verify-image') {
+            if (-not $hasCandidate -or $State.imageCandidate.id -cnotmatch '^[0-9a-f]{32}$' -or
+                $State.imageCandidate.diskHash -cnotmatch '^[0-9A-F]{64}$' -or $State.imageCandidate.bindingHash -cnotmatch '^[0-9A-F]{64}$' -or
+                $State.imageCandidate.recipeId -cnotmatch '^[0-9A-F]{64}$') { throw 'Image verifier requires its protected candidate binding.' }
+        } elseif ($hasCandidate) { throw 'Only the credential-free verifier may carry an image candidate.' }
     }
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'

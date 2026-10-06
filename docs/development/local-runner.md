@@ -76,7 +76,11 @@ pinned Node/npm toolchain, npm download cache, Playwright headless browser/syste
 dependencies and the enabled Supabase service/test images. It pulls images without
 starting Supabase or creating database containers/volumes. The builder scrubs its
 temporary checkout, input files, SSH keys, credentials/config/history and cloud-init
-identity before emitting a bounded receipt and shutting down gracefully. No job
+identity before emitting a bounded receipt and shutting down gracefully. It uses
+[cloud-init's documented clean options](https://docs.cloud-init.io/en/latest/reference/cli.html)
+to remove generated network configuration and reset the machine ID, then requires
+the builder's `50-cloud-init.yaml` to be absent and the systemd machine ID to be
+`uninitialized`. The fresh-clone gate verifies the resulting boot behavior. No job
 disk is ever retained as an image.
 
 Storage is pulled once from an available official mirror. The builder adds the
@@ -87,10 +91,18 @@ against the installed trusted manifest before accepting scrub/publication proof.
 
 The host requires successful scrub proof, the exact recorded VM identity in
 `Off` state, verified VM removal, and an offline disk with no registered VM
-references. It copies that disk to a new protected candidate, hashes it and writes
-its receipt before atomically publishing `prepared-image.json` last. Receipts
+references. It copies that disk to a new protected, unselected candidate and
+hashes it. While pickup remains suspended under the same owner control, a second
+credential-free `verify-image` session boots a full copy through the ordinary
+prepared path, with a fresh MAC, SSH key and NoCloud instance. The verifier must
+pass the canonical cloud-init and runner prerequisites (including Docker for its
+fixed heavy profile), network isolation and live guardian checks. Its VM removal
+and unreferenced instance cleanup must then complete successfully. The original
+candidate is never booted: its hash is checked before verification and again
+after verifier cleanup, before publishing `prepared-image.json` last. Receipts
 bind the complete installed bundle, five inputs, generic base hash, scrub proof,
-actual Docker image digests and browser/OS provenance. Failed/interrupted builds
+actual Docker image digests, browser/OS provenance, and the fresh verifier's
+identity, readiness and cleanup proof. Failed/interrupted builds or verification
 cannot replace the selected image. Retention keeps the selected image and one
 prior image, deleting only recognized protected unreferenced candidates.
 
@@ -103,7 +115,16 @@ that one disposable guest. A job cannot write caches or disks back to the host;
 its entire disk is deleted after execution. The separate verified runner archive
 cache keeps its existing metadata/hash checks.
 
-Image publication copies and hashes the unselected candidate outside the state lock, allowing the guardian/watchdog to cancel the session during this work. The selector commit reacquires the lock and requires the same session/GUID, committed scrub proof, unchanged trusted binding and offline/unreferenced source and candidate. Cleanup winning this race refuses selection and removes only the unselected candidate. Full hashes of the previous image also run outside the state lock.
+Candidate copy and full hashes run outside the state lock, allowing the guardian
+to cancel the builder during this work. Staging requires a fresh builder
+session/GUID, committed scrub proof, unchanged trusted binding and
+offline/unreferenced source and candidate. Publication follows successful
+verifier cleanup and briefly reacquires the state lock to confirm idle ownership,
+unchanged binding/selector and an offline, unreferenced candidate. Failed
+verification keeps Stop in place and removes only its unselected candidate;
+uncertain VM removal retains the canonical VM/state for investigation. Interrupted
+unselected files are purged by the next explicit preparation after reference
+checks. There is no resumable verification or publication action.
 
 Absent prepared images or changed trusted inputs use the generic base, with an
 explicit reason. Generic guests use the runner's default writable tool-cache path.

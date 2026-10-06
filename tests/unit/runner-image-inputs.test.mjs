@@ -187,7 +187,74 @@ describe('owner-reviewed runner image inputs', () => {
       expect(result.status).not.toBe(0);
     },
   );
+
+  it('scrubs the builder network and leaves systemd identity uninitialized', () => {
+    const result = scrubFixture();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('scrub-verified\n');
+  });
+
+  it.each([
+    'clean-failure',
+    'retained-netplan',
+    'blank-machine-id',
+    'old-machine-id',
+    'missing-machine-id',
+    'oversized-machine-id',
+  ])('refuses scrub proof after %s', (mode) => {
+    const result = scrubFixture(mode);
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain('scrub-verified');
+  });
 });
+
+function scrubFixture(mode = 'success') {
+  const root = mkdtempSync(join(tmpdir(), 'itir-image-scrub-'));
+  try {
+    const recipe = readFileSync(
+      'scripts/local-runner/Image.Prepare.sh',
+      'utf8',
+    );
+    const helper = recipe.match(/scrub_cloud_init\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(helper).toBeTruthy();
+    const bash =
+      process.platform === 'win32'
+        ? join(process.env.ProgramFiles, 'Git/bin/bash.exe')
+        : 'bash';
+    // Execute the production helper with only its filesystem prefix relocated.
+    // cloud-init is mocked so no host network/identity files can be modified.
+    const script = `set -euo pipefail
+root=$1; mode=$2
+if command -v cygpath >/dev/null; then root=$(cygpath -u "$root"); fi
+mkdir -p "$root/etc/netplan"
+printf 'network: builder-mac\\n' > "$root/etc/netplan/50-cloud-init.yaml"
+printf '0123456789abcdef0123456789abcdef\\n' > "$root/etc/machine-id"
+cloud-init() {
+  [[ "$*" == 'clean --logs --seed --machine-id --configs network' ]] || return 90
+  [[ $mode != clean-failure ]] || return 1
+  if [[ $mode != retained-netplan ]]; then rm -- "$root/etc/netplan/50-cloud-init.yaml"; fi
+  case $mode in
+    blank-machine-id) : > "$root/etc/machine-id";;
+    old-machine-id) ;;
+    missing-machine-id) rm -- "$root/etc/machine-id";;
+    oversized-machine-id) printf '%100s' x > "$root/etc/machine-id";;
+    *) printf 'uninitialized\\n' > "$root/etc/machine-id";;
+  esac
+}
+${helper.replaceAll('/etc/', '"$root"/etc/')}
+scrub_cloud_init
+printf 'scrub-verified\\n'
+`;
+    const result = spawnSync(bash, ['-s', '--', root, mode], {
+      input: script,
+      encoding: 'utf8',
+    });
+    expect(result.error).toBeUndefined();
+    return result;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 function aliasFixture(resolved, mode = 'success') {
   const root = mkdtempSync(join(tmpdir(), 'itir-image-alias-'));

@@ -139,9 +139,17 @@ rm -rf -- /home/runner/.npm/_logs /home/runner/.npm/_update-notifier-last-checke
 find /home/runner /root -maxdepth 1 -type f \( -name '*history' -o -name '.node_repl_history' \) -delete
 apt-get clean
 rm -rf -- /var/lib/apt/lists/* /tmp/* /var/tmp/*
-rm -f -- /etc/ssh/ssh_host_* /etc/machine-id /var/lib/dbus/machine-id
-touch /etc/machine-id
-cloud-init clean --logs --seed
+rm -f -- /etc/ssh/ssh_host_* /var/lib/dbus/machine-id
+# Let cloud-init reset its generated network configuration and systemd identity.
+# A clone must receive its own MAC-bound netplan configuration on first boot.
+scrub_cloud_init() {
+  cloud-init clean --logs --seed --machine-id --configs network || return 1
+  [[ ! -e /etc/netplan/50-cloud-init.yaml && ! -L /etc/netplan/50-cloud-init.yaml ]] || return 1
+  [[ -f /etc/machine-id && ! -L /etc/machine-id ]] || return 1
+  [[ $(wc -c < /etc/machine-id) == 14 ]] || return 1
+  [[ $(cat -- /etc/machine-id) == uninitialized ]] || return 1
+}
+scrub_cloud_init
 chown -R runner:runner /home/runner/.npm /home/runner/.cache "$RUNNER_TOOL_CACHE"
 chmod 755 /opt/it-inventory-image
 chmod 644 "$receipt"
