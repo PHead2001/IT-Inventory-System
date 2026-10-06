@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import { Worker } from 'node:worker_threads';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { cleanupClockChecks } from './files-cleanup-clock';
 
 function local(value: string | undefined, port: number) {
   assert.ok(value);
@@ -1663,6 +1664,15 @@ async function main() {
     'select id from public.locations where active and can_hold_inventory limit 1',
   );
   const parent = await asset(staff, cat.id, loc.id);
+  checks += await cleanupClockChecks(
+    db,
+    dbUrl,
+    staff.id,
+    viewer.id,
+    await asset(staff, cat.id, loc.id),
+    keyId,
+    secret,
+  );
   // A cleanup request waiting on the global file guard must not hold the
   // inventory parent lock and block an unrelated metadata writer.
   const guardHolder = new Client({ connectionString: dbUrl });

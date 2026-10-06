@@ -6,6 +6,7 @@ import { Client } from 'pg';
 import { format } from 'prettier';
 import { localStatus, npm } from './runtime.mjs';
 import { verifyLocalStorageRuntime } from './local-storage-version.mjs';
+import { compareLocalStagingRoutineManifest } from './staging-file-routine-check.mjs';
 import {
   STAGING_ROUTINE_CATALOG_SQL,
   STAGING_TRIGGER_CATALOG_SQL,
@@ -53,10 +54,10 @@ try {
       await format(JSON.stringify(manifest), { parser: 'json' }),
     );
   else
-    assert.deepEqual(
+    await compareLocalStagingRoutineManifest(
       manifest,
       JSON.parse(readFileSync(target, 'utf8')),
-      'Canonical staging routine manifest drift; review an explicit local regeneration',
+      status.DB_URL,
     );
   console.log(
     write

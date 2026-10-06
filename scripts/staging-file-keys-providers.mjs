@@ -40,6 +40,7 @@ export const STAGING_FILE_MIGRATIONS = Object.freeze([
   '20261005142029',
   '20261005153057',
   '20261005163814',
+  '20261006051349',
 ]);
 // Version history and signatures cannot prove the CP5 implementation. Compare
 // the reviewed portable manifest at each fresh guard, including legacy wrappers.

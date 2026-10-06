@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { compareLocalStagingRoutineManifest } from '../scripts/staging-file-routine-check.mjs';
 import { boundedJsonRequest, SQL } from '../scripts/preview-file-providers.mjs';
 import {
   provisionStagingFiles,
@@ -36,6 +46,84 @@ const backend = { fingerprint: 'c'.repeat(64), updatedAt: 10 };
 const revision = migrationRevision(
   STAGING_FILE_MIGRATIONS.map((version) => ({ version })),
 );
+test('local catalog drift produces a review artifact, fails and leaves expectations untouched', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'staging-routine-candidate-'));
+  try {
+    const expectedPath = join(directory, 'expected.json');
+    const artifact = join(directory, 'test-results', 'candidate.json');
+    const expectedBytes = JSON.stringify(routineManifest);
+    writeFileSync(expectedPath, expectedBytes);
+    const expected = JSON.parse(readFileSync(expectedPath, 'utf8'));
+    await compareLocalStagingRoutineManifest(
+      structuredClone(expected),
+      expected,
+      'postgresql://localhost:54322/postgres',
+      artifact,
+    );
+    assert.equal(
+      existsSync(artifact),
+      false,
+      'matching catalogs need no candidate',
+    );
+    const changed = structuredClone(expected);
+    changed.routines.find((row) =>
+      row.signature.startsWith('private.'),
+    ).body_sha256 = 'e'.repeat(64);
+    await assert.rejects(
+      compareLocalStagingRoutineManifest(
+        changed,
+        expected,
+        'postgresql://127.0.0.1:54322/postgres',
+        artifact,
+      ),
+      /manifest drift; review candidate/,
+    );
+    assert.deepEqual(JSON.parse(readFileSync(artifact, 'utf8')), changed);
+    assert.equal(readFileSync(expectedPath, 'utf8'), expectedBytes);
+    assert.deepEqual(
+      expected,
+      routineManifest,
+      'comparison does not mutate expectations',
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('candidate diagnostics reject hosted targets and unexpected secret or identity fields', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'staging-routine-refusal-'));
+  try {
+    const artifact = join(directory, 'candidate.json');
+    const changed = structuredClone(routineManifest);
+    changed.routines.find((row) =>
+      row.signature.startsWith('private.'),
+    ).body_sha256 = 'e'.repeat(64);
+    await assert.rejects(
+      compareLocalStagingRoutineManifest(
+        changed,
+        routineManifest,
+        'postgresql://example.invalid:54322/postgres',
+        artifact,
+      ),
+      /Refusing nonlocal/,
+    );
+    for (const field of ['secret', 'object_id', 'source']) {
+      const unsafe = structuredClone(changed);
+      unsafe.routines[0][field] = 'must not be captured';
+      await assert.rejects(
+        compareLocalStagingRoutineManifest(
+          unsafe,
+          routineManifest,
+          'postgresql://localhost:54322/postgres',
+          artifact,
+        ),
+      );
+    }
+    assert.equal(existsSync(artifact), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 function fixture() {
   const writes = [];
   const original = {
@@ -240,6 +328,19 @@ test('CP5 schema without staging-allocation accounting and a matching digest can
   f.state.schemaReady = false;
   f.state.revision = migrationRevision(
     STAGING_FILE_MIGRATIONS.slice(0, 2).map((version) => ({ version })),
+  );
+  f.options.expectedMigrationRevision = f.state.revision;
+  await rejectsCode(
+    () => provisionStagingFiles(f.options),
+    'STAGING_SCHEMA_DENIED',
+  );
+  assert.deepEqual(f.writes, []);
+});
+test('CP5 schema without cleanup lease timing and a matching digest cannot write', async () => {
+  const f = fixture();
+  f.state.schemaReady = false;
+  f.state.revision = migrationRevision(
+    STAGING_FILE_MIGRATIONS.slice(0, 3).map((version) => ({ version })),
   );
   f.options.expectedMigrationRevision = f.state.revision;
   await rejectsCode(

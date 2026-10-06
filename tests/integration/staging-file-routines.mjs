@@ -6,11 +6,13 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import manifest from '../../scripts/staging-file-routines.json' with { type: 'json' };
 import { STAGING_SCHEMA_SQL } from '../../scripts/staging-file-keys-providers.mjs';
+import { compareLocalStagingRoutineManifest } from '../../scripts/staging-file-routine-check.mjs';
 import {
   STAGING_ROUTINE_CATALOG_SQL,
   STAGING_TRIGGER_CATALOG_SQL,
   STAGING_STORAGE_CATALOG_SQL,
   STAGING_STORAGE_PROVIDER_BASELINE,
+  STAGING_FILE_API_COMPARISON_SQL,
 } from '../../scripts/staging-file-routines.mjs';
 
 const migrationBody = (filename, name) => {
@@ -188,10 +190,21 @@ export async function verifyStagingRoutineContract(db) {
     );
     checks++;
   };
-  assert.deepEqual(
-    await catalog(),
-    manifest.routines,
-    'fresh canonical catalog must match checked-in manifest',
+  assert.equal(
+    (await db.query(`select ${STAGING_FILE_API_COMPARISON_SQL} as ready`))
+      .rows[0].ready,
+    true,
+    'fresh canonical catalog has only the reviewed public file API',
+  );
+  await compareLocalStagingRoutineManifest(
+    {
+      version: 5,
+      routines: await catalog(),
+      triggers: await triggers(),
+      storage: await storage(),
+    },
+    manifest,
+    process.env.LOCAL_DB_URL,
   );
   assert.deepEqual(
     await triggers(),
@@ -348,6 +361,38 @@ export async function verifyStagingRoutineContract(db) {
     },
   );
   for (const [note, signature, body] of [
+    [
+      'cleanup claim retains transaction-start lease timing',
+      'public.inventory_file_cleanup_claim_parent(text,uuid,integer,text,text,bigint,text)',
+      migrationBody(
+        '20261005142029_parent_scoped_file_readiness.sql',
+        'public.inventory_file_cleanup_claim_parent',
+      ),
+    ],
+    [
+      'cleanup status retains transaction-start lease timing',
+      'public.inventory_file_cleanup_status(text,uuid)',
+      migrationBody(
+        '20261005142029_parent_scoped_file_readiness.sql',
+        'public.inventory_file_cleanup_status',
+      ),
+    ],
+    [
+      'cleanup confirmation retains transaction-start lease enforcement',
+      'public.inventory_file_cleanup_confirm(uuid,text,text,bigint,text)',
+      migrationBody(
+        '20260925153015_integrated_private_files.sql',
+        'public.inventory_file_cleanup_confirm',
+      ),
+    ],
+    [
+      'Storage DELETE retains transaction-start lease enforcement',
+      'private.file_storage_delete(text,text)',
+      migrationBody(
+        '20260925153015_integrated_private_files.sql',
+        'private.file_storage_delete',
+      ),
+    ],
     [
       'old additive accounting body',
       'private.file_staging_bytes(timestamptz)',
