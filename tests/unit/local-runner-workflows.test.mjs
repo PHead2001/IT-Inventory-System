@@ -1,4 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 import { foundationGates } from '../../scripts/ci-gates.mjs';
@@ -15,6 +17,48 @@ const profileLabels = new Set([
   'it-inventory-mid',
   'it-inventory-heavy',
 ]);
+const foundation = load(ci);
+const npmSetup = foundation.jobs.required.steps.find(
+  (step) => step.id === 'npm_setup',
+).run;
+
+function exerciseNpmSetup(version, probeStatus = 0, installStatus = 0) {
+  const bash =
+    process.platform === 'win32'
+      ? join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe')
+      : 'bash';
+  // Exercise the real workflow shell with a function fixture; never invoke npm.
+  return spawnSync(
+    bash,
+    [
+      '--noprofile',
+      '--norc',
+      '-e',
+      '-o',
+      'pipefail',
+      '-c',
+      `npm() {
+        if [ "$*" = '--version' ]; then
+          printf '%s\\n' "$FIXTURE_NPM_VERSION"
+          return "$FIXTURE_PROBE_STATUS"
+        fi
+        printf '%s\\n' "$*"
+        return "$FIXTURE_INSTALL_STATUS"
+      }
+      ${npmSetup}`,
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        FIXTURE_NPM_VERSION: version,
+        FIXTURE_PROBE_STATUS: String(probeStatus),
+        FIXTURE_INSTALL_STATUS: String(installStatus),
+      },
+    },
+  );
+}
 
 function auditWorkflowRouting(name, source) {
   const workflow = load(source);
@@ -50,6 +94,130 @@ function auditWorkflowRouting(name, source) {
 }
 
 describe('disposable local runner workflow contracts', () => {
+  it('pins every application Node setup to the checked-out exact version', () => {
+    expect(readFileSync('.nvmrc', 'utf8').trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    for (const name of ['ci.yml', 'preview-access.yml', 'staging-sync.yml']) {
+      const jobs = load(readWorkflow(name)).jobs;
+      const setups = Object.values(jobs).flatMap((job) =>
+        (job.steps ?? []).filter((step) =>
+          step.uses?.startsWith('actions/setup-node@'),
+        ),
+      );
+      expect(setups.length, name).toBeGreaterThan(0);
+      for (const setup of setups) {
+        expect(setup.with['node-version-file'], name).toBe('.nvmrc');
+        expect(setup.with['node-version'], name).toBeUndefined();
+        expect(setup.with.cache, name).toBeUndefined();
+        expect(setup.with['package-manager-cache'], name).toBe(false);
+      }
+    }
+  });
+
+  it.each(['required', 'production_database'])(
+    'retains an unconditional fresh lockfile install in %s',
+    (name) => {
+      const steps = foundation.jobs[name].steps;
+      const installs = steps.filter((step) => /^npm ci\b/.test(step.run ?? ''));
+      expect(installs).toHaveLength(1);
+      expect(installs[0].run).toBe('npm ci --prefer-offline');
+      expect(installs[0].if).toBeUndefined();
+      expect(installs[0]['continue-on-error']).toBeUndefined();
+      expect(steps.find((step) => step.run?.includes('npm@11.11.0')).run).toBe(
+        npmSetup,
+      );
+    },
+  );
+
+  it.each([
+    ['11.11.0', 0, ''],
+    ['11.10.0', 0, 'install --global npm@11.11.0\n'],
+    ['', 1, 'install --global npm@11.11.0\n'],
+    ['11.11.0', 1, 'install --global npm@11.11.0\n'],
+  ])(
+    'sets up exact npm from version %s and probe status %s',
+    (version, status, output) => {
+      const result = exerciseNpmSetup(version, status);
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe(output);
+    },
+  );
+
+  it('fails npm setup when the required version cannot be installed', () => {
+    const result = exerciseNpmSetup('11.10.0', 0, 23);
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(23);
+    expect(result.stdout).toBe('install --global npm@11.11.0\n');
+  });
+
+  it('keeps browser preparation unconditional with a verified-cache helper', () => {
+    const browser = foundation.jobs.required.steps.find(
+      (step) => step.id === 'browser_install',
+    );
+    expect(browser.run).toBe('node scripts/install-ci-browser.mjs');
+    expect(browser.if).toBeUndefined();
+    expect(browser['continue-on-error']).toBeUndefined();
+  });
+
+  it.each([
+    [0, 0, 0, 0],
+    [1, 0, 0, 1],
+    [1, 27, 27, undefined],
+  ])(
+    'reuses the exact pilot image or pulls a miss (%s, %s)',
+    (cachedStatus, pullStatus, status, pulls) => {
+      const run = load(pilot).jobs.pilot.steps.find((step) =>
+        step.run?.includes('docker pull'),
+      ).run;
+      const image = run.match(/image='(alpine@sha256:[a-f0-9]{64})'/)[1];
+      const fragment = run.match(
+        /if ! timeout 30s docker image inspect[^]*?\n\s*fi/,
+      )[0];
+      const bash =
+        process.platform === 'win32'
+          ? join(process.env.ProgramFiles, 'Git/bin/bash.exe')
+          : 'bash';
+      const result = spawnSync(
+        bash,
+        [
+          '--noprofile',
+          '--norc',
+          '-e',
+          '-o',
+          'pipefail',
+          '-c',
+          `
+      pulls=0
+      timeout() { shift; "$@"; }
+      docker() {
+        if [ "$1" = image ]; then return "$FIXTURE_CACHED_STATUS"; fi
+        if [ "$1" = pull ]; then pulls=$((pulls+1)); return "$FIXTURE_PULL_STATUS"; fi
+        return 99
+      }
+      image='${image}'
+      ${fragment}
+      printf '%s' "$pulls"
+    `,
+        ],
+        {
+          encoding: 'utf8',
+          timeout: 10_000,
+          env: {
+            ...process.env,
+            FIXTURE_CACHED_STATUS: String(cachedStatus),
+            FIXTURE_PULL_STATUS: String(pullStatus),
+          },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(status);
+      if (pulls !== undefined) expect(result.stdout).toBe(String(pulls));
+      expect(run).toContain('docker create --name "$container"');
+      expect(run).toContain('docker start --attach "$container"');
+      expect(run).toContain('docker rm "$container"');
+    },
+  );
+
   it('audits every job in every YAML workflow, including future files, without reusable workflow bypasses', () => {
     const workflows = readdirSync('.github/workflows').filter((name) =>
       /\.ya?ml$/i.test(name),
@@ -176,7 +344,9 @@ describe('disposable local runner workflow contracts', () => {
         '${{ steps.' + gate + '.outcome }}',
       );
     }
-    expect(steps.filter((step) => step.run === 'npm ci')).toHaveLength(1);
+    expect(
+      steps.filter((step) => step.run === 'npm ci --prefer-offline'),
+    ).toHaveLength(1);
     expect(steps.find((step) => step.id === 'app').run).toBe(
       'npm run validate:app',
     );

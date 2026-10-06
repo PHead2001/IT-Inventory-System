@@ -56,6 +56,63 @@ before normal ephemeral cleanup, to establish actual candidate allocation.
 
 ## Owner setup
 
+### Prepared guest image
+
+After installing the reviewed bundle, choose **Prepare trusted image while idle**
+in Setup once. This owner action builds a credential-free guest from the pinned
+generic Ubuntu base. It waits for the idle supervisor to acknowledge pickup
+suspension and refuses an existing session; it never stops a running job. The
+builder uses the fixed heavy memory/CPU profile, the existing network isolation,
+guardian, readiness checks, hard deadline and owned cleanup. It never decrypts
+the GitHub credential, downloads/registers a runner, receives a JIT value, checks
+out a PR or executes a job. Successful preparation resumes previously active
+pickup when no explicit Stop marker existed. Previously stopped or inactive
+pickup stays suspended; failed preparation stays suspended for investigation.
+
+The trusted installed bundle contains five builder inputs: `Image.Prepare.sh`,
+`Image.Inputs.json`, `Image.Package.json`, `Image.PackageLock.json` and
+`Image.Supabase.toml`. The fixed recipe installs OS/Docker prerequisites, the
+pinned Node/npm toolchain, npm download cache, Playwright headless browser/system
+dependencies and the enabled Supabase service/test images. It pulls images without
+starting Supabase or creating database containers/volumes. The builder scrubs its
+temporary checkout, input files, SSH keys, credentials/config/history and cloud-init
+identity before emitting a bounded receipt and shutting down gracefully. No job
+disk is ever retained as an image.
+
+The host requires successful scrub proof, the exact recorded VM identity in
+`Off` state, verified VM removal, and an offline disk with no registered VM
+references. It copies that disk to a new protected candidate, hashes it and writes
+its receipt before atomically publishing `prepared-image.json` last. Receipts
+bind the complete installed bundle, five inputs, generic base hash, scrub proof,
+actual Docker image digests and browser/OS provenance. Failed/interrupted builds
+cannot replace the selected image. Retention keeps the selected image and one
+prior image, deleting only recognized protected unreferenced candidates.
+
+Each job still receives a **full fresh disk copy**, a new MAC/SSH key/NoCloud
+instance ID and its ordinary memory profile. Prepared copies omit apt installation
+only after all protection/provenance/content checks pass. Node uses a guest-local
+`/opt/hostedtoolcache` with setup-node completed markers; npm and browser caches
+live in the guest's normal runner home. New PR pins download cache misses inside
+that one disposable guest. A job cannot write caches or disks back to the host;
+its entire disk is deleted after execution. The separate verified runner archive
+cache keeps its existing metadata/hash checks.
+
+Absent prepared images or changed trusted inputs use the generic base, with an
+explicit reason. Generic guests use the runner's default writable tool-cache path.
+Corrupt hashes, unexpected ACLs and reparse points fail closed. Status compares
+built and installed recipe identities and reports fallback; it checks metadata
+only to stay fast. Full disk hashing and offline/reference checks occur before
+job pickup. An image remains installation-specific evidence: offline tests do not
+prove live guest boot, scrub, graceful shutdown, cache hits or workload timing.
+
+To refresh trusted pins reproducibly, review the recipe and repository pins, then
+run `Write-Bundle.ps1 -Version <strictly newer version>` in the source checkout.
+That helper runs `node scripts/runner-image-inputs.mjs`, using the already installed
+pinned Playwright package to create deterministic snapshots without downloads.
+`node scripts/runner-image-inputs.mjs --check` detects stale source snapshots.
+Install the new bundle through Setup, then explicitly prepare its image. PR changes
+never trigger host image preparation or host writeback.
+
 Double-click `scripts/local-runner/Setup.cmd` and accept the Windows elevation prompt. Its small menu offers **Enable Hyper-V**, **Install or resume**, and **Store GitHub token**. Enabling the feature never restarts Windows automatically; restart if Windows requests it, then open Setup again and choose Install. A failed step stays visible and can be retried from the menu. The defaults target `PHead2001/IT-Inventory-System` and GitHub's default runner group ID `1`; the JIT API will reject an invalid group rather than silently choose another repository. Setup stops if another Windows NAT occupies the host, including one used by Rancher/WSL. It never removes or changes that NAT, the Rancher distribution, or an existing VM.
 
 Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: the generic [Noble cloud QCOW2 image](https://cloud-images.ubuntu.com/releases/noble/release-20260926/) and [Ubuntu 24.04.5 WSL image](https://releases.ubuntu.com/24.04/). A dedicated WSL image converter installs `qemu-utils` and converts the verified QCOW2 into a Hyper-V VHDX. WSL retains Windows host integration and is a trusted setup tool, not an isolated job sandbox. Its random distribution name is recorded in the protected setup stage before import; resume requires the same Windows WSL registration and owned base path. An unrecognized or preexisting converter is refused. Conversion writes a temporary VHDX, validates and resizes it, then records the completed output hash. Resume verifies both the source and output hashes; a partial or unreceipted VHDX is regenerated. Before setup completes or the token menu can run, setup verifies the exact owned converter registration, terminates it, verifies ownership again, unregisters it, and verifies its absence. Retirement failure keeps setup incomplete; retry uses the protected stage. The Azure VHD is intentionally excluded: [Canonical says it will not work on local Hyper-V](https://ubuntu.com/docs/public-images/public-images-reference/artifacts/). Canonical documents [generic image conversion and NoCloud on Hyper-V](https://ubuntu.com/blog/how-to-use-ubuntu-on-windows). The full converted VHDX is copied for each job, never attached as a shared parent disk.

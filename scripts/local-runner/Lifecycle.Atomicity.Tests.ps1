@@ -19,6 +19,7 @@ function Assert-SecureRoot {}
 function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
+function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-RunnerVmInventory { return @(Get-VM) }
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
@@ -80,6 +81,7 @@ function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Assert-InstalledHost { param($Config) }
 function Get-OwnerToken { 'dummy' }
+function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
 function Start-ScheduledTask { [IO.File]::WriteAllText((Join-Path $Root 'unexpected-task'), 'started') }

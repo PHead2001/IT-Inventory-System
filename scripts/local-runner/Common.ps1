@@ -12,6 +12,7 @@ $script:RunnerConfigPath = Join-Path $script:RunnerRoot 'config.json'
 $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
 $script:RunnerOperationStage = 'idle'
 $script:RunnerSessionName = $null
+$script:RunnerPreparationAuthorized = $false
 
 function Initialize-RunnerDpapi {
     # Fresh Windows PowerShell 5.1 sessions do not preload ProtectedData.
@@ -609,6 +610,10 @@ function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
 # A committed initial state is the durable claim. Complete its exact receipt
 # before any recovery can erase that state, including watchdog/Stop cleanup.
 function Complete-RunnerPilotClaim($State) {
+    if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -ceq 'prepare') {
+        Assert-StateIdentity $State
+        return
+    }
     if ($State.PSObject.Properties.Name -contains 'claimMode' -and
         ($State.claimMode -cnotin @('pilot', 'active') -or
         ($State.claimMode -ceq 'pilot' -and $State.PSObject.Properties.Name -notcontains 'pilotClaim') -or
@@ -630,6 +635,12 @@ function Complete-RunnerPilotClaim($State) {
 }
 
 function Assert-StateIdentity($State) {
+    if ($State.PSObject.Properties.Name -contains 'purpose') {
+        if ($State.purpose -cnotin @('job', 'prepare') -or
+            ($State.purpose -ceq 'prepare' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
+            throw 'Session purpose may not carry job authorization in a preparation session.'
+        }
+    }
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'
     }
@@ -718,3 +729,5 @@ function Remove-RunnerInstance($State) {
         Remove-Item -LiteralPath $script:RunnerStatePath -Force
     }
 }
+
+. (Join-Path $PSScriptRoot 'PreparedImage.ps1')

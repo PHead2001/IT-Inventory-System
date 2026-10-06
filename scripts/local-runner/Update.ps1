@@ -13,14 +13,30 @@ function Get-RunnerBundleVersion([string] $Version) {
 }
 
 function Get-RunnerBundleNames {
+    return @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
+        'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
+}
+
+function Get-RunnerLegacyBundleNames {
     return @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
         'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
 }
 
-function Get-RunnerBundle([string] $SourceRoot) {
+function Get-RunnerBundle([string] $SourceRoot, [switch] $AllowLegacyInstalled) {
     $path = Join-Path $SourceRoot 'Bundle.json'
     $bundle = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
     $names = Get-RunnerBundleNames
+    # Only a verified old installed bundle can use the historical dependency set.
+    # New source/updates always require image inputs and the current host module.
+    if ($AllowLegacyInstalled -and
+        [string]::Equals([IO.Path]::GetFullPath($SourceRoot), [IO.Path]::GetFullPath((Join-Path $script:RunnerRoot 'bin')), [StringComparison]::OrdinalIgnoreCase) -and
+        $bundle.version -cmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$') {
+        $version = Get-RunnerBundleVersion $bundle.version
+        $cutoff = Get-RunnerBundleVersion '2026-10-06.1'
+        $legacy = Get-RunnerLegacyBundleNames
+        if (($version.date -lt $cutoff.date -or ($version.date -eq $cutoff.date -and $version.revision -le $cutoff.revision)) -and
+            $bundle.files.Count -eq $legacy.Count -and -not (Compare-Object @($bundle.files.name | Sort-Object) @($legacy | Sort-Object))) { $names = $legacy }
+    }
     if ($bundle.schema -ne 1 -or $bundle.tag -cne $script:RunnerTag -or $bundle.version -cnotmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' -or
         $bundle.files.Count -ne $names.Count -or (Compare-Object @($bundle.files.name | Sort-Object) @($names | Sort-Object))) {
         throw 'Runner bundle manifest identity/version/dependency list is invalid.'
@@ -107,8 +123,8 @@ function Resume-RunnerSetupPublication {
     }
 }
 
-function Test-InstalledRunnerBundle([string] $SourceRoot) {
-    $source = Get-RunnerBundle $SourceRoot
+function Test-InstalledRunnerBundle([string] $SourceRoot, [switch] $AllowLegacyInstalled) {
+    $source = Get-RunnerBundle $SourceRoot -AllowLegacyInstalled:$AllowLegacyInstalled
     $receipt = Read-RunnerJson (Assert-OwnedPath (Join-Path $script:RunnerRoot 'installed-bundle.json'))
     if ($null -eq $receipt -or $receipt.tag -cne $script:RunnerTag -or $receipt.manifestHash -cne $source.hash -or
         $receipt.version -cne $source.manifest.version) { return $false }
@@ -130,8 +146,8 @@ function Get-CoherentInstalledRunnerBundle {
         $path = if ($name -ceq 'Bundle.json') { Join-Path $bin $name } else { Join-Path $script:RunnerRoot $name }
         Assert-RunnerProtectedPath (Assert-OwnedPath $path)
     }
-    $bundle = Get-RunnerBundle $bin
-    if (-not (Test-InstalledRunnerBundle $bin)) { throw 'Installed manifest, receipt or dependencies are not coherent.' }
+    $bundle = Get-RunnerBundle $bin -AllowLegacyInstalled
+    if (-not (Test-InstalledRunnerBundle $bin -AllowLegacyInstalled)) { throw 'Installed manifest, receipt or dependencies are not coherent.' }
     return $bundle
 }
 

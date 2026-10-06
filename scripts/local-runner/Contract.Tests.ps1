@@ -48,6 +48,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regres
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
+
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Image.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell prepared image regression failed.' }
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($testRoot)
 $script:RunnerRoot = $testRoot
@@ -473,6 +476,7 @@ public class ArgvSink {
     Write-RunnerJson $script:RunnerStatePath $creating
     $name = $validName; $instance = $validInstance; $key = 'dummy public key'; $Config = [pscustomobject]@{}
     $profile = Get-RunnerResourceProfile 'it-inventory-heavy'
+    $image = [pscustomobject]@{ prepared = $false }
     $sessionDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $true)
     $segmentStart = $sessionDefinition.Extent.Text.IndexOf('$guestMac = Set-RunnerGuestMac')
     $segmentEnd = $sessionDefinition.Extent.Text.IndexOf('$script:RunnerOperationStage = ''network-isolation''')

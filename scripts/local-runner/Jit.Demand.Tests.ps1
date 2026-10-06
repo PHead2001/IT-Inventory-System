@@ -14,6 +14,7 @@ foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-Ru
 function Enter-RunnerLock { return $null }
 function Exit-RunnerLock {}
 function Get-OwnerToken { return 'fixture' }
+function Get-RunnerImageSelection($Config) { return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $script:case -ceq 'prepared' } }
 function Wait-Guest {
     param($State, $Config, $ProfileLabel)
     if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest readiness.' }
@@ -38,7 +39,14 @@ function Get-HostNetworkFingerprint { return 'fixture' }
 function Set-IsolatedAdapter { return @() }
 function Get-RunnerArchive { return 'fixture' }
 function Get-SshArgs { return @() }
-function Invoke-RunnerNative { $script:nativeCalls++; return 0 }
+function Invoke-RunnerNative($Executable, $Arguments, $InputText = $null) {
+    $script:nativeCalls++
+    if ($null -ne $InputText) {
+        $command = $Arguments[-1]
+        if (($command -match 'RUNNER_TOOL_CACHE=/opt/hostedtoolcache') -ne ($script:case -ceq 'prepared')) { throw 'Generic fallback lost writable runner-default toolcache, or prepared cache was not exposed.' }
+    }
+    return 0
+}
 function Remove-RunnerInstance($State) { $script:cleanups++; Remove-Item -LiteralPath $script:RunnerStatePath }
 function New-Job([int] $Id, [string] $Label, [string] $Status = 'queued') { return [pscustomobject]@{ id = $Id; status = $Status; runner_id = 0; labels = @('self-hosted', $Label) } }
 function Invoke-GitHub($Uri, $Method, $Body, $Token) {
@@ -75,13 +83,14 @@ try {
     $script:runCount = 1; $script:jobCount = 101
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:jobCount = 1
-    foreach ($case in @('cancelled', 'incompatible', 'lower', 'same', 'unexpected-readback', 'overflow')) {
+    foreach ($case in @('cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow')) {
         $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0
         $script:badReadback = $case -eq 'unexpected-readback'
         $script:jobs = switch ($case) {
             'cancelled' { New-Job 1 'it-inventory-heavy' }
             'incompatible' { New-Job 1 'it-inventory-heavy' }
             'same' { New-Job 1 'it-inventory-heavy' }
+            'prepared' { New-Job 1 'it-inventory-heavy' }
             'unexpected-readback' { New-Job 1 'it-inventory-heavy' }
             default { New-Job 1 'it-inventory-light' }
         }
@@ -89,7 +98,7 @@ try {
         if ($case -in @('unexpected-readback', 'overflow')) { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
         else {
             $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
-            if ($case -eq 'same') { if ($result.id -ne 42 -or $result.outcome -cne 'job-completed' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
+            if ($case -in @('same', 'prepared')) { if ($result.id -ne 42 -or $result.outcome -cne 'job-completed' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
             elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne 2) { throw 'Withdrawn demand registered or executed an idle JIT.' }
         }
         if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }

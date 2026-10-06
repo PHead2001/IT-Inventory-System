@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'RetryPilot', 'EnableActive')]
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'StoreCredential', 'Start', 'Restart', 'Stop', 'Status', 'Watchdog', 'Guard', 'Supervise', 'EnablePilot', 'RetryPilot', 'EnableActive', 'PrepareImage')]
     [string] $Action,
     [ValidatePattern('^ITIR-[0-9a-f]{32}$')][string] $SessionName,
     [ValidatePattern('^[0-9a-f]{40}$')][string] $ExpectedPilotSha,
@@ -10,6 +10,7 @@ param(
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 . (Join-Path $PSScriptRoot 'Update.ps1') # Definitions only; dot sourcing never installs a bundle.
+. (Join-Path $PSScriptRoot 'PreparedImage.ps1')
 
 function Invoke-GitHub([string] $Uri, [string] $Method = 'GET', $Body = $null, [string] $Token = '') {
     $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2026-03-10'; 'User-Agent' = 'ITInventoryLocalRunner' }
@@ -36,10 +37,10 @@ function Get-OwnerToken {
     finally { [Array]::Clear($plain, 0, $plain.Length) }
 }
 
-function Assert-InstalledHost($Config) {
+function Assert-InstalledHost($Config, [switch] $ForPreparation) {
     Assert-HostPrerequisites
     Assert-SecureRoot
-    if ($Config.activation -notin @('pilot', 'active')) { throw 'Runner pickup is disabled in installed config.' }
+    if (-not $ForPreparation -and $Config.activation -notin @('pilot', 'active')) { throw 'Runner pickup is disabled in installed config.' }
     if (-not (Get-ScheduledTask -TaskName $script:RunnerTask -ErrorAction SilentlyContinue) -or
         -not (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue)) {
         throw 'Supervisor and periodic host watchdog tasks must be installed before runner registration.'
@@ -67,10 +68,11 @@ function Get-RunnerGuestPrerequisites([string] $ProfileLabel) {
     return [pscustomobject]@{ docker = $docker; packages = $packages }
 }
 
-function Get-GuestCloudConfig([string] $PublicKey, [string] $ProfileLabel = 'it-inventory-ephemeral') {
+function Get-GuestCloudConfig([string] $PublicKey, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
     $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
     # cloud-init's users/groups module runs before package installation. Declare
     # docker here so runner membership succeeds before docker.io creates it.
+    $installation = if ($Prepared) { 'package_update: false' } else { "package_update: true`npackages: [$($prerequisites.packages -join ', ')]" }
     return @"
 #cloud-config
 hostname: itir-guest
@@ -85,8 +87,7 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - $PublicKey
-package_update: true
-packages: [$($prerequisites.packages -join ', ')]
+$installation
 growpart:
   mode: auto
   devices: ['/']
@@ -94,7 +95,7 @@ resize_rootfs: true
 "@
 }
 
-function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral') {
+function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Config, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
     [void](Assert-OwnedPath $Path)
     New-VHD -Path $Path -SizeBytes 64MB -Dynamic | Out-Null
     $mounted = Mount-VHD -Path $Path -Passthru
@@ -109,7 +110,7 @@ function New-SeedDisk([string] $Path, [string] $PublicKey, [string] $Mac, $Confi
         $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel CIDATA -Confirm:$false | Out-Null
         $letter = $partition.DriveLetter
         $root = "$($letter):\"
-        $userData = Get-GuestCloudConfig $PublicKey $ProfileLabel
+        $userData = Get-GuestCloudConfig $PublicKey $ProfileLabel $Prepared
         $network = @"
 version: 2
 ethernets:
@@ -404,27 +405,31 @@ function Assert-RunnerVmResources([string] $Name, [string] $ProfileLabel) {
     if ($memory.Startup -ne $profile.memoryBytes -or $memory.DynamicMemoryEnabled -ne $false) { throw 'VM resource readback differs from the fixed selected profile.' }
 }
 
-function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '') {
-    $profile = Get-RunnerSessionProfile $Config $ProfileLabel
+function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '', [ValidateSet('job', 'prepare')][string] $Purpose = 'job') {
+    $preparing = $Purpose -ceq 'prepare'
+    $profile = if ($preparing) { Get-RunnerResourceProfile 'it-inventory-heavy' } else { Get-RunnerSessionProfile $Config $ProfileLabel }
     $script:RunnerOperationStage = 'preflight'
-    Assert-InstalledHost $Config
-    [void](Get-OwnerToken) # Check owner binding before changing the host or contacting GitHub.
+    if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-InstalledHost $Config -ForPreparation }
+    else { Assert-InstalledHost $Config; [void](Get-OwnerToken) }
+    $image = if ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
     $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
     $script:RunnerSessionName = $name
     $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
     $state = [ordered]@{
         tag = $script:RunnerTag; vmName = $name; instancePath = $instance
-        claimMode = $Config.activation; resourceLabel = $profile.label
+        purpose = $Purpose; resourceLabel = $profile.label
         createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
         deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
         supervisorPid = $PID
         supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
     }
+    if (-not $preparing) { $state.claimMode = $Config.activation }
     $mutex = Enter-RunnerLock
     try {
-        Assert-RunnerClaimOpen
+        if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-RunnerTransitionClear }
+        else { Assert-RunnerClaimOpen }
         if (Get-RunnerState) { throw 'Another runner session is already recorded.' }
-        if ($Config.activation -eq 'pilot') {
+        if (-not $preparing -and $Config.activation -eq 'pilot') {
             if ($null -eq $PilotAttempt -or (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json'))) { throw 'Pilot claim requires a fresh bound receipt.' }
             $PilotAttempt | Add-Member -NotePropertyName sessionName -NotePropertyValue $name -Force
             $state.pilotClaim = Get-RunnerJsonEvidence $PilotAttempt
@@ -438,7 +443,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         New-Item -ItemType Directory -Path $instance -Force | Out-Null
         $script:RunnerOperationStage = 'disk-copy'
         $disk = Join-Path $instance 'guest.vhdx'
-        Copy-Item -LiteralPath $Config.baseVhdx -Destination $disk -ErrorAction Stop
+        Copy-Item -LiteralPath $image.path -Destination $disk -ErrorAction Stop
         $script:RunnerOperationStage = 'key-generation'
         New-RunnerSshKey (Join-Path $instance 'id_ed25519')
         $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
@@ -479,7 +484,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             Write-RunnerJson $script:RunnerStatePath $current
         } finally { Exit-RunnerLock $mutex }
         $seed = Join-Path $instance 'cidata.vhdx'
-        New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label
+        New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
         Add-VMHardDiskDrive -VMName $name -Path $seed
         $script:RunnerOperationStage = 'network-isolation'
         $mutex = Enter-RunnerLock
@@ -502,6 +507,11 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Assert-SessionAlive $state
         Assert-AdapterRules $name $expectedRules
         Test-GuestIsolation $state $Config
+
+        if ($preparing) {
+            $script:RunnerOperationStage = 'image-preparation'
+            return Invoke-RunnerImageBuild ([pscustomobject]$state) $Config
+        }
 
         $script:RunnerOperationStage = 'runner-download'
         $archiveWatch = [Diagnostics.Stopwatch]::StartNew()
@@ -546,7 +556,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
         # A JIT runner exits after one job. No guest output or secret-bearing config is logged on the host.
         $script:RunnerOperationStage = 'job-execution'
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'read -r JIT; cd ~/actions-runner; exec ./run.sh --jitconfig "$JIT" >/dev/null 2>&1')) $jit.encoded_jit_config
+        $jobCommand = Get-RunnerJobCommand $image.prepared
+        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $jobCommand)) $jit.encoded_jit_config
         if ($exitCode -ne 0) { throw 'JIT runner process ended abnormally; check GitHub Actions job state.' }
         Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
         return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'job-completed' }
@@ -1092,10 +1103,11 @@ function Invoke-RunnerSupervisorRecovery {
 }
 
 $actionControl = $null
-if ($Action -in @('StoreCredential', 'Start', 'Restart', 'Stop', 'EnablePilot', 'RetryPilot', 'EnableActive')) {
+if ($Action -in @('StoreCredential', 'Start', 'Restart', 'Stop', 'EnablePilot', 'RetryPilot', 'EnableActive', 'PrepareImage')) {
     $actionControl = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Control-v1' -FailFast
 }
 try { switch ($Action) {
+    'PrepareImage' { Invoke-RunnerPrepareImageCore }
     'Preflight' {
         Assert-HostPrerequisites
         $config = Get-RunnerConfig
@@ -1139,6 +1151,7 @@ try { switch ($Action) {
         Assert-SecureRoot
         $config = Get-RunnerConfig
         $state = Get-RunnerState
+        Show-RunnerImageStatus $config
         $supervisor = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue
         if ($null -eq $state) { Write-Host "Supervisor: $($supervisor.State). Idle. Activation: $($config.activation)." }
         else {
