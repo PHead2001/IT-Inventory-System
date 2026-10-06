@@ -28,13 +28,13 @@
   "supabaseConfigSha256": "1F50521C49BC3A9D40D1E959B0452BBE3DCCF63867C09957FD661A42BF17EE19",
   "sources": {
     ".nvmrc": "7E8A2FA94951112B894A3DBE3D05EFEF5E9263741FA49125F0A70F40FEDAB4CC",
-    "scripts/runner-image-inputs.mjs": "09630201B10E365A1556BC355835F651513C0ECBDAAFE9DAD2E60F1A6C72B6C6",
+    "scripts/runner-image-inputs.mjs": "397FF1DFF22BBEB0EECF7C9D89195D8CB56522660C61D8C803D6302CD68A73F3",
     "scripts/install-ci-browser.mjs": "72AC274746406C231755030D28D0B3DB5A66D9167EB3F887B17FF9C9F743F1D4",
     "scripts/local-storage-version.mjs": "2D236FFCBCD72787E229AAA6497BDE673F380A0C67A51DDCDDC1994870AFB837",
     ".github/workflows/local-runner-pilot.yml": "2A59A1F9EE033B6BF19570463896ED35915B169D8DE364EAC5848EADED0AA75C"
   },
   "files": {
-    "Image.Prepare.sh": "2CFAFA5F5A68146DA8383C538E9CEBCE56F095F11D9F215DAA7A60BF023FD4FC",
+    "Image.Prepare.sh": "7C47F6DF0B3B7E87064A6975DBCC1D96C60A01535D95BF8C7050D138BC0140B1",
     "Image.Package.json": "D7ACF56453DCA3E8A452AB2EC4DA738C7189E9A70A2DA6D97BC86E2D1FEA22D7",
     "Image.PackageLock.json": "4B5B5D6F4D60C5A7064AB16915F35DACF93F7A1F2E304E9C8AC9E746634B1F37",
     "Image.Supabase.toml": "1F50521C49BC3A9D40D1E959B0452BBE3DCCF63867C09957FD661A42BF17EE19"
@@ -46,7 +46,8 @@
         "public.ecr.aws/supabase/postgres:17.6.1.165",
         "ghcr.io/supabase/postgres:17.6.1.165",
         "supabase/postgres:17.6.1.165"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "library/kong:2.8.1",
@@ -54,7 +55,8 @@
         "public.ecr.aws/supabase/kong:2.8.1",
         "ghcr.io/supabase/kong:2.8.1",
         "library/kong:2.8.1"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "supabase/gotrue:v2.196.0",
@@ -62,7 +64,8 @@
         "public.ecr.aws/supabase/gotrue:v2.196.0",
         "ghcr.io/supabase/gotrue:v2.196.0",
         "supabase/gotrue:v2.196.0"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "axllent/mailpit:v1.30.2",
@@ -70,7 +73,8 @@
         "public.ecr.aws/supabase/mailpit:v1.30.2",
         "ghcr.io/supabase/mailpit:v1.30.2",
         "axllent/mailpit:v1.30.2"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "postgrest/postgrest:v16.1",
@@ -78,7 +82,8 @@
         "public.ecr.aws/supabase/postgrest:v16.1",
         "ghcr.io/supabase/postgrest:v16.1",
         "postgrest/postgrest:v16.1"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "supabase/storage-api:v1.77.9",
@@ -86,6 +91,12 @@
         "public.ecr.aws/supabase/storage-api:v1.77.9",
         "ghcr.io/supabase/storage-api:v1.77.9",
         "supabase/storage-api:v1.77.9"
+      ],
+      "aliases": [
+        "public.ecr.aws/supabase/storage-api:v1.77.9",
+        "ghcr.io/supabase/storage-api:v1.77.9",
+        "supabase/storage-api:v1.77.9",
+        "docker.io/supabase/storage-api:v1.77.9"
       ]
     },
     {
@@ -94,7 +105,8 @@
         "public.ecr.aws/supabase/edge-runtime:v1.74.3",
         "ghcr.io/supabase/edge-runtime:v1.74.3",
         "supabase/edge-runtime:v1.74.3"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "supabase/postgres-meta:v0.98.0",
@@ -102,7 +114,8 @@
         "public.ecr.aws/supabase/postgres-meta:v0.98.0",
         "ghcr.io/supabase/postgres-meta:v0.98.0",
         "supabase/postgres-meta:v0.98.0"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "supabase/studio:2026.08.17-sha-0c1da8f",
@@ -110,7 +123,8 @@
         "public.ecr.aws/supabase/studio:2026.08.17-sha-0c1da8f",
         "ghcr.io/supabase/studio:2026.08.17-sha-0c1da8f",
         "supabase/studio:2026.08.17-sha-0c1da8f"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "supabase/pg_prove:3.36",
@@ -118,7 +132,8 @@
         "public.ecr.aws/supabase/pg_prove:3.36",
         "ghcr.io/supabase/pg_prove:3.36",
         "supabase/pg_prove:3.36"
-      ]
+      ],
+      "aliases": []
     },
     {
       "source": "alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659",

@@ -14,6 +14,7 @@ import {
   writeImageInputs,
   sha256,
 } from '../../scripts/runner-image-inputs.mjs';
+import { LOCAL_STORAGE_IMAGES } from '../../scripts/local-storage-version.mjs';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'itir-image-inputs-'));
@@ -58,6 +59,13 @@ describe('owner-reviewed runner image inputs', () => {
           (entry) => entry.source === 'supabase/storage-api:v1.77.9',
         ),
       ).toBe(true);
+      const storage = inputs.images.find(
+        (entry) => entry.source === 'supabase/storage-api:v1.77.9',
+      );
+      expect(storage.aliases).toEqual([...LOCAL_STORAGE_IMAGES]);
+      expect(inputs.images.filter((entry) => entry.aliases?.length)).toEqual([
+        storage,
+      ]);
       expect(
         inputs.images.some(
           (entry) => entry.source === 'supabase/pg_prove:3.36',
@@ -154,4 +162,86 @@ describe('owner-reviewed runner image inputs', () => {
     }
     expect(writeImageInputs(process.cwd(), true)).toMatch(/^[A-F0-9]{64}$/);
   });
+
+  it.each([...LOCAL_STORAGE_IMAGES].slice(0, 3))(
+    'caches every runtime Storage mirror from the one pulled %s image',
+    (resolved) => {
+      const result = aliasFixture(resolved);
+      expect(result.status, result.stderr).toBe(0);
+      const aliases = JSON.parse(result.stdout);
+      expect(aliases.map((entry) => entry.reference)).toEqual([
+        ...LOCAL_STORAGE_IMAGES,
+      ]);
+      expect(new Set(aliases.map((entry) => entry.id))).toEqual(
+        new Set(['sha256:' + 'a'.repeat(64)]),
+      );
+      expect(result.calls).toHaveLength(4);
+      expect(result.calls.every((line) => line.startsWith('tag '))).toBe(true);
+    },
+  );
+
+  it.each(['tag-failure', 'wrong-id', 'inspect-failure', 'missing-source'])(
+    'refuses Storage alias publication after %s',
+    (mode) => {
+      const result = aliasFixture([...LOCAL_STORAGE_IMAGES][0], mode);
+      expect(result.status).not.toBe(0);
+    },
+  );
 });
+
+function aliasFixture(resolved, mode = 'success') {
+  const root = mkdtempSync(join(tmpdir(), 'itir-image-alias-'));
+  try {
+    const recipe = readFileSync(
+      'scripts/local-runner/Image.Prepare.sh',
+      'utf8',
+    );
+    const helper = recipe.match(/cache_image_aliases\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(helper).toBeTruthy();
+    const bash =
+      process.platform === 'win32'
+        ? join(process.env.ProgramFiles, 'Git/bin/bash.exe')
+        : 'bash';
+    const calls = join(root, 'calls');
+    writeFileSync(calls, '');
+    const script = `set -euo pipefail
+resolved=$1; mode=$2; calls=$3; shift 3
+declare -A known_ids
+known_ids["$resolved"]="sha256:$(printf 'a%.0s' {1..64})"
+docker() {
+  [[ $1 == image ]] || return 90
+  case $2 in
+    tag)
+      printf 'tag %s %s\\n' "$3" "$4" >> "$calls"
+      [[ $mode != tag-failure ]] || return 1
+      known_ids["$4"]=$3
+      if [[ $mode == wrong-id ]]; then known_ids["$4"]="sha256:$(printf 'b%.0s' {1..64})"; fi
+      ;;
+    inspect)
+      local reference=$5
+      [[ $mode != inspect-failure || $reference == "$resolved" ]] || return 1
+      [[ $mode != missing-source ]] || return 1
+      [[ -n \${known_ids[$reference]-} ]] || return 1
+      printf '%s\\n' "\${known_ids[$reference]}"
+      ;;
+    *) return 91;;
+  esac
+}
+${helper}
+aliases=$(cache_image_aliases "$resolved" "$@")
+printf '%s' "$aliases"
+`;
+    const result = spawnSync(
+      bash,
+      ['-s', '--', resolved, mode, calls, ...LOCAL_STORAGE_IMAGES],
+      { input: script, encoding: 'utf8' },
+    );
+    expect(result.error).toBeUndefined();
+    return {
+      ...result,
+      calls: readFileSync(calls, 'utf8').split('\n').filter(Boolean),
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}

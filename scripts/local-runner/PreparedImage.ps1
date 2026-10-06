@@ -128,6 +128,24 @@ function Assert-RunnerPrepareState($State) {
         $State.PSObject.Properties.Name -notcontains 'vmId') { throw 'Only the credential-free preparation session can publish an image.' }
 }
 
+function Assert-RunnerImageStorageReceipt($Guest) {
+    $path = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Image.Inputs.json')
+    Assert-RunnerProtectedPath $path
+    $inputs = Read-RunnerJson $path
+    $source = 'supabase/storage-api:' + $inputs.storageVersion
+    $expected = @($inputs.images | Where-Object source -CEQ $source)
+    $observed = @($Guest.images | Where-Object source -CEQ $source)
+    if ($expected.Count -ne 1 -or $observed.Count -ne 1 -or @($Guest.images).Count -ne @($inputs.images).Count) { throw 'Prepared Storage image receipt inventory is invalid.' }
+    $image = $observed[0]; $aliases = @($image.aliases)
+    if ($image.id -cnotmatch '^sha256:[a-f0-9]{64}$' -or @($image.digests).Count -eq 0 -or
+        @($expected[0].candidates) -cnotcontains $image.reference -or
+        $aliases.Count -ne @($expected[0].aliases).Count -or $aliases.Count -ne 4 -or
+        (Compare-Object @($aliases.reference | Sort-Object) @($expected[0].aliases | Sort-Object))) { throw 'Prepared Storage image mirror aliases are invalid.' }
+    foreach ($alias in $aliases) {
+        if ($alias.id -cne $image.id) { throw 'Prepared Storage image aliases do not identify the verified pulled image.' }
+    }
+}
+
 function Invoke-RunnerImageBuild($State, $Config) {
     Assert-RunnerPreparationAuthorized
     $binding = Get-RunnerImageBinding $Config
@@ -150,6 +168,7 @@ function Invoke-RunnerImageBuild($State, $Config) {
     $guest = $result.Output | ConvertFrom-Json
     if ($guest.schema -ne 1 -or $guest.recipeId -cne $binding.recipeId -or $guest.scrubbed -ne $true -or
         (Compare-Object @($guest.capabilities | Sort-Object) @('os-prerequisites', 'node-toolcache', 'npm-cache', 'playwright', 'supabase-images' | Sort-Object))) { throw 'Image scrub/capability receipt is invalid.' }
+    Assert-RunnerImageStorageReceipt $guest
     $limit = [DateTime]::UtcNow.AddSeconds(90)
     do {
         Assert-SessionAlive $State
@@ -174,8 +193,8 @@ function Invoke-RunnerImageBuild($State, $Config) {
         $current.phase = 'sealed-off'
         $current | Add-Member -NotePropertyName imageScrubProof -NotePropertyValue (Get-RunnerJsonEvidence $guest) -Force
         Write-RunnerJson $script:RunnerStatePath $current
-        Publish-RunnerPreparedImage $current $Config $binding $guest
     } finally { Exit-RunnerLock $mutex }
+    Publish-RunnerPreparedImage $current $Config $binding $guest
     return [pscustomobject]@{ outcome = 'image-prepared'; name = $State.vmName }
 }
 
@@ -185,11 +204,12 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
     Assert-SessionAlive $State
     $current = Get-RunnerState
     Assert-RunnerPrepareState $current
-    if ($current.vmName -cne $State.vmName -or $current.phase -cne 'sealed-off' -or
+    if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or $current.instancePath -cne $State.instancePath -or $current.phase -cne 'sealed-off' -or
         $current.PSObject.Properties.Name -notcontains 'imageScrubProof') { throw 'Preparation has no committed graceful shutdown/scrub proof.' }
     $proof = Get-RunnerEvidenceValue $current.imageScrubProof
     if ($proof.schema -ne 1 -or $proof.recipeId -cne $Binding.recipeId -or $proof.scrubbed -ne $true -or
         (Compare-Object @($proof.capabilities | Sort-Object) @('os-prerequisites', 'node-toolcache', 'npm-cache', 'playwright', 'supabase-images' | Sort-Object))) { throw 'Committed preparation scrub proof is invalid.' }
+    Assert-RunnerImageStorageReceipt $proof
     if (@(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq [guid]$State.vmId }).Count -gt 0) { throw 'Preparation VM is still registered; publication refused.' }
     Assert-RunnerInstanceUnreferenced $State
     $source = Assert-OwnedPath (Join-Path $State.instancePath 'guest.vhdx')
@@ -221,8 +241,25 @@ function Publish-RunnerPreparedImage($State, $Config, $Binding, $Guest) {
         Assert-SessionAlive $State
         $selector = [ordered]@{ schema = 1; tag = $script:RunnerTag; id = $id; previous = $(if ($null -ne $old) { $old.selector.id } else { '' })
             receiptHash = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash }
-        Write-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json') $selector
-        Invoke-RunnerTransitionCheckpoint 'image-selector'
+        # Bulk copy and all full-disk hashes run outside the guardian's mutex.
+        # Cleanup may win while copying; only a fresh proof can commit selection.
+        $mutex = Enter-RunnerLock
+        try {
+            Assert-SessionAlive $State
+            $current = Get-RunnerState
+            Assert-RunnerPrepareState $current
+            if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or $current.instancePath -cne $State.instancePath -or $current.phase -cne 'sealed-off' -or
+                (Get-RunnerJsonEvidence (Get-RunnerEvidenceValue $current.imageScrubProof)).hash -cne (Get-RunnerJsonEvidence $proof).hash) { throw 'Preparation proof changed during image copy; selection refused.' }
+            if ((Get-RunnerImageBinding $Config).hash -cne $Binding.hash) { throw 'Trusted image binding changed during image copy.' }
+            $latest = Get-RunnerImageRecord
+            if (($null -eq $old) -ne ($null -eq $latest) -or ($null -ne $old -and (Get-RunnerJsonEvidence $latest.selector).hash -cne (Get-RunnerJsonEvidence $old.selector).hash)) { throw 'Prepared image selection changed during publication.' }
+            if (@(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq [guid]$State.vmId }).Count -gt 0) { throw 'Preparation VM was registered during publication.' }
+            Assert-RunnerInstanceUnreferenced $current
+            Assert-RunnerImageDiskUnreferenced $source
+            Assert-RunnerImageDiskUnreferenced $candidate
+            Write-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json') $selector
+            Invoke-RunnerTransitionCheckpoint 'image-selector'
+        } finally { Exit-RunnerLock $mutex }
         Remove-RunnerOldImages ([pscustomobject]$selector)
     } finally {
         $selected = Read-RunnerJson (Join-Path $script:RunnerRoot 'prepared-image.json')

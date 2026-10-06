@@ -293,14 +293,50 @@ function Start-SessionGuardian($State) {
 }
 
 function Start-GuardedVm($State) {
+    $boot = $null
     $mutex = Enter-RunnerLock
     try {
         Assert-SessionAlive $State
         $current = Get-RunnerState
-        if ($current.vmName -cne $State.vmName -or $current.guardianReady -ne $true) { throw 'VM boot requires its ready guardian.' }
+        if ($null -eq $current -or $current.vmName -cne $State.vmName -or $current.guardianReady -ne $true -or
+            $current.PSObject.Properties.Name -notcontains 'vmId') { throw 'VM boot requires its recorded identity and ready guardian.' }
         Assert-RunnerVmLifecycle $State.vmName
-        Start-VM -Name $State.vmName
+        $vmId = [guid]$current.vmId
+        $vm = Get-VM -Id $vmId -ErrorAction Stop
+        if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $current.vmName -or $vm.Notes -cne $script:RunnerTag -or
+            [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'VM identity changed before boot dispatch.' }
+        # Dispatch against the verified object, never a delayed name lookup.
+        # Hyper-V boot completion must not monopolize the guardian's state lock.
+        $boot = Start-VM -VM $vm -AsJob -ErrorAction Stop
     } finally { Exit-RunnerLock $mutex }
+    try {
+        $limit = [DateTime]::UtcNow.AddMinutes(12)
+        while ($boot.State -notin @('Completed', 'Failed', 'Stopped')) {
+            Assert-SessionAlive $State
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne $vmId) { throw 'Session removed or replaced during VM boot.' }
+            if ([DateTime]::UtcNow -ge $limit) { throw 'VM boot completion exceeded its bounded wait.' }
+            [void](Wait-Job -Job $boot -Timeout 1)
+        }
+        if ($boot.State -ne 'Completed') {
+            [void](Receive-Job -Job $boot -ErrorAction Stop)
+            throw 'Hyper-V VM boot job did not complete successfully.'
+        }
+        [void](Receive-Job -Job $boot -ErrorAction Stop)
+        Assert-SessionAlive $State
+        $mutex = Enter-RunnerLock
+        try {
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne $vmId -or $current.guardianReady -ne $true) { throw 'Session identity changed before VM boot continuation.' }
+            $vm = Get-VM -Id $vmId -ErrorAction Stop
+            if ([guid]$vm.Id -ne $vmId -or $vm.Name -cne $State.vmName -or $vm.State -cne 'Running' -or
+                $vm.Notes -cne $script:RunnerTag -or [IO.Path]::GetFullPath($vm.Path) -ine (Join-Path $current.instancePath $current.vmName)) { throw 'Booted VM readback differs from the recorded identity/running state.' }
+        } finally { Exit-RunnerLock $mutex }
+    } finally {
+        # Stop-Job is not proof of provider cancellation. Canonical cleanup owns
+        # exact-GUID removal and retains state/files if provider readback fails.
+        if ($null -ne $boot -and $boot.State -in @('Completed', 'Failed', 'Stopped')) { Remove-Job -Job $boot -ErrorAction Stop }
+    }
 }
 
 function Get-SshArgs($State) {

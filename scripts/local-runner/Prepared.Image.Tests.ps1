@@ -22,6 +22,14 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
 $script:blocked = ''; $script:interrupt = ''; $script:attached = $false; $script:vms = @()
 $script:binding = [pscustomobject]@{ hash = ('A' * 64); recipeId = ('B' * 64) }
 $script:guest = [pscustomobject]@{ schema = 1; recipeId = $script:binding.recipeId; scrubbed = $true; capabilities = @('os-prerequisites', 'node-toolcache', 'npm-cache', 'playwright', 'supabase-images') }
+$fixtureInputs = Read-RunnerJson (Join-Path $PSScriptRoot 'Image.Inputs.json')
+[void][IO.Directory]::CreateDirectory((Join-Path $base 'bin'))
+Write-RunnerJson (Join-Path (Join-Path $base 'bin') 'Image.Inputs.json') $fixtureInputs
+$script:guest | Add-Member -NotePropertyName images -NotePropertyValue @($fixtureInputs.images | ForEach-Object {
+    $entry = $_
+    [pscustomobject]@{ source = $entry.source; reference = $entry.candidates[0]; id = ('sha256:' + ('a' * 64)); digests = @($entry.candidates[0] + '@sha256:' + ('b' * 64))
+        aliases = @($(if ($entry.PSObject.Properties.Name -contains 'aliases') { $entry.aliases }) | ForEach-Object { [pscustomobject]@{ reference = $_; id = ('sha256:' + ('a' * 64)) } }) }
+})
 $config = [pscustomobject]@{ activation = 'disabled'; label = 'it-inventory-ephemeral'; maxMinutes = 120; guestIp = 'fixture'; baseVhdx = (Join-Path $base 'base.vhdx'); baseSha256 = ('C' * 64) }
 [IO.File]::WriteAllText($config.baseVhdx, 'generic-clean-base')
 function Assert-Administrator {}
@@ -44,7 +52,52 @@ function New-SealedState {
     Write-RunnerJson $script:RunnerStatePath $state
     return $state
 }
+$script:copyRace = ''
+function Copy-Item($LiteralPath, $Destination) {
+    if ($script:copyRace -and [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Destination)) -ceq 'prepared-images') {
+        $lockName = 'Local\' + [IO.Path]::GetFileName($base) + '-Global-ITInventoryLocalRunner-v1'
+        $job = Start-Job -ArgumentList $PSScriptRoot, $base, $lockName, $script:copyRace -ScriptBlock {
+            param($source, $root, $lockName, $race)
+            $ErrorActionPreference = 'Stop'
+            . (Join-Path $source 'Common.ps1')
+            . (Join-Path $source 'Test.Mutex.ps1')
+            $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
+            $mutex = Enter-RunnerLock $lockName -FailFast
+            try {
+                $state = Get-RunnerState
+                switch ($race) {
+                    'cleanup' { Remove-Item -LiteralPath $script:RunnerStatePath }
+                    'guid' { $state.vmId = [guid]::NewGuid().ToString(); Write-RunnerJson $script:RunnerStatePath $state }
+                    'proof' { $proof = Get-RunnerEvidenceValue $state.imageScrubProof; $proof.scrubbed = $false; $state.imageScrubProof = Get-RunnerJsonEvidence $proof; Write-RunnerJson $script:RunnerStatePath $state }
+                }
+                [IO.File]::WriteAllText((Join-Path $root 'copy-guardian-acquired'), 'ready')
+            } finally { Exit-RunnerLock $mutex }
+        }
+        try {
+            [void](Wait-Job $job -Timeout 15)
+            if ($job.State -ne 'Completed') { throw 'Image-copy guardian could not acquire state mutex.' }
+            [void](Receive-Job $job -ErrorAction Stop)
+        } finally { if ($job.State -in @('Completed', 'Failed', 'Stopped')) { Remove-Job $job } }
+    }
+    Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -ErrorAction Stop
+}
 try {
+    Assert-RunnerImageStorageReceipt $script:guest
+    $guestBytes = ConvertTo-Json -InputObject $script:guest -Depth 10
+    foreach ($invalid in @('missing-alias', 'wrong-id', 'wrong-version', 'other-registry', 'duplicate', 'unpulled-reference', 'no-digests')) {
+        $badGuest = $guestBytes | ConvertFrom-Json
+        $storage = @($badGuest.images | Where-Object source -CEQ 'supabase/storage-api:v1.77.9')[0]
+        switch ($invalid) {
+            'missing-alias' { $storage.aliases = @($storage.aliases | Select-Object -Skip 1) }
+            'wrong-id' { $storage.aliases[0].id = 'sha256:' + ('c' * 64) }
+            'wrong-version' { $storage.aliases[0].reference = 'public.ecr.aws/supabase/storage-api:v1.77.0' }
+            'other-registry' { $storage.aliases[0].reference = 'other.example/supabase/storage-api:v1.77.9' }
+            'duplicate' { $storage.aliases[0].reference = $storage.aliases[1].reference }
+            'unpulled-reference' { $storage.reference = 'other.example/supabase/storage-api:v1.77.9' }
+            'no-digests' { $storage.digests = @() }
+        }
+        Assert-Rejected { Assert-RunnerImageStorageReceipt $badGuest } "storage-$invalid"
+    }
     if ((Get-RunnerImageSelection $config).reason -cne 'absent') { throw 'Absent prepared image did not use generic fallback.' }
     [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop')
     $state = New-SealedState
@@ -72,6 +125,15 @@ try {
         $script:interrupt = ''
         if ((Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash -cne $initialSelectorHash -or
             @(Get-ChildItem -LiteralPath (Join-Path $base 'prepared-images')).Count -ne 2) { throw 'Interrupted publication changed selection or left an unowned candidate.' }
+    }
+    foreach ($race in @('cleanup', 'guid', 'proof')) {
+        $state = New-SealedState; $script:copyRace = $race
+        if (Test-Path (Join-Path $base 'copy-guardian-acquired')) { Remove-Item -LiteralPath (Join-Path $base 'copy-guardian-acquired') }
+        Assert-Rejected { Publish-RunnerPreparedImage $state $config $script:binding $script:guest } "copy-$race"
+        $script:copyRace = ''
+        if (-not (Test-Path (Join-Path $base 'copy-guardian-acquired')) -or
+            (Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash -cne $initialSelectorHash -or
+            @(Get-ChildItem -LiteralPath (Join-Path $base 'prepared-images')).Count -ne 2) { throw 'Image copy blocked guardian, selected cancelled candidate, or leaked its candidate.' }
     }
     $state = New-SealedState; $script:interrupt = 'image-selector'
     Assert-Rejected { Publish-RunnerPreparedImage $state $config $script:binding $script:guest } 'post-commit interruption'
@@ -162,15 +224,17 @@ try {
         if ($CaptureOutput) {
             if ($TimeoutSeconds -ne 3600 -or -not $CaptureError -or $Arguments[-1] -cne 'bash -o pipefail -c ''sudo bash /home/runner/image-inputs/Image.Prepare.sh 2> >(tail -c 4096 >&2) | head -c 16385''') { throw 'Builder execution lost fixed command/output/deadline.' }
             $script:vms[0].State = 'Off'
-            return [pscustomobject]@{ ExitCode = $(if ($script:buildFails) { 1 } else { 0 }); Output = (ConvertTo-Json -InputObject $script:guest -Compress); ErrorOutput = (('fixture' + [char]1 + ' prepare error ') + ('x' * 5000)) }
+            return [pscustomobject]@{ ExitCode = $(if ($script:buildFails) { 1 } else { 0 }); Output = (ConvertTo-Json -InputObject $script:guest -Depth 8 -Compress); ErrorOutput = (('fixture' + [char]1 + ' prepare error ') + ('x' * 5000)) }
         }
         return 0
     }
     $script:keys = @(); $script:forcedStops = 0; $script:guardians = 0; $script:readiness = 0; $script:isolation = 0; $script:natives = 0; $script:buildFails = $false
+    $script:copyRace = 'observe'
     foreach ($attempt in @(1, 2)) {
         $outcome = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare'
         if ($outcome.outcome -cne 'image-prepared' -or (Get-RunnerState) -or $script:vms.Count -ne 0) { throw 'Preparation session failed publication/owned cleanup.' }
     }
+    $script:copyRace = ''
     if ($script:keys.Count -ne 2 -or $script:keys[0] -ceq $script:keys[1] -or $script:guardians -ne 2 -or
         $script:readiness -ne 2 -or $script:isolation -ne 2 -or $script:natives -ne 6 -or $script:forcedStops -ne 0) { throw 'Builder skipped isolation/readiness/fresh identity or required forced shutdown.' }
     $before = (Get-FileHash -LiteralPath $selectorPath).Hash; $script:buildFails = $true

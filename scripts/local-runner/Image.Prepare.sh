@@ -23,6 +23,10 @@ import hashlib,json,pathlib,re,sys
 p=pathlib.Path(sys.argv[1]); manifest=json.loads((p/'Image.Inputs.json').read_bytes())
 assert manifest['schema']==1 and manifest['platform']=='ubuntu24.04-x64'
 assert len(manifest['images'])==11
+storage=f"supabase/storage-api:{manifest['storageVersion']}"
+aliases=[f"public.ecr.aws/{storage}",f"ghcr.io/{storage}",storage,f"docker.io/{storage}"]
+for image in manifest['images']:
+    assert image.get('aliases',[]) == (aliases if image['source']==storage else [])
 expected={'Image.Prepare.sh','Image.Package.json','Image.PackageLock.json','Image.Supabase.toml'}
 assert set(manifest['files'])==expected
 for name,digest in manifest['files'].items():
@@ -79,17 +83,37 @@ writeFileSync(process.argv[2],JSON.stringify(records));
 JS
 systemctl start docker
 [[ -z $(docker ps -aq) && -z $(docker volume ls -q) ]] || exit 1
+# Storage runtime may select a different official mirror. Add local aliases to
+# the already pulled image ID, without downloading a second mirror's content.
+cache_image_aliases() {
+  local resolved=$1 image_id alias alias_id separator=''
+  shift
+  image_id=$(docker image inspect --format '{{.Id}}' "$resolved") || return 1
+  [[ $image_id =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
+  printf '['
+  for alias in "$@"; do
+    docker image tag "$image_id" "$alias" >&2 || return 1
+    alias_id=$(docker image inspect --format '{{.Id}}' "$alias") || return 1
+    [[ $alias_id == "$image_id" ]] || return 1
+    printf '%s{"reference":"%s","id":"%s"}' "$separator" "$alias" "$alias_id"
+    separator=','
+  done
+  printf ']'
+}
 mkdir "$work/images"
 index=0
-while IFS= read -r candidates; do
+while IFS= read -r image; do
   resolved=''
   while IFS= read -r candidate; do
     if timeout 300 docker pull --platform linux/amd64 "$candidate"; then resolved=$candidate; break; fi
-  done < <(printf '%s\n' "$candidates" | jq -er '.[]')
+  done < <(printf '%s\n' "$image" | jq -er '.candidates[]')
   [[ -n $resolved ]] || exit 1
-  docker image inspect "$resolved" | jq --arg reference "$resolved" -e '.[0] | {reference:$reference,id:.Id,digests:.RepoDigests,size:.Size} | select((.digests|length)>0)' > "$work/images/$index.json"
+  mapfile -t alias_refs < <(printf '%s\n' "$image" | jq -r '.aliases[]?')
+  aliases=$(cache_image_aliases "$resolved" "${alias_refs[@]}")
+  source=$(printf '%s\n' "$image" | jq -er '.source')
+  docker image inspect "$resolved" | jq --arg source "$source" --arg reference "$resolved" --argjson aliases "$aliases" -e '.[0] | {source:$source,reference:$reference,id:.Id,digests:.RepoDigests,size:.Size,aliases:$aliases} | select((.digests|length)>0)' > "$work/images/$index.json"
   index=$((index+1))
-done < <(jq -ec '.images[].candidates' "$inputs/Image.Inputs.json")
+done < <(jq -ec '.images[]' "$inputs/Image.Inputs.json")
 [[ $(du -sm /var/lib/docker | cut -f1) -le 24576 && $(du -sm /home/runner/.npm | cut -f1) -le 4096 ]] || exit 1
 # Pull only: no databases, container secrets or volumes ever enter the prepared image.
 [[ -z $(docker ps -aq) && -z $(docker volume ls -q) ]] || exit 1

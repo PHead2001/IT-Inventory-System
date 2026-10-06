@@ -79,6 +79,12 @@ temporary checkout, input files, SSH keys, credentials/config/history and cloud-
 identity before emitting a bounded receipt and shutting down gracefully. No job
 disk is ever retained as an image.
 
+Storage is pulled once from an available official mirror. The builder adds the
+four exact-version runtime mirror aliases to that verified local image ID, checks
+each alias resolves to the same ID, and records this proof in the bounded receipt.
+Alias creation does not pull more images. The host verifies the exact alias set
+against the installed trusted manifest before accepting scrub/publication proof.
+
 The host requires successful scrub proof, the exact recorded VM identity in
 `Off` state, verified VM removal, and an offline disk with no registered VM
 references. It copies that disk to a new protected candidate, hashes it and writes
@@ -96,6 +102,8 @@ live in the guest's normal runner home. New PR pins download cache misses inside
 that one disposable guest. A job cannot write caches or disks back to the host;
 its entire disk is deleted after execution. The separate verified runner archive
 cache keeps its existing metadata/hash checks.
+
+Image publication copies and hashes the unselected candidate outside the state lock, allowing the guardian/watchdog to cancel the session during this work. The selector commit reacquires the lock and requires the same session/GUID, committed scrub proof, unchanged trusted binding and offline/unreferenced source and candidate. Cleanup winning this race refuses selection and removes only the unselected candidate. Full hashes of the previous image also run outside the state lock.
 
 Absent prepared images or changed trusted inputs use the generic base, with an
 explicit reason. Generic guests use the runner's default writable tool-cache path.
@@ -247,7 +255,7 @@ Before constructing the NoCloud seed, the host assigns a collision-checked rando
 
 After a consumed pilot fails, preserve `pilot-attempt.json` and the recorded failure; do not clear the receipt or restart pickup blindly. The owner can run `DiagnoseNetwork.ps1` elevated for read-only host routes, ACL capability and owned-network evidence. After independent review and explicit owner authorization, `ProbeNetworkAcl.ps1` can reproduce the current policy on one fresh, diskless VM that is never booted. It reports the exact failing rule or readback error and removes only its verified VM ID/name/Off state/path/tag/diskless identity and owned folder. Inspect its JSON `cleanupVerified` and `cleanupError` fields; a successful shell exit alone is insufficient. Its two-minute limit applies between ACL commands, not to the duration of an individual Windows management call. Coordinate concurrent WSL/Docker network work so it does not change the network during the diagnosis.
 
-A separate per-session Windows guardian starts and confirms readiness before VM boot. It compares a canonical snapshot of all host IPv4/IPv6 addresses and routes, including destination, next hop, and interface, once per second throughout cloud-init, downloads, SSH, and job execution. Address/route drift or inspection failure removes the session VM instead of adopting a new baseline; a fresh comparison also runs immediately before JIT registration. Boot holds the state lock and rechecks the session/guardian so cancelled sessions cannot subsequently start. The one-second interval plus host inspection, lock acquisition and VM stop time creates a nonzero exposure window; this is not instantaneous network isolation.
+A separate per-session Windows guardian starts and confirms readiness before VM boot. It compares a canonical snapshot of all host IPv4/IPv6 addresses and routes, including destination, next hop, and interface, once per second throughout cloud-init, downloads, SSH, and job execution. Address/route drift or inspection failure removes the session VM instead of adopting a new baseline; a fresh comparison also runs immediately before JIT registration. Boot dispatch holds the state lock briefly, rechecks the session/guardian and passes the verified VM object and GUID to Start-VM -AsJob. Its bounded completion wait runs outside the lock, checks session/network/guardian validity, and requires fresh GUID/owner/running-state readback before continuation. Cleanup remains authoritative: cancelling a PowerShell job is not proof that Hyper-V cancelled the operation; unverified removal or disk references retain state and files. The one-second interval plus host inspection, lock acquisition and VM stop time creates a nonzero exposure window; this is not instantaneous network isolation.
 
 Before enabling active pickup on the live host, security evidence must establish the exact ACL and guardian on Windows: live guest isolation, synthetic route/address drift termination, deadline and process-loss cleanup, real GitHub assignment, and normal one-job exit/cleanup. Provisional creation and boot recovery also require verification. Active pickup needs the owner's explicit acceptance of the measured residual window and independent review. The exact-SHA diagnostic Docker pilot proves assignment and basic guest readiness; it does not certify Supabase or Playwright. After normal job routing is enabled for the live host, the first normal PR CI run must exercise the full Supabase/Playwright workload and pass the complete repository gate before PR readiness. Repository label changes alone are not evidence that host security acceptance, activation, or workload certification has occurred.
 

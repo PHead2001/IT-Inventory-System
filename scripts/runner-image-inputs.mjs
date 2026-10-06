@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { LOCAL_STORAGE_VERSION } from './local-storage-version.mjs';
+import {
+  LOCAL_STORAGE_VERSION,
+  LOCAL_STORAGE_IMAGES,
+} from './local-storage-version.mjs';
 
 export const imageInputNames = [
   'Image.Prepare.sh',
@@ -148,6 +151,10 @@ export function createImageInputs(root = process.cwd()) {
             `ghcr.io/supabase/${suffix}`,
             source,
           ],
+          aliases:
+            source === `supabase/storage-api:${LOCAL_STORAGE_VERSION}`
+              ? [...LOCAL_STORAGE_IMAGES]
+              : [],
         };
       }),
       { source: pilotImage, candidates: [pilotImage] },

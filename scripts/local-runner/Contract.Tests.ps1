@@ -53,7 +53,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regres
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Image.Tests.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell prepared image regression failed.' }
+if ($LASTEXITCODE -ne 0) { throw 'Prepared image tests failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guardian.Boot.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Guardian boot tests failed.' }
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($testRoot)
 $script:RunnerRoot = $testRoot
@@ -403,7 +405,7 @@ public class ArgvSink {
     $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'guest.vhdx' })
     $script:deletions = 0
     $script:fakeVmRemoved = $false
-    function Get-VM { param($Name) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
+    function Get-VM { param($Name, $Id) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
     # Provider coherence is tested separately by Cleanup.Integrity.Tests.ps1.
     function Get-RunnerVmInventory { return @(Get-VM) }
     function Get-VMHardDiskDrive { param($VM, $VMName) return $script:fakeDisks }
@@ -574,7 +576,7 @@ public class ArgvSink {
     [Array]::Reverse($script:fakeAddresses)
     if ((Get-HostNetworkFingerprint) -cne $fingerprint) { throw 'Network fingerprint depends on enumeration order.' }
     $networkState = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance
+        tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
         networkFingerprint = $fingerprint; supervisorPid = $PID
         heartbeatUtc = [DateTime]::UtcNow.ToString('o')
         supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
@@ -607,7 +609,7 @@ public class ArgvSink {
         $script:inspectionFailure = $false
     }
     $script:starts = 0
-    function Start-VM { param($Name) $script:starts++ }
+    function Start-VM { param($VM, [switch] $AsJob) $script:starts++; $script:fakeVm.State = 'Running'; $job = Start-Job {}; [void](Wait-Job $job); return $job }
     $rejected = $false
     try { Start-GuardedVm $networkState } catch { $rejected = $true }
     if (-not $rejected -or $script:starts -ne 0) { throw 'Cancelled session booted after guardian removed its state.' }
