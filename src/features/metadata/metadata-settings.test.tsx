@@ -2026,6 +2026,23 @@ describe('category form designer', () => {
       ),
     );
     cleanup();
+    // Observe the first committed recovery UI, before passive effects have to
+    // run. A user must never see a locked uncertain command with navigation open.
+    const entryLink = document.createElement('a');
+    entryLink.href = '/settings';
+    document.body.append(entryLink);
+    let entryNavigationAllowed: boolean | undefined;
+    const observer = new MutationObserver(() => {
+      if (
+        entryNavigationAllowed === undefined &&
+        screen.queryByRole('button', { name: 'Recover edits' })
+      ) {
+        entryNavigationAllowed = entryLink.dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true }),
+        );
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     render(
       <MetadataSettings
         memberId={id(50)}
@@ -2036,11 +2053,18 @@ describe('category form designer', () => {
         forms={{ [id(1)]: form }}
       />,
     );
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Recover edits' }),
-      ).toBeVisible(),
-    );
+    try {
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Recover edits' }),
+        ).toBeVisible(),
+      );
+      await waitFor(() => expect(entryNavigationAllowed).toBeDefined());
+    } finally {
+      observer.disconnect();
+      entryLink.remove();
+    }
+    expect(entryNavigationAllowed).toBe(false);
     expect(
       screen.getByRole('button', { name: 'Discard recovered edits' }),
     ).toBeDisabled();

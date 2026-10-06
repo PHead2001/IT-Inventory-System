@@ -3,6 +3,7 @@ import { OperationalTimestamp } from '@/components/operational-time';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useTransition,
@@ -918,7 +919,9 @@ export function MetadataSettings({
     recoveryLoadedScope,
     recoveryScope,
   ]);
-  useEffect(() => {
+  // Install navigation protection in the same commit that exposes locked
+  // recovery controls; a passive effect leaves an observable navigation gap.
+  useLayoutEffect(() => {
     if (!unsaved && !operationPending && !unresolvedSave && !navigationTarget)
       return;
     const warn = (event: BeforeUnloadEvent) => {
