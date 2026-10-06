@@ -1,6 +1,10 @@
 import type { NextConfig } from 'next';
 const config: NextConfig = {
   poweredByHeader: false,
+  // Page-data/static-generation workers share the host with local test tools.
+  ...(process.platform === 'win32' && !process.env.CI && !process.env.VERCEL
+    ? { experimental: { cpus: 2 } }
+    : {}),
   outputFileTracingIncludes: {
     '/api/inventory-files/validate': [
       './src/features/files/inspect-worker.cjs',
