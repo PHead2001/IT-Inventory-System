@@ -232,6 +232,10 @@ try {
         $warm = Get-GuestCloudConfig 'different-fresh-public-key' $label $true
         if ($cold -notmatch 'package_update: true' -or $warm -match 'packages:' -or $warm -notmatch 'package_update: false' -or
             $warm -notmatch 'different-fresh-public-key' -or $warm -match 'fresh-public-key\s+package_update: true') { throw 'Prepared seed lost fresh SSH identity or retained apt install.' }
+        if ($cold -notmatch '(?m)^groups:\r?\n  - docker\r?\nusers:' -or $warm -match '(?m)^groups:' -or
+            $cold -notmatch '(?m)^    groups: \[sudo, docker\]$' -or $warm -notmatch '(?m)^    groups: \[sudo, docker\]$') {
+            throw 'Rendered generic/prepared seeds lost Docker membership or redeclared an existing prepared group.'
+        }
     }
 
     # Actual preparation session runs creation/guard/readiness and cleanup while

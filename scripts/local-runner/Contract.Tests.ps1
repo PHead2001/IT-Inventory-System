@@ -388,12 +388,14 @@ public class ArgvSink {
             $remoteCommand -notmatch 'test "\$\(id -un\)" = runner' -or $remoteCommand -notmatch 'timeout 10 docker info' -or $remoteCommand -match '\bsudo\b') {
             throw 'Guest readiness did not check unprivileged runner access to Docker.'
         }
-        # A socket can exist while runner access fails. That attempt must retry.
-        if ($script:readinessCalls -eq 1) { return 1 }
+        # A completed cloud-init with a recoverable warning exits 2. Neither it
+        # nor failed Docker access (1) may satisfy the strict readiness contract.
+        if ($script:readinessCalls -eq 1) { return 2 }
+        if ($script:readinessCalls -eq 2) { return 1 }
         return 0
     }
     Wait-Guest ([pscustomobject]@{ instancePath = Join-Path $testRoot 'readiness' }) ([pscustomobject]@{ guestIp = '172.30.240.2' })
-    if ($script:readinessCalls -ne 2 -or $script:readinessSleeps -ne 1) { throw 'Guest readiness accepted a Docker access failure.' }
+    if ($script:readinessCalls -ne 3 -or $script:readinessSleeps -ne 2) { throw 'Guest readiness accepted cloud-init warnings or a Docker access failure.' }
     Set-Item -Path Function:\Assert-SessionAlive -Value $realSessionAlive
     Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
     Remove-Item -Path Function:\Start-Sleep

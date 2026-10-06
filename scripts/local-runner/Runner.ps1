@@ -70,15 +70,15 @@ function Get-RunnerGuestPrerequisites([string] $ProfileLabel) {
 
 function Get-GuestCloudConfig([string] $PublicKey, [string] $ProfileLabel = 'it-inventory-ephemeral', [bool] $Prepared = $false) {
     $prerequisites = Get-RunnerGuestPrerequisites $ProfileLabel
-    # cloud-init's users/groups module runs before package installation. Declare
-    # docker here so runner membership succeeds before docker.io creates it.
+    # Generic guests need the group before package installation. Prepared guests
+    # already have it; redeclaring it makes cloud-init report a recoverable error.
+    $groupCreation = if ($Prepared) { '' } else { "groups:`n  - docker" }
     $installation = if ($Prepared) { 'package_update: false' } else { "package_update: true`npackages: [$($prerequisites.packages -join ', ')]" }
     return @"
 #cloud-config
 hostname: itir-guest
 manage_etc_hosts: true
-groups:
-  - docker
+$groupCreation
 users:
   - name: runner
     lock_passwd: true
