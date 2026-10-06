@@ -93,6 +93,26 @@ function Assert-RunnerMutexSecurity($Security, [string] $Name) {
     if ($owner -cnotin @('S-1-5-18', 'S-1-5-32-544')) { throw 'Runner mutex owner is untrusted.' }
     $rights = @{}
     $rules = @($Security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    # Captured Task Scheduler legacy descriptor: owner rights can read the ACL,
+    # while SYSTEM and this exact Schedule service identity have full control.
+    # Accept only the existing fixed runner objects, never a service-SID pattern.
+    if ($owner -ceq 'S-1-5-18' -and $rules.Count -eq 3 -and $Name -cin @(
+        'Global\ITInventoryLocalRunner-v1', 'Global\ITInventoryLocalRunner-Control-v1',
+        'Global\ITInventoryLocalRunner-Supervisor-v1', 'Global\ITInventoryLocalRunner-Archive-v1')) {
+        $expected = @{
+            'S-1-3-4' = [int][Security.AccessControl.MutexRights]::ReadPermissions
+            'S-1-5-18' = [int][Security.AccessControl.MutexRights]::FullControl
+            'S-1-5-80-4125092361-1567024937-842823819-2091237918-836075745' = [int][Security.AccessControl.MutexRights]::FullControl
+        }
+        $seen = @{}
+        foreach ($rule in $rules) {
+            $sid = $rule.IdentityReference.Value
+            if ($rule.AccessControlType -ne 'Allow' -or $rule.IsInherited -or -not $expected.ContainsKey($sid) -or
+                [int]$rule.MutexRights -ne $expected[$sid] -or $seen.ContainsKey($sid)) { break }
+            $seen[$sid] = $true
+        }
+        if ($seen.Count -eq 3) { return } # Use as-is; never repair legacy security.
+    }
     foreach ($rule in $rules) {
         $sid = $rule.IdentityReference.Value
         if ($sid -cnotin @('S-1-5-18', 'S-1-5-32-544') -or $rule.AccessControlType -ne 'Allow' -or $rule.IsInherited) { throw 'Runner mutex ACL is untrusted.' }
