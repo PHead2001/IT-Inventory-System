@@ -11,6 +11,8 @@ foreach ($file in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1')) {
 
 # Keep DPAPI proof in a fresh -NoProfile process rather than inheriting any
 # assemblies imported by these contract checks or an interactive owner shell.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Mutex.Security.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell mutex policy regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Dpapi.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell DPAPI regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup.Download.Tests.ps1')
@@ -47,6 +49,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regression failed.' }
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Image.Tests.ps1')
@@ -628,6 +631,7 @@ public class ArgvSink {
     $guardJob = Start-Job -ArgumentList $PSScriptRoot, $testRoot, $validName, $readyName, $script:contractLockPrefix -ScriptBlock {
         param($source, $root, $name, $eventName, $lockPrefix)
         . (Join-Path $source 'Common.ps1')
+            . (Join-Path $source 'Test.Mutex.ps1')
         $script:guardEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
         $script:guardLockName = $lockPrefix + '-state'
         function Enter-RunnerLock { return & $script:guardEnterLock $script:guardLockName }

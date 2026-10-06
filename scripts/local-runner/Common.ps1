@@ -75,9 +75,45 @@ function Assert-OwnedPath([string] $Path) {
     return $target
 }
 
+function New-RunnerMutexSecurity([string] $Name) {
+    $security = [Security.AccessControl.MutexSecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $owner = if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ceq 'S-1-5-18') { 'S-1-5-18' } else { 'S-1-5-32-544' }
+    $security.SetOwner([Security.Principal.SecurityIdentifier]::new($owner))
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $security.AddAccessRule([Security.AccessControl.MutexAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new($sid), [Security.AccessControl.MutexRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow))
+    }
+    return $security
+}
+
+function Assert-RunnerMutexSecurity($Security, [string] $Name) {
+    $owner = $Security.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -cnotin @('S-1-5-18', 'S-1-5-32-544')) { throw 'Runner mutex owner is untrusted.' }
+    $rights = @{}
+    $rules = @($Security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if ($sid -cnotin @('S-1-5-18', 'S-1-5-32-544') -or $rule.AccessControlType -ne 'Allow' -or $rule.IsInherited) { throw 'Runner mutex ACL is untrusted.' }
+        if (-not $rights.ContainsKey($sid)) { $rights[$sid] = 0 }
+        $rights[$sid] = $rights[$sid] -bor [int]$rule.MutexRights
+    }
+    $full = [int][Security.AccessControl.MutexRights]::FullControl
+    if ($rights.Count -eq 1 -and $rights.ContainsKey('S-1-5-18') -and $rights['S-1-5-18'] -eq $full -and $owner -ceq 'S-1-5-18') {
+        return # Historical SYSTEM-only object: use under SYSTEM; never change it in place.
+    }
+    if (-not $Security.AreAccessRulesProtected -or $rights.Count -ne 2 -or
+        $rights['S-1-5-18'] -ne $full -or $rights['S-1-5-32-544'] -ne $full) { throw 'Runner mutex ACL does not match protected SYSTEM/Administrators access.' }
+}
+
 function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
-    $mutex = [Threading.Mutex]::new($false, $Name)
+    $created = $false
+    # Windows ignores the supplied descriptor for an existing object. Validate
+    # that object's owner/DACL before waiting; never repair its ACL in place.
+    $mutex = [Threading.Mutex]::new($false, $Name, [ref]$created, (New-RunnerMutexSecurity $Name))
     try {
+        Assert-RunnerMutexSecurity ($mutex.GetAccessControl()) $Name
         try {
             $timeout = if ($FailFast) { [TimeSpan]::Zero } else { [TimeSpan]::FromSeconds(20) }
             if (-not $mutex.WaitOne($timeout)) {

@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-06.2",
+  "version": "2026-10-06.3",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "9E3559FD1910ACFB60C6181F7DA90C169C1D63D99D59F5F11434A2B7D861C403"
+      "hash": "D6186B7670450B95F935AA2D1F9769D8BDB62DEA579BDDC5275DE5A3B8381D04"
     },
     {
       "name": "Runner.ps1",

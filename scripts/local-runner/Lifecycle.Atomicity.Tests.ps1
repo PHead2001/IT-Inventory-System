@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
@@ -67,6 +68,7 @@ param($Scripts, $Root, $Mode, $Point, $Source)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $Scripts 'Common.ps1')
+. (Join-Path $Scripts 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Scripts $name), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
