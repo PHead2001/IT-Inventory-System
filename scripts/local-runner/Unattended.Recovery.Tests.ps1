@@ -32,6 +32,7 @@ function Get-CoherentInstalledRunnerBundle {
 }
 function Get-RunnerState { return $script:state }
 function Get-VM { if ($script:unexpectedVm) { return [pscustomobject]@{ Name = 'ITIR-unexpected' } } }
+function Get-RunnerVmInventory { return @(Get-VM) }
 function Get-ScheduledTask { return [pscustomobject]@{ State = $script:taskState } }
 function Start-ScheduledTask { $script:events.Add('start'); $script:starts++; $script:taskState = 'Running' }
 function Test-RunnerProcessIdentity { return $script:ownerAlive }

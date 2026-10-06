@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-04.1",
+  "version": "2026-10-06.1",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "E4C7EA9AC8C2B34D568C72C936BDE14047B6922870DCDF03C1C7A90CD3AABEF9"
+      "hash": "5A08B0A5831CAA00C59A2E15233F4F20F9F9DC0D2CF7F98ABB4F81F19C7143A0"
     },
     {
       "name": "Runner.ps1",
-      "hash": "45066E4EED5E6A8901FDEFBA3878E7407DF00394D9FC003A0A19332B100D1434"
+      "hash": "EAE58DD391B2189CE4136E9FFB8D3C8D7DA23ABEE8737EDD8EFC119663EFC1B9"
     },
     {
       "name": "Guest.Network.ps1",
@@ -21,7 +21,7 @@
     },
     {
       "name": "Setup.ps1",
-      "hash": "0E8412A84C908179A2AE02CEB11861AD1C7DA24208C18DA5FCF92E3CC30524FC"
+      "hash": "69FCBC18FB304180B5E39CB26645752C5143E899EBBC7717E493DBCED74B889C"
     },
     {
       "name": "Setup.Download.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "Update.ps1",
-      "hash": "10E7A4829588A1CD5E89573C270516CCEE3A03DD14F7AFE412777A55C63C7822"
+      "hash": "E5B6AED67026B5A9EAEDB079430B0188D8065D4018B360E4C7958BD3D7AED727"
     },
     {
       "name": "Setup.cmd",

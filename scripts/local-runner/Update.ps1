@@ -178,7 +178,7 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
     $claimLock = Enter-RunnerLock
     try {
         Invoke-RunnerTransitionCheckpoint 'update-before-marker'
-        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        if ((Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
             throw 'Update requires no session or owned-prefix VM; no job was stopped.'
         }
         Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
@@ -188,7 +188,7 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         Invoke-RunnerTransitionCheckpoint 'update-wait'
-        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        if ((Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
             throw 'A session or VM appeared during graceful suspension; update refused without stopping it.'
         }
         if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -ne 'Running') {
@@ -213,6 +213,44 @@ function Assert-UpdatePreservedHashes($Expected) {
     $actual = Get-UpdatePreservedHashes
     foreach ($property in $Expected.PSObject.Properties) {
         if ($actual.($property.Name) -cne $property.Value) { throw 'Protected credential/pilot evidence changed during update; refusing overwrite.' }
+    }
+}
+
+function Get-OwnedRunnerScheduledTasks {
+    $installed = Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1'
+    foreach ($role in @('Watchdog', 'Supervisor')) {
+        $name = 'ITInventoryLocalRunner-' + $role
+        $tasks = @(Get-ScheduledTask -TaskName $name -ErrorAction Stop)
+        if ($tasks.Count -ne 1) { throw 'RUNNER_TASK_IDENTITY_AMBIGUOUS' }
+        $task = $tasks[0]
+        $action = if ($role -ceq 'Watchdog') { 'Watchdog' } else { 'Supervise' }
+        $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action $action"
+        $actions = @($task.Actions)
+        if ($task.TaskName -cne $name -or $task.TaskPath -cne '\' -or
+            $task.Principal.UserId -notin @('SYSTEM', 'S-1-5-18', 'NT AUTHORITY\SYSTEM') -or
+            [string]$task.Principal.LogonType -cne 'ServiceAccount' -or [string]$task.Principal.RunLevel -cne 'Highest' -or
+            $actions.Count -ne 1 -or $actions[0].Execute -ine 'powershell.exe' -or
+            $actions[0].Arguments -cne $arguments -or -not [string]::IsNullOrEmpty($actions[0].WorkingDirectory)) {
+            throw 'RUNNER_TASK_IDENTITY_UNEXPECTED'
+        }
+        $task
+    }
+}
+
+function Set-RunnerBatteryTaskSettings {
+    # Validate BOTH identities before the first write. Keep every other existing
+    # setting, trigger and action: only these two task power conditions change.
+    $tasks = @(Get-OwnedRunnerScheduledTasks)
+    foreach ($task in $tasks) {
+        $settings = $task.Settings
+        $settings.DisallowStartIfOnBatteries = $false
+        $settings.StopIfGoingOnBatteries = $false
+        Set-ScheduledTask -TaskPath '\' -TaskName $task.TaskName -Settings $settings -ErrorAction Stop | Out-Null
+    }
+    foreach ($task in @(Get-OwnedRunnerScheduledTasks)) {
+        if ($task.Settings.DisallowStartIfOnBatteries -or $task.Settings.StopIfGoingOnBatteries) {
+            throw 'RUNNER_TASK_BATTERY_SETTINGS_READBACK_FAILED'
+        }
     }
 }
 
@@ -257,6 +295,7 @@ function Complete-RunnerBundleUpdate($Plan) {
         (-not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.oldConfig) -and -not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig))) {
         throw 'Installed config changed outside the recorded update transition.'
     }
+    [void]@(Get-OwnedRunnerScheduledTasks) # Reject unexpected tasks before publication writes.
     Write-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig
     Invoke-RunnerTransitionCheckpoint 'update-disabled'
     foreach ($file in $Plan.files) {
@@ -277,6 +316,8 @@ function Complete-RunnerBundleUpdate($Plan) {
     Invoke-RunnerTransitionCheckpoint 'update-receipt'
     Assert-UpdatePreservedHashes $Plan.preserved
     if (-not (Test-InstalledRunnerBundle $stage)) { throw 'Coherent installed bundle verification failed; pickup remains disabled.' }
+    Set-RunnerBatteryTaskSettings
+    Invoke-RunnerTransitionCheckpoint 'update-task-power-settings'
     if (-not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig)) { throw 'Disabled update config changed before restoration.' }
     Write-RunnerEvidence $script:RunnerConfigPath $Plan.oldConfig
     Invoke-RunnerTransitionCheckpoint 'update-restored-config'
@@ -290,6 +331,7 @@ function Complete-RunnerBundleUpdate($Plan) {
 function Install-RunnerBundleCore([string] $SourceRoot, [switch] $Resume) {
     Assert-Administrator
     Assert-SecureRoot
+    [void]@(Get-OwnedRunnerScheduledTasks)
     $journalPath = Assert-OwnedPath (Join-Path $script:RunnerRoot 'update-journal.json')
     $pending = Read-RunnerJson $journalPath
     if ($null -ne $pending -and ($pending.tag -cne $script:RunnerTag -or $pending.phase -cnotin @('pending', 'complete'))) { throw 'Installed update journal is invalid.' }

@@ -20,7 +20,11 @@ function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
 function Get-VM {}
+function Get-RunnerVmInventory { return @(Get-VM) }
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
+# Task identity/power readbacks have dedicated Task.Power.Tests.ps1 coverage.
+function Get-OwnedRunnerScheduledTasks {}
+function Set-RunnerBatteryTaskSettings {}
 function Write-Host {}
 function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     $rejected = $false; try { & $Work } catch { $rejected = $true }
@@ -79,6 +83,8 @@ function Get-OwnerToken { 'dummy' }
 function Get-VM {}
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
 function Start-ScheduledTask { [IO.File]::WriteAllText((Join-Path $Root 'unexpected-task'), 'started') }
+function Get-OwnedRunnerScheduledTasks {}
+function Set-RunnerBatteryTaskSettings {}
 function Stop-ScheduledTask { throw 'Unexpected destructive task stop.' }
 function Read-Host { throw 'Concurrent credential control reached the secret prompt.' }
 function Copy-Item { throw 'Claim reached disk copy before the fixture boundary.' }

@@ -24,7 +24,13 @@ function Wait-Guest {
 function Get-CimInstance { throw 'Postallocation capacity must not be inspected.' }
 function New-SeedDisk($Path, $PublicKey, $Mac, $Config, $ProfileLabel) { if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest cloud-config.' } }
 function New-RunnerSshKey($Path) { [IO.File]::WriteAllText(($Path + '.pub'), 'fixture-public') }
-function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{} }
+function New-RunnerProfileVm { $script:allocations++; return [pscustomobject]@{ Id = [guid]'11111111-1111-1111-1111-111111111111' } }
+function Set-VM {
+    $recorded = Get-RunnerState
+    if ($recorded.vmId -cne '11111111-1111-1111-1111-111111111111' -or $recorded.phase -cne 'creating') {
+        throw 'VM GUID was not journaled immediately after creation, before tagging.'
+    }
+}
 function Get-VM { return [pscustomobject]@{ Notes = $script:RunnerTag } }
 function Get-VMIntegrationService { return @() }
 function Set-RunnerGuestMac { return [pscustomobject]@{ rawMac = 'fixture'; seedMac = 'fixture' } }

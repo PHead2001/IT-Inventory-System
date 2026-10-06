@@ -6,6 +6,15 @@ The design runs one repository-scoped, just-in-time GitHub runner in one fresh U
 
 ## Unattended recovery and capacity status
 
+Both SYSTEM tasks explicitly allow starting on battery power and keep running
+when AC power disconnects. Their own CPU/RAM admission, hard session deadline,
+network guard, cleanup and explicit Stop controls remain in force. Windows
+critical-battery and sleep behavior is unchanged. Setup supplies these settings;
+bundle update verifies both exact task identities before changing only the two
+battery conditions on their existing settings, preserving other task settings.
+An unexpected task action or principal blocks the update, and failed power-setting
+readback leaves its journal pending and activation disabled.
+
 After exact owned-session cleanup succeeds, the minute watchdog may restart an
 exited **active** supervisor. It first acquires the supervisor lifetime mutex
 without waiting, then the state mutex. A running supervisor or bundle updater
@@ -78,6 +87,10 @@ If a retry was interrupted before pulling a newer checkout, choose **Maintainer 
 For script maintenance, regenerate the manifest with `powershell.exe -NoProfile -File scripts/local-runner/Write-Bundle.ps1 -Version YYYY-MM-DD.N`, format `Bundle.json`, and review it with the changed scripts before installation. This authoring helper only writes the checkout manifest; no runtime downloads or automatic updates are performed.
 
 ## Resource profiles and cutover
+
+Cleanup verifies a complete Hyper-V inventory against an independent `Msvm_ComputerSystem` provider inventory before treating a VM as absent. A failed/partial query or GUID/name disagreement blocks cleanup, admission, unattended recovery and updates. VM creation journals its GUID immediately after `New-VM`; cleanup binds that GUID when present and retains the existing name/tag/path ownership checks. Legacy state without a GUID also requires that no remaining registered VM references a configuration path or disk at or under its instance directory. Stop/removal errors, surviving registrations and unverifiable post-removal absence preserve instance files and state. Status reports an unverified inventory without exposing provider exception details.
+
+These checks prevent cleanup from deleting files after an uncertain lookup; they do not repair or adopt an unknown or damaged VM registration. An orphan with no trustworthy state requires separate owner-authorized investigation and a targeted recovery plan. Preserve disks, configuration and registration evidence; never bulk-delete Hyper-V caches or recreate state from a matching display name. `Cleanup.Integrity.Tests.ps1`, included in the canonical contract command, exercises these refusal and verified-absence paths with mocked VM/provider operations and disposable TEMP files. Source tests do not prove that the updated bundle is installed or that real host recovery succeeded.
 
 Install the reviewed updated runtime bundle **before pushing workflows that request
 these new labels**. The owner controls the subsequent merge of workflow changes to

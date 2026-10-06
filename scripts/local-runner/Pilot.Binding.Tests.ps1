@@ -87,6 +87,7 @@ try {
     $script:taskRunning = $false; $script:existingVm = $false; $script:existingState = $false
     function Get-ScheduledTask { param($TaskName) return [pscustomobject]@{ State = $(if ($script:taskRunning) { 'Running' } else { 'Ready' }) } }
     function Get-VM { if ($script:existingVm) { return [pscustomobject]@{ Name = 'ITIR-' + ('c' * 32) } } }
+    function Get-RunnerVmInventory { return @(Get-VM) }
     function Get-RunnerState { if ($script:existingState) { return [pscustomobject]@{ tag = $script:RunnerTag } } }
     function Start-ScheduledTask { throw 'Activation/retry must never start a supervisor automatically.' }
     $config.activation = 'disabled'

@@ -23,6 +23,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle recovery re
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell update controls regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Lifecycle.Atomicity.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell lifecycle atomicity regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Cleanup.Integrity.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell cleanup integrity regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guest.Network.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell guest MAC regression failed.' }
 
@@ -35,6 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell resource profile regr
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell capacity observation regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Unattended.Recovery.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell unattended recovery regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Task.Power.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell task power regression failed.' }
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Jit.Demand.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression failed.' }
@@ -387,15 +391,18 @@ public class ArgvSink {
     Remove-Item -Path Function:\Start-Sleep
     $expectedVmPath = Join-Path $validInstance $validName
     $script:fakeVm = [pscustomobject]@{
-        Name = $validName; Notes = ''; Path = $expectedVmPath; State = 'Off'
+        Id = [guid]'11111111-1111-1111-1111-111111111111'; Name = $validName; Notes = ''; Path = $expectedVmPath; State = 'Off'
         AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff'
     }
     $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'guest.vhdx' })
     $script:deletions = 0
-    function Get-VM { param($Name) return $script:fakeVm }
-    function Get-VMHardDiskDrive { param($VMName) return $script:fakeDisks }
-    function Remove-VM { param($Name, [switch]$Force) $script:deletions++ }
-    function Stop-VM { param($Name, [switch]$TurnOff, [switch]$Force) $script:fakeVm.State = 'Off' }
+    $script:fakeVmRemoved = $false
+    function Get-VM { param($Name) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
+    # Provider coherence is tested separately by Cleanup.Integrity.Tests.ps1.
+    function Get-RunnerVmInventory { return @(Get-VM) }
+    function Get-VMHardDiskDrive { param($VM, $VMName) return $script:fakeDisks }
+    function Remove-VM { param($VM, $Name, [switch]$Force) $script:deletions++; $script:fakeVmRemoved = $true }
+    function Stop-VM { param($VM, $Name, [switch]$TurnOff, [switch]$Force) $script:fakeVm.State = 'Off' }
     Assert-RunnerVmLifecycle $validName
     foreach ($property in @('AutomaticStartAction', 'AutomaticStopAction')) {
         $previous = $script:fakeVm.$property
@@ -406,12 +413,13 @@ public class ArgvSink {
         $script:fakeVm.$property = $previous
     }
     $creating = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance
+        tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
         phase = 'creating'; expectedBootDisk = $script:fakeDisks[0].Path; expectedVmPath = $expectedVmPath
     }
     Remove-RunnerInstance $creating
     if ($script:deletions -ne 1) { throw 'Crash after New-VM left the exact provisional VM undeletable.' }
     foreach ($case in @('running', 'wrong-note', 'wrong-path', 'instance-root', 'descendant', 'wrong-recorded-path', 'extra-disk', 'wrong-disk', 'owned-phase', 'wrong-name')) {
+        $script:fakeVmRemoved = $false
         $script:fakeVm.State = 'Off'; $script:fakeVm.Notes = ''; $script:fakeVm.Path = $expectedVmPath
         $creating.expectedVmPath = $expectedVmPath
         $script:fakeVm.Name = $validName; $creating.phase = 'creating'
@@ -433,12 +441,15 @@ public class ArgvSink {
         if (-not $rejected -or $script:deletions -ne 1) { throw "Provisional cleanup accepted $case." }
     }
     $script:fakeVm.Name = $validName; $script:fakeVm.Notes = $script:RunnerTag
+    $script:fakeVmRemoved = $false
     Remove-RunnerInstance $creating
     if ($script:deletions -ne 2) { throw 'Crash after tagging rejected normal owned cleanup.' }
     $creating.PSObject.Properties.Remove('expectedVmPath')
+    $script:fakeVmRemoved = $false
     Remove-RunnerInstance $creating
     if ($script:deletions -ne 3) { throw 'Legacy state rejected the exact known New-VM nested layout.' }
     foreach ($badVmPath in @($validInstance, (Join-Path $expectedVmPath 'descendant'), (Join-Path $validInstance 'another-vm'))) {
+        $script:fakeVmRemoved = $false
         $script:fakeVm.Path = $badVmPath
         $rejected = $false
         try { Remove-RunnerInstance $creating } catch { $rejected = $true }
@@ -569,6 +580,7 @@ public class ArgvSink {
         throw "Stable network guardian failed readiness: $($guardError | ConvertTo-Json -Compress)."
     }
     foreach ($change in @('route', 'ipv4', 'ipv6', 'inspection')) {
+        $script:fakeVmRemoved = $false
         Write-RunnerJson $script:RunnerStatePath $networkState
         switch ($change) {
             'route' { $script:fakeRoutes[0].NextHop = '192.0.2.3' }
@@ -592,6 +604,7 @@ public class ArgvSink {
     $rejected = $false
     try { Start-GuardedVm $networkState } catch { $rejected = $true }
     if (-not $rejected -or $script:starts -ne 0) { throw 'Cancelled session booted after guardian removed its state.' }
+    $script:fakeVmRemoved = $false
     Write-RunnerJson $script:RunnerStatePath $networkState
     [void](Invoke-GuardCheck $validName)
     Start-GuardedVm $networkState
