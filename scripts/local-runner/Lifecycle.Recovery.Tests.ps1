@@ -21,6 +21,9 @@ function Assert-SecureRoot {}
 function Get-OwnerToken { return 'dummy' }
 function Assert-RunnerProtectedPath { param($Path) if ($script:rejectAcl -and $Path.EndsWith($script:rejectAcl)) { throw 'Synthetic unexpected ACL.' }; [void](Assert-OwnedPath $Path) }
 function Get-ScheduledTask { param($TaskName) return [pscustomobject]@{ State = $(if ($script:taskRunning) { 'Running' } else { 'Ready' }) } }
+# Canonical identity/settings behavior is exercised in Task.Power.Tests.ps1.
+function Get-OwnedRunnerScheduledTasks {}
+function Set-RunnerBatteryTaskSettings { if ($script:fault -ceq 'task-power-readback') { throw 'Synthetic settings readback failure.' } }
 function Get-VM { if ($script:vmPresent) { return [pscustomobject]@{ Name = 'ITIR-' + ('c' * 32) } } }
 function Get-RunnerVmInventory { return @(Get-VM) }
 $script:realWaitUpdate = (Get-Command Wait-RunnerUpdateIdle).ScriptBlock
@@ -115,7 +118,7 @@ try {
     [void][IO.Directory]::CreateDirectory($source)
     foreach ($name in @($sourceBundle.manifest.files.name) + @('Bundle.json')) { [IO.File]::Copy((Join-Path $PSScriptRoot $name), (Join-Path $source $name)) }
     $updatePoints = @('update-pending', 'update-disabled') + @($sourceBundle.manifest.files.name | ForEach-Object { 'update-file-' + $_ }) +
-        @('update-file-Bundle.json', 'update-receipt', 'update-restored-config', 'update-before-complete', 'update-complete')
+        @('update-file-Bundle.json', 'update-receipt', 'update-task-power-settings', 'update-restored-config', 'update-before-complete', 'update-complete', 'task-power-readback')
     foreach ($point in $updatePoints) {
         New-Fixture $point
         foreach ($file in $sourceBundle.manifest.files) { [IO.File]::WriteAllText((Join-Path (Join-Path $script:RunnerRoot 'bin') $file.name), 'old fixture ' + $file.name) }

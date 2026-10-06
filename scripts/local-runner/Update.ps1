@@ -216,6 +216,44 @@ function Assert-UpdatePreservedHashes($Expected) {
     }
 }
 
+function Get-OwnedRunnerScheduledTasks {
+    $installed = Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1'
+    foreach ($role in @('Watchdog', 'Supervisor')) {
+        $name = 'ITInventoryLocalRunner-' + $role
+        $tasks = @(Get-ScheduledTask -TaskName $name -ErrorAction Stop)
+        if ($tasks.Count -ne 1) { throw 'RUNNER_TASK_IDENTITY_AMBIGUOUS' }
+        $task = $tasks[0]
+        $action = if ($role -ceq 'Watchdog') { 'Watchdog' } else { 'Supervise' }
+        $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action $action"
+        $actions = @($task.Actions)
+        if ($task.TaskName -cne $name -or $task.TaskPath -cne '\' -or
+            $task.Principal.UserId -notin @('SYSTEM', 'S-1-5-18', 'NT AUTHORITY\SYSTEM') -or
+            [string]$task.Principal.LogonType -cne 'ServiceAccount' -or [string]$task.Principal.RunLevel -cne 'Highest' -or
+            $actions.Count -ne 1 -or $actions[0].Execute -ine 'powershell.exe' -or
+            $actions[0].Arguments -cne $arguments -or -not [string]::IsNullOrEmpty($actions[0].WorkingDirectory)) {
+            throw 'RUNNER_TASK_IDENTITY_UNEXPECTED'
+        }
+        $task
+    }
+}
+
+function Set-RunnerBatteryTaskSettings {
+    # Validate BOTH identities before the first write. Keep every other existing
+    # setting, trigger and action: only these two task power conditions change.
+    $tasks = @(Get-OwnedRunnerScheduledTasks)
+    foreach ($task in $tasks) {
+        $settings = $task.Settings
+        $settings.DisallowStartIfOnBatteries = $false
+        $settings.StopIfGoingOnBatteries = $false
+        Set-ScheduledTask -TaskPath '\' -TaskName $task.TaskName -Settings $settings -ErrorAction Stop | Out-Null
+    }
+    foreach ($task in @(Get-OwnedRunnerScheduledTasks)) {
+        if ($task.Settings.DisallowStartIfOnBatteries -or $task.Settings.StopIfGoingOnBatteries) {
+            throw 'RUNNER_TASK_BATTERY_SETTINGS_READBACK_FAILED'
+        }
+    }
+}
+
 function Complete-RunnerBundleUpdate($Plan) {
     if ($Plan.tag -cne $script:RunnerTag -or $Plan.schema -ne 1 -or $Plan.updateId -cnotmatch '^[0-9a-f]{32}$' -or $Plan.phase -cne 'pending') {
         throw 'Pending update journal identity is invalid.'
@@ -257,6 +295,7 @@ function Complete-RunnerBundleUpdate($Plan) {
         (-not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.oldConfig) -and -not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig))) {
         throw 'Installed config changed outside the recorded update transition.'
     }
+    [void]@(Get-OwnedRunnerScheduledTasks) # Reject unexpected tasks before publication writes.
     Write-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig
     Invoke-RunnerTransitionCheckpoint 'update-disabled'
     foreach ($file in $Plan.files) {
@@ -277,6 +316,8 @@ function Complete-RunnerBundleUpdate($Plan) {
     Invoke-RunnerTransitionCheckpoint 'update-receipt'
     Assert-UpdatePreservedHashes $Plan.preserved
     if (-not (Test-InstalledRunnerBundle $stage)) { throw 'Coherent installed bundle verification failed; pickup remains disabled.' }
+    Set-RunnerBatteryTaskSettings
+    Invoke-RunnerTransitionCheckpoint 'update-task-power-settings'
     if (-not (Test-RunnerEvidence $script:RunnerConfigPath $Plan.disabledConfig)) { throw 'Disabled update config changed before restoration.' }
     Write-RunnerEvidence $script:RunnerConfigPath $Plan.oldConfig
     Invoke-RunnerTransitionCheckpoint 'update-restored-config'
@@ -290,6 +331,7 @@ function Complete-RunnerBundleUpdate($Plan) {
 function Install-RunnerBundleCore([string] $SourceRoot, [switch] $Resume) {
     Assert-Administrator
     Assert-SecureRoot
+    [void]@(Get-OwnedRunnerScheduledTasks)
     $journalPath = Assert-OwnedPath (Join-Path $script:RunnerRoot 'update-journal.json')
     $pending = Read-RunnerJson $journalPath
     if ($null -ne $pending -and ($pending.tag -cne $script:RunnerTag -or $pending.phase -cnotin @('pending', 'complete'))) { throw 'Installed update journal is invalid.' }

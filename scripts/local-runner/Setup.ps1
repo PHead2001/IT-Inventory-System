@@ -194,10 +194,14 @@ try {
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $minute = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
     $boot = New-ScheduledTaskTrigger -AtStartup
-    Register-ScheduledTask -TaskName $script:RunnerTask -Action $action -Trigger $minute -Principal $principal -Force | Out-Null
+    $watchdogSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $script:RunnerTask -Action $action -Trigger $minute -Principal $principal -Settings $watchdogSettings -Force | Out-Null
     $supervisorAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Supervise"
-    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     Register-ScheduledTask -TaskName $script:RunnerSupervisorTask -Action $supervisorAction -Trigger $boot -Principal $principal -Settings $settings -Force | Out-Null
+    foreach ($task in @(Get-OwnedRunnerScheduledTasks)) {
+        if ($task.Settings.DisallowStartIfOnBatteries -or $task.Settings.StopIfGoingOnBatteries) { throw 'RUNNER_TASK_BATTERY_SETTINGS_READBACK_FAILED' }
+    }
 
     $configEvidence = Get-RunnerJsonEvidence ([ordered]@{
         schema = 1; tag = $script:RunnerTag; repo = $Repository; runnerGroupId = $RunnerGroupId

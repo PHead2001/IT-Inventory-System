@@ -6,6 +6,15 @@ The design runs one repository-scoped, just-in-time GitHub runner in one fresh U
 
 ## Unattended recovery and capacity status
 
+Both SYSTEM tasks explicitly allow starting on battery power and keep running
+when AC power disconnects. Their own CPU/RAM admission, hard session deadline,
+network guard, cleanup and explicit Stop controls remain in force. Windows
+critical-battery and sleep behavior is unchanged. Setup supplies these settings;
+bundle update verifies both exact task identities before changing only the two
+battery conditions on their existing settings, preserving other task settings.
+An unexpected task action or principal blocks the update, and failed power-setting
+readback leaves its journal pending and activation disabled.
+
 After exact owned-session cleanup succeeds, the minute watchdog may restart an
 exited **active** supervisor. It first acquires the supervisor lifetime mutex
 without waiting, then the state mutex. A running supervisor or bundle updater

@@ -37,6 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell resource profile regr
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell capacity observation regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Unattended.Recovery.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell unattended recovery regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Task.Power.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell task power regression failed.' }
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Jit.Demand.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression failed.' }

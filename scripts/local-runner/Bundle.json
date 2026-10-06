@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-05.1",
+  "version": "2026-10-06.1",
   "files": [
     {
       "name": "Common.ps1",
@@ -21,7 +21,7 @@
     },
     {
       "name": "Setup.ps1",
-      "hash": "0E8412A84C908179A2AE02CEB11861AD1C7DA24208C18DA5FCF92E3CC30524FC"
+      "hash": "69FCBC18FB304180B5E39CB26645752C5143E899EBBC7717E493DBCED74B889C"
     },
     {
       "name": "Setup.Download.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "Update.ps1",
-      "hash": "228577D8A1FE5EAB5C72D4FF16D856B7A15662D8464266E7E2056C8F0D0EE478"
+      "hash": "E5B6AED67026B5A9EAEDB079430B0188D8065D4018B360E4C7958BD3D7AED727"
     },
     {
       "name": "Setup.cmd",
