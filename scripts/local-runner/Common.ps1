@@ -560,9 +560,33 @@ function Assert-RunnerClaimOpen {
     }
 }
 
+function Get-RunnerVmInventory {
+    # Collect both complete snapshots before returning any objects. A failed or
+    # partial Hyper-V lookup must never become proof that a VM does not exist.
+    try {
+        $vms = @(Get-VM -ErrorAction Stop)
+        $systems = @(Get-CimInstance -Namespace 'root/virtualization/v2' -ClassName Msvm_ComputerSystem -OperationTimeoutSec 10 -ErrorAction Stop)
+        $registered = @($systems | Where-Object Caption -CEQ 'Virtual Machine')
+        if (@($systems | Where-Object Caption -CEQ 'Hosting Computer System').Count -ne 1 -or
+            $systems.Count -ne ($registered.Count + 1)) { throw 'Incomplete provider inventory.' }
+        $seen = @{}
+        foreach ($vm in $vms) {
+            $id = [guid]$vm.Id
+            if ($id -eq [guid]::Empty -or [string]::IsNullOrEmpty($vm.Name) -or $seen.ContainsKey($id.ToString())) { throw 'Invalid or duplicate VM identity.' }
+            $seen[$id.ToString()] = $true
+            $matching = @($registered | Where-Object { $_.Name -ieq $id.ToString() -and $_.ElementName -ceq $vm.Name })
+            if ($matching.Count -ne 1) { throw 'VM/provider identity differs.' }
+        }
+        if ($vms.Count -ne $registered.Count) { throw 'VM/provider inventory differs.' }
+    } catch {
+        throw 'Hyper-V inventory could not be verified. Preserve runner instance files and state; investigate VM registration before retrying cleanup or pickup.'
+    }
+    return $vms
+}
+
 function Assert-RunnerControlIdle {
     if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -eq 'Running' -or
-        (Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        (Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
         throw 'Lifecycle control requires a stopped supervisor and no session or owned-prefix VM.'
     }
 }
@@ -614,18 +638,46 @@ function Assert-StateIdentity($State) {
         if ($State.PSObject.Properties.Name -contains 'claimMode' -and $State.claimMode -ceq 'active' -and
             $State.resourceLabel -cmatch '^it-inventory-pilot-') { throw 'Active state has a pilot resource label.' }
     }
+    if ($State.PSObject.Properties.Name -contains 'vmId') {
+        if ([string]$State.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or
+            [guid]$State.vmId -eq [guid]::Empty) { throw 'Recorded VM GUID is invalid; runner instance files and state are retained.' }
+    }
     [void](Assert-OwnedPath $State.instancePath)
     if (-not $State.instancePath.EndsWith($State.vmName, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Runner state instance path does not match its VM name.'
     }
 }
 
+function Assert-RunnerInstanceUnreferenced($State) {
+    $instancePath = Assert-OwnedPath $State.instancePath
+    $instancePrefix = $instancePath.TrimEnd('\') + '\'
+    foreach ($entry in @(Get-RunnerVmInventory)) {
+        if ([string]::IsNullOrEmpty($entry.Path)) { throw 'VM configuration path inspection failed; runner files/state are retained.' }
+        $configurationPath = [IO.Path]::GetFullPath($entry.Path)
+        if ($configurationPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $configurationPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'A registered VM still references the recorded instance configuration path; runner files/state are retained.'
+        }
+        foreach ($disk in @(Get-VMHardDiskDrive -VM $entry -ErrorAction Stop)) {
+            if ([string]::IsNullOrEmpty($disk.Path)) { throw 'VM disk path inspection failed; runner files/state are retained.' }
+            $diskPath = [IO.Path]::GetFullPath($disk.Path)
+            if ($diskPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $diskPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'A registered VM still references the recorded instance disk path; runner files/state are retained.'
+            }
+        }
+    }
+}
+
 function Remove-RunnerInstance($State) {
     Assert-StateIdentity $State
     Complete-RunnerPilotClaim $State
-    $vm = Get-VM -Name $State.vmName -ErrorAction SilentlyContinue
+    $hasVmId = $State.PSObject.Properties.Name -contains 'vmId'
+    $matching = @(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or ($hasVmId -and [guid]$_.Id -eq [guid]$State.vmId) })
+    if ($matching.Count -gt 1) { throw 'Ambiguous VM identity; runner instance files and state are retained.' }
+    $vm = if ($matching.Count -eq 1) { $matching[0] } else { $null }
     if ($null -ne $vm) {
-        $disk = @(Get-VMHardDiskDrive -VMName $State.vmName)
+        $vmId = [guid]$vm.Id
+        if ($hasVmId -and $vmId -ne [guid]$State.vmId) { throw 'Recorded VM GUID differs from the inspected VM; runner files/state are retained.' }
+        $disk = @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
         foreach ($entry in $disk) {
             [void](Assert-OwnedPath $entry.Path)
         }
@@ -649,9 +701,12 @@ function Remove-RunnerInstance($State) {
         if (-not ($normalOwner -or $provisionalOwner)) {
             throw 'VM identity does not match owned state; refusing deletion.'
         }
-        if ($vm.State -ne 'Off') { Stop-VM -Name $State.vmName -TurnOff -Force -ErrorAction Stop }
-        Remove-VM -Name $State.vmName -Force -ErrorAction Stop
+        if ($vm.State -ne 'Off') { Stop-VM -VM $vm -TurnOff -Force -ErrorAction Stop }
+        Remove-VM -VM $vm -Force -ErrorAction Stop
+        $remaining = @(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq $vmId })
+        if ($remaining.Count -ne 0) { throw 'VM removal was not verified; runner instance files and state are retained.' }
     }
+    Assert-RunnerInstanceUnreferenced $State
     $instancePath = Assert-OwnedPath $State.instancePath
     if (Test-Path -LiteralPath $instancePath) {
         $links = @(Get-ChildItem -LiteralPath $instancePath -Recurse -Force -ErrorAction Stop |

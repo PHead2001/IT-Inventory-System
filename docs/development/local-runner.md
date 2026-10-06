@@ -79,6 +79,10 @@ For script maintenance, regenerate the manifest with `powershell.exe -NoProfile 
 
 ## Resource profiles and cutover
 
+Cleanup verifies a complete Hyper-V inventory against an independent `Msvm_ComputerSystem` provider inventory before treating a VM as absent. A failed/partial query or GUID/name disagreement blocks cleanup, admission, unattended recovery and updates. VM creation journals its GUID immediately after `New-VM`; cleanup binds that GUID when present and retains the existing name/tag/path ownership checks. Legacy state without a GUID also requires that no remaining registered VM references a configuration path or disk at or under its instance directory. Stop/removal errors, surviving registrations and unverifiable post-removal absence preserve instance files and state. Status reports an unverified inventory without exposing provider exception details.
+
+These checks prevent cleanup from deleting files after an uncertain lookup; they do not repair or adopt an unknown or damaged VM registration. An orphan with no trustworthy state requires separate owner-authorized investigation and a targeted recovery plan. Preserve disks, configuration and registration evidence; never bulk-delete Hyper-V caches or recreate state from a matching display name. `Cleanup.Integrity.Tests.ps1`, included in the canonical contract command, exercises these refusal and verified-absence paths with mocked VM/provider operations and disposable TEMP files. Source tests do not prove that the updated bundle is installed or that real host recovery succeeded.
+
 Install the reviewed updated runtime bundle **before pushing workflows that request
 these new labels**. The owner controls the subsequent merge of workflow changes to
 main; a branch runtime update does not change trusted main workflows. The installed

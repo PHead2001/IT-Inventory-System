@@ -22,6 +22,7 @@ function Get-OwnerToken { return 'dummy' }
 function Assert-RunnerProtectedPath { param($Path) if ($script:rejectAcl -and $Path.EndsWith($script:rejectAcl)) { throw 'Synthetic unexpected ACL.' }; [void](Assert-OwnedPath $Path) }
 function Get-ScheduledTask { param($TaskName) return [pscustomobject]@{ State = $(if ($script:taskRunning) { 'Running' } else { 'Ready' }) } }
 function Get-VM { if ($script:vmPresent) { return [pscustomobject]@{ Name = 'ITIR-' + ('c' * 32) } } }
+function Get-RunnerVmInventory { return @(Get-VM) }
 $script:realWaitUpdate = (Get-Command Wait-RunnerUpdateIdle).ScriptBlock
 function Wait-RunnerUpdateIdle { & $script:realWaitUpdate -TimeoutSeconds 0 }
 function Invoke-InstalledRunnerStop { throw 'Updater invoked destructive Stop.' }

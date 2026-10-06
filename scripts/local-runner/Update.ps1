@@ -178,7 +178,7 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
     $claimLock = Enter-RunnerLock
     try {
         Invoke-RunnerTransitionCheckpoint 'update-before-marker'
-        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        if ((Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
             throw 'Update requires no session or owned-prefix VM; no job was stopped.'
         }
         Write-RunnerBytes $marker ([Text.Encoding]::UTF8.GetBytes('stop'))
@@ -188,7 +188,7 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         Invoke-RunnerTransitionCheckpoint 'update-wait'
-        if ((Get-RunnerState) -or @(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+        if ((Get-RunnerState) -or @(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
             throw 'A session or VM appeared during graceful suspension; update refused without stopping it.'
         }
         if ((Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -ne 'Running') {

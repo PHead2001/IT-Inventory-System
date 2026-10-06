@@ -19,6 +19,7 @@ function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path
 function Get-OwnerToken { 'dummy' }
 function Get-ScheduledTask { param($TaskName) [pscustomobject]@{ State = $(if ($script:taskRunning) { 'Running' } else { 'Ready' }) } }
 function Get-VM { if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'vm.marker')) { [pscustomobject]@{ Name = 'ITIR-' + ('c' * 32) } } }
+function Get-RunnerVmInventory { return @(Get-VM) }
 function Stop-ScheduledTask { throw 'Update attempted destructive task stop.' }
 function Remove-RunnerInstance { throw 'Update attempted destructive session removal.' }
 function Invoke-InstalledRunnerStop { throw 'Update attempted destructive Stop.' }

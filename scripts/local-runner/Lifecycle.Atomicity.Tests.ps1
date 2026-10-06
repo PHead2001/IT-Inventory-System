@@ -20,6 +20,7 @@ function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
 function Get-VM {}
+function Get-RunnerVmInventory { return @(Get-VM) }
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
 function Write-Host {}
 function Assert-Rejected([scriptblock] $Work, [string] $Case) {

@@ -53,7 +53,7 @@ function Assert-InstalledHost($Config) {
     if ((Get-FileHash -LiteralPath $Config.baseVhdx -Algorithm SHA256).Hash -ine $Config.baseSha256) {
         throw 'The immutable Ubuntu base VHDX has changed.'
     }
-    if (@(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
+    if (@(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
         throw 'An owned-prefix VM already exists. Resolve it before launching another.'
     }
     if (Get-RunnerState) { throw 'Runner state exists. Stop or investigate it before launching another.' }
@@ -453,6 +453,9 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
             Write-RunnerJson $script:RunnerStatePath $current
             $vm = New-RunnerProfileVm $name $disk $instance $profile.label
+            $current | Add-Member -NotePropertyName vmId -NotePropertyValue ([guid]$vm.Id).ToString() -Force
+            Assert-StateIdentity $current
+            Write-RunnerJson $script:RunnerStatePath $current
             Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
             Assert-RunnerVmLifecycle $name
             if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
@@ -1079,7 +1082,7 @@ function Invoke-RunnerSupervisorRecovery {
                 [string]::IsNullOrEmpty($record.ciphertext) -or $record.ciphertext.Length -gt 16384 -or
                 [Convert]::FromBase64String($record.ciphertext).Length -eq 0) { throw 'Credential record is invalid.' }
             # No token decryption, VM creation or API request belongs to recovery.
-            if (@(Get-VM -ErrorAction Stop | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -ne 0) { throw 'Unexpected owned-prefix VM blocks recovery.' }
+            if (@(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -ne 0) { throw 'Unexpected owned-prefix VM blocks recovery.' }
             Assert-RunnerClaimOpen # Recheck explicit Stop/journals immediately before start.
             if ((Get-RunnerConfig).activation -cne 'active' -or (Get-RunnerState) -or
                 (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -cne 'Ready') { return }
@@ -1146,6 +1149,12 @@ try { switch ($Action) {
         }
         if ($null -eq $state -and $config.activation -in @('pilot', 'active')) {
             Show-RunnerCapacityStatus $config
+        }
+        try {
+            $inventory = @(Get-RunnerVmInventory)
+            Write-Host "Hyper-V inventory verified: $($inventory.Count) virtual machine(s)."
+        } catch {
+            Write-Host 'Hyper-V inventory is unverified. Pickup and cleanup are blocked; preserve instance files/state and investigate VM registration.'
         }
         $recentError = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
         if ($config.PSObject.Properties.Name -contains 'pilotExpectedSha') { Write-Host "Pilot binding: workflow=$($config.pilotWorkflowPath); SHA=$($config.pilotExpectedSha); label=$($config.pilotLabel)." }
