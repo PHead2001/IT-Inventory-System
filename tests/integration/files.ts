@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import { Worker } from 'node:worker_threads';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { cleanupClockChecks } from './files-cleanup-clock';
 
 function local(value: string | undefined, port: number) {
   assert.ok(value);
@@ -192,11 +193,131 @@ async function raceStorageUploadWithCancel(
     });
   }
 }
+async function cleanupWithLostConfirmation(
+  person: Actor,
+  parentId: string,
+  keyId: string,
+  secret: string,
+) {
+  const child = fork(
+    new URL('./files-cleanup-response-loss.ts', import.meta.url),
+    [],
+    {
+      execArgv: ['--conditions=react-server', '--import', 'tsx'],
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      env: { NODE_ENV: 'test', LOCAL_API_URL: url, LOCAL_ANON_KEY: anonKey },
+    },
+  );
+  return new Promise<{
+    result: {
+      status: string;
+      deleted: number;
+      failed: number;
+      outstanding: number;
+      blocked: number;
+      pending: boolean;
+    };
+    committed: number;
+  }>((resolve, reject) => {
+    let result:
+      | {
+          result: {
+            status: string;
+            deleted: number;
+            failed: number;
+            outstanding: number;
+            blocked: number;
+            pending: boolean;
+          };
+          committed: number;
+        }
+      | undefined;
+    const deadline = setTimeout(() => {
+      child.kill();
+      reject(new Error('Cleanup response-loss helper exceeded 30 seconds'));
+    }, 30000);
+    child.once('error', (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    child.on('message', (message: typeof result & { failure?: boolean }) => {
+      if (!message || message.failure) return;
+      result = message;
+    });
+    child.once('exit', (code) => {
+      clearTimeout(deadline);
+      if (code !== 0 || !result)
+        reject(new Error('Cleanup response-loss helper failed'));
+      else resolve(result);
+    });
+    child.send({
+      email: person.email,
+      actorId: person.id,
+      parentId,
+      keyId,
+      secret,
+    });
+  });
+}
 async function rpc(
   client: SupabaseClient,
   name: string,
   args: Record<string, unknown> = {},
 ) {
+  const person = actors.find((entry) => entry.client === client);
+  // These local-only fixtures exercise the server's signed dispatch contract.
+  // Direct unsigned callers are tested separately below.
+  if (
+    name === 'inventory_file_reserve' &&
+    person &&
+    keyToRetire &&
+    keySecretForCleanup
+  ) {
+    return client.rpc('inventory_file_reserve_ready', {
+      ...args,
+      p_replaces: args.p_replaces ?? null,
+      p_expected_file_version: args.p_expected_file_version ?? null,
+      p_key_id: keyToRetire,
+      ...serverProof(keySecretForCleanup, person.id, 'reserve', [
+        String(args.p_parent_type),
+        String(args.p_parent_id),
+        String(args.p_expected_revision),
+        Buffer.from(String(args.p_name)).toString('hex'),
+        String(args.p_type),
+        String(args.p_bytes),
+        String(args.p_replaces ?? '-'),
+        String(args.p_expected_file_version ?? '-'),
+        keyToRetire,
+      ]),
+    });
+  }
+  if (
+    name === 'inventory_file_cleanup_claim' &&
+    person &&
+    keySecretForCleanup
+  ) {
+    const parents = await db.query<{ kind: string; id: string }>(
+      "select distinct case when asset_id is null then 'quantity' else 'asset' end kind,coalesce(asset_id,quantity_id) id from public.inventory_files where uploader_id=$1 order by id",
+      [person.id],
+    );
+    const claims: { object_id: string; path: string }[] = [];
+    for (const parent of parents.rows) {
+      const result = await client.rpc('inventory_file_cleanup_claim_parent', {
+        ...args,
+        p_parent_type: parent.kind,
+        p_parent_id: parent.id,
+        ...serverProof(keySecretForCleanup, person.id, 'cleanup_claim', [
+          parent.kind,
+          parent.id,
+          String(args.p_limit),
+          String(args.p_key_id),
+        ]),
+      });
+      if (result.error) return result;
+      claims.push(...result.data);
+    }
+    return { data: claims, error: null };
+  }
   return client.rpc(name, args);
 }
 async function okay(
@@ -304,6 +425,387 @@ async function reserve(
     p_replaces: replaces,
     p_expected_file_version: replacedVersion,
   })) as { id: string; path: string };
+}
+
+async function expiredTransitionBarrier(
+  staff: Actor,
+  parent: string,
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const source = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'delayed-upload.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const validated = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'delayed-validation.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  for (const file of [source, validated]) {
+    const upload = await staff.client.storage
+      .from('inventory-files')
+      .upload(file.path, bytes, { contentType: 'application/pdf' });
+    assert.equal(
+      upload.error,
+      null,
+      'expiry barrier source physically uploads',
+    );
+  }
+  await okay(staff.client, 'inventory_file_uploaded', {
+    p_file_id: validated.id,
+  });
+  const requestId = randomUUID();
+  const begun = await okay(staff.client, 'inventory_file_begin', {
+    p_file_id: validated.id,
+    p_request_id: requestId,
+    p_key_id: keyId,
+    ...serverProof(secret, staff.id, 'begin', [validated.id, requestId, keyId]),
+  });
+  const uploadTxn = new Client({ connectionString: dbUrl });
+  const validatedTxn = new Client({ connectionString: dbUrl });
+  const guard = new Client({ connectionString: dbUrl });
+  await Promise.all([
+    uploadTxn.connect(),
+    validatedTxn.connect(),
+    guard.connect(),
+  ]);
+  let transitions: Promise<(string | null)[]> | undefined;
+  try {
+    for (const client of [uploadTxn, validatedTxn]) {
+      await client.query('begin');
+      await client.query("select set_config('request.jwt.claims',$1,true)", [
+        JSON.stringify({ sub: staff.id, role: 'authenticated' }),
+      ]);
+      await client.query('set local role authenticated');
+    }
+    const deadline = await db.query<{ expires: Date }>(
+      "select clock_timestamp()+interval '100 milliseconds' expires",
+    );
+    const expires = deadline.rows[0].expires;
+    await db.query(
+      'update public.inventory_files set reserve_expires_at=$1 where id=$2',
+      [expires, source.id],
+    );
+    await db.query(
+      'update public.inventory_files set validation_lease_until=$1 where id=$2',
+      [expires, validated.id],
+    );
+    const attestation = await db.query<{ statement: string }>(
+      'select private.file_attestation_message(f,$2,$3,$4,$5,$6) statement from public.inventory_files f where id=$1',
+      [
+        validated.id,
+        begun.source_id,
+        begun.source_version,
+        'application/pdf',
+        bytes.length,
+        sha(bytes),
+      ],
+    );
+    // Real wall clock ages both pre-existing transactions beyond lease grace.
+    // This is separate from controlled fixture aging in the admission race.
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, expires.getTime() + 31000 - Date.now())),
+    );
+    const elapsed = await db.query<{ closed: boolean }>(
+      "select clock_timestamp()>$1::timestamptz+interval '30 seconds' closed",
+      [expires],
+    );
+    eq(
+      elapsed.rows[0].closed,
+      true,
+      'both original capabilities are expired beyond real grace',
+    );
+    for (let index = 0; index < 3; index++)
+      await reserve(
+        staff,
+        'asset',
+        parent,
+        1,
+        `after-expiry-${index}.pdf`,
+        'application/pdf',
+        16,
+      );
+    await guard.query('begin');
+    const holder = await guard.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guard.query('select private.file_guard_lock()');
+    transitions = Promise.all([
+      uploadTxn
+        .query('select public.inventory_file_uploaded($1)', [source.id])
+        .then(
+          () => null,
+          (error: { code?: string }) => error.code ?? 'unknown',
+        ),
+      validatedTxn
+        .query(
+          'select public.inventory_file_validated($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [
+            validated.id,
+            begun.generation,
+            keyId,
+            begun.source_id,
+            begun.source_version,
+            'application/pdf',
+            bytes.length,
+            sha(bytes),
+            mac(secret, attestation.rows[0].statement),
+          ],
+        )
+        .then(
+          () => null,
+          (error: { code?: string }) => error.code ?? 'unknown',
+        ),
+    ]);
+    const waitUntil = performance.now() + 10000;
+    let queued = false;
+    while (performance.now() < waitUntil) {
+      const waiting = await db.query<{ count: string }>(
+        `with recursive queue(pid) as (
+          select pid from pg_stat_activity where $1::integer=any(pg_blocking_pids(pid))
+          union select activity.pid from pg_stat_activity activity join queue holder on holder.pid=any(pg_blocking_pids(activity.pid))
+        ) select count(*) from pg_stat_activity where pid in(select pid from queue) and wait_event_type='Lock'
+          and (query ilike '%inventory_file_uploaded%' or query ilike '%inventory_file_validated%')`,
+        [holder.rows[0].pid],
+      );
+      if (Number(waiting.rows[0].count) === 2) {
+        queued = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      queued,
+      'both aged independent transactions are observed behind the guard',
+    );
+    checks++;
+    await guard.query('commit');
+    eq(
+      await transitions,
+      ['P1008', 'P1008'],
+      'fresh wall clock rejects stale uploaded and validated transitions',
+    );
+    const rows = await db.query<{ state: string; version: string }>(
+      'select state,version::text from public.inventory_files where id=any($1::uuid[]) order by state',
+      [[source.id, validated.id]],
+    );
+    eq(
+      rows.rows,
+      [
+        { state: 'reserved', version: '1' },
+        { state: 'validating', version: '3' },
+      ],
+      'rejected transitions do not revive state or change versions',
+    );
+    const count = await db.query<{ count: string }>(
+      'select count(*) from public.inventory_files f where uploader_id=$1 and private.file_pending_active(f,clock_timestamp())',
+      [staff.id],
+    );
+    eq(
+      count.rows[0].count,
+      '3',
+      'stale transactions cannot revive a fourth or fifth active slot',
+    );
+    eq(
+      sha(await bytesAt(staff.client, source.path)),
+      sha(bytes),
+      'failed upload notification preserves physical bytes for scoped cleanup',
+    );
+  } finally {
+    await guard.query('rollback').catch(() => undefined);
+    await transitions?.catch(() => undefined);
+    await Promise.all([
+      uploadTxn.query('rollback'),
+      validatedTxn.query('rollback'),
+    ]);
+    await Promise.all([uploadTxn.end(), validatedTxn.end(), guard.end()]);
+  }
+  await cleanupFailedFixture(staff, keyId, secret);
+}
+
+async function pendingAdmissionRace(
+  staff: Actor,
+  independent: SupabaseClient,
+  parent: string,
+  retainedParent: string,
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const expired = await reserve(
+    staff,
+    'asset',
+    retainedParent,
+    1,
+    'renew.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const uploaded = await staff.client.storage
+    .from('inventory-files')
+    .upload(expired.path, bytes, { contentType: 'application/pdf' });
+  assert.equal(uploaded.error, null, 'renewal race source physically uploads');
+  await okay(staff.client, 'inventory_file_uploaded', {
+    p_file_id: expired.id,
+  });
+  // Controlled aging sets up abandoned work. Natural wall-clock completion
+  // fencing remains covered by files-completion.ts; no absence is inferred.
+  await db.query(
+    "update public.inventory_files set reserve_expires_at=clock_timestamp()-interval '2 hours' where id=$1",
+    [expired.id],
+  );
+  await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'active-one.pdf',
+    'application/pdf',
+    16,
+  );
+  await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'active-two.pdf',
+    'application/pdf',
+    16,
+  );
+  const guard = new Client({ connectionString: dbUrl });
+  await guard.connect();
+  const requestId = randomUUID();
+  let requests: Promise<Awaited<ReturnType<typeof rpc>>[]> | undefined;
+  try {
+    await guard.query('begin');
+    const holder = await guard.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guard.query('select private.file_guard_lock()');
+    requests = Promise.all([
+      rpc(staff.client, 'inventory_file_begin', {
+        p_file_id: expired.id,
+        p_request_id: requestId,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'begin', [
+          expired.id,
+          requestId,
+          keyId,
+        ]),
+      }),
+      rpc(independent, 'inventory_file_reserve', {
+        p_parent_type: 'asset',
+        p_parent_id: parent,
+        p_expected_revision: 1,
+        p_name: 'new-racer.pdf',
+        p_type: 'application/pdf',
+        p_bytes: 16,
+        p_replaces: null,
+        p_expected_file_version: null,
+      }),
+    ]);
+    const deadline = performance.now() + 10000;
+    let queued = false;
+    while (performance.now() < deadline) {
+      const waiting = await db.query<{ count: string }>(
+        `with recursive queue(pid) as (
+          select pid from pg_stat_activity where $1::integer=any(pg_blocking_pids(pid))
+          union
+          select activity.pid from pg_stat_activity activity join queue holder
+            on holder.pid=any(pg_blocking_pids(activity.pid))
+        ) select count(*) from pg_stat_activity where pid in(select pid from queue)
+          and wait_event_type='Lock'
+          and (query ilike '%inventory_file_begin%' or query ilike '%inventory_file_reserve_ready%')`,
+        [holder.rows[0].pid],
+      );
+      if (Number(waiting.rows[0].count) === 2) {
+        queued = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      queued,
+      'independent reserve and renewal both queue at file_guard',
+    );
+    checks++;
+    await guard.query('commit');
+    const results = await requests;
+    eq(
+      results.filter((result) => !result.error).length,
+      1,
+      'only reserve or expired renewal can take third active slot',
+    );
+    eq(
+      results.filter((result) => result.error?.code === 'P1012').length,
+      1,
+      'loser is quota-denied without bypass',
+    );
+    const active = await db.query<{ count: string }>(
+      'select count(*) from public.inventory_files f where uploader_id=$1 and private.file_pending_active(f,clock_timestamp())',
+      [staff.id],
+    );
+    eq(
+      active.rows[0].count,
+      '3',
+      'exactly three active pending files remain after race across parents',
+    );
+    const state = await db.query<{
+      state: string;
+      validation_generation: number;
+      validation_lease_until: string | null;
+    }>(
+      'select state,validation_generation,validation_lease_until from public.inventory_files where id=$1',
+      [expired.id],
+    );
+    if (results[0].error) {
+      eq(
+        state.rows[0],
+        {
+          state: 'uploaded',
+          validation_generation: 0,
+          validation_lease_until: null,
+        },
+        'losing renewal rolls back generation and lease',
+      );
+    } else {
+      eq(
+        state.rows[0].state,
+        'validating',
+        'winning renewal is admitted under fresh lease',
+      );
+      eq(
+        state.rows[0].validation_generation,
+        1,
+        'winning renewal creates exactly one new generation',
+      );
+    }
+    eq(
+      sha(await bytesAt(staff.client, expired.path)),
+      sha(bytes),
+      'capacity accounting preserves expired source physical bytes',
+    );
+  } finally {
+    await guard.query('rollback').catch(() => undefined);
+    await requests?.catch(() => undefined);
+    await guard.end();
+  }
+  await cleanupFailedFixture(staff, keyId, secret);
 }
 
 async function cleanupFailedFixture(
@@ -425,6 +927,7 @@ async function validate(
   requestId = randomUUID(),
   parentType: 'asset' | 'quantity' = 'asset',
   replaces: string | null = null,
+  foreignSource?: { id: string; version: string },
 ) {
   const replacedVersion = replaces
     ? (
@@ -596,6 +1099,36 @@ async function validate(
     sha(bytes),
     registered.sort().join('|'),
   ].join(':');
+  if (foreignSource) {
+    const substituted = statement.split(':');
+    substituted[13] = foreignSource.id;
+    substituted[14] = foreignSource.version;
+    await denied(
+      staff.client,
+      'inventory_file_validated',
+      {
+        p_file_id: file.id,
+        p_generation: begin.generation,
+        p_key_id: keyId,
+        p_source_id: foreignSource.id,
+        p_source_version: foreignSource.version,
+        p_type: type,
+        p_bytes: bytes.length,
+        p_sha256: sha(bytes),
+        p_mac: mac(secret, substituted.join(':')),
+      },
+      'P1012',
+    );
+    eq(
+      (
+        await db.query('select state from public.inventory_files where id=$1', [
+          file.id,
+        ])
+      ).rows[0].state,
+      'validating',
+      'correctly signed foreign source cannot advance validation',
+    );
+  }
   await okay(staff.client, 'inventory_file_validated', {
     p_file_id: file.id,
     p_generation: begin.generation,
@@ -608,6 +1141,506 @@ async function validate(
     p_mac: mac(secret, statement),
   });
   return requestId;
+}
+
+async function finalizeCancelRace(
+  staff: Actor,
+  parent: string,
+  keyId: string,
+  secret: string,
+  cancelWins: boolean,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const file = await reserve(
+    staff,
+    'asset',
+    parent,
+    1,
+    'publish-cancel.pdf',
+    'application/pdf',
+    bytes.length,
+  );
+  const uploaded = await staff.client.storage
+    .from('inventory-files')
+    .upload(file.path, bytes, { contentType: 'application/pdf' });
+  assert.equal(uploaded.error, null, 'race source physically uploaded');
+  await okay(staff.client, 'inventory_file_uploaded', { p_file_id: file.id });
+  const requestId = await validate(
+    staff,
+    keyId,
+    secret,
+    file,
+    bytes,
+    'application/pdf',
+    parent,
+    1,
+    'asset_document',
+  );
+  const winner = new Client({
+    connectionString: dbUrl,
+    application_name: 'files-transition-winner',
+  });
+  const loser = new Client({
+    connectionString: dbUrl,
+    application_name: 'files-transition-loser',
+  });
+  await winner.connect();
+  await loser.connect();
+  let waiting: Promise<{ code?: string }> | undefined;
+  try {
+    for (const connection of [winner, loser]) {
+      await connection.query('begin');
+      await connection.query("set local statement_timeout='10s'");
+      await connection.query('set local role authenticated');
+      await connection.query(
+        "select set_config('request.jwt.claims',$1,true)",
+        [JSON.stringify({ sub: staff.id, role: 'authenticated' })],
+      );
+    }
+    const winnerPid = (
+      await winner.query<{ pid: number }>('select pg_backend_pid() pid')
+    ).rows[0].pid;
+    const loserPid = (
+      await loser.query<{ pid: number }>('select pg_backend_pid() pid')
+    ).rows[0].pid;
+    eq(
+      winnerPid === loserPid,
+      false,
+      'transition race uses independent connections',
+    );
+    const finalize =
+      'select public.inventory_file_finalize($1::uuid,$2::bigint,$3::uuid)';
+    const cancel = 'select public.inventory_file_cancel($1::uuid)';
+    const finalArgs = [file.id, 1, requestId];
+    await winner.query(
+      cancelWins ? cancel : finalize,
+      cancelWins ? [file.id] : finalArgs,
+    );
+    waiting = loser
+      .query(cancelWins ? finalize : cancel, cancelWins ? finalArgs : [file.id])
+      .then(
+        () => ({}),
+        (error: { code?: string }) => ({ code: error.code }),
+      );
+    const deadline = performance.now() + 3000;
+    let blocked = false;
+    while (performance.now() < deadline) {
+      blocked = (
+        await db.query<{ blocked: boolean }>(
+          "select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock' and $2::integer=any(pg_blocking_pids(pid))) blocked",
+          [loserPid, winnerPid],
+        )
+      ).rows[0].blocked;
+      if (blocked) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    eq(
+      blocked,
+      true,
+      'losing transition waits while winning transition is uncommitted',
+    );
+    await winner.query('commit');
+    eq(
+      (await waiting).code,
+      'P1008',
+      'losing transition fails after winner commits',
+    );
+  } finally {
+    await winner.query('rollback').catch(() => undefined);
+    await waiting;
+    await loser.query('rollback').catch(() => undefined);
+    await winner.end();
+    await loser.end();
+  }
+  const readback = (
+    await db.query(
+      `select f.state,f.version::text,o.cleanup_state,c.revision::text,
+    (select count(*)::text from public.inventory_file_events where file_id=f.id) events,
+    (select count(*)::text from private.file_receipts where actor_id=$2 and request_id=$3 and result is not null) receipts
+    from public.inventory_files f join private.file_objects o on o.file_id=f.id
+    join public.inventory_file_collections c on c.asset_id=f.asset_id where f.id=$1`,
+      [file.id, staff.id, requestId],
+    )
+  ).rows[0];
+  eq(
+    readback.state,
+    cancelWins ? 'cancelled' : 'ready',
+    'committed race winner determines stable file state',
+  );
+  eq(
+    readback.cleanup_state,
+    cancelWins ? 'eligible' : 'held',
+    'only cancelled bytes become cleanup eligible',
+  );
+  eq(
+    readback.revision,
+    cancelWins ? '1' : '2',
+    'only publication increments collection',
+  );
+  eq(
+    readback.events,
+    cancelWins ? '0' : '1',
+    'publication event commits exactly once',
+  );
+  eq(
+    readback.receipts,
+    cancelWins ? '0' : '1',
+    'failed finalize leaves no completed receipt',
+  );
+  if (cancelWins) {
+    // Cancellation has only a file-ID argument, not a receipt/request token.
+    // Both an identical retry and a fresh invocation on this terminal file must
+    // report invalid_transition without repeating its committed side effects.
+    const cancelArgs = { p_file_id: file.id };
+    await denied(staff.client, 'inventory_file_cancel', cancelArgs, 'P1008');
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { ...cancelArgs },
+      'P1008',
+    );
+    eq(
+      (
+        await db.query(
+          `select f.state,f.version::text,o.cleanup_state,c.revision::text,
+          (select count(*)::text from public.inventory_file_events where file_id=f.id) events,
+          (select count(*)::text from private.file_receipts where actor_id=$2 and request_id=$3 and result is not null) receipts
+          from public.inventory_files f join private.file_objects o on o.file_id=f.id
+          join public.inventory_file_collections c on c.asset_id=f.asset_id where f.id=$1`,
+          [file.id, staff.id, requestId],
+        )
+      ).rows[0],
+      readback,
+      'repeated cancellation retains terminal state/version, collection, objects and event/receipt counts',
+    );
+    eq(
+      sha(await bytesAt(admin, file.path)),
+      sha(bytes),
+      'repeated cancellation leaves physical source for truthful normal cleanup',
+    );
+    await denied(
+      staff.client,
+      'inventory_file_finalize',
+      { p_file_id: file.id, p_expected_revision: 1, p_request_id: requestId },
+      'P1008',
+    );
+    // Teardown ages only this terminal fixture; race ordering above uses real locks.
+    await db.query(
+      "update public.inventory_files set validation_lease_until=clock_timestamp()-interval '31 seconds' where id=$1 and state='cancelled'",
+      [file.id],
+    );
+  } else {
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { p_file_id: file.id },
+      'P1008',
+    );
+    await okay(staff.client, 'inventory_file_finalize', {
+      p_file_id: file.id,
+      p_expected_revision: 1,
+      p_request_id: requestId,
+    });
+  }
+  const claims = (await okay(
+    staff.client,
+    'inventory_file_cleanup_claim_parent',
+    {
+      p_parent_type: 'asset',
+      p_parent_id: parent,
+      p_limit: 20,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_claim', [
+        'asset',
+        parent,
+        '20',
+        keyId,
+      ]),
+    },
+  )) as { object_id: string; path: string }[];
+  eq(
+    claims.map((claim) => claim.path),
+    cancelWins ? [file.path] : [],
+    'cleanup never claims published live source',
+  );
+  for (const claim of claims) {
+    const removed = await staff.client.storage
+      .from('inventory-files')
+      .remove([claim.path]);
+    assert.equal(
+      removed.error,
+      null,
+      'cancel winner deletes its exact physical source',
+    );
+    await okay(staff.client, 'inventory_file_cleanup_confirm', {
+      p_object_id: claim.object_id,
+      p_key_id: keyId,
+      ...serverProof(secret, staff.id, 'cleanup_confirm', [
+        claim.object_id,
+        keyId,
+      ]),
+    });
+  }
+  if (cancelWins) {
+    await denied(
+      staff.client,
+      'inventory_file_cancel',
+      { p_file_id: file.id },
+      'P1008',
+    );
+    for (let repeat = 0; repeat < 2; repeat++) {
+      eq(
+        await okay(staff.client, 'inventory_file_cleanup_claim_parent', {
+          p_parent_type: 'asset',
+          p_parent_id: parent,
+          p_limit: 20,
+          p_key_id: keyId,
+          ...serverProof(secret, staff.id, 'cleanup_claim', [
+            'asset',
+            parent,
+            '20',
+            keyId,
+          ]),
+        }),
+        [],
+        'repeated cleanup claims no objects after cancelled source deletion',
+      );
+      eq(
+        await okay(staff.client, 'inventory_file_cleanup_status', {
+          p_parent_type: 'asset',
+          p_parent_id: parent,
+        }),
+        { outstanding: 0, blocked: 0 },
+        'authoritative repeated cleanup status is zero work',
+      );
+    }
+    await denied(
+      staff.client,
+      'inventory_file_finalize',
+      {
+        p_file_id: file.id,
+        p_expected_revision: 1,
+        p_request_id: requestId,
+      },
+      'P1008',
+    );
+  }
+  const finalState = (
+    await db.query(
+      'select state,version::text from public.inventory_files where id=$1',
+      [file.id],
+    )
+  ).rows[0];
+  eq(
+    finalState,
+    { state: readback.state, version: readback.version },
+    'losing retry and cleanup cannot resurrect or mutate winning file',
+  );
+  if (cancelWins) {
+    eq(
+      (
+        await db.query(
+          "select count(*)::text count from storage.objects where bucket_id='inventory-files' and name=$1",
+          [file.path],
+        )
+      ).rows[0].count,
+      '0',
+      'cancelled physical object absent',
+    );
+    assert.ok(
+      (await admin.storage.from('inventory-files').download(file.path)).error,
+      'cancelled physical bytes unavailable through privileged Storage read',
+    );
+    checks++;
+  } else {
+    eq(
+      sha(await bytesAt(staff.client, file.path)),
+      sha(bytes),
+      'published live bytes survive losing cancel and cleanup',
+    );
+  }
+}
+
+async function crossParentStorageSubstitution(
+  staff: Actor,
+  parents: [string, string],
+  keyId: string,
+  secret: string,
+) {
+  const document = await PDFDocument.create();
+  document.addPage([80, 80]);
+  const bytes = Buffer.from(await document.save());
+  const files = [];
+  for (const parent of parents) {
+    const file = await reserve(
+      staff,
+      'asset',
+      parent,
+      1,
+      'parent-bound.pdf',
+      'application/pdf',
+      bytes.length,
+    );
+    const uploaded = await staff.client.storage
+      .from('inventory-files')
+      .upload(file.path, bytes, { contentType: 'application/pdf' });
+    assert.equal(
+      uploaded.error,
+      null,
+      'cross-parent source physically uploaded',
+    );
+    await okay(staff.client, 'inventory_file_uploaded', { p_file_id: file.id });
+    files.push(file);
+  }
+  const [target, foreign] = files;
+  const requestId = await validate(
+    staff,
+    keyId,
+    secret,
+    foreign,
+    bytes,
+    'application/pdf',
+    parents[1],
+    1,
+    'asset_document',
+  );
+  await okay(staff.client, 'inventory_file_finalize', {
+    p_file_id: foreign.id,
+    p_expected_revision: 1,
+    p_request_id: requestId,
+  });
+  const identity = (
+    await db.query(
+      "select id,version from storage.objects where bucket_id='inventory-files' and name=$1",
+      [foreign.path],
+    )
+  ).rows[0] as { id: string; version: string };
+  const physicalIdentitySql =
+    "select name,id,version,metadata->>'size' as bytes from storage.objects where bucket_id='inventory-files' and name=any($1::text[]) order by name";
+  const physicalIdentities = (
+    await db.query(physicalIdentitySql, [files.map((file) => file.path)])
+  ).rows;
+  // Same active staff is allowed to read both parents. The boundary is sealed
+  // object identity and parent-bound attestation, not an invented read denial.
+  const foreignBytes = await bytesAt(staff.client, foreign.path);
+  eq(
+    sha(foreignBytes),
+    sha(bytes),
+    'same staff can read foreign ready source before substitution',
+  );
+  const substitutions = [
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .copy(foreign.path, target.path),
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .move(foreign.path, target.path),
+    () =>
+      staff.client.storage
+        .from('inventory-files')
+        .upload(target.path, foreignBytes, {
+          contentType: 'application/pdf',
+          upsert: true,
+        }),
+  ];
+  for (const [index, operation] of substitutions.entries()) {
+    const result = await operation();
+    assert.ok(
+      result.error,
+      'actual Storage cross-parent sealed path substitution denied',
+    );
+    if (index === 2) {
+      eq(
+        (result.error as { statusCode?: string }).statusCode,
+        '403',
+        'foreign ready bytes cannot overwrite another sealed parent source',
+      );
+    }
+    const error = result.error as {
+      status?: number;
+      statusCode?: string;
+      code?: string;
+    };
+    console.log(
+      'Cross-parent Storage substitution outcome:',
+      JSON.stringify({
+        operation: ['copy', 'move', 'upsert'][index],
+        status: Number.isInteger(error.status) ? error.status : null,
+        statusCode: /^\d{3}$/.test(error.statusCode ?? '')
+          ? error.statusCode
+          : null,
+        code: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(error.code ?? '')
+          ? error.code
+          : null,
+      }),
+    );
+    checks++;
+  }
+  eq(
+    (await db.query(physicalIdentitySql, [files.map((file) => file.path)]))
+      .rows,
+    physicalIdentities,
+    'cross-parent Storage attempts retain both exact object IDs, versions and sizes',
+  );
+  const targetRequest = await validate(
+    staff,
+    keyId,
+    secret,
+    target,
+    bytes,
+    'application/pdf',
+    parents[0],
+    1,
+    'asset_document',
+    randomUUID(),
+    'asset',
+    null,
+    identity,
+  );
+  await okay(staff.client, 'inventory_file_finalize', {
+    p_file_id: target.id,
+    p_expected_revision: 1,
+    p_request_id: targetRequest,
+  });
+  for (const [index, file] of files.entries()) {
+    eq(
+      await okay(staff.client, 'inventory_file_read', {
+        p_file_id: file.id,
+        p_variant: 'source',
+      }),
+      file.path,
+      'ready read resolves its own immutable source',
+    );
+    eq(
+      sha(await bytesAt(staff.client, file.path)),
+      sha(bytes),
+      'cross-parent attempts preserve both physical sources',
+    );
+    eq(
+      (
+        await db.query(
+          'select asset_id,state from public.inventory_files where id=$1',
+          [file.id],
+        )
+      ).rows[0],
+      { asset_id: parents[index], state: 'ready' },
+      'publication retains exact original parent',
+    );
+    eq(
+      (
+        await db.query(
+          'select asset_id from public.inventory_file_events where file_id=$1',
+          [file.id],
+        )
+      ).rows.map((row) => row.asset_id),
+      [parents[index]],
+      'publication history cannot substitute another parent',
+    );
+  }
 }
 
 async function main() {
@@ -631,7 +1664,103 @@ async function main() {
     'select id from public.locations where active and can_hold_inventory limit 1',
   );
   const parent = await asset(staff, cat.id, loc.id);
+  checks += await cleanupClockChecks(
+    db,
+    dbUrl,
+    staff.id,
+    viewer.id,
+    await asset(staff, cat.id, loc.id),
+    keyId,
+    secret,
+  );
+  // A cleanup request waiting on the global file guard must not hold the
+  // inventory parent lock and block an unrelated metadata writer.
+  const guardHolder = new Client({ connectionString: dbUrl });
+  const parentWriter = new Client({ connectionString: dbUrl });
+  await guardHolder.connect();
+  await parentWriter.connect();
+  let waitingClaim: Promise<{ data: unknown; error: unknown }> | undefined;
+  try {
+    await guardHolder.query('begin');
+    const holder = await guardHolder.query<{ pid: number }>(
+      'select pg_backend_pid() pid',
+    );
+    await guardHolder.query('select id from private.file_guard for update');
+    waitingClaim = Promise.resolve(
+      staff.client.rpc('inventory_file_cleanup_claim_parent', {
+        p_parent_type: 'asset',
+        p_parent_id: parent,
+        p_limit: 1,
+        p_key_id: keyId,
+        ...serverProof(secret, staff.id, 'cleanup_claim', [
+          'asset',
+          parent,
+          '1',
+          keyId,
+        ]),
+      }),
+    ).then((result) => ({ data: result.data, error: result.error }));
+    const deadline = performance.now() + 1500;
+    let observed = false;
+    while (performance.now() < deadline) {
+      const blocked = await db.query<{ present: boolean }>(
+        "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query ilike '%inventory_file_cleanup_claim_parent%' and $1::integer=any(pg_blocking_pids(pid))) present",
+        [holder.rows[0].pid],
+      );
+      if (blocked.rows[0].present) {
+        observed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(
+      observed,
+      'scoped cleanup is observed waiting for the global guard',
+    );
+    await parentWriter.query('begin');
+    await parentWriter.query("set local statement_timeout='500ms'");
+    await parentWriter.query(
+      'select id from public.serialized_assets where id=$1 for update',
+      [parent],
+    );
+    await parentWriter.query('commit');
+    await guardHolder.query('commit');
+    const claimed = await waitingClaim;
+    assert.equal(claimed.error, null, 'claim completes after guard release');
+    eq(claimed.data, [], 'empty parent stays empty after lock-order race');
+    checks += 2;
+  } finally {
+    await parentWriter.query('rollback').catch(() => undefined);
+    await guardHolder.query('rollback').catch(() => undefined);
+    await waitingClaim?.catch(() => undefined);
+    await parentWriter.end();
+    await guardHolder.end();
+  }
   const independent = await independentSession(staff);
+  await pendingAdmissionRace(
+    staff,
+    independent,
+    parent,
+    await asset(staff, cat.id, loc.id),
+    keyId,
+    secret,
+  );
+  await expiredTransitionBarrier(staff, parent, keyId, secret);
+  for (const cancelWins of [true, false]) {
+    await finalizeCancelRace(
+      staff,
+      await asset(staff, cat.id, loc.id),
+      keyId,
+      secret,
+      cancelWins,
+    );
+  }
+  await crossParentStorageSubstitution(
+    staff,
+    [await asset(staff, cat.id, loc.id), await asset(staff, cat.id, loc.id)],
+    keyId,
+    secret,
+  );
   const uploadCancel = await reserve(
     staff,
     'asset',
@@ -1356,22 +2485,33 @@ async function main() {
     ),
     'interrupted deletion is claimable after lease',
   );
-  const deletion = await staff.client.storage
-    .from('inventory-files')
-    .remove([sourceClaim.path]);
-  assert.equal(
-    deletion.error,
-    null,
-    `claimed source deletion: ${deletion.error?.message}`,
+  await db.query(
+    "update private.file_objects set cleanup_lease_until=now()-interval '1 minute' where id=$1",
+    [sourceClaim.object_id],
   );
-  await okay(staff.client, 'inventory_file_cleanup_confirm', {
-    p_object_id: sourceClaim.object_id,
-    p_key_id: keyId,
-    ...serverProof(secret, staff.id, 'cleanup_confirm', [
-      sourceClaim.object_id,
-      keyId,
-    ]),
-  });
+  const lostConfirmation = await cleanupWithLostConfirmation(
+    staff,
+    parent,
+    keyId,
+    secret,
+  );
+  eq(
+    lostConfirmation.committed,
+    1,
+    'real cleanup confirmation committed before response delivery was lost',
+  );
+  eq(
+    lostConfirmation.result,
+    {
+      deleted: 0,
+      failed: 0,
+      outstanding: 0,
+      blocked: 0,
+      pending: false,
+      status: 'complete',
+    },
+    'actual server service settles lost confirmation using authorized final zero work without inferring deleted count',
+  );
   const tombstone = await db.query(
     'select cleanup_state,path from private.file_objects where id=$1',
     [sourceClaim.object_id],

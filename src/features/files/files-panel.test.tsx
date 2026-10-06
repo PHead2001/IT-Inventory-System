@@ -9,14 +9,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
-  rpc: vi.fn(),
+  operation: vi.fn(),
+  browserRpc: vi.fn(),
+  reserve: vi.fn(),
   fetch: vi.fn(),
   upload: vi.fn(),
   download: vi.fn(),
 }));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
-    rpc: mocks.rpc,
+    rpc: mocks.browserRpc,
     storage: {
       from: () => ({ upload: mocks.upload, download: mocks.download }),
     },
@@ -49,7 +51,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.upload.mockResolvedValue({ data: { path: 's/fixture' }, error: null });
   let cancelled = false;
-  mocks.rpc.mockImplementation(async (name: string) => {
+  mocks.operation.mockImplementation(async (name: string) => {
     if (name === 'inventory_file_cancel') {
       cancelled = true;
       return { data: { changed: true }, error: null };
@@ -67,7 +69,49 @@ beforeEach(() => {
     ok: true,
     json: async () => ({ deleted: 1, pending: false }),
   });
-  vi.stubGlobal('fetch', mocks.fetch);
+  mocks.browserRpc.mockImplementation((...args) => mocks.operation(...args));
+  // Backend-state fixtures model the new server reservation response; they do
+  // not imply a browser can invoke the signed reservation RPC directly.
+  mocks.reserve.mockImplementation(async (_url, options) => {
+    const v = JSON.parse(options.body);
+    const result = await mocks.operation('inventory_file_reserve', {
+      p_parent_type: v.parentType,
+      p_parent_id: v.parentId,
+      p_expected_revision: v.expectedRevision,
+      p_name: v.name,
+      p_type: v.type,
+      p_bytes: v.bytes,
+      p_replaces: v.replaces,
+      p_expected_file_version: v.expectedFileVersion,
+    });
+    return {
+      ok: !result.error,
+      json: async () => ({
+        result: result.data,
+        message: result.error?.message,
+      }),
+    };
+  });
+  vi.stubGlobal('fetch', async (url: string, options: RequestInit) => {
+    if (url === '/api/inventory-files/reserve')
+      return mocks.reserve(url, options);
+    const response = await mocks.fetch(url, options);
+    if (url !== '/api/inventory-files/cleanup' || !response.ok) return response;
+    const result = await response.json();
+    // Old fixtures meant 'batch count only', so keep their unverified status.
+    const envelope =
+      'status' in result
+        ? result
+        : {
+            ...result,
+            pending: true,
+            status: 'pending',
+            failed: 0,
+            outstanding: 1,
+            blocked: 1,
+          };
+    return { ...response, json: async () => envelope };
+  });
 });
 
 it('labels the actual file upload/activity instants in the one shared display zone and preserves their source fractions', async () => {
@@ -75,7 +119,7 @@ it('labels the actual file upload/activity instants in the one shared display zo
     .spyOn(operationalTime, 'browserDisplayTimeZone')
     .mockReturnValue({ timeZone: 'America/Los_Angeles', fallback: false });
   const at = '2026-10-03T05:23:06.123456Z';
-  mocks.rpc.mockImplementation(async (name: string) => {
+  mocks.operation.mockImplementation(async (name: string) => {
     if (name === 'inventory_file_cards')
       return {
         data: { revision: '1', files: [{ ...pending, created_at: at }] },
@@ -153,6 +197,118 @@ it('labels the actual file upload/activity instants in the one shared display zo
   }
 });
 
+describe('authoritative file readiness and cleanup', () => {
+  it('keeps unavailable uploads out of Storage and never calls unsigned browser reserve', async () => {
+    mocks.reserve.mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        message: 'File validation is not configured for this environment.',
+      }),
+    });
+    render(
+      <FilesPanel
+        actorId="staff"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByRole('button', { name: 'Add photo' });
+    fireEvent.change(screen.getByLabelText('Add recognition photo'), {
+      target: {
+        files: [new File(['fictional'], 'safe.png', { type: 'image/png' })],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Upload and review' }));
+    await screen.findByText(
+      'File validation is not configured for this environment.',
+    );
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(
+      mocks.browserRpc.mock.calls.some(
+        ([name]) =>
+          name === 'inventory_file_reserve' ||
+          name === 'inventory_file_reserve_ready',
+      ),
+    ).toBe(false);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it('uses parent-scoped authoritative no-work and clears the retry state', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'no_work',
+        deleted: 0,
+        failed: 0,
+        outstanding: 0,
+        blocked: 0,
+        pending: false,
+      }),
+    });
+    render(
+      <FilesPanel
+        actorId="staff"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByRole('button', { name: 'Add photo' });
+    fireEvent.click(screen.getByText(/File activity/));
+    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
+    await screen.findByText('No file cleanup is needed for this record.');
+    expect(
+      screen.getByRole('button', { name: 'Check file cleanup' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Retry file cleanup' }),
+    ).not.toBeInTheDocument();
+    expect(JSON.parse(mocks.fetch.mock.calls[0][1].body)).toEqual({
+      parentType: 'quantity',
+      parentId: id,
+    });
+  });
+  it('confirms completed cleanup without an inferred deletion count or retry', async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: 'complete',
+        deleted: 0,
+        failed: 0,
+        outstanding: 0,
+        blocked: 0,
+        pending: false,
+      }),
+    });
+    render(
+      <FilesPanel
+        actorId="staff"
+        parentType="quantity"
+        parentId={id}
+        active
+        staff
+      />,
+    );
+    await screen.findByRole('button', { name: 'Add photo' });
+    fireEvent.click(screen.getByText(/File activity/));
+    fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
+    await screen.findByText(
+      'File cleanup is complete for this record. No stored objects await cleanup.',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry file cleanup' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Deleted 0 stored objects/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Check file cleanup' }),
+    ).toBeVisible();
+  });
+});
+
 describe('fresh native picker intent', () => {
   const first = {
     ...pending,
@@ -169,7 +325,7 @@ describe('fresh native picker intent', () => {
   const image = (name: string) =>
     new File(['fresh fictional bytes'], name, { type: 'image/png' });
   function configure(files: (typeof first)[]) {
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision: '9', files }, error: null };
       if (name === 'inventory_file_history')
@@ -274,7 +430,7 @@ describe('fresh native picker intent', () => {
         screen.getByRole('button', { name: 'Upload and review' }),
       ).toBeDisabled();
       expect(
-        mocks.rpc.mock.calls.filter(
+        mocks.operation.mock.calls.filter(
           ([name]) => name === 'inventory_file_reserve',
         ),
       ).toHaveLength(0);
@@ -286,7 +442,7 @@ describe('fresh native picker intent', () => {
       );
       await waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(1));
       expect(mocks.upload.mock.calls[0][1]).toBe(fresh);
-      expect(mocks.rpc).toHaveBeenCalledWith(
+      expect(mocks.operation).toHaveBeenCalledWith(
         'inventory_file_reserve',
         expect.objectContaining({
           p_name: fresh.name,
@@ -327,7 +483,7 @@ describe('fresh native picker intent', () => {
     await user.click(screen.getByRole('button', { name: 'Upload and review' }));
     await waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(1));
     expect(mocks.upload.mock.calls[0][1]).toBe(fresh);
-    expect(mocks.rpc).toHaveBeenCalledWith(
+    expect(mocks.operation).toHaveBeenCalledWith(
       'inventory_file_reserve',
       expect.objectContaining({
         p_replaces: second.id,
@@ -360,7 +516,7 @@ describe('terminal file cancellation cleanup', () => {
   it('keeps a full-width metadata row and a separate wrapping action row for a ready file', async () => {
     const longName =
       'Fictional recognition photo with a readable descriptive filename';
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return {
           data: {
@@ -436,7 +592,7 @@ describe('terminal file cancellation cleanup', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Invalid file content. Deleted 0 stored objects. Remaining cleanup is unverified',
     );
-    expect(mocks.rpc).not.toHaveBeenCalledWith('inventory_file_cancel', {
+    expect(mocks.operation).not.toHaveBeenCalledWith('inventory_file_cancel', {
       p_file_id: id,
     });
   });
@@ -453,7 +609,7 @@ describe('terminal file cancellation cleanup', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
-      expect(mocks.rpc).toHaveBeenCalledWith('inventory_file_cancel', {
+      expect(mocks.operation).toHaveBeenCalledWith('inventory_file_cancel', {
         p_file_id: id,
       });
       expect(mocks.fetch).toHaveBeenCalledWith(
@@ -468,7 +624,7 @@ describe('terminal file cancellation cleanup', () => {
 
   it('keeps the successful publish visible when cleanup fails instead of reloading away the retry', async () => {
     let ready = false;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return {
           data: {
@@ -532,7 +688,7 @@ describe('terminal file cancellation cleanup', () => {
       purpose: 'asset_document',
       state: 'ready',
     };
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return {
           data: {
@@ -584,14 +740,14 @@ describe('terminal file cancellation cleanup', () => {
     });
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
-        'File published. Deleted 1 stored object. Remaining cleanup is unverified',
+        'File published. Deleted 1 stored object. 1 stored object still awaits cleanup',
       ),
     );
   });
 
   it('removes a file from the visible cards before waiting for byte cleanup', async () => {
     let removed = false;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return {
           data: {
@@ -646,7 +802,7 @@ describe('terminal file cancellation cleanup', () => {
     });
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
-        'File removed. Deleted 0 stored objects. Remaining cleanup is unverified',
+        'File removed. Deleted 0 stored objects. 1 stored object still awaits cleanup',
       ),
     );
   });
@@ -673,7 +829,7 @@ describe('terminal file cancellation cleanup', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Deleted 0 stored objects. Remaining cleanup is unverified',
+      'Deleted 0 stored objects. 1 stored object still awaits cleanup',
     );
   });
 
@@ -713,7 +869,7 @@ describe('terminal file cancellation cleanup', () => {
     );
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
-        'Deleted 1 stored object. Remaining cleanup is unverified',
+        'Deleted 1 stored object. 1 stored object still awaits cleanup',
       ),
     );
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
@@ -745,7 +901,7 @@ describe('replacement selection and reviewed upload intent', () => {
     let visible = [original];
     let revision = '1';
     let validations = 0;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision, files: visible }, error: null };
       if (name === 'inventory_file_history')
@@ -801,7 +957,7 @@ describe('replacement selection and reviewed upload intent', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Upload and review' }));
     await waitFor(() => expect(screen.getAllByText('Extra')).toHaveLength(2));
-    const reservations = mocks.rpc.mock.calls.filter(
+    const reservations = mocks.operation.mock.calls.filter(
       (call) => call[0] === 'inventory_file_reserve',
     );
     expect(reservations[0][1]).toMatchObject({
@@ -817,7 +973,7 @@ describe('replacement selection and reviewed upload intent', () => {
   it('retains failed publish intent and blocks a missing reviewed target until explicitly reselected', async () => {
     let visible = [original];
     let refreshed = 0;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards') {
         refreshed++;
         return {
@@ -897,7 +1053,7 @@ describe('replacement selection and reviewed upload intent', () => {
     };
     let visible: Array<typeof original | typeof reserved> = [original];
     let confirmations = 0;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision: '7', files: visible }, error: null };
       if (name === 'inventory_file_history')
@@ -956,7 +1112,7 @@ describe('replacement selection and reviewed upload intent', () => {
     expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(
-      mocks.rpc.mock.calls.filter(
+      mocks.operation.mock.calls.filter(
         ([name]) => name === 'inventory_file_uploaded',
       ),
     ).toEqual([
@@ -985,7 +1141,7 @@ describe('replacement selection and reviewed upload intent', () => {
 
   it('accepts an ambiguous confirmation only after a fresh uploaded card proves it committed', async () => {
     let visible = [{ ...pending, state: 'reserved' }];
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision: '1', files: visible }, error: null };
       if (name === 'inventory_file_history')
@@ -1016,7 +1172,7 @@ describe('replacement selection and reviewed upload intent', () => {
   });
 
   it('blocks a changed replacement version instead of using the latest version', async () => {
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return {
           data: {
@@ -1075,7 +1231,7 @@ describe('task-first file presentation', () => {
         filename: 'first.png',
         state: 'ready',
       };
-      mocks.rpc.mockImplementation(async (name: string) => {
+      mocks.operation.mockImplementation(async (name: string) => {
         if (name === 'inventory_file_cards') {
           if (++cardReads === 1)
             return { data: { revision: '1', files: [] }, error: null };
@@ -1186,7 +1342,7 @@ describe('task-first file presentation', () => {
 
 describe('file state and role fixtures', () => {
   function show(files: Array<Record<string, unknown>>, historyError = false) {
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision: '2', files }, error: null };
       if (name === 'inventory_file_history')
@@ -1339,7 +1495,7 @@ describe('file state and role fixtures', () => {
     expect(screen.queryByText('No file changes yet.')).not.toBeInTheDocument();
   });
   it('does not disguise a failed collection read as an empty record', async () => {
-    mocks.rpc.mockResolvedValue({
+    mocks.operation.mockResolvedValue({
       data: null,
       error: { message: 'Unavailable' },
     });
@@ -1391,7 +1547,7 @@ describe('file collection identity isolation', () => {
         finishRead = resolve;
       });
       let first = true;
-      mocks.rpc.mockImplementation(async (name: string) => {
+      mocks.operation.mockImplementation(async (name: string) => {
         if (name === 'inventory_file_cards')
           return {
             data: {
@@ -1453,7 +1609,7 @@ describe('file collection identity isolation', () => {
   );
   it('does not retain download controls when a confirmed removal cannot refresh cards', async () => {
     let removed = false;
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return removed
           ? { data: null, error: { message: 'Refresh unavailable' } }
@@ -1497,7 +1653,7 @@ describe('ready private file reads', () => {
   it.each(['image/png', 'application/pdf'])(
     'uses only the authorized variant for %s and retains viewer access',
     async (type) => {
-      mocks.rpc.mockImplementation(
+      mocks.operation.mockImplementation(
         async (name: string, args: Record<string, unknown>) => {
           if (name === 'inventory_file_cards')
             return {
@@ -1542,7 +1698,7 @@ describe('ready private file reads', () => {
         }),
       );
       await waitFor(() =>
-        expect(mocks.rpc).toHaveBeenCalledWith('inventory_file_read', {
+        expect(mocks.operation).toHaveBeenCalledWith('inventory_file_read', {
           p_file_id: id,
           p_variant: type === 'application/pdf' ? 'source' : 'display',
         }),
@@ -1569,7 +1725,7 @@ describe('ready private file reads', () => {
 describe('explicit add intent and terminal invalidation', () => {
   it('clears an abandoned replacement choice when staff explicitly adds an attachment', async () => {
     const original = { ...pending, state: 'ready', type: 'application/pdf' };
-    mocks.rpc.mockImplementation(async (name: string) => {
+    mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
         return { data: { revision: '3', files: [original] }, error: null };
       if (name === 'inventory_file_history')
@@ -1602,7 +1758,7 @@ describe('explicit add intent and terminal invalidation', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Upload and review' }));
     await waitFor(() =>
-      expect(mocks.rpc).toHaveBeenCalledWith(
+      expect(mocks.operation).toHaveBeenCalledWith(
         'inventory_file_reserve',
         expect.objectContaining({
           p_replaces: null,
@@ -1616,7 +1772,7 @@ describe('explicit add intent and terminal invalidation', () => {
     'invalidates a confirmed terminal %s even if refresh fails',
     async (action) => {
       let terminal = false;
-      mocks.rpc.mockImplementation(async (name: string) => {
+      mocks.operation.mockImplementation(async (name: string) => {
         if (name === 'inventory_file_cards')
           return terminal
             ? { data: null, error: { message: 'Read failed' } }
@@ -1665,7 +1821,7 @@ describe('explicit add intent and terminal invalidation', () => {
         action === 'cancel' ? 'File cancelled' : 'Invalid content',
       );
       expect(screen.getByRole('alert')).toHaveTextContent(
-        /unverified|unconfirmed|could not be confirmed/,
+        /unverified|unconfirmed|could not be confirmed|awaits cleanup/,
       );
     },
   );
@@ -1681,7 +1837,7 @@ describe('late successful private blob isolation', () => {
       });
       mocks.download.mockReturnValue(delayed);
       let prior = true;
-      mocks.rpc.mockImplementation(async (name: string) => {
+      mocks.operation.mockImplementation(async (name: string) => {
         if (name === 'inventory_file_cards')
           return {
             data: {
@@ -1734,7 +1890,7 @@ describe('late successful private blob isolation', () => {
 
 it('revokes an open private preview when the authenticated actor changes', async () => {
   let prior = true;
-  mocks.rpc.mockImplementation(async (name: string) => {
+  mocks.operation.mockImplementation(async (name: string) => {
     if (name === 'inventory_file_cards')
       return {
         data: {
@@ -1786,7 +1942,7 @@ it('revokes an open private preview when the authenticated actor changes', async
 
 it('preserves the real upload validation failure when cards cannot refresh', async () => {
   let rejected = false;
-  mocks.rpc.mockImplementation(async (name: string) => {
+  mocks.operation.mockImplementation(async (name: string) => {
     if (name === 'inventory_file_cards')
       return rejected
         ? { data: null, error: { message: 'Refresh unavailable' } }

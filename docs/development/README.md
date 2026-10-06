@@ -48,6 +48,8 @@ Run `npm run validate:db` after persistence/security changes. Regenerate and com
 
 Use focused Vitest tests while iterating; run formatting and relevant complete gates before certification. Room parsing needs no Docker; room-to-database contracts do.
 
+Local Windows runs without `CI` or `VERCEL` cap Vitest workers and Next.js page-data/static-generation workers at two. Linux, CI and Vercel retain their existing defaults; the cap preserves test selection and assertions. Playwright already uses at most two workers for the full suite and one for focused runs. Next.js compilation and other tools can still use additional processes, so these caps are not a total host resource limit. Run one local validation at a time and avoid overlapping it with a heavy self-hosted runner job on the same computer. The browser performance report currently collects resource samples only on Linux; a Windows pass alone does not prove that host memory stayed below its limit.
+
 ## Inventory Core iteration
 
 The local reset applies Foundation followed by additive Inventory Core/read migrations. Use fictional data only. Staff can create a zero-stock quantity definition or a located asset through /inventory; viewers can browse search, details, locations and history. Required reasons and optimistic version conflicts are enforced by the mutation RPCs as well as the forms.

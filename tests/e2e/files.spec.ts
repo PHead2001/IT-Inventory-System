@@ -494,7 +494,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   const input = files.getByLabel('Add photo or PDF');
   let reserves = 0;
   const countReserve = (request: import('@playwright/test').Request) => {
-    if (request.url().includes('/rpc/inventory_file_reserve')) reserves++;
+    if (request.url().includes('/api/inventory-files/reserve')) reserves++;
   };
   page.on('request', countReserve);
   await input.setInputFiles({
@@ -541,14 +541,14 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     { timeout: 20_000 },
   );
   const replaceReserve = page.waitForRequest((request) =>
-    request.url().includes('/rpc/inventory_file_reserve'),
+    request.url().includes('/api/inventory-files/reserve'),
   );
   await files.getByRole('button', { name: 'Upload and review' }).click();
   expect((await replaceReserve).postDataJSON()).toMatchObject({
-    p_name: 'replacement.pdf',
-    p_bytes: replacementBytes.length,
-    p_replaces: reviewedTarget,
-    p_expected_file_version: reviewedVersion,
+    name: 'replacement.pdf',
+    bytes: replacementBytes.length,
+    replaces: reviewedTarget,
+    expectedFileVersion: reviewedVersion,
   });
   expect(reserves).toBe(1);
   page.off('request', countReserve);
@@ -649,7 +649,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
   let primaryError: unknown = null;
   const reserved = page.waitForResponse(
     (response) =>
-      response.url().includes('/rpc/inventory_file_reserve') &&
+      response.url().includes('/api/inventory-files/reserve') &&
       response.request().method() === 'POST',
   );
   const validation = page.waitForResponse(
@@ -663,14 +663,14 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
     await files.getByRole('button', { name: 'Upload and review' }).click();
     const reserveResponse = await reserved;
     const reserveBody = (await reserveResponse.json()) as {
-      id?: string;
+      result?: { id: string };
       code?: string;
     };
     expect(
       reserveResponse.ok(),
       JSON.stringify({ code: reserveBody.code }),
     ).toBe(true);
-    reservationId = reserveBody.id ?? null;
+    reservationId = reserveBody.result?.id ?? null;
     expect(reservationId).toMatch(/^[0-9a-f-]{36}$/);
     const result = await validation;
     expect(result.ok(), JSON.stringify(await result.json())).toBe(true);
@@ -717,6 +717,15 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
               .context()
               .request.post('/api/inventory-files/cleanup', {
                 timeout: 10_000,
+                data: {
+                  parentType: 'asset',
+                  parentId: (
+                    await db.query(
+                      'select asset_id from public.inventory_files where id=$1',
+                      [reservationId],
+                    )
+                  ).rows[0].asset_id,
+                },
               });
             expect(cleanup.ok()).toBe(true);
             const source = await db.query<{ state: string }>(

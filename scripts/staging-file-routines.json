@@ -1,0 +1,1768 @@
+{
+  "version": 5,
+  "routines": [
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_attestation_message(public.inventory_files,uuid,text,text,bigint,text)",
+      "volatility": "s",
+      "body_sha256": "7d890130b33a82a2a46624492a5e8e683e0c913905fcec84834c5694d7b63c0a",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "f",
+        "p_source_id",
+        "p_source_version",
+        "p_type",
+        "p_bytes",
+        "p_sha"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_collection_lock(uuid,uuid)",
+      "volatility": "v",
+      "body_sha256": "41e4634ebbda01cabdcca9c79e7c9ffff0eacba2e626b83e009cf6d020343fed",
+      "return_type": "inventory_file_collections",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "public",
+      "argument_modes": null,
+      "argument_names": ["p_asset", "p_quantity"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_guard_lock()",
+      "volatility": "v",
+      "body_sha256": "b655df6bfff7a3fe73dce2556efe7f274a67ba291264bff5211639a6fd749f24",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": false,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_mac(text,text)",
+      "volatility": "i",
+      "body_sha256": "7758b0ad943ba7348c7991752baa57b6ea22be0690b8053e90a0f66b7d813a62",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_text", "p_key"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": false,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_member()",
+      "volatility": "s",
+      "body_sha256": "b15dd0618a214a977425b929d85658375222566966e89e4f68a98dc6eb7a34e5",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_parent_staff(text,uuid)",
+      "volatility": "v",
+      "body_sha256": "0edb63e0e6829e6304d8a929d9b7a6f133020d6f3220701c0d039db6d4f19582",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_parent_type", "p_parent_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": true,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_pending_active(public.inventory_files,timestamptz)",
+      "volatility": "i",
+      "body_sha256": "1a0d1772c2433ebaea0ec58a1de01acdd27fe13ebf8e870d04956c8820eefbfb",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file", "p_checked_at"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": false,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "NULL::uuid, NULL::bigint",
+      "language": "plpgsql",
+      "signature": "private.file_reserve_ready(text,uuid,bigint,text,text,bigint,uuid,bigint)",
+      "volatility": "v",
+      "body_sha256": "6195153e50d5ccf622d4bb202747dbd95fc6069130111382860b5c46e3689721",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 2,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_parent_type",
+        "p_parent_id",
+        "p_expected_revision",
+        "p_name",
+        "p_type",
+        "p_bytes",
+        "p_replaces",
+        "p_expected_file_version"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_server_proof(text,uuid,text,text,text,bigint,text)",
+      "volatility": "s",
+      "body_sha256": "114addfab61335be7d6a6e33a76d9692f47e148e29a60be5fe5b95e19458ee31",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_key_id",
+        "p_actor",
+        "p_operation",
+        "p_args",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "false",
+      "language": "sql",
+      "signature": "private.file_signature_valid(text,text,text,boolean)",
+      "volatility": "s",
+      "body_sha256": "7fbb44e422144e63a20b76ae39a449df7788fdcd4e0323aff9c8f80f626d0c82",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 1,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_key_id", "p_text", "p_signature", "p_new"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_staff()",
+      "volatility": "v",
+      "body_sha256": "a98b383ebe7568a441106481bf938a546caff0c55ca338659b4814a96868e45e",
+      "return_type": "uuid",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": true,
+      "defaults": null,
+      "language": "sql",
+      "signature": "private.file_staging_bytes(timestamptz)",
+      "volatility": "v",
+      "body_sha256": "1d911f9591cd0668fcc49fab3086cf41551614b5865f878ae3ba90183a274571",
+      "return_type": "int8",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_checked_at"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": false,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_storage_delete(text,text)",
+      "volatility": "v",
+      "body_sha256": "513d844be4f1c6c5daece23b404124c13c0ea35b270bafd4cd0e27b4234afc05",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_bucket", "p_path"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_storage_insert(text,text)",
+      "volatility": "v",
+      "body_sha256": "8d8f5cec67069a98faaee3bae3d1dad8b13f5fdb3ddd2014eb3622afa184b454",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_bucket", "p_path"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.file_storage_select(text,text)",
+      "volatility": "v",
+      "body_sha256": "e35b4b58060146b7300a30208e30b0270443178108ad3a3b80322a99a358513d",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_bucket", "p_path"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "private.inventory_file_storage_completion_guard()",
+      "volatility": "v",
+      "body_sha256": "e8ee38dac9b0c9089ff95e4794bc93fb410f18b9a7283ca5bd120733170bb53a",
+      "return_type": "trigger",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": false
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_active_key()",
+      "volatility": "v",
+      "body_sha256": "68f402726b1a2c741db84277151de3012eac8d3ec44ff77431abb902ad031fcf",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_begin(uuid,uuid,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "0299ef995e9f7c0892820888fdb2b96cfe0b7299effa76170e397f700cf2dbcb",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_request_id",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cancel(uuid)",
+      "volatility": "v",
+      "body_sha256": "0b90bd0241de1db7596e897dd154cdfcae655f1b9da6936da32d05b95df15188",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cards(text,uuid)",
+      "volatility": "v",
+      "body_sha256": "b8a425c5ddf4860f74269b917c5b2f5292d05c3db85abf2b7d9091df161f23bf",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_parent_type", "p_parent_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cleanup_claim_parent(text,uuid,integer,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "cb5b3a37e20d899fe4b615f8a81d312bf25192975cbc17eaf9504c8e30f2bd2c",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_parent_type",
+        "p_parent_id",
+        "p_limit",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cleanup_claim(integer,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "e73557bc4900a7ae039332832ea8696913a18a1d8e94d7d927ab377082b6428d",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_limit",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cleanup_confirm(uuid,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "a79e90d2d47ca85b3734aa8d2439d9e6f2de89c16036ea588bea0989104dcefa",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_object_id",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_cleanup_status(text,uuid)",
+      "volatility": "v",
+      "body_sha256": "5145f6ffe848792cd79cf339bbd5dff87a1f94614eb22dd9b7cca879dfb54ba7",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_parent_type", "p_parent_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_finalize(uuid,bigint,uuid)",
+      "volatility": "v",
+      "body_sha256": "aecddc126952128b80278068593859c528a06dc607cd128c9e48e1410b9bc80e",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id", "p_expected_revision", "p_request_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "1",
+      "language": "plpgsql",
+      "signature": "public.inventory_file_history(text,uuid,integer)",
+      "volatility": "s",
+      "body_sha256": "629493c8b8f072ee572661b531cb5efe7510c523fa691fdf86c892b64cf21d60",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 1,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_parent_type", "p_parent_id", "p_page"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_list_thumbnails(uuid[],uuid[])",
+      "volatility": "v",
+      "body_sha256": "bbf830e5fd586dabd2727efc0fbcd02c1b7af39ceee4a6e6a57bdbf8ecbb5f28",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_asset_ids", "p_quantity_ids"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_prepare_variant(uuid,integer,text,text,bigint,text,text)",
+      "volatility": "v",
+      "body_sha256": "e7492990d58a864424ced16da470d83c139f7e7459fe647ac2cfb122335391f1",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_variant",
+        "p_path",
+        "p_bytes",
+        "p_sha256",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_read(uuid,text)",
+      "volatility": "v",
+      "body_sha256": "3abbe1ba779730080039ae6a25aa6c0b806aa71736f1cfc60e49777138d72369",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id", "p_variant"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_register(uuid,integer,text,text,uuid,bigint,text,text)",
+      "volatility": "v",
+      "body_sha256": "f2eb53028f267f426517c24cdf04817d367d280e342b8bf211244377d087c677",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_variant",
+        "p_path",
+        "p_object_id",
+        "p_bytes",
+        "p_sha256",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_reject(uuid,integer,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "12dd708cd04b76e0a320cd228edfa0b32cba7a7181d0f71e7dbdf21bdf6f43fe",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_remove(uuid,bigint,bigint,uuid)",
+      "volatility": "v",
+      "body_sha256": "28636a52aa01cc9d70f208f359942a625646ca2c7d207ec7310893ca654bb101",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_expected_revision",
+        "p_expected_file_version",
+        "p_request_id"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_rename(uuid,bigint,bigint,text,uuid)",
+      "volatility": "v",
+      "body_sha256": "fb1af4e189ddefb47fded647d14d39ca59eecffbe71b328f19c4e21349c61891",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_expected_revision",
+        "p_expected_file_version",
+        "p_title",
+        "p_request_id"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_reserve_ready(text,uuid,bigint,text,text,bigint,uuid,bigint,text,text,bigint,text)",
+      "volatility": "v",
+      "body_sha256": "13b86123013be380b246915c1cdfc503610a3687d1f7a421dfa180a0dab130c4",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_parent_type",
+        "p_parent_id",
+        "p_expected_revision",
+        "p_name",
+        "p_type",
+        "p_bytes",
+        "p_replaces",
+        "p_expected_file_version",
+        "p_key_id",
+        "p_nonce",
+        "p_expires",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "NULL::uuid, NULL::bigint",
+      "language": "plpgsql",
+      "signature": "public.inventory_file_reserve(text,uuid,bigint,text,text,bigint,uuid,bigint)",
+      "volatility": "v",
+      "body_sha256": "eda71d29915ab9afc2179c5117c653b5fa127abffa3187424c31a094df5569de",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 2,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_parent_type",
+        "p_parent_id",
+        "p_expected_revision",
+        "p_name",
+        "p_type",
+        "p_bytes",
+        "p_replaces",
+        "p_expected_file_version"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": "NULL::bigint",
+      "language": "plpgsql",
+      "signature": "public.inventory_file_review(uuid,bigint,bigint)",
+      "volatility": "v",
+      "body_sha256": "c4393a367f8ea7b5c2b9a5cedadcbdd48d2f312fe9802c211d6671096855d190",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 1,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_expected_revision",
+        "p_expected_file_version"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_source_details(uuid)",
+      "volatility": "v",
+      "body_sha256": "d5401267271446350bf9f46d8be13e08c065c8db3b07b42ca0121e3750186cec",
+      "return_type": "jsonb",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_uploaded(uuid)",
+      "volatility": "v",
+      "body_sha256": "7ebc37bd18d3d38e3315cb181e62060155cff46bad2813a4efe285ce4bd44d34",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["p_file_id"],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "authenticated",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "postgres",
+          "grantor": "postgres",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "postgres",
+      "config": ["search_path=\"\""],
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "public.inventory_file_validated(uuid,integer,text,uuid,text,text,bigint,text,text)",
+      "volatility": "v",
+      "body_sha256": "f6acc4ca1d8e33216bf6f6065ed01e505c0f2c60a207ebb114a3f465c29442bd",
+      "return_type": "void",
+      "returns_set": false,
+      "anon_execute": false,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": [
+        "p_file_id",
+        "p_generation",
+        "p_key_id",
+        "p_source_id",
+        "p_source_version",
+        "p_type",
+        "p_bytes",
+        "p_sha256",
+        "p_mac"
+      ],
+      "public_execute": false,
+      "service_execute": false,
+      "security_definer": true,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "PUBLIC",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "supabase_storage_admin",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "supabase_storage_admin",
+      "config": null,
+      "strict": false,
+      "defaults": null,
+      "language": "sql",
+      "signature": "storage.allow_any_operation(text[])",
+      "volatility": "s",
+      "body_sha256": "c54409510ad2ecf68bd6b7da4a526f2d51ecba75d4ff6529dc6f1cc3a72774d6",
+      "return_type": "bool",
+      "returns_set": false,
+      "anon_execute": true,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": ["expected_operations"],
+      "public_execute": true,
+      "service_execute": true,
+      "security_definer": false,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "PUBLIC",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "supabase_storage_admin",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "supabase_storage_admin",
+      "config": null,
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "storage.operation()",
+      "volatility": "s",
+      "body_sha256": "b211a4c4b376b7bd1c50cc5fd2876824c7b639717e6e0d6484482411bebc34af",
+      "return_type": "text",
+      "returns_set": false,
+      "anon_execute": true,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": true,
+      "service_execute": true,
+      "security_definer": false,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "PUBLIC",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "supabase_storage_admin",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "supabase_storage_admin",
+      "config": null,
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "storage.protect_delete()",
+      "volatility": "v",
+      "body_sha256": "8c757b3898456c92b28f30e15cdeadb43ff4522c0b9f0526100da3a34b174236",
+      "return_type": "trigger",
+      "returns_set": false,
+      "anon_execute": true,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": true,
+      "service_execute": true,
+      "security_definer": false,
+      "authenticated_execute": true
+    },
+    {
+      "acl": [
+        {
+          "grantee": "PUBLIC",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        },
+        {
+          "grantee": "supabase_storage_admin",
+          "grantor": "supabase_storage_admin",
+          "grantable": false,
+          "privilege": "EXECUTE"
+        }
+      ],
+      "kind": "f",
+      "owner": "supabase_storage_admin",
+      "config": null,
+      "strict": false,
+      "defaults": null,
+      "language": "plpgsql",
+      "signature": "storage.update_updated_at_column()",
+      "volatility": "v",
+      "body_sha256": "1e0582c796d58810ca3d1066e97ce7f4a5d55e4174b8185ff8aebe14e61f424f",
+      "return_type": "trigger",
+      "returns_set": false,
+      "anon_execute": true,
+      "default_count": 0,
+      "external_body": false,
+      "return_schema": "pg_catalog",
+      "argument_modes": null,
+      "argument_names": null,
+      "public_execute": true,
+      "service_execute": true,
+      "security_definer": false,
+      "authenticated_execute": true
+    }
+  ],
+  "triggers": [
+    {
+      "name": "inventory_file_storage_completion_guard",
+      "type": 23,
+      "enabled": "O",
+      "routine": "private.inventory_file_storage_completion_guard()",
+      "internal": false,
+      "deferrable": false,
+      "has_parent": false,
+      "table_name": "objects",
+      "table_schema": "storage",
+      "columns_empty": true,
+      "has_condition": false,
+      "argument_count": 0,
+      "has_constraint": false,
+      "arguments_empty": true,
+      "initially_deferred": false,
+      "has_constraint_index": false,
+      "has_constraint_relation": false,
+      "has_new_transition_table": false,
+      "has_old_transition_table": false
+    },
+    {
+      "name": "protect_objects_delete",
+      "type": 10,
+      "enabled": "O",
+      "routine": "storage.protect_delete()",
+      "internal": false,
+      "deferrable": false,
+      "has_parent": false,
+      "table_name": "objects",
+      "table_schema": "storage",
+      "columns_empty": true,
+      "has_condition": false,
+      "argument_count": 0,
+      "has_constraint": false,
+      "arguments_empty": true,
+      "initially_deferred": false,
+      "has_constraint_index": false,
+      "has_constraint_relation": false,
+      "has_new_transition_table": false,
+      "has_old_transition_table": false
+    },
+    {
+      "name": "update_objects_updated_at",
+      "type": 19,
+      "enabled": "O",
+      "routine": "storage.update_updated_at_column()",
+      "internal": false,
+      "deferrable": false,
+      "has_parent": false,
+      "table_name": "objects",
+      "table_schema": "storage",
+      "columns_empty": true,
+      "has_condition": false,
+      "argument_count": 0,
+      "has_constraint": false,
+      "arguments_empty": true,
+      "initially_deferred": false,
+      "has_constraint_index": false,
+      "has_constraint_relation": false,
+      "has_new_transition_table": false,
+      "has_old_transition_table": false
+    }
+  ],
+  "storage": {
+    "kind": "r",
+    "owner": "supabase_storage_admin",
+    "bucket": {
+      "id": "inventory-files",
+      "name": "inventory-files",
+      "public": false,
+      "file_size_limit": 20971520,
+      "allowed_mime_types": [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+      ]
+    },
+    "buckets": {
+      "kind": "r",
+      "owner": "supabase_storage_admin",
+      "policies": [],
+      "table_name": "buckets",
+      "row_security": true,
+      "table_schema": "storage",
+      "force_row_security": false
+    },
+    "policies": [
+      {
+        "name": "inventory_file_cleanup_select",
+        "roles": ["authenticated"],
+        "command": "r",
+        "permissive": true,
+        "check_expression": null,
+        "using_expression": "(private.file_storage_delete(bucket_id, name) AND storage.allow_any_operation(ARRAY['object.delete'::text, 'object.delete_many'::text]))"
+      },
+      {
+        "name": "inventory_file_delete",
+        "roles": ["authenticated"],
+        "command": "d",
+        "permissive": true,
+        "check_expression": null,
+        "using_expression": "private.file_storage_delete(bucket_id, name)"
+      },
+      {
+        "name": "inventory_file_insert",
+        "roles": ["authenticated"],
+        "command": "a",
+        "permissive": true,
+        "check_expression": "private.file_storage_insert(bucket_id, name)",
+        "using_expression": null
+      },
+      {
+        "name": "inventory_file_select",
+        "roles": ["authenticated"],
+        "command": "r",
+        "permissive": true,
+        "check_expression": null,
+        "using_expression": "(private.file_storage_select(bucket_id, name) AND storage.allow_any_operation(ARRAY['object.get_authenticated'::text, 'object.get_authenticated_info'::text, 'object.head_authenticated_info'::text]))"
+      }
+    ],
+    "table_name": "objects",
+    "row_security": true,
+    "table_schema": "storage",
+    "force_row_security": false
+  }
+}

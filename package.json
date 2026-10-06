@@ -25,6 +25,7 @@
     "db:reset": "node scripts/db.mjs reset",
     "db:types": "node scripts/db.mjs types",
     "db:types:check": "node scripts/db.mjs types-check",
+    "db:staging-file-routines": "node scripts/generate-staging-file-routines.mjs",
     "db:deliver:production": "node scripts/production-db.mjs",
     "test:db": "node scripts/db.mjs test",
     "test:db:form-save": "node scripts/db.mjs test-form-save",
@@ -37,7 +38,8 @@
     "validate:app": "node scripts/validate.mjs app",
     "validate": "node scripts/validate.mjs all",
     "test:e2e:list": "playwright test --list",
-    "test:staging-user-sync": "node --test tests/staging-user-sync.test.mjs"
+    "test:staging-user-sync": "node --test tests/staging-user-sync.test.mjs",
+    "test:staging-file-keys": "node --test tests/staging-file-keys.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/helpers": "0.5.0",

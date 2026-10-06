@@ -3,6 +3,7 @@ import { OperationalTimestamp } from '@/components/operational-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
+import { cleanupResultSchema, type CleanupResult } from './contract';
 
 const bucket = 'inventory-files';
 type Card = {
@@ -108,7 +109,17 @@ function fileType(type: string) {
     )[type] ?? type
   );
 }
-function cleanupStatus(deleted: number | null) {
+function cleanupStatus(result: CleanupResult | number | null) {
+  if (result && typeof result === 'object') {
+    if (result.status === 'no_work')
+      return 'No file cleanup is needed for this record.';
+    if (result.status === 'complete')
+      return 'File cleanup is complete for this record. No stored objects await cleanup.';
+    if (result.status === 'partial' || result.status === 'failed')
+      return `Deleted ${result.deleted} stored object${result.deleted === 1 ? '' : 's'}. ${result.failed} cleanup confirmation${result.failed === 1 ? '' : 's'} failed; retry later.`;
+    return `Deleted ${result.deleted} stored object${result.deleted === 1 ? '' : 's'}. ${result.outstanding} stored object${result.outstanding === 1 ? '' : 's'} still await${result.outstanding === 1 ? 's' : ''} cleanup; retry later.`;
+  }
+  const deleted = result;
   return deleted === null
     ? 'Byte cleanup could not be confirmed; retry later.'
     : `Deleted ${deleted} stored object${deleted === 1 ? '' : 's'}. Remaining cleanup is unverified; retry later.`;
@@ -209,17 +220,14 @@ function BoundFilesPanel({
     try {
       const response = await fetch('/api/inventory-files/cleanup', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentType, parentId }),
         signal: controller.signal,
       });
       if (!response.ok) throw new Error('Cleanup request failed.');
-      const result: { deleted?: number } = await response.json();
-      setCleanupPending(true);
-      const deleted = result.deleted;
-      return typeof deleted === 'number' &&
-        Number.isSafeInteger(deleted) &&
-        deleted >= 0
-        ? deleted
-        : null;
+      const result = cleanupResultSchema.parse(await response.json());
+      setCleanupPending(result.pending);
+      return result;
     } catch {
       setCleanupPending(true);
       return null;
@@ -327,15 +335,17 @@ function BoundFilesPanel({
       terminalRejected?: boolean;
       cleanupPending?: boolean;
       cleanupDeleted?: number | null;
+      cleanup?: CleanupResult | null;
     } = await response.json();
     if (!response.ok) {
       if (body.terminalRejected) {
         invalidatedFiles.current.add(fileId);
         setCards((current) => current.filter((card) => card.id !== fileId));
-        setCleanupPending(true);
+        const cleanup = cleanupResultSchema.safeParse(body.cleanup);
+        setCleanupPending(cleanup.success ? cleanup.data.pending : true);
         await load();
         throw new Error(
-          `${body.message ?? 'Validation could not be confirmed.'} ${cleanupStatus(body.cleanupDeleted ?? null)}`,
+          `${body.message ?? 'Validation could not be confirmed.'} ${cleanupStatus(cleanup.success ? cleanup.data : (body.cleanupDeleted ?? null))}`,
         );
       }
       throw new Error(body.message ?? 'Validation could not be confirmed.');
@@ -404,23 +414,30 @@ function BoundFilesPanel({
         throw new Error(
           'The selected replacement is unavailable. Choose another ready file or add without replacing.',
         );
-      const { data, error } = await rpc('inventory_file_reserve', {
-        p_parent_type: parentType,
-        p_parent_id: parentId,
-        p_expected_revision: collectionRevision,
-        p_name: safeName,
-        p_type: file.type,
-        p_bytes: file.size,
-        p_replaces: replacement?.id ?? null,
-        p_expected_file_version: replacement?.version ?? null,
+      const response = await fetch('/api/inventory-files/reserve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parentType,
+          parentId,
+          expectedRevision: collectionRevision,
+          name: safeName,
+          type: file.type,
+          bytes: file.size,
+          replaces: replacement?.id ?? null,
+          expectedFileVersion: replacement?.version ?? null,
+        }),
       });
-      if (error)
-        throw new Error(
-          error.code === 'P1002'
-            ? 'Files changed. Refresh and review them before uploading.'
-            : 'A reservation could not be created.',
-        );
-      const reservation = data as { id: string; path: string };
+      const body = await response.json();
+      if (!response.ok)
+        throw new Error(body.message ?? 'A reservation could not be created.');
+      const reservation = body.result as { id: string; path: string };
+      if (
+        !reservation ||
+        typeof reservation.id !== 'string' ||
+        typeof reservation.path !== 'string'
+      )
+        throw new Error('A reservation could not be confirmed.');
       const uploaded = await client.storage
         .from(bucket)
         .upload(reservation.path, file, {

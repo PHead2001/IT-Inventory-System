@@ -57,6 +57,12 @@ const request = () =>
       expectedFileVersion: null,
     }),
   });
+const cleanupRequest = () =>
+  new Request('https://inventory.example/api/inventory-files/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentType: 'asset', parentId: actorId }),
+  });
 const called = (name: string) =>
   mocks.fileRpc.mock.calls.some((call) => call[1] === name);
 
@@ -78,6 +84,8 @@ beforeEach(() => {
   mocks.fileRpc.mockImplementation(async (_client, name: string) => {
     if (name === 'inventory_file_finalize')
       throw Object.assign(new Error('Not ready'), { code: 'P1008' });
+    if (name === 'inventory_file_cleanup_status')
+      return { outstanding: 1, blocked: 1 };
     if (name === 'inventory_file_active_key') return 'testkey';
     if (name === 'inventory_file_begin')
       return {
@@ -99,7 +107,7 @@ beforeEach(() => {
         replaces: null,
         replaced_file_version: null,
       };
-    if (name === 'inventory_file_cleanup_claim')
+    if (name === 'inventory_file_cleanup_claim_parent')
       return [{ object_id: objectId, path: sourcePath }];
     return null;
   });
@@ -108,9 +116,9 @@ beforeEach(() => {
 describe('invalid file validation and bounded cleanup', () => {
   it('denies cleanup before claiming bytes when staff authorization is absent', async () => {
     mocks.staffClient.mockResolvedValue(null);
-    const response = await cleanup();
+    const response = await cleanup(cleanupRequest());
     expect(response.status).toBe(403);
-    expect(called('inventory_file_cleanup_claim')).toBe(false);
+    expect(called('inventory_file_cleanup_claim_parent')).toBe(false);
     expect(mocks.remove).not.toHaveBeenCalled();
   });
 
@@ -135,14 +143,14 @@ describe('invalid file validation and bounded cleanup', () => {
       mocks.inspectFile.mockRejectedValue(new InvalidFileContentError());
       const response = await validate(request());
       expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
+      expect(await response.json()).toMatchObject({
         message: 'Invalid file content.',
         terminalRejected: true,
         cleanupPending: true,
         cleanupDeleted: 1,
       });
       expect(called('inventory_file_reject')).toBe(true);
-      expect(called('inventory_file_cleanup_claim')).toBe(true);
+      expect(called('inventory_file_cleanup_claim_parent')).toBe(true);
       expect(called('inventory_file_cleanup_confirm')).toBe(true);
       expect(mocks.remove).toHaveBeenCalledWith([sourcePath]);
       expect(
@@ -151,7 +159,7 @@ describe('invalid file validation and bounded cleanup', () => {
         ),
       ).toBeLessThan(
         mocks.fileRpc.mock.calls.findIndex(
-          (call) => call[1] === 'inventory_file_cleanup_claim',
+          (call) => call[1] === 'inventory_file_cleanup_claim_parent',
         ),
       );
     },
@@ -160,7 +168,7 @@ describe('invalid file validation and bounded cleanup', () => {
   it('keeps cleanup pending while terminal bytes remain behind validation grace', async () => {
     mocks.inspectFile.mockRejectedValue(new InvalidFileContentError());
     mocks.fileRpc.mockImplementation(async (client, name: string) => {
-      if (name === 'inventory_file_cleanup_claim') return [];
+      if (name === 'inventory_file_cleanup_claim_parent') return [];
       return baselineRpc(client, name);
     });
     const response = await validate(request());
@@ -171,17 +179,17 @@ describe('invalid file validation and bounded cleanup', () => {
     });
     expect(called('inventory_file_reject')).toBe(true);
     expect(mocks.remove).not.toHaveBeenCalled();
-    const retriedBeforeGrace = await cleanup();
-    expect(await retriedBeforeGrace.json()).toEqual({
+    const retriedBeforeGrace = await cleanup(cleanupRequest());
+    expect(await retriedBeforeGrace.json()).toMatchObject({
       deleted: 0,
       pending: true,
     });
   });
 
-  it('reports unknown completion after cleaning an unrelated old claim while the new rejection is in grace', async () => {
+  it('keeps parent cleanup pending after an older claim while the new rejection is in grace', async () => {
     mocks.inspectFile.mockRejectedValue(new InvalidFileContentError());
     mocks.fileRpc.mockImplementation(async (client, name: string) => {
-      if (name === 'inventory_file_cleanup_claim')
+      if (name === 'inventory_file_cleanup_claim_parent')
         return [{ object_id: objectId, path: 's/old-terminal-object' }];
       return baselineRpc(client, name);
     });
@@ -198,16 +206,16 @@ describe('invalid file validation and bounded cleanup', () => {
 
   it('does not infer completion when the claim RPC returns twenty existing claims', async () => {
     mocks.fileRpc.mockImplementation(async (client, name: string) => {
-      if (name === 'inventory_file_cleanup_claim')
+      if (name === 'inventory_file_cleanup_claim_parent')
         return Array.from({ length: 20 }, (_, index) => ({
           object_id: `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`,
           path: `s/fictional-${index}`,
         }));
       return baselineRpc(client, name);
     });
-    const response = await cleanup();
+    const response = await cleanup(cleanupRequest());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ deleted: 20, pending: true });
+    expect(await response.json()).toMatchObject({ deleted: 20, pending: true });
     expect(mocks.remove).toHaveBeenCalledTimes(20);
   });
 
@@ -219,7 +227,7 @@ describe('invalid file validation and bounded cleanup', () => {
     const response = await validate(request());
     expect(response.status).toBe(409);
     expect(called('inventory_file_reject')).toBe(false);
-    expect(called('inventory_file_cleanup_claim')).toBe(false);
+    expect(called('inventory_file_cleanup_claim_parent')).toBe(false);
   });
 
   it('does not classify a stale database review as invalid content', async () => {
@@ -232,7 +240,7 @@ describe('invalid file validation and bounded cleanup', () => {
     expect(response.status).toBe(409);
     expect(called('inventory_file_begin')).toBe(false);
     expect(called('inventory_file_reject')).toBe(false);
-    expect(called('inventory_file_cleanup_claim')).toBe(false);
+    expect(called('inventory_file_cleanup_claim_parent')).toBe(false);
   });
 
   it('retains a terminal rejection when cleanup fails, then accepts a bounded retry', async () => {
@@ -250,13 +258,15 @@ describe('invalid file validation and bounded cleanup', () => {
     expect((await response.json()).cleanupPending).toBe(true);
     expect(called('inventory_file_reject')).toBe(true);
     mocks.fileRpc.mockImplementation(baselineRpc);
-    const retried = await cleanup();
+    const retried = await cleanup(cleanupRequest());
     expect(retried.status).toBe(200);
-    expect(await retried.json()).toEqual({ deleted: 1, pending: true });
+    expect(await retried.json()).toMatchObject({ deleted: 1, pending: true });
   });
 });
 
 async function baselineRpc(_client: unknown, name: string) {
+  if (name === 'inventory_file_cleanup_status')
+    return { outstanding: 1, blocked: 1 };
   if (name === 'inventory_file_finalize')
     throw Object.assign(new Error('Not ready'), { code: 'P1008' });
   if (name === 'inventory_file_active_key') return 'testkey';
@@ -280,7 +290,7 @@ async function baselineRpc(_client: unknown, name: string) {
       replaces: null,
       replaced_file_version: null,
     };
-  if (name === 'inventory_file_cleanup_claim')
+  if (name === 'inventory_file_cleanup_claim_parent')
     return [{ object_id: objectId, path: sourcePath }];
   return null;
 }
