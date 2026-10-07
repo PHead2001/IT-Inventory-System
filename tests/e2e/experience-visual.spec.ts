@@ -1,4 +1,5 @@
 import { openRecordTask } from './record-task-controls';
+import { auditCreateRecord, auditReadback } from './audit-two-controls';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
@@ -21,7 +22,11 @@ async function noHorizontalOverflow(page: Page) {
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 }
 
-async function openInventoryRecord(page: Page, kind: 'quantity' | 'assets') {
+async function openInventoryRecord(
+  page: Page,
+  kind: 'quantity' | 'assets',
+  expectedScope?: string,
+) {
   const inventory = new URL(page.url());
   const record = page
     .locator(`a[href^="/inventory/${kind}/"]:not([href*="/new"])`)
@@ -34,7 +39,8 @@ async function openInventoryRecord(page: Page, kind: 'quantity' | 'assets') {
     .locator('xpath=ancestor::li[1]')
     .getAttribute('id');
   expect(rowId).toMatch(/^inventory-row-\d+$/);
-  const returnTo = inventory.pathname + inventory.search + '#' + rowId;
+  const returnTo =
+    (expectedScope ?? inventory.pathname + inventory.search) + '#' + rowId;
   expect(destination.searchParams.get('returnTo')).toBe(returnTo);
   await record.click();
   await expect(page).toHaveURL(
@@ -75,193 +81,278 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     fullPage: true,
   });
   await signIn(page);
-  await page.goto('/dashboard');
-  await expect(
-    page.getByRole('heading', { name: 'Low-stock overview' }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Main navigation' })
-      .getByRole('link', { name: 'Overview' }),
-  ).toHaveAttribute('aria-current', 'page');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('overview-desktop-1440.png'),
-    fullPage: true,
-  });
-  await page.goto('/inventory');
-  await expect(
-    page.getByRole('form', { name: 'Search inventory' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('inventory-desktop-1440.png'),
-    fullPage: true,
-  });
-  await openInventoryRecord(page, 'quantity');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('quantity-detail-desktop-1440.png'),
-    fullPage: true,
-  });
-  await openRecordTask(page, 'Edit quantity metadata');
-  await expect(
-    page.getByRole('form', { name: 'Edit quantity metadata' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('quantity-detail-edit-open-desktop-1440.png'),
-    fullPage: true,
-  });
-  await page.goto('/inventory?type=asset');
-  await openInventoryRecord(page, 'assets');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('asset-detail-desktop-1440.png'),
-    fullPage: true,
-  });
-  await openRecordTask(page, 'Edit asset metadata');
-  await expect(
-    page.getByRole('form', { name: 'Edit asset metadata' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('asset-detail-edit-open-desktop-1440.png'),
-    fullPage: true,
-  });
-  // Halving CSS viewport width exercises the same responsive breakpoints as
-  // 200% browser zoom on a 1440px desktop window without changing app styles.
-  await page.setViewportSize({ width: 720, height: 900 });
-  await page.goto('/inventory');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('inventory-200pct-reflow-equivalent-720.png'),
-    fullPage: true,
-  });
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/dashboard');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('overview-phone-390.png'),
-    fullPage: true,
-  });
-  await page.screenshot({
-    path: testInfo.outputPath('overview-phone-390-viewport.png'),
-  });
-  await expect(
-    page.getByRole('button', { name: 'Reduce motion locally' }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole('heading', { name: 'Low-stock overview' }),
-  ).toBeVisible();
-  const menu = page.getByRole('button', { name: 'Menu', exact: true });
-  await menu.focus();
-  await page.keyboard.press('Enter');
-  await expect(
-    page.getByRole('button', { name: 'Close menu' }),
-  ).toHaveAttribute('aria-expanded', 'true');
-  await page.screenshot({
-    path: testInfo.outputPath('navigation-menu-phone-390.png'),
-    fullPage: true,
-  });
-  const navigation = page.getByRole('navigation', { name: 'Main navigation' });
-  await navigation.getByRole('link', { name: 'Inventory' }).click();
-  await expect(page).toHaveURL(/\/inventory$/);
-  await expect(
-    page.locator('#experience-navigation a[href="/inventory"]'),
-  ).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('button', { name: 'Menu' })).toHaveAttribute(
-    'aria-expanded',
-    'false',
+  // A unique ordinary search makes the long owned title deterministic across
+  // retries, independent of database collation and earlier suites' fixtures.
+  const identity = crypto.randomUUID();
+  const firstRowName = 'Audit two deep answer ' + identity;
+  const owned = await auditCreateRecord(
+    page,
+    'quantity',
+    'Tools',
+    firstRowName,
   );
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('inventory-phone-390.png'),
-    fullPage: true,
-  });
-  await page.screenshot({
-    path: testInfo.outputPath('inventory-phone-390-viewport.png'),
-    fullPage: false,
-  });
-  await page.setViewportSize({ width: 502, height: 757 });
-  await noHorizontalOverflow(page);
-  await expect(
-    page.locator('li[id^="inventory-row-"] a[href^="/inventory/"]').first(),
-  ).toBeInViewport({ ratio: 1 });
-  await page.screenshot({
-    path: testInfo.outputPath('inventory-phone-502-viewport.png'),
-    fullPage: false,
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await openInventoryRecord(page, 'quantity');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('quantity-detail-phone-390.png'),
-    fullPage: true,
-  });
-  await openRecordTask(page, 'Edit quantity metadata');
-  await expect(
-    page.getByRole('form', { name: 'Edit quantity metadata' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('quantity-detail-edit-open-phone-390.png'),
-    fullPage: true,
-  });
-  await page.goto('/inventory?type=asset');
-  await openInventoryRecord(page, 'assets');
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('asset-detail-phone-390.png'),
-    fullPage: true,
-  });
-  await openRecordTask(page, 'Edit asset metadata');
-  await expect(
-    page.getByRole('form', { name: 'Edit asset metadata' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('asset-detail-edit-open-phone-390.png'),
-    fullPage: true,
-  });
-  await expect(
-    page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
-  ).resolves.toBe(true);
-  await setLocalReducedMotion(page, true);
-  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await setLocalReducedMotion(page, false);
-  await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
+  try {
+    await page.goto('/dashboard');
+    await expect(
+      page.getByRole('heading', { name: 'Low-stock overview' }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Main navigation' })
+        .getByRole('link', { name: 'Overview' }),
+    ).toHaveAttribute('aria-current', 'page');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('overview-desktop-1440.png'),
+      fullPage: true,
+    });
+    await page.goto('/inventory');
+    await expect(
+      page.getByRole('form', { name: 'Search inventory' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-desktop-1440.png'),
+      fullPage: true,
+    });
+    await openInventoryRecord(page, 'quantity');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('quantity-detail-desktop-1440.png'),
+      fullPage: true,
+    });
+    await openRecordTask(page, 'Edit quantity metadata');
+    await expect(
+      page.getByRole('form', { name: 'Edit quantity metadata' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('quantity-detail-edit-open-desktop-1440.png'),
+      fullPage: true,
+    });
+    await page.goto('/inventory?type=asset');
+    await openInventoryRecord(page, 'assets');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('asset-detail-desktop-1440.png'),
+      fullPage: true,
+    });
+    await openRecordTask(page, 'Edit asset metadata');
+    await expect(
+      page.getByRole('form', { name: 'Edit asset metadata' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('asset-detail-edit-open-desktop-1440.png'),
+      fullPage: true,
+    });
+    // Halving CSS viewport width exercises the same responsive breakpoints as
+    // 200% browser zoom on a 1440px desktop window without changing app styles.
+    await page.setViewportSize({ width: 720, height: 900 });
+    await page.goto('/inventory');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-200pct-reflow-equivalent-720.png'),
+      fullPage: true,
+    });
 
-  await page.goto('/settings/forms');
-  await page.locator('main a[href^="/settings/forms/"]').first().click();
-  await expect(
-    page.getByRole('region', { name: 'Forms and fields' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('designer-phone-390.png'),
-    fullPage: true,
-  });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/dashboard');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('overview-phone-390.png'),
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: testInfo.outputPath('overview-phone-390-viewport.png'),
+    });
+    await expect(
+      page.getByRole('button', { name: 'Reduce motion locally' }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'Low-stock overview' }),
+    ).toBeVisible();
+    const menu = page.getByRole('button', { name: 'Menu', exact: true });
+    await menu.focus();
+    await page.keyboard.press('Enter');
+    await expect(
+      page.getByRole('button', { name: 'Close menu' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await page.screenshot({
+      path: testInfo.outputPath('navigation-menu-phone-390.png'),
+      fullPage: true,
+    });
+    const navigation = page.getByRole('navigation', {
+      name: 'Main navigation',
+    });
+    await navigation.getByRole('link', { name: 'Inventory' }).click();
+    await expect(page).toHaveURL(/\/inventory$/);
+    await expect(
+      page.locator('#experience-navigation a[href="/inventory"]'),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('button', { name: 'Menu' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await noHorizontalOverflow(page);
+    const firstName = page
+      .locator('li[id^="inventory-row-"] a[href^="/inventory/"]')
+      .first();
+    // Retain the unfiltered acceptance check as well as the deterministic case.
+    await page.setViewportSize({ width: 502, height: 757 });
+    await expect(firstName).toBeInViewport({ ratio: 1 });
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-phone-502-global-viewport.png'),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const query = identity.slice(0, 8);
+    const scopedSearch = page.getByRole('form', { name: 'Search inventory' });
+    await scopedSearch.getByRole('textbox').fill(query);
+    await scopedSearch
+      .getByRole('button', { name: 'Search', exact: true })
+      .click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/inventory' && url.searchParams.get('q') === query,
+    );
+    await expect(
+      page.getByText('1 matching row', { exact: true }),
+    ).toBeVisible();
+    await expect(firstName).toHaveText(firstRowName);
+    await expect(firstName).toBeInViewport({ ratio: 1 });
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-phone-390.png'),
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-phone-390-viewport.png'),
+      fullPage: false,
+    });
+    await page.setViewportSize({ width: 502, height: 757 });
+    await noHorizontalOverflow(page);
+    await expect(firstName).toHaveText(firstRowName);
+    await expect(firstName).toBeInViewport({ ratio: 1 });
+    const search = page.getByRole('form', { name: 'Search inventory' });
+    for (const control of [
+      search.getByRole('textbox'),
+      search.getByRole('combobox', { name: 'Tracking type', exact: true }),
+      search.getByRole('combobox', { name: 'Status', exact: true }),
+      search.getByRole('button', { name: 'Search', exact: true }),
+      search.getByRole('button', { name: 'More filters', exact: true }),
+      page.locator('.experience-export-menu > summary'),
+    ]) {
+      const bounds = await control.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath('inventory-phone-502-viewport.png'),
+      fullPage: false,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    // Form GET includes empty/default controls; record return scope is canonical.
+    await openInventoryRecord(page, 'quantity', '/inventory?q=' + query);
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('quantity-detail-phone-390.png'),
+      fullPage: true,
+    });
+    await openRecordTask(page, 'Edit quantity metadata');
+    await expect(
+      page.getByRole('form', { name: 'Edit quantity metadata' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('quantity-detail-edit-open-phone-390.png'),
+      fullPage: true,
+    });
+    await page.goto('/inventory?type=asset');
+    await openInventoryRecord(page, 'assets');
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('asset-detail-phone-390.png'),
+      fullPage: true,
+    });
+    await openRecordTask(page, 'Edit asset metadata');
+    await expect(
+      page.getByRole('form', { name: 'Edit asset metadata' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('asset-detail-edit-open-phone-390.png'),
+      fullPage: true,
+    });
+    await expect(
+      page.evaluate(
+        () => matchMedia('(prefers-reduced-motion: reduce)').matches,
+      ),
+    ).resolves.toBe(true);
+    await setLocalReducedMotion(page, true);
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-motion',
+      'reduced',
+    );
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-motion',
+      'reduced',
+    );
+    await setLocalReducedMotion(page, false);
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-motion',
+      'reduced',
+    );
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
 
-  await page.context().clearCookies();
-  await page.goto('/forgot-password');
-  await expect(
-    page.getByRole('heading', { name: 'Reset your password' }),
-  ).toBeVisible();
-  await noHorizontalOverflow(page);
-  await page.screenshot({
-    path: testInfo.outputPath('recovery-phone-390.png'),
-    fullPage: true,
-  });
-  expect(
-    errors.filter((error) => /hydration|uncaught|error:/i.test(error)),
-  ).toEqual([]);
+    await page.goto('/settings/forms');
+    await page.locator('main a[href^="/settings/forms/"]').first().click();
+    await expect(
+      page.getByRole('region', { name: 'Forms and fields' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('designer-phone-390.png'),
+      fullPage: true,
+    });
+
+    await page.context().clearCookies();
+    await page.goto('/forgot-password');
+    await expect(
+      page.getByRole('heading', { name: 'Reset your password' }),
+    ).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.screenshot({
+      path: testInfo.outputPath('recovery-phone-390.png'),
+      fullPage: true,
+    });
+    expect(
+      errors.filter((error) => /hydration|uncaught|error:/i.test(error)),
+    ).toEqual([]);
+  } finally {
+    // Only this attempt's zero-stock fixture is archived, including on failure.
+    const client = await auditReadback();
+    const current = await client
+      .from('quantity_items')
+      .select('name,version,archived')
+      .eq('id', owned.id)
+      .single();
+    expect(current.error).toBeNull();
+    expect(current.data!.name).toBe(firstRowName);
+    if (!current.data!.archived) {
+      const archived = await client.rpc('quantity_archive', {
+        p_request_id: crypto.randomUUID(),
+        p_payload: {
+          item_id: owned.id,
+          expected_version: current.data!.version,
+          reason: 'Completed disposable browser visibility fixture',
+        },
+      });
+      expect(archived.error).toBeNull();
+    }
+    await client.auth.signOut();
+  }
 });
 
 test('the first styled paint is reduced before hydration and the saved preference wins afterward', async ({

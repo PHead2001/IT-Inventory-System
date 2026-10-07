@@ -117,7 +117,7 @@ export default async function InventoryPage({
           sites={sites}
           diagnosticsEnabled={authDiagnosticsEnabled()}
         />
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
+        <div className="experience-inventory-results mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
           <div>
             <h2 className="text-lg font-semibold">Matching inventory</h2>
             <InventoryCount result={result} />
