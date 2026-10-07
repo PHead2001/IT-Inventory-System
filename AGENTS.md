@@ -30,8 +30,9 @@ For normal work, inspect only what is relevant:
 4. `docs/validation.md`
 5. `docs/deployment.md` when deployment/configuration is affected
 6. `docs/development/README.md` when setup/workflow is relevant
-7. affected module docs, source, tests, migrations, scripts, and workflows
-8. current PR/review/CI state when working on an existing PR
+7. `docs/interface-standards.md` when user-visible UI, copy, motion or the room view is affected
+8. affected module docs, source, tests, migrations, scripts, and workflows
+9. current PR/review/CI state when working on an existing PR
 
 Do not guess repository facts that can be inspected.
 
@@ -332,6 +333,28 @@ The scene emits/selects logical location identifiers. Application/domain service
 
 ---
 
+# Interface standards
+
+The app is used by IT staff during real work, often on a phone in a closet. User-visible quality is a product requirement, not polish after correctness.
+
+Invariants:
+
+- Never render raw identifiers (UUIDs, revision IDs, internal markers such as `legacy`, RPC or table names) in user-facing UI, including display strings composed in SQL. Show them only in technical detail, exports or logs intended for them.
+- Never show success before the write commits. Plain language must stay truthful.
+- Destructive and lifecycle actions (retire, archive, remove, discard) use the danger/warning treatment and name the affected record.
+- Essential actions never depend on hover or precise 3D manipulation (see 2.5D interaction).
+
+Defaults (deviate only with a stated reason in the PR):
+
+- Use the design tokens and type scale in `docs/interface-standards.md`. Do not introduce ad hoc colors, font families, or font sizes below the documented minimum.
+- Write UI copy for the staff member, not the reviewer: outcome first, verb-led buttons, no internal model terms. Correctness detail belongs in docs, tests and history, not on screen.
+- A completed operation shows a clear result and a way out (Done / next action). It does not lock unrelated controls.
+- Use the existing motion vocabulary and Motion library for feedback and transitions; respect the motion preference.
+
+User-visible changes are not accepted from tests alone. Inspect real populated screens at desktop and 390 px, in Full and Reduced motion, scaled to the change. Attach before/after captures to the PR.
+
+---
+
 # Git safety
 
 - work on a feature/fix branch, not directly on `main`
@@ -548,6 +571,7 @@ Update durable docs in the same PR when changing:
 - deployment
 - external prerequisites
 - known limitations
+- design tokens, type scale, shared copy vocabulary, or interface standards
 
 Use:
 
@@ -557,6 +581,7 @@ Use:
 - `docs/validation.md` — gates and commands
 - `docs/deployment.md` — Vercel/Supabase deployment
 - `docs/development/README.md` — local workflow
+- `docs/interface-standards.md` — typography, color, copy, feedback, motion, room-view, and visual acceptance standards
 - module docs — only for sufficiently complex subsystems
 - ADRs — only for meaningful durable architecture decisions
 
@@ -583,6 +608,7 @@ For substantial work, report:
 - production status
 - remaining manual prerequisites
 - known unvalidated boundaries
+- for user-visible changes: how to try it (preview link and the steps to reach the changed flow), before/after captures, and known UX gaps
 
 Keep routine command narration out of the report.
 
