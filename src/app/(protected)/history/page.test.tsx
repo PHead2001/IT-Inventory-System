@@ -159,3 +159,70 @@ it('updates the locked kind when browser navigation restores a record after chan
     'quantity',
   );
 });
+
+it.each([
+  [false, 'No'],
+  [true, 'Yes'],
+  ['', 'Empty text'],
+  [0, '0'],
+])(
+  'shows human snapshot answer %s with optional raw JSON',
+  async (value, label) => {
+    m.custom.mockResolvedValue({
+      field_id: id,
+      label: 'Answer',
+      legacy: false,
+      present: true,
+      field_type: typeof value === 'boolean' ? 'boolean' : 'short_text',
+      value,
+      validated_revision_id: id,
+      owner_category_id: id,
+      option_paths: [],
+      next_option_offset: null,
+    });
+    render(
+      await Page({
+        searchParams: Promise.resolve({ event: 'quantity:' + id }),
+      }),
+    );
+    expect(screen.getByText(label, { selector: 'p' })).toBeVisible();
+    expect(
+      screen.getByText('Technical recorded value').closest('details'),
+    ).not.toHaveAttribute('open');
+  },
+);
+it.each([
+  ['https://example.test/long?q=value', true],
+  ['javascript:alert(1)', false],
+])(
+  'revalidates recorded link %s before exposing Open/Copy',
+  async (value, safe) => {
+    m.custom.mockResolvedValue({
+      field_id: id,
+      label: 'Recorded link',
+      legacy: true,
+      present: true,
+      field_type: 'url',
+      value,
+      validated_revision_id: id,
+      owner_category_id: id,
+      option_paths: [],
+      next_option_offset: null,
+    });
+    render(
+      await Page({ searchParams: Promise.resolve({ event: 'asset:' + id }) }),
+    );
+    if (safe) {
+      expect(screen.getByRole('link', { name: /Open https/ })).toHaveAttribute(
+        'href',
+        value,
+      );
+      expect(screen.getByRole('button', { name: /Copy https/ })).toBeVisible();
+    } else {
+      expect(
+        screen.queryByRole('link', { name: /Open javascript/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/not a safe HTTP or HTTPS link/)).toBeVisible();
+    }
+  },
+);

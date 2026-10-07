@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
@@ -22,11 +23,15 @@ import {
 import styles from '@/features/inventory/components/inventory-visual.module.css';
 export default async function AssetPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { member } = await requireMember();
   const { id } = await params;
+  const query = await searchParams;
+  const returnTo = inventoryReturnPath(query?.returnTo);
   const detail = await getAssetDetail(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
@@ -35,15 +40,14 @@ export default async function AssetPage({
     getLocations(),
     getSites(),
     getEntityAssignments('asset', id),
-    member.role === 'staff'
-      ? getPublishedForms([asset.categoryId])
-      : Promise.resolve({}),
+    getPublishedForms([asset.categoryId]),
   ]);
   return (
     <>
       <section className={`experience-surface-bright ${styles.detailHero}`}>
-        <Link href="/inventory" className="text-sm text-cyan-200 underline">
-          ← Back to inventory
+        <Link href={returnTo} className="text-sm text-cyan-200 underline">
+          ←{' '}
+          {returnTo === '/inventory' ? 'Back to inventory' : 'Back to results'}
         </Link>
         <div className={`${styles.detailHead} mt-4`}>
           <div className={styles.detailTitle}>
@@ -132,6 +136,8 @@ export default async function AssetPage({
             </dl>
           </section>
           <CustomMetadataList
+            definition={forms[asset.categoryId]?.published_definition}
+            kind="asset"
             values={asset.customDisplay}
             needsMetadata={asset.needsMetadata}
           />
@@ -163,6 +169,7 @@ export default async function AssetPage({
             actorId={member.user_id}
             parentType="asset"
             parentId={asset.id}
+            parentName={asset.name}
             active={asset.status === 'active'}
             staff={member.role === 'staff'}
           />

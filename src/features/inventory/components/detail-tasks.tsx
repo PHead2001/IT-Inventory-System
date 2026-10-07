@@ -131,6 +131,7 @@ export function DetailTasks(props: {
           return (
             <MetadataForm
               actorId={props.actorId}
+              recoveryBackend={props.backendScope}
               kind={quantity ? 'quantity' : 'asset'}
               item={item}
               asset={asset}
@@ -157,6 +158,7 @@ export function DetailTasks(props: {
                 >[0]['action']
               }
               entityId={entity.id}
+              entityName={entity.name}
               version={String(entity.version)}
               locations={props.locations}
               sites={props.sites}

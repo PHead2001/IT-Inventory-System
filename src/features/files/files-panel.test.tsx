@@ -788,6 +788,7 @@ describe('terminal file cancellation cleanup', () => {
       />,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
     await waitFor(() =>
       expect(
         screen.queryByRole('button', { name: 'Download PDF' }),
@@ -1640,6 +1641,7 @@ describe('file collection identity isolation', () => {
       />,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
     await waitFor(() =>
       expect(
         screen.queryByRole('button', { name: 'Download PDF' }),
@@ -1993,5 +1995,305 @@ it('preserves the real upload validation failure when cards cannot refresh', asy
   );
   expect(screen.getByRole('alert')).toHaveTextContent(
     'Remaining cleanup is unverified',
+  );
+});
+
+describe('named file removal confirmation', () => {
+  const original = {
+    ...pending,
+    name: 'Router instructions',
+    filename: 'router.pdf',
+    state: 'ready',
+    type: 'application/pdf',
+    version: '7',
+  };
+  function arrange(
+    remove: (args: Record<string, unknown>) => Promise<unknown>,
+    refreshFailure = false,
+    refreshedFiles = [{ ...original, id: 'replacement', version: '1' }],
+  ) {
+    let reads = 0;
+    mocks.operation.mockImplementation(
+      async (name: string, args: Record<string, unknown>) => {
+        if (name === 'inventory_file_cards') {
+          reads++;
+          if (reads > 1 && refreshFailure)
+            throw new Error('Refresh transport failed');
+          return {
+            data: {
+              revision: reads === 1 ? '12' : '13',
+              files: reads === 1 ? [original] : refreshedFiles,
+            },
+            error: null,
+          };
+        }
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_remove') return remove(args);
+        if (name === 'inventory_file_read')
+          return { data: null, error: { message: 'No thumbnail' } };
+        throw new Error('Unexpected RPC: ' + name);
+      },
+    );
+    return render(
+      <FilesPanel
+        actorId="actor-a"
+        parentType="asset"
+        parentId={id}
+        parentName="Office router"
+        active
+        staff
+      />,
+    );
+  }
+  const removals = () =>
+    mocks.operation.mock.calls.filter(
+      ([name]) => name === 'inventory_file_remove',
+    );
+  it('names the actual file and owner, focuses Cancel, and cancels without RPC or cleanup', async () => {
+    arrange(async () => ({ data: {}, error: null }));
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole('button', {
+      name: 'Remove',
+    });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    expect(
+      screen.getByRole('dialog', { name: 'Remove Router instructions?' }),
+    ).toHaveTextContent('router.pdf from Office router');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(removals()).toHaveLength(0);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it.each(['asset', 'quantity'] as const)(
+    'offers the same named protection and Escape cancellation for a %s photo',
+    async (parentType) => {
+      mocks.operation.mockImplementation(async (name: string) => {
+        if (name === 'inventory_file_cards')
+          return {
+            data: { revision: '4', files: [{ ...pending, state: 'ready' }] },
+            error: null,
+          };
+        if (name === 'inventory_file_history')
+          return { data: { rows: [], has_more: false }, error: null };
+        if (name === 'inventory_file_read')
+          return { data: null, error: { message: 'No thumbnail' } };
+        throw new Error('Unexpected mutation');
+      });
+      render(
+        <FilesPanel
+          actorId="actor-a"
+          parentType={parentType}
+          parentId={id}
+          parentName="Cable stock"
+          active
+          staff
+        />,
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent('damaged.png from Cable stock');
+      expect(dialog).toHaveTextContent('This photo will become unavailable');
+      fireEvent(
+        dialog,
+        new Event('cancel', { bubbles: false, cancelable: true }),
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(removals()).toHaveLength(0);
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    },
+  );
+  it('sends the captured target and versions once despite repeated confirmation', async () => {
+    let finish!: (value: unknown) => void;
+    arrange(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    const confirm = screen.getByRole('button', {
+      name: 'Remove file',
+    });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(removals()).toHaveLength(1);
+    expect(removals()[0][1]).toEqual({
+      p_file_id: id,
+      p_expected_file_version: '7',
+      p_expected_revision: '12',
+      p_request_id: expect.any(String),
+    });
+    expect(
+      screen.queryByRole('button', { name: 'Cancel' }),
+    ).not.toBeInTheDocument();
+    await act(async () => finish({ data: {}, error: null }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('File removed.'),
+    );
+  });
+  it('retains the exact request after a lost response, with no false Cancel', async () => {
+    let attempts = 0;
+    arrange(async () => {
+      if (++attempts === 1) throw new Error('Lost response');
+      return { data: {}, error: null };
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Retry removal' }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(removals()).toHaveLength(2);
+    expect(removals()[0][1]).toEqual(removals()[1][1]);
+    expect(screen.getByRole('alert')).toHaveTextContent('File removed.');
+  });
+  it.each(['P1002', 'P1010', 'P1012', 'P1009'])(
+    'never substitutes a replacement after %s rejection; refresh requires a fresh explicit confirmation',
+    async (code) => {
+      arrange(async () => ({
+        data: null,
+        error: { code, message: 'Rejected' },
+      }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Refresh files' }),
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+      );
+      expect(removals()).toHaveLength(1);
+      expect(removals()[0][1].p_file_id).toBe(id);
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      await screen.findByRole('button', { name: 'Refresh files' });
+      expect(removals()[1][1]).toEqual(
+        expect.objectContaining({
+          p_file_id: 'replacement',
+          p_expected_file_version: '1',
+          p_expected_revision: '13',
+        }),
+      );
+      expect(removals()[1][1].p_request_id).not.toEqual(
+        removals()[0][1].p_request_id,
+      );
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    },
+  );
+  it('refreshes an explicitly removed target without offering a retry or deleting anything else', async () => {
+    arrange(
+      async () => ({
+        data: null,
+        error: { code: 'P1010', message: 'not_found' },
+      }),
+      false,
+      [],
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    const refresh = await screen.findByRole('button', {
+      name: 'Refresh files',
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'reviewed file was removed or replaced',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry removal' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(refresh);
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Remove' }),
+    ).not.toBeInTheDocument();
+    expect(removals()).toHaveLength(1);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+  it.each(['P1001', '42501'])(
+    'keeps an uncertain request bound when %s denies replay before receipt lookup',
+    async (code) => {
+      let attempts = 0;
+      arrange(async () => {
+        if (++attempts === 1) throw new Error('Lost acknowledgement');
+        return { data: null, error: { code, message: 'forbidden' } };
+      });
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Retry removal' }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'Restore authorized access',
+        ),
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Cancel' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Refresh files' }),
+      ).not.toBeInTheDocument();
+      expect(removals()).toHaveLength(2);
+      expect(removals()[0][1]).toEqual(removals()[1][1]);
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    },
+  );
+  it('preserves acknowledged logical removal when refresh throws and byte cleanup fails', async () => {
+    arrange(async () => ({ data: {}, error: null }), true);
+    mocks.fetch.mockRejectedValue(new Error('Cleanup unavailable'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'File removed. Files could not be refreshed',
+      ),
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Byte cleanup could not be confirmed',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Retry removal' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Download PDF' }),
+    ).not.toBeInTheDocument();
+  });
+  it.each(['actor', 'parent', 'role', 'environment'] as const)(
+    'masks prior intent and ignores late removal callbacks after %s changes',
+    async (change) => {
+      let finish!: (value: unknown) => void;
+      const view = arrange(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+      if (change === 'environment')
+        vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://other.invalid');
+      view.rerender(
+        <FilesPanel
+          actorId={change === 'actor' ? 'actor-b' : 'actor-a'}
+          parentType="asset"
+          parentId={change === 'parent' ? 'other' : id}
+          parentName="New record"
+          active
+          staff={change !== 'role'}
+        />,
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await act(async () => finish({ data: {}, error: null }));
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(screen.queryByText(/File removed/)).not.toBeInTheDocument();
+      vi.unstubAllEnvs();
+    },
   );
 });

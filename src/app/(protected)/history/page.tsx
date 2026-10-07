@@ -1,3 +1,5 @@
+import { formatCustomValue } from '@/features/metadata/contracts';
+import { WebLinkValue } from '@/features/metadata/web-link-value';
 import {
   getHistory,
   getHistoryRecord,
@@ -94,32 +96,42 @@ export default async function HistoryPage({
               {custom.label} {custom.legacy ? '(legacy)' : ''}
             </h2>
             <p className="mt-2 text-sm text-slate-400">
-              {side === 'before' ? 'Before' : 'After'} · field {custom.field_id}
+              {side === 'before' ? 'Before event' : 'After event'}
             </p>
             {custom.present ? (
               <>
-                <p className="mt-2 text-sm">Type: {custom.field_type}</p>
-                <p className="mt-2 text-sm">
-                  Validated revision: {custom.validated_revision_id}
-                </p>
-                <p className="mt-2 text-sm">
-                  Field owner category: {custom.owner_category_id}
-                </p>
                 {custom.field_type === 'datetime' && (
                   <p className="mt-2 text-sm">
                     Display time: <OperationalTimestamp value={custom.value} />
                   </p>
                 )}
-                <pre className="mt-3 whitespace-pre-wrap break-all text-sm">
-                  {JSON.stringify(custom.value)}
-                </pre>
-                {custom.option_paths.length > 0 && (
-                  <ol className="mt-3 list-inside list-decimal space-y-1 text-sm">
-                    {custom.option_paths.map((path, index) => (
-                      <li key={index}>{path.join(' / ')}</li>
-                    ))}
-                  </ol>
+                {custom.field_type === 'url' ? (
+                  <div className="mt-3">
+                    <WebLinkValue value={custom.value} />
+                  </div>
+                ) : (
+                  custom.field_type !== 'datetime' && (
+                    <p className="mt-3 whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+                      {formatCustomValue(custom.value, custom.option_paths)}
+                    </p>
+                  )
                 )}
+                <details className="mt-3 text-sm">
+                  <summary className="min-h-11 cursor-pointer py-2">
+                    Technical recorded value
+                  </summary>
+                  <p>Field: {custom.field_id}</p>
+                  <p className="mt-2 text-sm">Type: {custom.field_type}</p>
+                  <p className="mt-2 text-sm">
+                    Validated revision: {custom.validated_revision_id}
+                  </p>
+                  <p className="mt-2 text-sm">
+                    Field owner category: {custom.owner_category_id}
+                  </p>
+                  <pre className="whitespace-pre-wrap break-all">
+                    {JSON.stringify(custom.value)}
+                  </pre>
+                </details>
                 {custom.option_offset && custom.option_offset > 0 && (
                   <a
                     className="mr-4 text-cyan-300 underline"
@@ -326,7 +338,7 @@ export default async function HistoryPage({
         {countLabel(result.total, 'matching event')}
       </p>
       <div className={styles.history}>
-        <HistoryList events={result.rows} />
+        <HistoryList events={result.rows} compact />
       </div>
       <Pagination result={result} base="/history" params={coherentParams} />
     </>

@@ -19,7 +19,7 @@ import {
   Pagination,
 } from '@/features/inventory/components/read-ui';
 import { SearchForm } from '@/features/inventory/components/search-form';
-import { Button } from '@/components/ui/button';
+import { AddItemLauncher } from '@/features/inventory/components/add-item-launcher';
 import { readFilters } from '@/features/inventory/read-model';
 import { getSites } from '@/features/custody/queries.server';
 import { getFileListSummaries } from '@/features/files/list.server';
@@ -73,7 +73,10 @@ export default async function InventoryPage({
     Object.fromEntries(exportParams),
     result,
   );
-  if (recovery) redirect(recovery);
+  if (recovery)
+    redirect(
+      recovery + (recovery.includes('?') ? '&' : '?') + 'scopeAdjusted=true',
+    );
   const constrained = hasInventoryConstraints(params);
   const recorded =
     result.total === 0 && !constrained ? await hasRecordedInventory() : null;
@@ -94,48 +97,18 @@ export default async function InventoryPage({
       <p className="experience-eyebrow">
         Logical storage and site custody · Inventory
       </p>
-      <h1 className="experience-heading mt-2">Inventory</h1>
-      <p className="experience-muted mt-2 max-w-2xl text-sm">
-        Search available storage, assigned site holdings, and individually
-        tracked assets.
-      </p>
-      {member.role === 'staff' && (
-        <div className="my-3 flex flex-wrap gap-2">
-          <div className="min-w-0 flex-1 basis-64">
-            <Button asChild>
-              <Link
-                href={'/inventory/quantity/new?' + createQuery}
-                aria-describedby="quantity-choice-description"
-              >
-                Add quantity item
-              </Link>
-            </Button>
-            <p
-              id="quantity-choice-description"
-              className="mt-2 text-sm text-slate-300"
-            >
-              Track interchangeable items by count, such as cables and adapters.
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 basis-64">
-            <Button asChild variant="outline">
-              <Link
-                href={'/inventory/assets/new?' + createQuery}
-                aria-describedby="asset-choice-description"
-              >
-                Add individual asset
-              </Link>
-            </Button>
-            <p
-              id="asset-choice-description"
-              className="mt-2 text-sm text-slate-300"
-            >
-              Track one specific device, such as a laptop or switch.
-            </p>
-          </div>
-        </div>
+      <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>
+      {params.scopeAdjusted === 'true' && (
+        <p role="status" className="mt-2 text-sm text-amber-100">
+          The previous results page is no longer available. Showing the nearest
+          available page with your filters retained.
+        </p>
       )}
-      <div className="mt-4">
+      <p className="experience-muted mt-1 max-w-2xl text-sm sm:mt-2">
+        Search stock, site holdings, and individual assets.
+      </p>
+      {member.role === 'staff' && <AddItemLauncher query={createQuery} />}
+      <div className="mt-2 sm:mt-4">
         <SearchForm
           key={exportParams.toString()}
           params={params}
@@ -144,7 +117,7 @@ export default async function InventoryPage({
           sites={sites}
           diagnosticsEnabled={authDiagnosticsEnabled()}
         />
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="experience-inventory-results mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
           <div>
             <h2 className="text-lg font-semibold">Matching inventory</h2>
             <InventoryCount result={result} />
@@ -180,6 +153,7 @@ export default async function InventoryPage({
           </p>
         )}
         <InventoryRows
+          returnTo={returnTo}
           rows={result.rows}
           fileSummaries={fileSummaries}
           emptyState={

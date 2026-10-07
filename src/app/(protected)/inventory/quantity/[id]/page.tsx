@@ -1,7 +1,9 @@
 import Link from 'next/link';
+import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
+import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
   getQuantityDetail,
   getQuantityArchiveReview,
@@ -25,11 +27,15 @@ import {
 import styles from '@/features/inventory/components/inventory-visual.module.css';
 export default async function QuantityPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { member } = await requireMember();
   const { id } = await params;
+  const query = await searchParams;
+  const returnTo = inventoryReturnPath(query?.returnTo);
   const detail = await getQuantityDetail(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
@@ -47,9 +53,7 @@ export default async function QuantityPage({
     getSites(),
     getEntitySiteHoldings(id),
     getEntityAssignments('quantity', id),
-    member.role === 'staff'
-      ? getPublishedForms([item.categoryId])
-      : Promise.resolve({}),
+    getPublishedForms([item.categoryId]),
     member.role === 'staff' && !item.archived
       ? getQuantityArchiveReview(id)
       : Promise.resolve(null),
@@ -57,8 +61,9 @@ export default async function QuantityPage({
   return (
     <>
       <section className={`experience-surface-bright ${styles.detailHero}`}>
-        <Link href="/inventory" className="text-sm text-cyan-200 underline">
-          ← Back to inventory
+        <Link href={returnTo} className="text-sm text-cyan-200 underline">
+          ←{' '}
+          {returnTo === '/inventory' ? 'Back to inventory' : 'Back to results'}
         </Link>
         <div className={`${styles.detailHead} mt-4`}>
           <div className={styles.detailTitle}>
@@ -150,6 +155,8 @@ export default async function QuantityPage({
             </p>
           </section>
           <CustomMetadataList
+            definition={forms[item.categoryId]?.published_definition}
+            kind="quantity"
             values={item.customDisplay}
             needsMetadata={item.needsMetadata}
           />
@@ -219,6 +226,7 @@ export default async function QuantityPage({
             actorId={member.user_id}
             parentType="quantity"
             parentId={item.id}
+            parentName={item.name}
             active={!item.archived}
             staff={member.role === 'staff'}
           />
@@ -232,9 +240,12 @@ export default async function QuantityPage({
               <span className="font-medium capitalize">
                 {event.kind.replaceAll('_', ' ')}
               </span>{' '}
-              · {event.from_label || 'Opening'} →{' '}
-              {event.to_label || 'No destination'} ·{' '}
-              {countLabel(event.quantity ?? 0, 'unit')}· {event.actor_name} ·{' '}
+              ·{' '}
+              {event.kind === 'corrected'
+                ? siteCountCorrectionSummary(event.from_label)
+                : `${event.from_label || 'Opening'} → ${event.to_label || 'No destination'} · ${countLabel(event.quantity ?? 0, 'unit')}`}
+              {' · '}
+              {event.actor_name} ·{' '}
               <OperationalTimestamp value={event.created_at} />
               {event.reason && (
                 <span className="mt-1 block">Reason: {event.reason}</span>

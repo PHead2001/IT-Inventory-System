@@ -89,7 +89,7 @@ export function SearchForm({
   });
 
   return (
-    <div className="experience-inventory-search experience-surface mb-4 p-4">
+    <div className="experience-inventory-search experience-surface mb-3 px-4 py-2 sm:mb-4 sm:p-4">
       <form action={action} aria-label="Search inventory">
         <div className="experience-search-top">
           <div className="min-w-0 flex-1">
@@ -222,9 +222,11 @@ export function SearchForm({
       {chips.length > 0 && (
         <nav
           aria-label="Active inventory filters"
-          className="mt-3 flex flex-wrap items-center gap-2 border-t border-cyan-100/10 pt-3 text-xs"
+          className="experience-active-inventory-filters mt-3 flex flex-wrap items-center gap-2 border-t border-cyan-100/10 pt-3 text-xs"
         >
-          <span className="text-slate-400">Active filters</span>
+          <span className="sr-only text-slate-400 sm:not-sr-only">
+            Active filters
+          </span>
           {chips.map((chip) => (
             <Link
               key={chip.key}

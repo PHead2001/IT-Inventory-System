@@ -176,10 +176,13 @@ export function formatCustomValue(value: unknown, paths: unknown): string {
       .map((path) => (Array.isArray(path) ? path.join(' / ') : ''))
       .join('; ');
   }
+  if (value === undefined) return 'Unanswered';
+  if (value === '') return 'Empty text';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string' || typeof value === 'number')
     return String(value);
-  if (Array.isArray(value)) return value.map(String).join(', ');
+  if (Array.isArray(value))
+    return value.length ? value.map(String).join(', ') : 'No options selected';
   if (
     value &&
     typeof value === 'object' &&

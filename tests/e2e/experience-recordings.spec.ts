@@ -82,7 +82,9 @@ test('records navigation, a held designer drag and resize, and the saved form', 
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
   await name.press('Enter');
-  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
+  const width = designer
+    .getByTestId('designer-inspector')
+    .getByRole('combobox', { name: 'Preferred width', exact: true });
   await width.selectOption('12');
   const handle = name.getByRole('button', { name: 'Resize Name' });
   await handle.scrollIntoViewIfNeeded();

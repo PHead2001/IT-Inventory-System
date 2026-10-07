@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MetadataDefinition } from './contracts';
+import { countNoun } from './field-guidance';
 export type MetadataField = MetadataDefinition['fields'][number];
 const decimalPattern = /^-?(0|[1-9]\d*)(\.\d{1,6})?$/;
 function decimalUnits(raw: string) {
@@ -42,15 +43,17 @@ export function fieldValueError(field: MetadataField, value: unknown): string {
         rules.maxLength ?? (field.type === 'short_text' ? 500 : 10000),
       );
       return length < min
-        ? `Enter at least ${min} characters.`
+        ? `Enter at least ${countNoun(min, 'character')}.`
         : length > max
-          ? `Use at most ${max} characters.`
+          ? `Use at most ${countNoun(max, 'character')}.`
           : '';
     }
     case 'boolean':
       return typeof value === 'boolean'
         ? ''
-        : 'Choose checked, unchecked or clear the answer.';
+        : field.rules.booleanPresentation === 'yes_no'
+          ? 'Choose Yes or No, or clear the answer.'
+          : 'Choose checked, unchecked or clear the answer.';
     case 'integer':
     case 'decimal':
     case 'currency': {
@@ -82,7 +85,7 @@ export function fieldValueError(field: MetadataField, value: unknown): string {
       if (!decimalPattern.test(raw) || (raw.match(/\d/g) ?? []).length > 24)
         return 'Enter a number without commas or exponents (at most 24 digits).';
       if ((raw.split('.')[1]?.length ?? 0) > places)
-        return `Use at most ${places} decimal places; the amount will not be rounded.`;
+        return `Use at most ${countNoun(places, 'decimal place')}; the amount will not be rounded.`;
       const amount = decimalUnits(raw);
       return boundsError(
         rules.min !== undefined &&
@@ -126,7 +129,7 @@ export function fieldValueError(field: MetadataField, value: unknown): string {
         !Array.isArray(value) ||
         value.length > Number(rules.maxSelections ?? 1000)
       )
-        return `Choose at most ${Number(rules.maxSelections ?? 1000)} options.`;
+        return `Choose at most ${countNoun(Number(rules.maxSelections ?? 1000), 'option')}.`;
       return new Set(value).size === value.length &&
         value.every((id) =>
           field.options.some((option) => option.id === id && option.active),

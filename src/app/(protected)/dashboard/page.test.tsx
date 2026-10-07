@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
+vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({ dashboard: vi.fn(), redirect: vi.fn() }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getLowStockDashboard: mocks.dashboard,

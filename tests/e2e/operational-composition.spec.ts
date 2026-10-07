@@ -678,7 +678,10 @@ test('CP3 U08 designer starts with useful canvas and supports keyboard recovery,
   await expect.poll(order).toEqual(before);
   await field.press('Enter');
   const inspector = designer.getByTestId('designer-inspector'),
-    width = inspector.getByRole('combobox', { name: 'Width', exact: true });
+    width = inspector.getByRole('combobox', {
+      name: 'Preferred width',
+      exact: true,
+    });
   await expect(width).toBeVisible();
   await width.selectOption('12');
   const resize = field.getByRole('button', { name: 'Resize Name' });
@@ -784,8 +787,16 @@ test('CP3 U04 site opening review identifies existing equipment and site without
   await setup.getByLabel('Name', { exact: true }).fill(siteName);
   await setup.getByLabel('Permanent code', { exact: true }).fill(code);
   await setup.getByRole('button', { name: 'Save site' }).click();
-  await expect(setup.getByRole('status')).toContainText('Site saved');
+  await expect(
+    page.getByRole('heading', { name: 'Site created' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toContainText(siteName);
   await page.goto('/sites/' + code);
+  await page
+    .getByText('Record equipment already at this site', { exact: true })
+    .click();
   await page
     .getByRole('link', { name: 'Record existing quantity item', exact: true })
     .click();
@@ -824,6 +835,9 @@ test('CP3 U04 site opening review identifies existing equipment and site without
     page.getByText('2 assigned to sites · 2 total recorded'),
   ).toBeVisible();
   await page.goto('/sites/' + code);
+  await page
+    .getByText('Record equipment already at this site', { exact: true })
+    .click();
   await page
     .getByRole('link', {
       name: 'Record existing individual asset',

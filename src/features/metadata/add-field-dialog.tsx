@@ -242,9 +242,16 @@ export function AddFieldDialog({
       }}
     >
       <div className={`${styles.addDialogHeader} flex justify-between gap-3`}>
-        <h3 id={`${prefix}-title`} className="text-lg font-semibold">
-          Add field
-        </h3>
+        <div className="min-w-0">
+          <h3 id={`${prefix}-title`} className="text-lg font-semibold">
+            Add field
+          </h3>
+          {tab === 'new' && (
+            <p className="text-sm text-cyan-200" aria-live="polite">
+              Selected type: {fieldTypeInfo[field.type].name}
+            </p>
+          )}
+        </div>
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
@@ -333,6 +340,12 @@ export function AddFieldDialog({
               <FieldSettings
                 key={field.type}
                 field={field}
+                revisionOptionCount={
+                  definition.fields.reduce(
+                    (total, item) => total + item.options.length,
+                    0,
+                  ) + field.options.length
+                }
                 showTypeChooser={false}
                 change={setField}
                 onValidityChange={setInputError}

@@ -391,6 +391,7 @@ test('archiving stocked quantity clears every location in one reviewed operation
   const event = page.locator('li').filter({
     has: page.getByRole('heading', { name: 'Definition archived' }),
   });
+  await event.getByText('View event details', { exact: true }).click();
   await expect(
     event.getByText('Removed 12 units across 2 locations.'),
   ).toBeVisible();
@@ -666,7 +667,8 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
-  await beginNewRecordTransaction(page, 'New transaction');
+  await expect(form.getByRole('status')).toHaveText('Details saved.');
+  await form.getByRole('button', { name: 'Done', exact: true }).click();
   form = await openForm(page, 'Retire asset');
   await form.getByLabel('Reason (required)').fill('Removed from service');
   await confirm(form, 'Retire asset');
@@ -711,8 +713,15 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
       exact: true,
     }),
   ).toHaveCount(1);
+  const corrected = page.locator('li').filter({
+    has: page.getByRole('heading', {
+      name: 'Recorded location corrected',
+      exact: true,
+    }),
+  });
+  await corrected.getByText('View event details', { exact: true }).click();
   await expect(
-    page.getByText('Reason: Found in adjacent drawer'),
+    corrected.getByText('Reason: Found in adjacent drawer'),
   ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Asset retired', exact: true }),
@@ -751,7 +760,8 @@ test('overlapping two-page edits renew field choices after further races and vie
   // Each new overlapping commit invalidates the previous choice. A stale "mine"
   // decision must never silently overwrite a subsequently observed value.
   for (const nextVersion of [3, 4]) {
-    await beginNewRecordTransaction(other, 'New transaction');
+    await expect(otherForm.getByRole('status')).toHaveText('Details saved.');
+    await otherForm.getByRole('button', { name: 'Done', exact: true }).click();
     await openForm(other, 'Edit quantity metadata');
     await otherForm
       .getByLabel('Name', { exact: true })

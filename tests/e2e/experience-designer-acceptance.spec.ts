@@ -95,7 +95,12 @@ async function inspectControl(control: Locator) {
   );
   const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
   if (await tab.isVisible()) await tab.click();
-  await expect(inspectorFor(control).getByLabel('Width')).toBeVisible();
+  await expect(
+    inspectorFor(control).getByRole('combobox', {
+      name: 'Preferred width',
+      exact: true,
+    }),
+  ).toBeVisible();
 }
 
 async function chooseControlSection(control: Locator, name: string) {
@@ -202,7 +207,10 @@ test('keyboard width editing retains focus and survives reload', async ({
       name: 'Name layout properties',
     }),
   ).toBeVisible();
-  const width = inspectorFor(control).getByLabel('Width');
+  const width = inspectorFor(control).getByRole('combobox', {
+    name: 'Preferred width',
+    exact: true,
+  });
   const initial = await width.inputValue();
   await width.focus();
   await page.keyboard.press('End');
@@ -221,7 +229,12 @@ test('keyboard width editing retains focus and survives reload', async ({
   designer = await openDesigner(page, category);
   const reloaded = fieldControl(designer, 'Name');
   await openLayout(reloaded);
-  await expect(inspectorFor(reloaded).getByLabel('Width')).toHaveValue(chosen);
+  await expect(
+    inspectorFor(reloaded).getByRole('combobox', {
+      name: 'Preferred width',
+      exact: true,
+    }),
+  ).toHaveValue(chosen);
 });
 
 test('advanced JSON action stays clickable below sticky Save at a constrained viewport', async ({

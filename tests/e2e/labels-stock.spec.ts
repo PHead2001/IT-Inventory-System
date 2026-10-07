@@ -840,10 +840,44 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
     page.getByText('Holdings: IT Closet / Left Storage / Shelf 1 / 1A: 3'),
   ).toBeVisible();
   await addSearchRecord(page, quantityName);
-  await search.getByRole('textbox').fill(assetName);
+  const results = page.getByRole('region', { name: 'Label search results' });
+  await expect(
+    results.getByRole('button', { name: 'In queue', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    results.getByRole('link', { name: 'Review queue: 1 record' }),
+  ).toBeVisible();
+  await search.getByRole('textbox').fill(suffix);
   await search.getByRole('button', { name: 'Search' }).click();
   await expect(page.getByRole('link', { name: assetName })).toBeVisible();
-  await addSearchRecord(page, assetName);
+  await results
+    .getByRole('checkbox', {
+      name: `Select ${quantityName} (quantity ${quantityId})`,
+      exact: true,
+    })
+    .check();
+  await results
+    .getByRole('checkbox', {
+      name: `Select ${assetName} (asset ${assetId})`,
+      exact: true,
+    })
+    .check();
+  await expect(
+    results.getByText('2 selected records', { exact: true }),
+  ).toBeVisible();
+  await results.getByRole('button', { name: 'Add selected to queue' }).click();
+  await expect(results.getByRole('status')).toContainText(
+    'Added: ' + assetName,
+  );
+  await expect(results.getByRole('status')).toContainText(
+    'Already present: ' + quantityName,
+  );
+  await expect(
+    results.getByText('0 selected records', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    results.getByRole('button', { name: 'In queue', exact: true }),
+  ).toHaveCount(2);
   await chooseLocation(
     page.locator('section').filter({ hasText: 'Add a location' }).first(),
     'Location',

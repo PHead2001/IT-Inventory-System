@@ -560,7 +560,9 @@ describe('category form designer', () => {
       within(name).getByTestId('designer-control-preview'),
     ).toHaveAttribute('aria-hidden', 'true');
     expect(within(name).getByLabelText('Name preview')).toBeDisabled();
-    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Preferred width'),
+    ).not.toBeInTheDocument();
     fireEvent.focus(name);
     expect(name).toHaveAttribute('data-selected', 'true');
     expect(
@@ -569,7 +571,7 @@ describe('category form designer', () => {
     expect(
       within(inspector).getByRole('button', { name: 'Hide from form' }),
     ).toBeDisabled();
-    fireEvent.change(within(inspector).getByLabelText('Width'), {
+    fireEvent.change(within(inspector).getByLabelText('Preferred width'), {
       target: { value: '6' },
     });
     expect(canvas.querySelector(`[data-control-id="${id(4)}"]`)).toBe(name);
@@ -603,7 +605,9 @@ describe('category form designer', () => {
     expect(
       within(inspector).queryByLabelText('Field name'),
     ).not.toBeInTheDocument();
-    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Preferred width'),
+    ).not.toBeInTheDocument();
     expect(within(inspector).getByText(/Section Details/)).toBeInTheDocument();
     fireEvent.click(
       screen
@@ -617,7 +621,9 @@ describe('category form designer', () => {
     expect(
       within(inspector).queryByLabelText('Field name'),
     ).not.toBeInTheDocument();
-    expect(within(inspector).queryByLabelText('Width')).not.toBeInTheDocument();
+    expect(
+      within(inspector).queryByLabelText('Preferred width'),
+    ).not.toBeInTheDocument();
     expect(
       within(inspector).getByText(/Section New section/),
     ).toBeInTheDocument();
@@ -1070,7 +1076,7 @@ describe('category form designer', () => {
       name: 'Resize New field',
     });
     const width = screen
-      .getAllByLabelText('Width', { selector: 'select' })
+      .getAllByLabelText('Preferred width', { selector: 'select' })
       .at(-1)!;
     expect(width).toHaveValue('Auto');
     fireEvent.pointerDown(resize, { pointerId: 2, clientX: 10, clientY: 100 });
@@ -2797,5 +2803,151 @@ describe('category form designer', () => {
     expect(
       screen.queryByRole('button', { name: 'Undo edit' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens the same draft tester from the toolbar and returns to the selected field focus', async () => {
+    mount();
+    addField('Inspection notes');
+    const name = screen.getByLabelText('Field name');
+    name.focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview form' }));
+    expect(screen.getByTestId('preview-fields')).toHaveTextContent(
+      'Inspection notes',
+    );
+    expect(screen.getAllByText('Shared live preview')).toHaveLength(1);
+    expect(screen.getByText(/Temporary preview answers/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
+    await waitFor(() => expect(name).toHaveFocus());
+    expect(name).toHaveValue('Inspection notes');
+  });
+  it('applies pasted paths in one undoable designer edit', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Nested dropdown' }));
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Connection' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add to form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Paste option paths' }));
+    fireEvent.change(screen.getByLabelText('Option paths'), {
+      target: { value: 'USB > USB-C > Dock' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review paths' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply paths' }));
+    expect(screen.getByLabelText('Option name: Dock')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo edit' }));
+    expect(
+      screen.queryByLabelText('Option name: Dock'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Field name')).toHaveValue('Connection');
+  });
+
+  it('names a new required field and keeps review wording tied to the submitted proposal', async () => {
+    let finish!: (result: Awaited<ReturnType<typeof saveMetadataForm>>) => void;
+    vi.mocked(saveMetadataForm).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    mount();
+    addField('Safety inspection');
+    fireEvent.click(screen.getByLabelText('Required'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(saveMetadataForm).mock.calls[0][0].payload;
+    const field = (payload.definition as MetadataDefinition).fields[0];
+    await act(async () =>
+      finish({
+        ok: true,
+        data: {
+          status: 'confirmation_required',
+          token: id(10),
+          expires_at: '2030-09-24T20:00:00Z',
+          reasons: [
+            {
+              kind: 'required_tightened',
+              id: field.id,
+              affected_kinds: ['quantity', 'asset'],
+            },
+          ],
+          affected_quantity: '3',
+          affected_assets: '2',
+          newly_needs_quantity: '1',
+          newly_needs_assets: '0',
+        },
+      }),
+    );
+    const review = screen.getByRole('region', { name: 'Form save impact' });
+    expect(review).toHaveTextContent(
+      'Add required field “Safety inspection”: absent → required',
+    );
+    expect(review).toHaveTextContent(
+      '3 quantity records and 2 individual assets',
+    );
+    expect(review).not.toHaveTextContent('Required tightened');
+    fireEvent.change(screen.getByLabelText('Field name'), {
+      target: { value: 'Edited after review' },
+    });
+    expect(
+      screen.queryByRole('region', { name: 'Form save impact' }),
+    ).not.toBeInTheDocument();
+  });
+  it('announces a keyboard drag using field and section names in the actual live region', async () => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    Object.defineProperty(document, 'getAnimations', {
+      configurable: true,
+      value: () => [],
+    });
+    Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
+      configurable: true,
+      value: () => [],
+    });
+    mount();
+    addField('Inspection notes');
+    const handle = screen.getByRole('button', {
+      name: 'Drag Inspection notes',
+    });
+    handle.focus();
+    await waitFor(() => expect(handle).toHaveAttribute('aria-describedby'));
+    fireEvent.keyDown(handle, { key: ' ', code: 'Space' });
+    await waitFor(() =>
+      expect(
+        [
+          ...document.querySelectorAll(
+            '[aria-live="polite"][id^="dnd-kit-announcement"]',
+          ),
+        ]
+          .map((node) => node.textContent)
+          .join(' '),
+      ).toContain('Picked up “Inspection notes” in “Details”'),
+    );
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    await waitFor(() =>
+      expect(
+        [
+          ...document.querySelectorAll(
+            '[aria-live="polite"][id^="dnd-kit-announcement"]',
+          ),
+        ]
+          .map((node) => node.textContent)
+          .join(' '),
+      ).toContain('Canceled move of “Inspection notes”'),
+    );
   });
 });

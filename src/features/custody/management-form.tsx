@@ -15,6 +15,13 @@ import {
   useFormValidation,
   ValidationSummary,
 } from '@/components/forms/validation';
+import {
+  readSiteRecovery,
+  writeSiteRecovery,
+  type SiteRecoveryEnvelope,
+  type SiteRecoveryCommand,
+  type SubmissionPersistence,
+} from './site-recovery';
 
 type Command = {
   operation: CustodyOperation;
@@ -25,7 +32,10 @@ type Command = {
 
 // Capture the exact operation for uncertain retry and close the synchronous
 // double-click window before React has rendered disabled controls.
-function useSubmission(actorId?: string) {
+function useSubmission(
+  actorId?: string,
+  persistence?: React.RefObject<SubmissionPersistence | null>,
+) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [state, setState] = useState<CustodyState | null>(null);
@@ -33,6 +43,12 @@ function useSubmission(actorId?: string) {
   const [retryActor, setRetryActor] = useState<string | undefined>(actorId);
   const command = useRef<Command | null>(null);
   const running = useRef(false);
+  const completedCreate = useRef(false);
+  const acknowledged = useRef<{
+    command: Command;
+    result: CustodyState;
+  } | null>(null);
+  const [terminalPending, setTerminalPending] = useState(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -53,7 +69,12 @@ function useSubmission(actorId?: string) {
       payload: Record<string, unknown>,
     ) => void,
   ) => {
-    if (running.current) return;
+    if (
+      running.current ||
+      acknowledged.current ||
+      (completedCreate.current && operation === 'site_create')
+    )
+      return;
     const originalActor = actor.current;
     if (command.current && command.current.expectedActorId !== originalActor)
       return;
@@ -63,6 +84,7 @@ function useSubmission(actorId?: string) {
       requestId: crypto.randomUUID(),
       expectedActorId: originalActor,
     };
+    if (persistence?.current && !persistence.current.before(attempt)) return;
     command.current = attempt;
     running.current = true;
     setPending(true);
@@ -105,14 +127,25 @@ function useSubmission(actorId?: string) {
             'actor_changed',
           ].includes(result.code)));
     setUncertain(nextUncertain);
+    const persisted =
+      persistence?.current?.after(attempt, result, nextUncertain) ?? true;
+    if (!persisted && !nextUncertain) {
+      acknowledged.current = { command: attempt, result };
+      setTerminalPending(true);
+    }
     if (nextUncertain) setRetryActor(attempt.expectedActorId);
     setState(result);
     if (result.ok) {
-      command.current = null;
+      if (attempt.operation === 'site_create') completedCreate.current = true;
+      if (persisted) command.current = null;
       onSuccess(result, attempt.payload);
-      router.refresh();
+      try {
+        router.refresh();
+      } catch {
+        /* Commit acknowledgement remains authoritative. */
+      }
     } else if (!nextUncertain) {
-      command.current = null;
+      if (persisted) command.current = null;
       if (
         result.code === 'P1002' ||
         (result.code === 'P1008' && attempt.operation === 'site_set_active')
@@ -120,11 +153,52 @@ function useSubmission(actorId?: string) {
         router.refresh();
     }
   };
-  return { pending, uncertain, actorBlocked, state, setState, submit };
+  return {
+    pending,
+    uncertain,
+    actorBlocked,
+    state,
+    setState,
+    submit,
+    terminalPending,
+    reconcile: () => {
+      const original = acknowledged.current;
+      if (!original || actor.current !== original.command.expectedActorId)
+        return false;
+      if (
+        !persistence?.current?.after(original.command, original.result, false)
+      )
+        return false;
+      acknowledged.current = null;
+      command.current = null;
+      setTerminalPending(false);
+      return true;
+    },
+    recover: (original: Command) => {
+      command.current = original;
+      setUncertain(true);
+      setRetryActor(original.expectedActorId);
+    },
+    reset: () => {
+      completedCreate.current = false;
+      acknowledged.current = null;
+      setTerminalPending(false);
+      command.current = null;
+      setState(null);
+      setUncertain(false);
+    },
+  };
 }
 
 function newer(current: string, baseline: string) {
   return BigInt(current) > BigInt(baseline);
+}
+function backendOrigin(value: string | undefined) {
+  try {
+    return value ? new URL(value).origin : null;
+  } catch {
+    return null;
+  }
 }
 
 export function SiteManagementForm({
@@ -140,8 +214,20 @@ export function SiteManagementForm({
 }) {
   const scope = useId();
   const validation = useFormValidation();
-  const { pending, uncertain, actorBlocked, state, setState, submit } =
-    useSubmission(actorId);
+  const persistence = useRef<SubmissionPersistence | null>(null);
+  const {
+    pending,
+    uncertain,
+    actorBlocked,
+    state,
+    setState,
+    submit,
+    reset,
+    recover,
+    terminalPending,
+    reconcile,
+  } = useSubmission(actorId, persistence);
+  const [created, setCreated] = useState<Site | null>(null);
   const [baseline, setBaseline] = useState(site);
   const [values, setValues] = useState({
     code: '',
@@ -153,12 +239,256 @@ export function SiteManagementForm({
     version: string;
   } | null>(null);
   const [reason, setReason] = useState('');
+  const recovery = useRef<SiteRecoveryEnvelope | null>(null);
+  const recoveryStored = useRef(false);
+  const hydrated = useRef(false);
+  const [recoveryError, setRecoveryError] = useState('');
+  const backend = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const [mountedIdentity] = useState({
+    actorId,
+    backend: backendOrigin(backend),
+  });
+  const identityMismatch =
+    mountedIdentity.actorId !== actorId ||
+    mountedIdentity.backend !== backendOrigin(backend);
+  const recoveryEnabled = !!actorId;
+  const limitation =
+    'Site recovery could not be stored safely. Keep this task open and retry after storage is available; saving is paused.';
+  const persist = (
+    patch: Partial<SiteRecoveryEnvelope> = {},
+    resolved?: string,
+  ) => {
+    if (!recoveryEnabled) return true;
+    let previous = recovery.current;
+    if (
+      !previous ||
+      previous.scope.actor !== actorId ||
+      previous.scope.backend !== backendOrigin(backend)
+    ) {
+      setRecoveryError(limitation);
+      return false;
+    }
+    // A pristine visit owns an identity but no storage slot. Establish
+    // its editing envelope only when needed, before any submitted transition.
+    if (!recoveryStored.current) {
+      const initial: SiteRecoveryEnvelope = {
+        ...previous,
+        baseline: baseline ?? null,
+        values,
+        lifecycle,
+        reason,
+        ...(patch.status === 'editing' ? patch : {}),
+      };
+      if (!writeSiteRecovery(initial, null)) {
+        setRecoveryError(limitation);
+        return false;
+      }
+      recovery.current = previous = initial;
+      recoveryStored.current = true;
+    }
+    const terminal =
+      previous.status === 'saved' || previous.status === 'discarded';
+    const next: SiteRecoveryEnvelope = {
+      ...previous,
+      baseline: baseline ?? null,
+      values,
+      lifecycle,
+      reason,
+      ...(terminal
+        ? {
+            status: 'editing',
+            instance: crypto.randomUUID(),
+            sequence: 0,
+            completion: null,
+          }
+        : { sequence: previous.sequence + 1 }),
+      ...patch,
+    };
+    if (!writeSiteRecovery(next, previous, resolved)) {
+      setRecoveryError(limitation);
+      return false;
+    }
+    recovery.current = next;
+    setRecoveryError('');
+    return true;
+  };
+  useLayoutEffect(() => {
+    persistence.current = {
+      before: (command) => {
+        if (identityMismatch) return false;
+        if (recovery.current?.status === 'submitted') {
+          const previous = recovery.current.command;
+          return (
+            !!previous &&
+            previous.requestId === command.requestId &&
+            previous.operation === command.operation &&
+            previous.expectedActorId === command.expectedActorId &&
+            JSON.stringify(previous.payload) === JSON.stringify(command.payload)
+          );
+        }
+        return persist({
+          status: 'submitted',
+          command: command as SiteRecoveryCommand,
+          completion: null,
+        });
+      },
+      after: (command, result, unresolved) => {
+        if (!recoveryEnabled || unresolved) return true;
+        const previous = recovery.current;
+        if (
+          !previous ||
+          identityMismatch ||
+          previous.status !== 'submitted' ||
+          previous.command?.requestId !== command.requestId
+        )
+          return false;
+        // Reconcile the exact submitted envelope, even after the displayed
+        // baseline has advanced following a known successful server commit.
+        const next: SiteRecoveryEnvelope = {
+          ...previous,
+          sequence: previous.sequence + 1,
+          status: result.ok ? 'saved' : 'editing',
+          command: null,
+          completion: result.ok
+            ? {
+                entityId: result.entityId,
+                version: result.version,
+                changed: result.changed,
+              }
+            : null,
+        };
+        if (!writeSiteRecovery(next, previous, command.requestId)) {
+          setRecoveryError(
+            result.ok
+              ? 'Site saved, but completion recovery could not be recorded. Retry site recovery before editing or creating another site.'
+              : limitation,
+          );
+          return false;
+        }
+        recovery.current = next;
+        setRecoveryError('');
+        return true;
+      },
+    };
+  });
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+  useLayoutEffect(() => {
+    if (identityMismatch || !recoveryEnabled || hydrated.current) return;
+    const environment = backendOrigin(backend);
+    if (!environment || !actorId) {
+      setRecoveryError(limitation);
+      return;
+    }
+    const url = new URL(window.location.href);
+    const supplied = url.searchParams.get('siteDraft');
+    if (!site && supplied && !/^[0-9a-f-]{36}$/i.test(supplied)) {
+      setRecoveryError(
+        'The site draft identity is invalid. Reopen Add property/site from Settings.',
+      );
+      return;
+    }
+    const draft = site?.id ?? supplied ?? crypto.randomUUID();
+    if (!site && !supplied) {
+      url.searchParams.set('siteDraft', draft);
+      window.history.replaceState(window.history.state, '', url);
+    }
+    const identity = {
+      origin: window.location.origin,
+      backend: environment,
+      actor: actorId,
+      site: site?.id ?? null,
+      draft,
+    };
+    const stored = readSiteRecovery(identity);
+    if (stored.blocked) {
+      setRecoveryError(
+        'Saved site recovery is unavailable or incompatible. It was retained without replacing it.',
+      );
+      return;
+    }
+    const previous = stored.envelope;
+    const active: SiteRecoveryEnvelope = previous ?? {
+      version: 1,
+      scope: identity,
+      instance: crypto.randomUUID(),
+      sequence: 0,
+      status: 'editing',
+      baseline: site ?? null,
+      values,
+      lifecycle: null,
+      reason: '',
+      command: null,
+      completion: null,
+    };
+    recovery.current = active;
+    recoveryStored.current = !!previous;
+    hydrated.current = true;
+    if (previous && ['editing', 'submitted'].includes(previous.status)) {
+      setBaseline(previous.baseline ?? undefined);
+      setValues(previous.values);
+      setLifecycle(previous.lifecycle);
+      setReason(previous.reason);
+      if (previous.command) recover(previous.command);
+    } else if (previous?.status === 'saved' && !site && previous.completion) {
+      setCreated({
+        id: previous.completion.entityId,
+        version: previous.completion.version,
+        code: previous.values.code || suggestSiteCode(previous.values.name),
+        name: previous.values.name.trim(),
+        notes: previous.values.notes.trim() || null,
+        active: true,
+      });
+    }
+  });
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   const dirty =
     values.name !== (baseline?.name ?? '') ||
     values.notes !== (baseline?.notes ?? '') ||
     !!values.code;
+  useEffect(() => {
+    if (created || (!dirty && !pending && !uncertain && !lifecycle)) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    const guard = (event: MouseEvent) => {
+      if (
+        !recoveryError ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const anchor =
+        event.target instanceof Element
+          ? event.target.closest('a[href]')
+          : null;
+      if (!anchor || anchor.getAttribute('target') === '_blank') return;
+      event.preventDefault();
+      setRecoveryError(
+        limitation + ' Navigation is paused until this draft can be retained.',
+      );
+    };
+    document.addEventListener('click', guard, true);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', guard, true);
+    };
+  }, [
+    dirty,
+    pending,
+    uncertain,
+    lifecycle,
+    created,
+    recoveryError,
+    limitation,
+  ]);
   const stale = !!site && !!baseline && newer(site.version, baseline.version);
   if (
+    !identityMismatch &&
     site &&
     baseline &&
     newer(site.version, baseline.version) &&
@@ -170,12 +500,26 @@ export function SiteManagementForm({
     setBaseline(site);
     setValues({ code: '', name: site.name, notes: site.notes ?? '' });
   }
-  const disabled = pending || uncertain;
+  const disabled = pending || uncertain || terminalPending || identityMismatch;
   const update = (key: keyof typeof values, value: string) => {
-    setValues((old) => ({ ...old, [key]: value }));
+    const next = { ...values, [key]: value };
+    persist({
+      status: 'editing',
+      values: next,
+      command: null,
+      completion: null,
+    });
+    setValues(next);
     setState(null);
   };
   const save = () => {
+    if (
+      identityMismatch ||
+      terminalPending ||
+      created ||
+      (recoveryEnabled && (!hydrated.current || !!recoveryError))
+    )
+      return;
     if (stale && !uncertain) return;
     if (lifecycle && !reason.trim()) return;
     void submit(
@@ -217,12 +561,90 @@ export function SiteManagementForm({
           };
           setBaseline(saved);
           setValues({ code: '', name: saved.name, notes: saved.notes ?? '' });
+        } else {
+          setCreated({
+            id: result.entityId,
+            version: result.version,
+            code: payload.code as string,
+            name: (payload.name as string).trim(),
+            notes: (payload.notes as string | null)?.trim() || null,
+            active: true,
+          });
         }
         setLifecycle(null);
         setReason('');
       },
     );
   };
+  if (identityMismatch)
+    return (
+      <p role="alert" className={panel}>
+        This site task belongs to another signed-in account or environment.
+        Return to the original context or reopen Site settings for this account.
+      </p>
+    );
+  if (created)
+    return (
+      <section
+        className={panel + ' max-w-4xl space-y-4'}
+        aria-label="Site creation complete"
+      >
+        <h2 className="text-lg font-semibold">Site created</h2>
+        <p role="status" className="break-words">
+          {created.name} · {created.code}
+        </p>
+        {recoveryError && <p role="alert">{recoveryError}</p>}
+        {terminalPending && (
+          <Button type="button" variant="outline" onClick={() => reconcile()}>
+            Retry site recovery
+          </Button>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <Link
+            className="inline-flex min-h-11 items-center rounded-lg bg-cyan-600 px-4 font-medium text-slate-950"
+            href={`/sites/${encodeURIComponent(created.code)}`}
+          >
+            View site
+          </Link>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!!recoveryError || terminalPending}
+            onClick={() => {
+              if (recoveryEnabled) {
+                const previous = recovery.current;
+                if (!previous) return;
+                const draft = crypto.randomUUID();
+                const url = new URL(window.location.href);
+                url.searchParams.set('siteDraft', draft);
+                const next: SiteRecoveryEnvelope = {
+                  ...previous,
+                  scope: { ...previous.scope, draft },
+                  instance: crypto.randomUUID(),
+                  sequence: 0,
+                  status: 'editing',
+                  baseline: null,
+                  values: { code: '', name: '', notes: '' },
+                  lifecycle: null,
+                  reason: '',
+                  command: null,
+                  completion: null,
+                };
+                recovery.current = next;
+                recoveryStored.current = false;
+                window.history.replaceState(window.history.state, '', url);
+              }
+              reset();
+              setCreated(null);
+              setValues({ code: '', name: '', notes: '' });
+              validation.clear();
+            }}
+          >
+            Add another
+          </Button>
+        </div>
+      </section>
+    );
   return (
     <form
       className={panel + ' max-w-4xl space-y-4'}
@@ -241,6 +663,20 @@ export function SiteManagementForm({
         {baseline ? `Manage ${baseline.name}` : 'Add property/site'}
       </h2>
       <RequiredFieldsNote />
+      {recoveryError && <p role="alert">{recoveryError}</p>}
+      {recoveryError && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            if (terminalPending) reconcile();
+            else if (recovery.current?.status === 'editing') persist();
+            else setRecoveryError('');
+          }}
+        >
+          Retry site recovery
+        </Button>
+      )}
       <label className="block space-y-2">
         Name
         <RequiredMark />
@@ -322,6 +758,15 @@ export function SiteManagementForm({
                   active: !baseline.active,
                   version: baseline.version,
                 });
+                persist({
+                  status: 'editing',
+                  command: null,
+                  completion: null,
+                  lifecycle: {
+                    active: !baseline.active,
+                    version: baseline.version,
+                  },
+                });
                 setState(null);
               }}
             >
@@ -390,6 +835,7 @@ export function SiteManagementForm({
                   disabled={disabled}
                   value={reason}
                   onChange={(e) => {
+                    persist({ reason: e.target.value });
                     setReason(e.target.value);
                     setState(null);
                   }}
@@ -439,6 +885,22 @@ export function SiteManagementForm({
             onClick={() => {
               const current =
                 site && newer(site.version, baseline.version) ? site : baseline;
+              if (
+                !persist({
+                  status: 'editing',
+                  command: null,
+                  completion: null,
+                  baseline: current,
+                  values: {
+                    code: '',
+                    name: current.name,
+                    notes: current.notes ?? '',
+                  },
+                  lifecycle: null,
+                  reason: '',
+                })
+              )
+                return;
               setBaseline(current);
               setValues({
                 code: '',

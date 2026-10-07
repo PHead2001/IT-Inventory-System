@@ -1,3 +1,4 @@
+import { historySummary } from '../history-summary';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
 import Link from 'next/link';
@@ -5,6 +6,7 @@ import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { countLabel } from '@/lib/count';
 import { pageInventoryCounts } from '../scope-presentation';
+import { inventoryRecordHref, inventoryRowAnchor } from '../create-return';
 import styles from './inventory-visual.module.css';
 import { InventoryListThumbnail } from '@/features/files/list-thumbnail';
 import type { FileListSummary } from '@/features/files/list.server';
@@ -69,10 +71,12 @@ export function InventoryRows({
   rows,
   fileSummaries = [],
   emptyState,
+  returnTo,
 }: {
   rows: InventoryResult[];
   fileSummaries?: FileListSummary[];
   emptyState?: ReactNode;
+  returnTo?: string;
 }) {
   if (!rows.length)
     return (
@@ -80,12 +84,13 @@ export function InventoryRows({
     );
   return (
     <ul className={`experience-surface ${styles.list}`}>
-      {rows.map((row) => {
+      {rows.map((row, index) => {
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
         );
         return (
           <li
+            id={returnTo ? inventoryRowAnchor(index) : undefined}
             key={
               row.kind +
               row.id +
@@ -112,12 +117,13 @@ export function InventoryRows({
                 <div className="min-w-0">
                   <Link
                     className={styles.name}
-                    href={
-                      '/inventory/' +
-                      (row.kind === 'quantity' ? 'quantity' : 'assets') +
-                      '/' +
-                      row.id
-                    }
+                    href={inventoryRecordHref(
+                      row.kind,
+                      row.id,
+                      returnTo
+                        ? `${returnTo}#${inventoryRowAnchor(index)}`
+                        : undefined,
+                    )}
                   >
                     {row.name}
                   </Link>
@@ -346,26 +352,7 @@ export function HistoryList({
             </Link>{' '}
             · {event.actorName}
           </p>
-          {compact && (
-            <p className="mt-2 text-sm">
-              {event.assignment
-                ? [
-                    event.assignment.from.label ?? 'No recorded source',
-                    event.assignment.to.label ?? 'No recorded destination',
-                  ].join(' → ')
-                : event.eventType === 'created'
-                  ? 'Record created'
-                  : event.fromLocation || event.toLocation
-                    ? [
-                        event.fromLocation?.breadcrumb ?? 'No recorded source',
-                        event.toLocation?.breadcrumb ??
-                          'No recorded destination',
-                      ].join(' → ')
-                    : event.metadataChanges.length
-                      ? 'Record details updated'
-                      : 'Recorded inventory change'}
-            </p>
-          )}
+          <p className="mt-2 text-sm">{historySummary(event)}</p>
           <DetailTag>
             {compact && (
               <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
@@ -380,16 +367,22 @@ export function HistoryList({
             {event.assignment && (
               <div className="mt-3 space-y-1 text-sm">
                 <p className="min-w-0 [overflow-wrap:anywhere]">
-                  Custody: {event.assignment.from.label ?? 'No recorded source'}
-                  {' → '}
-                  {event.assignment.to.label ?? 'No recorded destination'}
+                  Custody:{' '}
+                  {event.kind === 'quantity' &&
+                  event.assignment.kind === 'corrected'
+                    ? historySummary(event)
+                    : `${event.assignment.from.label ?? 'No recorded source'} → ${event.assignment.to.label ?? 'No recorded destination'}`}
                 </p>
-                {event.assignment.quantity !== null && (
-                  <p>
-                    Custody quantity:{' '}
-                    {countLabel(event.assignment.quantity, 'unit')}
-                  </p>
-                )}
+                {event.assignment.quantity !== null &&
+                  !(
+                    event.kind === 'quantity' &&
+                    event.assignment.kind === 'corrected'
+                  ) && (
+                    <p>
+                      Custody quantity:{' '}
+                      {countLabel(event.assignment.quantity, 'unit')}
+                    </p>
+                  )}
                 {event.assignment.reference && (
                   <p className="whitespace-pre-wrap break-words">
                     Ticket number reference: {event.assignment.reference}

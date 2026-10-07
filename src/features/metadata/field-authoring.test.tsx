@@ -694,3 +694,56 @@ describe('authoring and visibility invariants', () => {
     ).toBe('Missing field');
   });
 });
+
+it('keeps selected type beside the dialog header while the field name is focused', () => {
+  const { dialog } = openPicker();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Money' }));
+  const name = within(dialog).getByLabelText('Field name');
+  name.focus();
+  expect(within(dialog).getByText('Selected type: Money')).toBeVisible();
+  expect(name).toHaveFocus();
+});
+it('offers compatible optional Yes/No presentation without changing the field identity or answer', () => {
+  const initial = { ...makeField('boolean'), default: false };
+  function Settings() {
+    const [field, setField] = useState(initial);
+    return (
+      <>
+        <FieldSettings
+          field={field}
+          change={(next) => setField(next as typeof initial)}
+        />
+        <output data-testid="authored-field">{JSON.stringify(field)}</output>
+      </>
+    );
+  }
+  render(<Settings />);
+  const presentation = screen.getByLabelText('Answer presentation');
+  expect(presentation).toHaveValue('checkbox');
+  fireEvent.change(presentation, { target: { value: 'yes_no' } });
+  expect(
+    JSON.parse(screen.getByTestId('authored-field').textContent!),
+  ).toMatchObject({
+    id: initial.id,
+    type: 'boolean',
+    default: false,
+    rules: { booleanPresentation: 'yes_no' },
+  });
+  fireEvent.change(presentation, { target: { value: 'checkbox' } });
+  expect(
+    JSON.parse(screen.getByTestId('authored-field').textContent!).rules,
+  ).toEqual({});
+});
+it.each(fieldTypes)('shows relevant required help for %s', (type) => {
+  const field = { ...makeField(type), required: true };
+  render(<FieldSettings field={field} change={() => {}} />);
+  if (type !== 'boolean')
+    expect(screen.queryByText(/unchecked checkbox/)).not.toBeInTheDocument();
+  if (type === 'multi_select')
+    expect(
+      screen.getByText(
+        'Select any that apply. Record a selection or explicitly choose none.',
+      ),
+    ).toBeVisible();
+  expect(screen.getByLabelText('Required')).toBeChecked();
+});

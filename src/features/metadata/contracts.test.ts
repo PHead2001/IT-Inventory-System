@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { formEnvelope, metadataDefinition } from './contracts';
+import {
+  formEnvelope,
+  metadataDefinition,
+  formatCustomValue,
+} from './contracts';
 
 const ids = {
   category: '00000000-0000-4000-8000-000000000001',
@@ -53,6 +57,20 @@ const envelope = (published_definition: unknown) => ({
   draft_id: null,
   draft_version: null,
   draft_definition: null,
+});
+it('keeps unanswered, empty text, none, false and zero distinct in read-only values', () => {
+  expect(
+    [undefined, '', [], false, true, 0].map((value) =>
+      formatCustomValue(value, []),
+    ),
+  ).toEqual([
+    'Unanswered',
+    'Empty text',
+    'No options selected',
+    'No',
+    'Yes',
+    '0',
+  ]);
 });
 
 describe('published metadata wire contract', () => {

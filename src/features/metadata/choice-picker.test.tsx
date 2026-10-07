@@ -9,6 +9,31 @@ const options = [
   { id: 'net', label: 'Network', active: true },
   { id: 'eth', label: 'Ethernet', parent_id: 'net', active: true },
 ];
+it('disambiguates legacy active siblings and ancestor paths without changing answer IDs', () => {
+  const change = vi.fn();
+  render(
+    <ChoicePicker
+      options={[
+        { id: 'first', label: 'USB', active: true },
+        { id: 'second', label: 'usb', active: true },
+        { id: 'child', label: 'Cable', parent_id: 'second', active: true },
+      ]}
+      type="hierarchical_select"
+      label="Connector"
+      value="child"
+      onChange={change}
+    />,
+  );
+  expect(
+    screen.getByText('Selected: usb [choice second] / Cable'),
+  ).toBeVisible();
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: 'USB [choice first]',
+    }),
+  );
+  expect(change).toHaveBeenCalledWith('first');
+});
 describe('shared choice picker', () => {
   it('associates submitted validation with the actual choice control without changing its value', () => {
     render(

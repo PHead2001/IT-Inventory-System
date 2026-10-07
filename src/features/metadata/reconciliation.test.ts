@@ -41,6 +41,13 @@ const item: QuantityItem = {
 };
 const draft = initialCore(item, []),
   custom = initialCustom(item.customValues);
+it('treats checkbox/Yes-No changes as compatible presentation while retaining validation changes', () => {
+  const next = structuredClone(definition);
+  next.fields[0].rules = { booleanPresentation: 'yes_no' };
+  expect(compatibleSchema(definition, next)).toBe(true);
+  next.fields[0].required = true;
+  expect(compatibleSchema(definition, next)).toBe(false);
+});
 describe('metadata three-way intent reconciliation', () => {
   it('preserves latest untouched fields, legacy values, and independent custom edits', () => {
     const latest = {

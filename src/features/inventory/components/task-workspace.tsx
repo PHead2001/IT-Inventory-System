@@ -9,6 +9,7 @@ import {
 import {
   TaskStateContext,
   TaskResetContext,
+  TaskDiscardContext,
   type TaskState,
 } from './task-state';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,10 @@ export function TaskWorkspace({
   );
   const [state, setState] = useState(clean);
   const stateRef = useRef(clean);
+  const discardTask = useRef<(() => boolean) | null>(null);
+  const registerDiscard = useCallback((discard: (() => boolean) | null) => {
+    discardTask.current = discard;
+  }, []);
   const requestedLauncher = useRef<HTMLButtonElement | null>(null);
   const [activeLabel, setActiveLabel] = useState('');
   const heading = useRef<HTMLHeadingElement | null>(null);
@@ -76,7 +81,8 @@ export function TaskWorkspace({
     if (
       stateRef.current.pending ||
       stateRef.current.uncertain ||
-      stateRef.current.completed ||
+      (stateRef.current.completed &&
+        !(selected === 'metadata' && id === null)) ||
       id === selected
     )
       return;
@@ -158,8 +164,9 @@ export function TaskWorkspace({
       )}
       {state.completed && (
         <p className="text-sm text-cyan-200">
-          Completed transaction retained. Start a new transaction explicitly
-          before switching tasks.
+          {selected === 'metadata'
+            ? 'Details saved. Choose Done or Close task to finish.'
+            : 'Completed transaction retained. Start a new transaction explicitly before switching tasks.'}
         </p>
       )}
       {requested !== undefined && (
@@ -172,7 +179,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             autoFocus
-            disabled={locked || state.completed}
+            disabled={locked || (state.completed && selected !== 'metadata')}
             onClick={() => {
               setRequested(undefined);
               heading.current?.focus();
@@ -198,6 +205,7 @@ export function TaskWorkspace({
                   !choices.some((choice) => choice.id === requested))
               )
                 return;
+              if (discardTask.current && !discardTask.current()) return;
               if (requested !== null)
                 launcher.current = requestedLauncher.current;
               setActiveLabel(
@@ -227,7 +235,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             variant="outline"
-            disabled={locked || state.completed}
+            disabled={locked || (state.completed && selected !== 'metadata')}
             onClick={() => change(null)}
           >
             Close task
@@ -242,9 +250,11 @@ export function TaskWorkspace({
               returnFocusRequested.current = true;
             }}
           >
-            <TaskStateContext.Provider value={report}>
-              {children(selected)}
-            </TaskStateContext.Provider>
+            <TaskDiscardContext.Provider value={registerDiscard}>
+              <TaskStateContext.Provider value={report}>
+                {children(selected)}
+              </TaskStateContext.Provider>
+            </TaskDiscardContext.Provider>
           </TaskResetContext.Provider>
         </div>
       )}

@@ -138,20 +138,23 @@ export function FilesPanel({
   active,
   staff,
   actorId,
+  parentName = 'this inventory record',
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
   active: boolean;
   staff: boolean;
   actorId: string;
+  parentName?: string;
 }) {
   return (
     <BoundFilesPanel
-      key={`${actorId}:${parentType}:${parentId}:${staff}`}
+      key={`${process.env.NEXT_PUBLIC_SUPABASE_URL}:${actorId}:${parentType}:${parentId}:${staff}`}
       parentType={parentType}
       parentId={parentId}
       active={active}
       staff={staff}
+      parentName={parentName}
     />
   );
 }
@@ -161,11 +164,13 @@ function BoundFilesPanel({
   parentId,
   active,
   staff,
+  parentName,
 }: {
   parentType: 'asset' | 'quantity';
   parentId: string;
   active: boolean;
   staff: boolean;
+  parentName: string;
 }) {
   const [client] = useState(createSupabaseBrowserClient);
   const [cards, setCards] = useState<Card[]>([]);
@@ -182,6 +187,28 @@ function BoundFilesPanel({
     !cards.some((card) => card.id === replace && card.state === 'ready'),
   );
   const [busy, setBusy] = useState(false);
+  const [removal, setRemoval] = useState<{
+    card: Card;
+    owner: string;
+    revision: string;
+    requestId: string;
+    phase: 'review' | 'sending' | 'unknown' | 'stale';
+  } | null>(null);
+  const removalLock = useRef(false);
+  const removalDialog = useRef<HTMLDialogElement>(null);
+  const removalTrigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (removal) {
+      const dialog = removalDialog.current;
+      if (dialog && !dialog.open) {
+        if (dialog.showModal) dialog.showModal();
+        else dialog.setAttribute('open', '');
+        dialog.querySelector<HTMLButtonElement>('button')?.focus();
+      }
+    } else {
+      if (removalTrigger.current?.isConnected) removalTrigger.current.focus();
+    }
+  }, [removal]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
@@ -205,12 +232,19 @@ function BoundFilesPanel({
       p_parent_type: parentType,
       p_parent_id: parentId,
     });
+    if (!mounted.current) return null;
     if (error) {
       setMessage('Files could not be loaded.');
       return null;
     }
     const envelope = data as CardsEnvelope;
-    setCards(Array.isArray(envelope?.files) ? envelope.files : []);
+    setCards(
+      Array.isArray(envelope?.files)
+        ? envelope.files.filter(
+            (card) => !invalidatedFiles.current.has(card.id),
+          )
+        : [],
+    );
     setCollectionRevision(envelope?.revision ?? '1');
     return envelope;
   }, [rpc, parentType, parentId]);
@@ -226,10 +260,11 @@ function BoundFilesPanel({
       });
       if (!response.ok) throw new Error('Cleanup request failed.');
       const result = cleanupResultSchema.parse(await response.json());
+      if (!mounted.current) return null;
       setCleanupPending(result.pending);
       return result;
     } catch {
-      setCleanupPending(true);
+      if (mounted.current) setCleanupPending(true);
       return null;
     } finally {
       clearTimeout(timeout);
@@ -552,38 +587,111 @@ function BoundFilesPanel({
     }
   }
 
-  async function remove(card: Card) {
+  async function remove() {
+    if (!removal || removalLock.current || removal.phase === 'stale') return;
+    const intent = removal;
+    removalLock.current = true;
     setBusy(true);
+    setRemoval({ ...intent, phase: 'sending' });
     setMessage('');
-    const { error } = await rpc('inventory_file_remove', {
-      p_file_id: card.id,
-      p_expected_revision: collectionRevision,
-      p_expected_file_version: card.version,
-      p_request_id: crypto.randomUUID(),
-    });
-    if (error)
-      setMessage(
-        error.code === 'P1002'
-          ? 'Files changed. Refresh and review them before removing.'
-          : 'Removal could not be confirmed.',
+    try {
+      const { error } = await rpc('inventory_file_remove', {
+        p_file_id: intent.card.id,
+        p_expected_revision: intent.revision,
+        p_expected_file_version: intent.card.version,
+        p_request_id: intent.requestId,
+      });
+      if (!mounted.current) return;
+      if (error) {
+        const rejections: Record<string, string> = {
+          P1002: 'Files changed. Refresh and review them before removing.',
+          P1010:
+            'The reviewed file was removed or replaced. Refresh and review the current files before removing.',
+          P1012:
+            'The removal request was rejected as invalid. Refresh and review the files before starting a new removal.',
+          P1009:
+            'The removal request identity conflicts with another operation. Refresh and review the files before starting a new removal.',
+        };
+        const rejection = rejections[error.code ?? ''];
+        // These explicit rejections cannot follow a matching committed receipt:
+        // replay returns that receipt before target/version checks, while invalid
+        // input and conflicting request identity cannot commit this command.
+        if (rejection) {
+          setRemoval({ ...intent, phase: 'stale' });
+          setMessage(rejection);
+        } else {
+          setRemoval({ ...intent, phase: 'unknown' });
+          setMessage(
+            error.code === 'P1001' || error.code === '42501'
+              ? 'Access to removal was denied. Restore authorized access and retry the same request; an earlier attempt may already have completed.'
+              : 'Removal could not be confirmed. Retry the same removal request; it may already have completed.',
+          );
+        }
+        return;
+      }
+      // Acknowledgement is permanent logical success. Refresh/cleanup cannot undo it.
+      invalidatedFiles.current.add(intent.card.id);
+      setCards((current) =>
+        current.filter((entry) => entry.id !== intent.card.id),
       );
-    else {
-      invalidatedFiles.current.add(card.id);
-      setCards((current) => current.filter((entry) => entry.id !== card.id));
-      setPreview((current) => (current?.id === card.id ? null : current));
-      const refreshed = await load();
+      setPreview((current) =>
+        current?.id === intent.card.id ? null : current,
+      );
+      setRemoval(null);
       setHistoryPage(1);
       setHistoryRefresh((value) => value + 1);
       setCleanupPending(true);
-      setMessage(
-        `File removed.${refreshed ? '' : ' Files could not be refreshed; reload this record.'} Checking byte cleanup…`,
-      );
+      setMessage('File removed. Checking byte cleanup…');
+      let refreshed: CardsEnvelope | null = null;
+      try {
+        refreshed = await load();
+      } catch {
+        /* Removal already committed. */
+      }
+      if (!mounted.current) return;
       const deleted = await cleanupTerminalFiles();
+      if (!mounted.current) return;
       setMessage(
         `File removed.${refreshed ? '' : ' Files could not be refreshed; reload this record.'} ${cleanupStatus(deleted)}`,
       );
+    } catch {
+      if (mounted.current) {
+        setRemoval({ ...intent, phase: 'unknown' });
+        setMessage(
+          'Removal could not be confirmed. Retry the same removal request; it may already have completed.',
+        );
+      }
+    } finally {
+      removalLock.current = false;
+      if (mounted.current) setBusy(false);
     }
-    setBusy(false);
+  }
+
+  async function refreshRemoval() {
+    if (removalLock.current) return;
+    removalLock.current = true;
+    setBusy(true);
+    try {
+      const refreshed = await load();
+      if (!mounted.current) return;
+      if (refreshed) {
+        setRemoval(null);
+        setMessage(
+          'Files refreshed. Review the current file and choose Remove again for a new confirmation.',
+        );
+      } else
+        setMessage(
+          'Files changed. Refresh failed; review is still required before removing.',
+        );
+    } catch {
+      if (mounted.current)
+        setMessage(
+          'Files changed. Refresh failed; review is still required before removing.',
+        );
+    } finally {
+      removalLock.current = false;
+      if (mounted.current) setBusy(false);
+    }
   }
 
   async function rename(card: Card) {
@@ -626,7 +734,7 @@ function BoundFilesPanel({
       {staff && (
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || Boolean(removal)}
           className="mt-3 min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
           onClick={() =>
             beginPicker(
@@ -648,7 +756,7 @@ function BoundFilesPanel({
           ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
           : 'JPEG, PNG, still WebP or PDF · Up to 20 MiB. Photos are normalized before display; PDFs download as attachments.'}
       </p>
-      {message && (
+      {message && !removal && (
         <p
           role="alert"
           className="experience-feedback mt-3 break-words text-amber-100"
@@ -726,7 +834,7 @@ function BoundFilesPanel({
                 {staff && card.state === 'ready' && (
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || Boolean(removal)}
                     className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                     onClick={() => beginPicker(card.id)}
                   >
@@ -736,7 +844,7 @@ function BoundFilesPanel({
                 {staff && card.state === 'ready' && (
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || Boolean(removal)}
                     className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                     onClick={() => void rename(card)}
                   >
@@ -746,9 +854,20 @@ function BoundFilesPanel({
                 {staff && card.state === 'ready' && (
                   <button
                     type="button"
-                    disabled={busy}
-                    className="min-h-11 text-amber-200 underline disabled:opacity-50"
-                    onClick={() => void remove(card)}
+                    disabled={busy || Boolean(removal)}
+                    className="ml-2 min-h-11 border-l border-amber-200/30 pl-4 text-amber-200 underline disabled:opacity-50"
+                    onClick={(event) => {
+                      if (busy || removal) return;
+                      setMessage('');
+                      removalTrigger.current = event.currentTarget;
+                      setRemoval({
+                        card: { ...card },
+                        owner: parentName,
+                        revision: collectionRevision,
+                        requestId: crypto.randomUUID(),
+                        phase: 'review',
+                      });
+                    }}
                   >
                     Remove
                   </button>
@@ -757,7 +876,7 @@ function BoundFilesPanel({
                   <>
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || Boolean(removal)}
                       className="min-h-11 text-cyan-300 underline disabled:opacity-50"
                       onClick={() => void pendingAction(card, 'validate')}
                     >
@@ -767,7 +886,7 @@ function BoundFilesPanel({
                     </button>
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || Boolean(removal)}
                       className="min-h-11 text-amber-200 underline disabled:opacity-50"
                       onClick={() => void pendingAction(card, 'cancel')}
                     >
@@ -859,7 +978,7 @@ function BoundFilesPanel({
         {staff && (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || Boolean(removal)}
             className="mt-2 min-h-11 text-cyan-300 underline disabled:opacity-50"
             onClick={() => {
               setBusy(true);
@@ -901,6 +1020,85 @@ function BoundFilesPanel({
           </button>
         )}
       </details>
+      {removal && (
+        <dialog
+          ref={removalDialog}
+          aria-labelledby="remove-file-title"
+          aria-describedby="remove-file-effect"
+          className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-amber-200/30 bg-slate-950 p-5 text-slate-100 backdrop:bg-slate-950/80"
+          onCancel={(event) => {
+            event.preventDefault();
+            if (removal.phase === 'review' && !removalLock.current)
+              setRemoval(null);
+          }}
+        >
+          <h3
+            id="remove-file-title"
+            className="break-words text-xl font-semibold"
+          >
+            Remove {removal.card.name}?
+          </h3>
+          <p id="remove-file-effect" className="mt-3 break-words">
+            Remove {removal.card.filename} from {removal.owner}. This{' '}
+            {removal.card.type === 'application/pdf' ? 'document' : 'photo'}{' '}
+            will become unavailable in this record. Stored bytes are cleaned up
+            separately and may remain pending. Previously issued signed links
+            may remain valid until their short expiry. This cannot be undone.
+          </p>
+          {removal.phase === 'unknown' && (
+            <p role="status" className="mt-3">
+              The outcome is unconfirmed. Retry uses the exact same file and
+              request. Cancellation cannot undo a request that may have
+              committed.
+            </p>
+          )}
+          {removal.phase === 'stale' && (
+            <p role="status" className="mt-3">
+              This removal was not applied. Refresh and review the current
+              files, then explicitly choose Remove again.
+            </p>
+          )}
+          {message && (
+            <p role="alert" className="mt-3 break-words text-amber-100">
+              {message}
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-3">
+            {removal.phase === 'review' && (
+              <button
+                type="button"
+                className="min-h-11 rounded-lg border px-4"
+                onClick={() => setRemoval(null)}
+              >
+                Cancel
+              </button>
+            )}
+            {removal.phase === 'stale' ? (
+              <button
+                type="button"
+                disabled={busy}
+                className="min-h-11 rounded-lg border px-4"
+                onClick={() => void refreshRemoval()}
+              >
+                Refresh files
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                className="min-h-11 rounded-lg bg-red-800 px-4 font-semibold disabled:opacity-50"
+                onClick={() => void remove()}
+              >
+                {removal.phase === 'unknown'
+                  ? 'Retry removal'
+                  : removal.phase === 'sending'
+                    ? 'Removing…'
+                    : 'Remove file'}
+              </button>
+            )}
+          </div>
+        </dialog>
+      )}
       {preview && (
         <div
           role="dialog"

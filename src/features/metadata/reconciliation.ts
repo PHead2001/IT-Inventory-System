@@ -95,7 +95,12 @@ export function compatibleSchema(a: MetadataDefinition, b: MetadataDefinition) {
         type: field.type,
         applies_to: [...field.applies_to].sort(),
         required: field.required,
-        rules: field.rules,
+        rules: Object.fromEntries(
+          Object.entries(field.rules).filter(
+            ([key]) =>
+              field.type !== 'boolean' || key !== 'booleanPresentation',
+          ),
+        ),
         default: field.default,
         options: field.options
           .map(({ id, parent_id, active }) => ({

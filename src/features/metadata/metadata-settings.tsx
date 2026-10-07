@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -13,8 +14,21 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { motion } from 'motion/react';
-import { DragDropProvider, DragOverlay, useDroppable } from '@dnd-kit/react';
+import {
+  DragDropProvider,
+  DragOverlay,
+  useDroppable,
+  type DragStartEvent,
+  type DragOverEvent,
+  type DragEndEvent,
+} from '@dnd-kit/react';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
+import { Accessibility } from '@dnd-kit/dom';
+import {
+  publicationReasonText,
+  designerDragName,
+  type PublicationReviewSnapshot,
+} from './publication-review-display';
 import { move as sortableMove } from '@dnd-kit/helpers';
 import {
   metadataDefinition,
@@ -223,7 +237,7 @@ function ControlProperties({
         </select>
       </label>
       <label className="block text-sm">
-        Width
+        Preferred width
         <select
           className={input}
           value={control.width}
@@ -257,6 +271,27 @@ function ControlProperties({
           ))}
         </select>
       </label>
+      <p className="text-xs text-slate-400">
+        Quarter, half and full describe a preferred share of the row. Each field
+        keeps a minimum usable size, wraps when needed and grows to fill unused
+        row space. Narrow forms stack fields. The canvas and Preview form use
+        the same layout.
+      </p>
+      <div
+        aria-label="Preferred width preview"
+        className="flex flex-wrap gap-3 rounded border border-slate-700 p-2"
+        aria-hidden="true"
+      >
+        {([control.width, 6] as Control['width'][]).map((width, index) => (
+          <span
+            key={index}
+            style={controlLayoutStyle(width, field?.type === 'boolean')}
+            className="min-h-10 rounded bg-cyan-950 p-2 text-xs"
+          >
+            {index === 0 ? 'Selected field' : 'Next field'}
+          </span>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
@@ -572,6 +607,25 @@ export function MetadataSettings({
   const [publishedBaseline, setPublishedBaseline] = useState(
     selected?.published_revision_id ?? '',
   );
+  const publishedSnapshot = useRef({
+    id: selected?.published_revision_id ?? '',
+    definition: copy(
+      selected?.published_definition ?? { fields: [], layout: [] },
+    ),
+  });
+  const [reviewSnapshot, setReviewSnapshot] =
+    useState<PublicationReviewSnapshot | null>(null);
+  const previewDetails = useRef<HTMLDetailsElement>(null);
+  const lastEditingFocus = useRef<HTMLElement | null>(null);
+  const previewReturn = useRef<{
+    focus: HTMLElement | null;
+    x: number;
+    y: number;
+    section: string | null;
+    control: string | null;
+    field: string | null;
+    panel: 'library' | 'canvas' | 'inspector';
+  } | null>(null);
   const [saveReview, setSaveReview] = useState<Record<string, unknown> | null>(
     null,
   );
@@ -696,6 +750,21 @@ export function MetadataSettings({
     container?: number;
   } | null>(null);
   const definitionRef = useRef(definition);
+  const dragAccessibility = useMemo(
+    () => ({
+      announcements: {
+        dragstart: ({ operation }: DragStartEvent) =>
+          `Picked up ${designerDragName(definitionRef.current ?? { fields: [], layout: [] }, operation.source?.id)}.`,
+        dragover: ({ operation }: DragOverEvent) =>
+          `Moving ${designerDragName(dndBaseline.current ?? definitionRef.current ?? { fields: [], layout: [] }, operation.source?.id)} to ${designerDragName(definitionRef.current ?? { fields: [], layout: [] }, operation.target?.id)}.`,
+        dragend: ({ operation, canceled }: DragEndEvent) =>
+          canceled
+            ? `Canceled move of ${designerDragName(dndBaseline.current ?? definitionRef.current ?? { fields: [], layout: [] }, operation.source?.id)}.`
+            : `Placed ${designerDragName(definitionRef.current ?? { fields: [], layout: [] }, operation.source?.id)}.`,
+      },
+    }),
+    [],
+  );
   const denyIdentity = useCallback(() => {
     if (terminalDenied.current) return;
     terminalDenied.current = true;
@@ -995,6 +1064,11 @@ export function MetadataSettings({
     setDraftVersion(version);
     setDraftId(nextDraftId);
     setPublishedBaseline(publishedId);
+    if (selected?.published_revision_id === publishedId)
+      publishedSnapshot.current = {
+        id: publishedId,
+        definition: copy(selected.published_definition),
+      };
     setReceipt(null);
     setSaveReview(null);
     setSavePayload(null);
@@ -1327,6 +1401,17 @@ export function MetadataSettings({
     setMessage('Saving…');
     const submittedSession = categorySession.current;
     const submittedEpoch = editEpoch.current;
+    const submittedReview: PublicationReviewSnapshot = {
+      proposal: copy(payload.definition as MetadataDefinition),
+      baseline:
+        publishedSnapshot.current.id ===
+        String(payload.expected_published_revision_id ?? '')
+          ? copy(publishedSnapshot.current.definition)
+          : null,
+      expectedPublishedRevisionId: String(
+        payload.expected_published_revision_id ?? '',
+      ),
+    };
     startTransition(async () => {
       try {
         const result = await saveMetadataForm({
@@ -1369,8 +1454,9 @@ export function MetadataSettings({
         unresolvedCommand.current = null;
         clearDesignerRecovery(memberId, categoryId);
         if (result.data.status === 'confirmation_required') {
-          setSaveReview(result.data);
-          setSavePayload(payload);
+          setSaveReview(copy(result.data));
+          setSavePayload(copy(payload));
+          setReviewSnapshot(submittedReview);
           setMessage('Review the effect on existing inventory before saving.');
           return;
         }
@@ -1382,6 +1468,10 @@ export function MetadataSettings({
         setDraftId(null);
         setDraftVersion('0');
         setPublishedBaseline(String(result.data.published_revision_id));
+        publishedSnapshot.current = {
+          id: String(result.data.published_revision_id),
+          definition: copy(payload.definition as MetadataDefinition),
+        };
         setSaved(JSON.stringify(definition));
         setHistory([]);
         setMessage(
@@ -1794,6 +1884,35 @@ export function MetadataSettings({
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={editorLocked || !definition}
+                  onClick={() => {
+                    previewReturn.current = {
+                      focus:
+                        lastEditingFocus.current ??
+                        (document.activeElement as HTMLElement | null),
+                      x: window.scrollX,
+                      y: window.scrollY,
+                      section: selectedSectionId,
+                      control: selectedControlId,
+                      field: selectedFieldId,
+                      panel: mobilePanel,
+                    };
+                    if (previewDetails.current) {
+                      previewDetails.current.open = true;
+                      previewDetails.current.scrollIntoView?.({
+                        block: 'start',
+                      });
+                      previewDetails.current
+                        .querySelector<HTMLElement>('summary')
+                        ?.focus({ preventScroll: true });
+                    }
+                  }}
+                >
+                  Preview form
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
                   disabled={history.length === 0 || pending || editorLocked}
                   onClick={() => {
                     if (
@@ -2159,16 +2278,11 @@ export function MetadataSettings({
               <ul className="list-disc pl-5">
                 {Array.isArray(saveReview.reasons) &&
                   saveReview.reasons.map((reason, index) => {
-                    const entry = reason as {
-                      kind?: string;
-                      id?: string;
-                      affected_kinds?: string[];
-                    };
                     return (
                       <li key={index}>
-                        {label(entry.kind ?? 'Change')}{' '}
-                        {entry.id ? `(${entry.id})` : ''}:{' '}
-                        {(entry.affected_kinds ?? []).map(label).join(', ')}
+                        {reviewSnapshot
+                          ? publicationReasonText(reason, reviewSnapshot)
+                          : 'Review names are unavailable. Cancel and review again.'}
                       </li>
                     );
                   })}
@@ -2208,6 +2322,10 @@ export function MetadataSettings({
           )}
           {definition && !recovery && (
             <fieldset
+              onFocusCapture={(event) => {
+                if (!previewDetails.current?.contains(event.target))
+                  lastEditingFocus.current = event.target as HTMLElement;
+              }}
               disabled={editorLocked}
               className="min-w-0 space-y-4 lg:[&_input]:scroll-mt-56 lg:[&_button]:scroll-mt-56 lg:[&_select]:scroll-mt-56 lg:[&_textarea]:scroll-mt-56 lg:[&_[data-control-id]]:scroll-mt-56"
             >
@@ -2227,6 +2345,13 @@ export function MetadataSettings({
                 ))}
               </nav>
               <DragDropProvider
+                plugins={(defaults) =>
+                  defaults.map((plugin) =>
+                    plugin === Accessibility
+                      ? Accessibility.configure(dragAccessibility)
+                      : plugin,
+                  )
+                }
                 onDragStart={(event) => {
                   if (
                     terminalDenied.current ||
@@ -2818,6 +2943,10 @@ export function MetadataSettings({
                         <FieldSettings
                           key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
+                          revisionOptionCount={definition.fields.reduce(
+                            (total, field) => total + field.options.length,
+                            0,
+                          )}
                           change={updateField}
                           published={Boolean(
                             selected?.published_definition.fields.some(
@@ -3139,11 +3268,45 @@ export function MetadataSettings({
                   onGo={(id, next) => selectPlacement(id, next ?? definition)}
                 />
               )}
-              <details className="rounded-xl border border-slate-700 bg-slate-950/30">
+              <details
+                ref={previewDetails}
+                className="rounded-xl border border-slate-700 bg-slate-950/30"
+              >
                 <summary className="min-h-11 cursor-pointer px-3 py-2 font-semibold text-cyan-100">
                   Try form · quantity items or individual assets
                 </summary>
                 <div className="space-y-3 pt-3">
+                  <p className="px-3 text-sm text-slate-400">
+                    Temporary preview answers test this draft only. They do not
+                    change Starts with defaults or save inventory.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const prior = previewReturn.current;
+                      if (previewDetails.current)
+                        previewDetails.current.open = false;
+                      if (!prior) {
+                        previewDetails.current
+                          ?.querySelector<HTMLElement>('summary')
+                          ?.focus();
+                        return;
+                      }
+                      setSelectedSectionId(prior.section);
+                      setSelectedControlId(prior.control);
+                      setSelectedFieldId(prior.field);
+                      setMobilePanel(prior.panel);
+                      requestAnimationFrame(() => {
+                        window.scrollTo(prior.x, prior.y);
+                        if (prior.focus?.isConnected)
+                          prior.focus.focus({ preventScroll: true });
+                      });
+                      previewReturn.current = null;
+                    }}
+                  >
+                    Back to editing
+                  </Button>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"

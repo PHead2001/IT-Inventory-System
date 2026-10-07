@@ -740,7 +740,43 @@ html[data-motion='full'] .experience-auth-panel {
     display: none;
   }
 }
+/* Inventory lookup retains 44px controls while reducing only narrow-page space. */
+@media (max-width: 639px) {
+  .experience-active-inventory-filters {
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+  .experience-inventory-results {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    margin-bottom: 4px;
+  }
+  .experience-inventory-results > :first-child {
+    min-width: 0;
+    flex: 1;
+  }
+  .experience-inventory-results > .experience-export-menu {
+    flex: none;
+  }
+  .experience-inventory-search {
+    margin-bottom: 8px;
+  }
+  .experience-add-item-launcher:not([open]) {
+    padding-block: 0;
+  }
+  .experience-inventory-search .experience-search-top {
+    row-gap: 6px;
+  }
+  .experience-inventory-search .experience-filter-toggle {
+    min-height: 44px;
+    margin-top: 4px;
+  }
+}
 @media (max-width: 640px) {
+  .experience-header:has(.experience-account > details[open]) {
+    position: relative;
+    z-index: 10;
+  }
   .experience-search-top {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -750,10 +786,24 @@ html[data-motion='full'] .experience-auth-panel {
   .experience-header-inner {
     padding: 11px 20px;
     align-items: flex-start;
+    gap: 12px;
+  }
+  .experience-header .experience-brand,
+  .experience-header .experience-brand > span:last-child {
+    min-width: 0;
+  }
+  .experience-header .experience-brand-mark {
+    flex-shrink: 0;
   }
   .experience-account {
+    position: relative;
     gap: 7px;
-    max-width: 48%;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    max-width: none;
+  }
+  .experience-account > details {
+    position: static;
   }
   .experience-account-name {
     display: none;
