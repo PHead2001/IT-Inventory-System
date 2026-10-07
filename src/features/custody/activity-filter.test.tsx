@@ -7,6 +7,40 @@ beforeEach(() => {
   push.mockReset();
 });
 afterEach(() => vi.useRealTimers());
+it('retains microsecond URL boundaries through rerender, Apply, and reload', () => {
+  const filters = {
+    from: '2026-10-07T00:00:00.000001Z',
+    until: '2026-10-07T00:00:00.000999Z',
+    zone: 'UTC',
+  };
+  const view = render(<ActivityFilter base="/sites/HQ" filters={filters} />);
+  view.rerender(<ActivityFilter base="/sites/HQ" filters={{ ...filters }} />);
+  expect(push).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('From (UTC, inclusive)')).toHaveValue(
+    filters.from,
+  );
+  expect(screen.getByLabelText('Until (UTC, exclusive)')).toHaveValue(
+    filters.until,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Filter activity' }));
+  expect(push).toHaveBeenCalledOnce();
+  const url = new URL(push.mock.calls[0][0], 'https://test.invalid');
+  expect(url.searchParams.get('from')).toBe(filters.from);
+  expect(url.searchParams.get('until')).toBe(filters.until);
+  view.unmount();
+  render(
+    <ActivityFilter
+      base="/sites/HQ"
+      filters={Object.fromEntries(url.searchParams)}
+    />,
+  );
+  expect(screen.getByLabelText('From (UTC, inclusive)')).toHaveValue(
+    filters.from,
+  );
+  expect(screen.getByLabelText('Until (UTC, exclusive)')).toHaveValue(
+    filters.until,
+  );
+});
 it('keeps invalid values and associates range guidance with Until without navigating', () => {
   render(
     <ActivityFilter

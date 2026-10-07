@@ -79,6 +79,7 @@ it.each([
   { from: '2026-10-08T00:00', until: '2026-10-07T00:00' },
   { from: 'bad-date' },
   { until: '2026-02-30T00:00' },
+  { from: '2026-10-07T00:00:00.1234567Z' },
 ])(
   'preserves holdings and exposes filter errors without executing invalid activity reads: %o',
   async (filters) => {
@@ -99,23 +100,27 @@ it.each([
     });
   },
 );
-it('uses the same inclusive/exclusive explicit instants for rows and metric reads', async () => {
-  const from = '2026-11-01T05:00:00.000Z',
-    until = '2026-11-02T06:00:00.000Z';
-  const result = await getSiteDetail(siteId, { from, until });
-  expect(result.activityValid).toBe(true);
-  expect(
-    mocks.reads.find((read) => read.table === 'assignment_events')?.filters,
-  ).toEqual([
-    ['created_at', from],
-    ['created_at', until],
-  ]);
-  expect(mocks.rpc).toHaveBeenCalledWith('site_activity_summary', {
-    p_site_id: siteId,
-    p_from: from,
-    p_until: until,
-  });
-});
+it.each([
+  ['2026-11-01T05:00:00.000Z', '2026-11-02T06:00:00.000Z'],
+  ['2026-10-07T00:00:00.000001Z', '2026-10-07T00:00:00.000999Z'],
+])(
+  'uses identical inclusive/exclusive instants for rows and metrics: %s / %s',
+  async (from, until) => {
+    const result = await getSiteDetail(siteId, { from, until });
+    expect(result.activityValid).toBe(true);
+    expect(
+      mocks.reads.find((read) => read.table === 'assignment_events')?.filters,
+    ).toEqual([
+      ['created_at', from],
+      ['created_at', until],
+    ]);
+    expect(mocks.rpc).toHaveBeenCalledWith('site_activity_summary', {
+      p_site_id: siteId,
+      p_from: from,
+      p_until: until,
+    });
+  },
+);
 it('keeps actual access/read failures distinct from invalid filters', async () => {
   mocks.member.mockRejectedValue(new Error('Access denied'));
   await expect(getSiteDetail(siteId, { from: 'bad' })).rejects.toThrow(

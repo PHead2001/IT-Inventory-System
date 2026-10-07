@@ -74,8 +74,13 @@ report never sums unlike product units into an unexplained equipment count.
 Activity filters validate both client input and direct URLs. Malformed dates and
 non-increasing two-sided ranges retain the site shell and current holdings, show
 field-associated guidance, and suppress activity rows and dated metrics until
-corrected. One-sided ranges remain supported. Legacy offset-less date/time URLs
-still mean UTC. Today, Yesterday and Last 7 days use the browser's existing named
+corrected. One-sided ranges remain supported. Explicit instants support at most
+six fractional-second digits (PostgreSQL microsecond precision); longer fractions
+receive actionable validation guidance rather than silent rounding. UTC offset
+normalization preserves those digits, and range ordering compares exact instants.
+The same inclusive/exclusive bounds reach both event rows and summary metrics.
+Legacy offset-less minute-precision date/time URLs still mean UTC. Today,
+Yesterday and Last 7 days use the browser's existing named
 display timezone (with an explicit UTC choice) and calendar midnight boundaries,
 including daylight-saving changes. Apply stores explicit UTC instants in the URL;
 refresh never recalculates an applied preset. Applied ranges reload as Custom and
@@ -88,7 +93,14 @@ eligibility. The receipt reads the exact RPC event/entity link from
 session and RLS. Endpoint names, actor, reference and time come from the event;
 the record name is identified as the name reviewed for this operation. Resulting
 balances are labelled as balances after that event, including zero after the last
-unit leaves. No current holdings read reconstructs a receipt. Receipt/cache
+unit leaves. Site quantity count corrections show the immutable event line's
+count before, signed adjustment, and observed count after correction, without a
+transfer arrow. Older cached receipts without those line details explicitly show
+that correction count details are unavailable. History summaries also distinguish
+count corrections from transfers when older history lacks a site event-line count
+snapshot; they do not infer a signed adjustment from an unsigned quantity. These
+labels do not change accounting or mutation semantics. No current holdings read
+reconstructs a receipt. Receipt/cache
 failure preserves known success and event identity, with a separate exact-event
 reload action after current actor and active membership checks. Done closes the
 task without another write. Starting another operation requires the acknowledged

@@ -379,6 +379,59 @@ it('renders historical custody labels and quantity on the full item history page
     screen.getByText('Custody: Old closet label → Old site label'),
   ).toHaveClass('[overflow-wrap:anywhere]');
 });
+it.each([false, true])(
+  'keeps site count correction summaries and expanded details free of transfer claims (compact=%s)',
+  (compact) => {
+    render(
+      <HistoryList
+        compact={compact}
+        events={[
+          {
+            id: 'site-count',
+            kind: 'quantity',
+            entityId: 'item',
+            entityName: 'Cable',
+            eventType: 'site_corrected',
+            at: '2026-10-07T12:00:00Z',
+            actorName: 'Staff',
+            reason: 'Count checked',
+            assignment: {
+              eventId: 'correction',
+              kind: 'corrected',
+              from: {
+                locationId: null,
+                siteId: 'site',
+                label: 'Historical site',
+              },
+              to: { locationId: null, siteId: null, label: null },
+              quantity: 5,
+              reference: 'COUNT-1',
+            },
+            lines: [],
+            fromLocation: null,
+            toLocation: null,
+            metadataChanges: [],
+            customMetadataPresent: false,
+            customMetadataChanged: false,
+          },
+        ]}
+      />,
+    );
+    const row = screen
+      .getByRole('heading', { name: 'Site custody corrected' })
+      .closest('li');
+    expect(row).toHaveTextContent('Count corrected at Historical site');
+    expect(row).toHaveTextContent(
+      'Custody: Count corrected at Historical site',
+    );
+    expect(row).toHaveTextContent('Reason: Count checked');
+    expect(row).toHaveTextContent('Ticket number reference: COUNT-1');
+    expect(row).not.toHaveTextContent('→');
+    expect(row).not.toHaveTextContent('No recorded destination');
+    expect(row).not.toHaveTextContent('Custody quantity:');
+    expect(row).not.toHaveTextContent('5 units');
+  },
+);
 
 it('keeps created snapshots and bounded custom history accessible behind compact event details', () => {
   render(

@@ -163,12 +163,17 @@ export type CustodyReceipt = {
     id: string;
     kind: 'storage' | 'site';
     name: string;
+    // Optional for compatibility with receipts produced before full line snapshots.
+    before?: number;
+    delta?: number;
     after?: number;
   } | null;
   destination: {
     id: string;
     kind: 'storage' | 'site';
     name: string;
+    before?: number;
+    delta?: number;
     after?: number;
   } | null;
   reference: string | null;

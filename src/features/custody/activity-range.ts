@@ -18,21 +18,48 @@ export function parseActivityRange(input: { from?: unknown; until?: unknown }) {
       : value;
     if (
       normalized.startsWith('0000-') ||
-      !z.iso.datetime({ offset: true }).safeParse(normalized).success ||
-      !Number.isFinite(Date.parse(normalized))
+      !z.iso.datetime({ offset: true }).safeParse(normalized).success
     ) {
       errors[key] =
         'Enter a valid date and time, with UTC or an explicit offset.';
       return null;
     }
-    return new Date(normalized).toISOString();
+    const fraction = normalized.match(/\.(\d+)/)?.[1] ?? '';
+    if (fraction.length > 6) {
+      errors[key] = 'Use at most 6 fractional digits (microsecond precision).';
+      return null;
+    }
+    // Date is only used for the whole-second timezone conversion. Passing the
+    // fraction through Date would discard PostgreSQL's sub-millisecond digits.
+    const wholeSecond = new Date(normalized.replace(/\.\d+/, ''));
+    if (
+      !Number.isFinite(wholeSecond.getTime()) ||
+      wholeSecond.getUTCFullYear() < 1 ||
+      wholeSecond.getUTCFullYear() > 9999
+    ) {
+      errors[key] =
+        'Choose a date and time within UTC years 0001 through 9999.';
+      return null;
+    }
+    return {
+      value: wholeSecond
+        .toISOString()
+        .replace('.000Z', `.${fraction.padEnd(3, '0')}Z`),
+      microseconds:
+        BigInt(wholeSecond.getTime()) * 1000n + BigInt(fraction.padEnd(6, '0')),
+    };
   };
   const from = parse('from');
   const until = parse('until');
-  if (from && until && Date.parse(from) >= Date.parse(until))
+  if (from && until && from.microseconds >= until.microseconds)
     errors.until =
       'Until must be later than From. From is inclusive; Until is exclusive.';
-  return { from, until, errors, valid: Object.keys(errors).length === 0 };
+  return {
+    from: from?.value ?? null,
+    until: until?.value ?? null,
+    errors,
+    valid: Object.keys(errors).length === 0,
+  };
 }
 
 const calendarParts = (instant: Date, zone: string) => {

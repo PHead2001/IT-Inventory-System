@@ -113,8 +113,11 @@ export async function readCustodyReceipt(
         const balance = await query.maybeSingle();
         if (balance.error || !balance.data)
           throw new Error('Custody balance unavailable.');
+        const snapshot = line.parse(balance.data);
         Object.assign(value, {
-          after: line.parse(balance.data).after_quantity,
+          before: snapshot.before_quantity,
+          delta: snapshot.delta,
+          after: snapshot.after_quantity,
         });
       }),
     );

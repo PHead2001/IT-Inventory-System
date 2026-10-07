@@ -1,9 +1,15 @@
 import { expect, it, vi } from 'vitest';
+import type { Tables } from '@/lib/supabase/database.types';
 import { readCustodyReceipt } from './custody-receipt.server';
 vi.mock('server-only', () => ({}));
+type AssignmentFixture = Omit<Tables<'assignment_events'>, 'id' | 'actor_id'>;
+type SiteLineFixture = Pick<
+  Tables<'site_quantity_event_lines'>,
+  'before_quantity' | 'after_quantity' | 'delta'
+>;
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const assignment = {
+const assignment: AssignmentFixture = {
   quantity_event_id: id(1),
   asset_event_id: null,
   item_id: id(2),
@@ -21,7 +27,15 @@ const assignment = {
   reference: 'TICKET-12',
   reason: null,
 };
-function clientFor(row = assignment, after = 0) {
+function clientFor(
+  row: AssignmentFixture = assignment,
+  after = 0,
+  siteLine: SiteLineFixture | null = {
+    before_quantity: 0,
+    after_quantity: 1,
+    delta: 1,
+  },
+) {
   const reads: { table: string; filters: [string, unknown][] }[] = [];
   const client = {
     from: vi.fn((table: string) => {
@@ -39,7 +53,7 @@ function clientFor(row = assignment, after = 0) {
               ? row
               : table === 'quantity_event_lines'
                 ? { before_quantity: 1, after_quantity: after, delta: -1 }
-                : { before_quantity: 0, after_quantity: 1, delta: 1 },
+                : siteLine,
           error: null,
         })),
       };
@@ -77,6 +91,69 @@ it('reads exact immutable event and line balances, preserving zero and historica
   expect(reads.map((read) => read.table)).not.toContain(
     'site_quantity_holdings',
   );
+});
+it.each([
+  { before_quantity: 10, delta: 5, after_quantity: 15 },
+  { before_quantity: 10, delta: -5, after_quantity: 5 },
+  { before_quantity: 5, delta: -5, after_quantity: 0 },
+])(
+  'retains the authoritative signed correction line: $delta',
+  async (siteLine) => {
+    const { client, reads } = clientFor(
+      {
+        ...assignment,
+        kind: 'corrected',
+        from_location_id: null,
+        from_site_id: id(4),
+        to_site_id: null,
+        from_label: 'Historical site name',
+        to_label: null,
+        quantity: Math.abs(siteLine.delta),
+      },
+      0,
+      siteLine,
+    );
+    expect(
+      await readCustodyReceipt(client, 'quantity', id(2), id(1)),
+    ).toMatchObject({
+      operation: 'corrected',
+      quantity: 5,
+      source: {
+        id: id(4),
+        kind: 'site',
+        name: 'Historical site name',
+        before: siteLine.before_quantity,
+        delta: siteLine.delta,
+        after: siteLine.after_quantity,
+      },
+      destination: null,
+    });
+    expect(reads[1]).toEqual({
+      table: 'site_quantity_event_lines',
+      filters: [
+        ['event_id', id(1)],
+        ['site_id', id(4)],
+      ],
+    });
+  },
+);
+it('rejects a missing correction line instead of inferring a signed adjustment from its absolute amount', async () => {
+  const { client } = clientFor(
+    {
+      ...assignment,
+      kind: 'corrected',
+      from_location_id: null,
+      from_site_id: id(4),
+      to_site_id: null,
+      to_label: null,
+      quantity: 5,
+    },
+    0,
+    null,
+  );
+  await expect(
+    readCustodyReceipt(client, 'quantity', id(2), id(1)),
+  ).rejects.toThrow('Custody balance unavailable.');
 });
 it('rejects a mismatched entity or inconsistent event-line arithmetic', async () => {
   const mismatch = clientFor({ ...assignment, item_id: id(9) });

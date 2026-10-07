@@ -1,8 +1,18 @@
 import type { HistoryEvent } from './contracts-ui';
 import { countLabel } from '@/lib/count';
 
+export function siteCountCorrectionSummary(siteName: string | null) {
+  return `Count corrected at ${siteName ?? 'recorded site'}`;
+}
+
 /** Amounts come only from immutable event lines/custody snapshots, never holdings. */
 export function historySummary(event: HistoryEvent): string {
+  if (
+    event.kind === 'quantity' &&
+    (event.eventType === 'site_corrected' ||
+      event.assignment?.kind === 'corrected')
+  )
+    return siteCountCorrectionSummary(event.assignment?.from.label ?? null);
   if (event.assignment) {
     const amount =
       event.assignment.quantity === null

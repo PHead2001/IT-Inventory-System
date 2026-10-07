@@ -197,3 +197,26 @@ it('checks current actor and active membership before loading an exact receipt',
   ).toBeNull();
   expect(mocks.receipt).not.toHaveBeenCalled();
 });
+it('keeps a zero-delta correction acknowledgement without requesting an event receipt', async () => {
+  mocks.rpc.mockResolvedValue({
+    data: { entity_id: other, version: '1', event_id: null, changed: false },
+    error: null,
+  });
+  expect(
+    await submitCustody({
+      operation: 'quantity_site_change',
+      requestId,
+      expectedActorId: actor,
+      payload: {
+        action: 'correct',
+        item_id: other,
+        expected_version: '1',
+        source_site_id: actor,
+        observed_quantity: 5,
+        reason: 'Count verified',
+      },
+    }),
+  ).toEqual({ ok: true, entityId: other, version: '1', changed: false });
+  expect(mocks.receipt).not.toHaveBeenCalled();
+  expect(mocks.rpc).toHaveBeenCalledOnce();
+});

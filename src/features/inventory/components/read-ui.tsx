@@ -367,16 +367,22 @@ export function HistoryList({
             {event.assignment && (
               <div className="mt-3 space-y-1 text-sm">
                 <p className="min-w-0 [overflow-wrap:anywhere]">
-                  Custody: {event.assignment.from.label ?? 'No recorded source'}
-                  {' → '}
-                  {event.assignment.to.label ?? 'No recorded destination'}
+                  Custody:{' '}
+                  {event.kind === 'quantity' &&
+                  event.assignment.kind === 'corrected'
+                    ? historySummary(event)
+                    : `${event.assignment.from.label ?? 'No recorded source'} → ${event.assignment.to.label ?? 'No recorded destination'}`}
                 </p>
-                {event.assignment.quantity !== null && (
-                  <p>
-                    Custody quantity:{' '}
-                    {countLabel(event.assignment.quantity, 'unit')}
-                  </p>
-                )}
+                {event.assignment.quantity !== null &&
+                  !(
+                    event.kind === 'quantity' &&
+                    event.assignment.kind === 'corrected'
+                  ) && (
+                    <p>
+                      Custody quantity:{' '}
+                      {countLabel(event.assignment.quantity, 'unit')}
+                    </p>
+                  )}
                 {event.assignment.reference && (
                   <p className="whitespace-pre-wrap break-words">
                     Ticket number reference: {event.assignment.reference}

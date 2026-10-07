@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
+import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
   getSite,
   getSiteDetail,
@@ -399,11 +400,17 @@ export default async function SitePage({
                       {event.actor_name}
                     </p>
                     <p className="mt-1 text-sm">
-                      {event.from_label || 'Opening / no source'} →{' '}
-                      {event.to_label || 'No destination'}
-                      {event.quantity
-                        ? ` · ${countLabel(event.quantity, 'unit')}`
-                        : ''}
+                      {event.kind === 'corrected' && event.item_id ? (
+                        siteCountCorrectionSummary(event.from_label)
+                      ) : (
+                        <>
+                          {event.from_label || 'Opening / no source'} →{' '}
+                          {event.to_label || 'No destination'}
+                          {event.quantity
+                            ? ` · ${countLabel(event.quantity, 'unit')}`
+                            : ''}
+                        </>
+                      )}
                     </p>
                     {event.reason && (
                       <p className="mt-1 whitespace-pre-wrap break-words text-sm">

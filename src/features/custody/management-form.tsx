@@ -240,6 +240,7 @@ export function SiteManagementForm({
   } | null>(null);
   const [reason, setReason] = useState('');
   const recovery = useRef<SiteRecoveryEnvelope | null>(null);
+  const recoveryStored = useRef(false);
   const hydrated = useRef(false);
   const [recoveryError, setRecoveryError] = useState('');
   const backend = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -258,7 +259,7 @@ export function SiteManagementForm({
     resolved?: string,
   ) => {
     if (!recoveryEnabled) return true;
-    const previous = recovery.current;
+    let previous = recovery.current;
     if (
       !previous ||
       previous.scope.actor !== actorId ||
@@ -266,6 +267,24 @@ export function SiteManagementForm({
     ) {
       setRecoveryError(limitation);
       return false;
+    }
+    // A pristine visit owns an identity but no storage slot. Establish
+    // its editing envelope only when needed, before any submitted transition.
+    if (!recoveryStored.current) {
+      const initial: SiteRecoveryEnvelope = {
+        ...previous,
+        baseline: baseline ?? null,
+        values,
+        lifecycle,
+        reason,
+        ...(patch.status === 'editing' ? patch : {}),
+      };
+      if (!writeSiteRecovery(initial, null)) {
+        setRecoveryError(limitation);
+        return false;
+      }
+      recovery.current = previous = initial;
+      recoveryStored.current = true;
     }
     const terminal =
       previous.status === 'saved' || previous.status === 'discarded';
@@ -401,11 +420,8 @@ export function SiteManagementForm({
       command: null,
       completion: null,
     };
-    if (!previous && !writeSiteRecovery(active, null)) {
-      setRecoveryError(limitation);
-      return;
-    }
     recovery.current = active;
+    recoveryStored.current = !!previous;
     hydrated.current = true;
     if (previous && ['editing', 'submitted'].includes(previous.status)) {
       setBaseline(previous.baseline ?? undefined);
@@ -614,11 +630,8 @@ export function SiteManagementForm({
                   command: null,
                   completion: null,
                 };
-                if (!writeSiteRecovery(next, null)) {
-                  setRecoveryError(limitation);
-                  return;
-                }
                 recovery.current = next;
+                recoveryStored.current = false;
                 window.history.replaceState(window.history.state, '', url);
               }
               reset();

@@ -300,11 +300,15 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               </p>
             )}
             <p>
-              {titles[action]} · {reviewed?.source} → {reviewed?.destination}
+              {quantity && correction
+                ? `Count correction at ${reviewed?.source}`
+                : `${titles[action]} · ${reviewed?.source} → ${reviewed?.destination}`}
             </p>
             <p>
               {quantity
-                ? `${reviewed?.quantity} ${correction ? 'observed units' : 'units'}`
+                ? correction
+                  ? `Reviewed observed count: ${reviewed?.quantity} units (submitted for this operation)`
+                  : `${reviewed?.quantity} units`
                 : '1 individual asset'}
             </p>
             {reviewed?.reference && (

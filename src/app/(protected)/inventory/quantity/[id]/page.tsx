@@ -3,6 +3,7 @@ import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
+import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
   getQuantityDetail,
   getQuantityArchiveReview,
@@ -239,9 +240,12 @@ export default async function QuantityPage({
               <span className="font-medium capitalize">
                 {event.kind.replaceAll('_', ' ')}
               </span>{' '}
-              · {event.from_label || 'Opening'} →{' '}
-              {event.to_label || 'No destination'} ·{' '}
-              {countLabel(event.quantity ?? 0, 'unit')}· {event.actor_name} ·{' '}
+              ·{' '}
+              {event.kind === 'corrected'
+                ? siteCountCorrectionSummary(event.from_label)
+                : `${event.from_label || 'Opening'} → ${event.to_label || 'No destination'} · ${countLabel(event.quantity ?? 0, 'unit')}`}
+              {' · '}
+              {event.actor_name} ·{' '}
               <OperationalTimestamp value={event.created_at} />
               {event.reason && (
                 <span className="mt-1 block">Reason: {event.reason}</span>

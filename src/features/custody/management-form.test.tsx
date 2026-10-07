@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { LocationManagementForm, SiteManagementForm } from './management-form';
 import { submitCustody } from './actions';
 import userEvent from '@testing-library/user-event';
+import { creationRecoveryLimits } from '@/features/metadata/creation-recovery';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('./actions', () => ({ submitCustody: vi.fn() }));
@@ -35,6 +36,126 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://site-test.supabase.co');
   sessionStorage.clear();
   window.history.replaceState(null, '', '/settings/sites');
+});
+
+it('leaves no recovery slots after repeated pristine create visits and still creates a site', async () => {
+  for (let visit = 0; visit < creationRecoveryLimits.instances + 2; visit++) {
+    window.history.replaceState(null, '', '/settings/sites');
+    const view = render(<SiteManagementForm actorId={id(8)} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    view.unmount();
+  }
+  expect(sessionStorage.length).toBe(0);
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: true,
+    entityId: id(9),
+    version: '1',
+    changed: true,
+  });
+  window.history.replaceState(null, '', '/settings/sites');
+  render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Actual site' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+  await screen.findByRole('heading', { name: 'Site created' });
+  expect(submitCustody).toHaveBeenCalledOnce();
+  expect(sessionStorage.length).toBe(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Add another' }));
+  expect(screen.getByLabelText('Name')).toHaveValue('');
+  expect(sessionStorage.length).toBe(1);
+});
+
+it('retains dirty and unresolved create drafts across pristine visits and Back or reload', async () => {
+  let view = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Dirty site' },
+  });
+  const dirtyURL = window.location.href;
+  view.unmount();
+  window.history.replaceState(null, '', '/settings/sites');
+  vi.mocked(submitCustody).mockRejectedValueOnce(new Error('response lost'));
+  view = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Unresolved site' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+  await screen.findByRole('button', { name: 'Retry submission' });
+  const command = vi.mocked(submitCustody).mock.calls[0][0];
+  const unresolvedURL = window.location.href;
+  view.unmount();
+  for (let visit = 0; visit < creationRecoveryLimits.instances + 2; visit++) {
+    window.history.replaceState(null, '', '/settings/sites');
+    view = render(<SiteManagementForm actorId={id(8)} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    view.unmount();
+  }
+  expect(sessionStorage.length).toBe(2);
+  window.history.replaceState(null, '', dirtyURL);
+  view = render(<SiteManagementForm actorId={id(8)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue('Dirty site');
+  expect(screen.getByLabelText('Name')).toBeEnabled();
+  view.unmount();
+  window.history.replaceState(null, '', unresolvedURL);
+  vi.mocked(submitCustody).mockResolvedValueOnce({
+    ok: true,
+    entityId: id(9),
+    version: '1',
+    changed: true,
+  });
+  render(<SiteManagementForm actorId={id(8)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue('Unresolved site');
+  expect(screen.getByLabelText('Name')).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry submission' }));
+  await screen.findByRole('heading', { name: 'Site created' });
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(command);
+});
+
+it('guards a first edit when deferred recovery storage fails and resumes after storage returns', async () => {
+  const storage = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new Error('Storage unavailable');
+    });
+  try {
+    render(
+      <>
+        <SiteManagementForm actorId={id(8)} />
+        <a href="/settings">Settings</a>
+      </>,
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Retain this site' },
+    });
+    expect(screen.getByLabelText('Name')).toHaveValue('Retain this site');
+    expect(screen.getByRole('alert')).toHaveTextContent('saving is paused');
+    expect(
+      fireEvent.click(screen.getByRole('link', { name: 'Settings' })),
+    ).toBe(false);
+    expect(screen.getByRole('alert')).toHaveTextContent('Navigation is paused');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+    expect(submitCustody).not.toHaveBeenCalled();
+    storage.mockRestore();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry site recovery' }),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    vi.mocked(submitCustody).mockResolvedValueOnce({
+      ok: true,
+      entityId: id(9),
+      version: '1',
+      changed: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+    await screen.findByRole('heading', { name: 'Site created' });
+    expect(submitCustody).toHaveBeenCalledOnce();
+  } finally {
+    storage.mockRestore();
+  }
 });
 
 it('keeps site creation errors associated and focuses Name before submission', () => {
@@ -330,6 +451,69 @@ const site = {
   active: true,
   version: '1',
 };
+
+it('allocates no recovery slots across repeated pristine site-edit visits', () => {
+  for (let visit = 0; visit < creationRecoveryLimits.instances + 2; visit++) {
+    window.history.replaceState(null, '', '/settings/sites/HQ');
+    const view = render(<SiteManagementForm site={site} actorId={id(8)} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText('Name')).toHaveValue(site.name);
+    expect(sessionStorage.length).toBe(0);
+    view.unmount();
+  }
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('leaves capacity for an actual edit after browsing more than 32 distinct pristine sites', async () => {
+  for (let visit = 0; visit < creationRecoveryLimits.instances + 3; visit++) {
+    const current = { ...site, id: id(100 + visit), code: `SITE-${visit}` };
+    window.history.replaceState(null, '', `/settings/sites/${current.code}`);
+    const view = render(<SiteManagementForm site={current} actorId={id(8)} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    view.unmount();
+  }
+  expect(sessionStorage.length).toBe(0);
+  vi.mocked(submitCustody).mockResolvedValueOnce({
+    ok: true,
+    entityId: site.id,
+    version: '2',
+    changed: true,
+  });
+  render(<SiteManagementForm site={site} actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Actual edit' },
+  });
+  expect(sessionStorage.length).toBe(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+  await screen.findByText('Site saved. Code and history remain unchanged.');
+  expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
+    operation: 'site_update',
+    payload: { site_id: site.id, expected_version: '1', name: 'Actual edit' },
+  });
+});
+
+it('persists the original lifecycle baseline and exact command before submitting a pristine site', async () => {
+  vi.mocked(submitCustody).mockImplementationOnce(async (command) => {
+    const stored = JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!);
+    expect(stored).toMatchObject({
+      status: 'submitted',
+      baseline: site,
+      lifecycle: { active: false, version: site.version },
+      command,
+    });
+    return { ok: true, entityId: site.id, version: '2', changed: true };
+  });
+  render(<SiteManagementForm site={site} actorId={id(8)} />);
+  expect(sessionStorage.length).toBe(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Archive site' }));
+  expect(sessionStorage.length).toBe(1);
+  fireEvent.change(screen.getByLabelText('Reason'), {
+    target: { value: 'Site closed' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm archive site' }));
+  await screen.findByText('Site saved. Code and history remain unchanged.');
+  expect(submitCustody).toHaveBeenCalledOnce();
+});
 
 it('exposes only name editing and submits immutable location identity with the captured version', async () => {
   vi.mocked(submitCustody).mockResolvedValue({

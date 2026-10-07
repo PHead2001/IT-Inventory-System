@@ -81,3 +81,41 @@ it('keeps metadata, corrections and unknown legacy operations distinct', () => {
     }),
   ).toBe('Historical operation details unavailable');
 });
+it.each([5, null])(
+  'summarizes site count corrections without deriving direction from unsigned quantity %s',
+  (quantity) => {
+    expect(
+      historySummary({
+        ...event,
+        eventType: 'site_corrected',
+        lines: [],
+        assignment: {
+          eventId: 'correction',
+          kind: 'corrected',
+          quantity,
+          from: { locationId: null, siteId: 'site', label: 'Historical site' },
+          to: { locationId: null, siteId: null, label: null },
+          reference: null,
+        },
+      }),
+    ).toBe('Count corrected at Historical site');
+  },
+);
+it('does not turn an asset custody correction into a quantity count correction', () => {
+  expect(
+    historySummary({
+      ...event,
+      kind: 'asset',
+      eventType: 'site_corrected',
+      lines: [],
+      assignment: {
+        eventId: 'correction',
+        kind: 'corrected',
+        quantity: null,
+        from: { locationId: null, siteId: 'site', label: 'Historical site' },
+        to: { locationId: null, siteId: 'other', label: 'Corrected site' },
+        reference: null,
+      },
+    }),
+  ).toBe('Historical site → Corrected site');
+});

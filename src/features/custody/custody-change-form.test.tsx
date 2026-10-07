@@ -434,3 +434,69 @@ it('preserves a last-unit return source name even when it leaves site holdings a
       .nextElementSibling,
   ).toHaveTextContent('0 units');
 });
+it.each([true, false])(
+  'renders a correction acknowledgement without transfer language when receipt is unavailable (changed=%s)',
+  async (changed) => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: changed ? '2' : '1',
+      changed,
+      ...(changed ? { eventId: id(10), refreshFailed: true } : {}),
+    });
+    render(
+      <CustodyChangeForm
+        kind="quantity"
+        action="correct"
+        entityId={id(1)}
+        version="1"
+        locations={[location]}
+        sites={[site]}
+        currentSite={site}
+        siteHoldings={[
+          {
+            site_id: site.id,
+            site_code: site.code,
+            site_name: site.name,
+            site_active: true,
+            inventory_kind: 'quantity',
+            entity_id: id(1),
+            name: 'Adapters',
+            category_name: 'Parts',
+            manufacturer: null,
+            model: null,
+            quantity: 5,
+            asset_tag: null,
+            serial_number: null,
+          },
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Observed units at site'), {
+      target: { value: changed ? '10' : '5' },
+    });
+    fireEvent.change(screen.getByLabelText('Reason (required)'), {
+      target: { value: 'Count verified' },
+    });
+    fireEvent.submit(
+      screen.getByRole('form', { name: 'Correct recorded site holding' }),
+    );
+    await screen.findByRole('button', { name: 'Done' });
+    const completion = screen.getByRole('region', {
+      name: 'Custody completion',
+    });
+    expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
+    expect(completion).toHaveTextContent(
+      `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
+    );
+    expect(completion).toHaveTextContent(
+      changed
+        ? 'The transaction is confirmed. The event receipt is not available yet'
+        : 'No balance change was needed.',
+    );
+    expect(completion).not.toHaveTextContent('→');
+    expect(completion).not.toHaveTextContent('No destination');
+    expect(completion).not.toHaveTextContent('Signed adjustment');
+    expect(submitCustody).toHaveBeenCalledOnce();
+  },
+);

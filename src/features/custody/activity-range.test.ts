@@ -38,6 +38,87 @@ describe('activity URL boundary validation', () => {
       until: '2026-10-07T05:00:00.000Z',
     });
   });
+  it.each([
+    ['2026-10-07T00:00:00.000001Z', '2026-10-07T00:00:00.000999Z'],
+    ['1969-12-31T23:59:59.999998Z', '1969-12-31T23:59:59.999999Z'],
+    ['1969-12-31T23:59:59.999999Z', '1970-01-01T00:00:00.000001Z'],
+    ['0001-01-01T00:00:00.000001Z', '0001-01-01T00:00:00.000002Z'],
+    ['9999-12-31T23:59:59.999998Z', '9999-12-31T23:59:59.999999Z'],
+  ])(
+    'preserves and orders exact microsecond boundaries %s / %s',
+    (from, until) => {
+      expect(parseActivityRange({ from, until })).toEqual({
+        from,
+        until,
+        errors: {},
+        valid: true,
+      });
+      expect(parseActivityRange({ from: until, until: from })).toMatchObject({
+        valid: false,
+        errors: { until: expect.stringContaining('Until must be later') },
+      });
+    },
+  );
+  it.each([
+    ['2026-10-07T00:00:00.123456-05:30', '2026-10-07T05:30:00.123456Z'],
+    ['2026-01-01T00:00:00.000001+01:00', '2025-12-31T23:00:00.000001Z'],
+    ['1969-12-31T23:59:59.999999-00:01', '1970-01-01T00:00:59.999999Z'],
+    ['2024-02-29T23:59:59.1234-00:01', '2024-03-01T00:00:59.1234Z'],
+    ['2026-10-07T00:00:00.1Z', '2026-10-07T00:00:00.100Z'],
+    ['2026-10-07T00:00:00.123Z', '2026-10-07T00:00:00.123Z'],
+  ])('normalizes offsets without changing precision %s', (from, normalized) => {
+    expect(parseActivityRange({ from })).toMatchObject({
+      from: normalized,
+      valid: true,
+    });
+  });
+  it('rejects equal instants expressed using different offsets and precision', () => {
+    expect(
+      parseActivityRange({
+        from: '2026-10-07T00:00:00.000001-05:00',
+        until: '2026-10-07T05:00:00.000001Z',
+      }),
+    ).toMatchObject({ valid: false });
+    expect(
+      parseActivityRange({
+        from: '2026-10-07T00:00:00.1Z',
+        until: '2026-10-07T00:00:00.100000Z',
+      }),
+    ).toMatchObject({ valid: false });
+  });
+  it.each(['from', 'until'] as const)(
+    'rejects unsupported precision on %s with an actionable error',
+    (key) => {
+      expect(
+        parseActivityRange({ [key]: '2026-10-07T00:00:00.1234567Z' }),
+      ).toMatchObject({
+        [key]: null,
+        valid: false,
+        errors: {
+          [key]: expect.stringContaining('at most 6 fractional digits'),
+        },
+      });
+    },
+  );
+  it.each([
+    '2026-02-29T00:00:00.000001Z',
+    '2026-04-31T00:00:00.000001Z',
+    '2026-10-07T24:00:00.000001Z',
+    '2026-10-07T23:59:60.000001Z',
+    '2026-10-07T00:00:00.000001+24:00',
+    '2026-10-07T00:00:00.000001+00:60',
+    '2026-10-07T00:00:00.000001',
+    '0001-01-01T00:00:00.000001+00:01',
+    '9999-12-31T23:59:59.999999-00:01',
+  ])(
+    'rejects invalid calendars, offsets, and unsupported year rollover %s',
+    (from) => {
+      expect(parseActivityRange({ from })).toMatchObject({
+        from: null,
+        valid: false,
+      });
+    },
+  );
 });
 describe('named-zone calendar activity presets', () => {
   it.each([

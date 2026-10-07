@@ -155,3 +155,30 @@ it('keeps viewer first-use guidance read-only', async () => {
     ),
   ).toBeVisible();
 });
+it('labels a quantity count correction at its recorded site without movement or unsigned amount', async () => {
+  mocks.detail.mockResolvedValue({
+    ...detail,
+    events: [
+      {
+        id: 'correction',
+        item_id: 'item',
+        asset_id: null,
+        kind: 'corrected',
+        actor_name: 'Staff',
+        created_at: '2026-10-07T12:00:00Z',
+        from_label: 'Historical site',
+        to_label: null,
+        quantity: 5,
+        reason: 'Count checked',
+        reference: null,
+      },
+    ],
+    eventTotal: 1,
+  });
+  await renderPage();
+  const row = screen.getByRole('link', { name: 'View record' }).closest('li');
+  expect(row).toHaveTextContent('Count corrected at Historical site');
+  expect(row).not.toHaveTextContent('→');
+  expect(row).not.toHaveTextContent('No destination');
+  expect(row).not.toHaveTextContent('5 units');
+});

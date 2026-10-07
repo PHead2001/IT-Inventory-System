@@ -89,3 +89,44 @@ The supplied source documents are outside this repository. Hashes below bind thi
 Key audit line anchors: original F201–F206 at 31–230; U201–U205 at 231–399; D201–D206 and A210/A203/A205/A206 at 401–519; form supplement U206–U211 and D207–D210/A208 at 607–947; structure/deep-hierarchy supplement including D211 at 981–1117. The goal file's relevant workstreams are §§1–8 and its explicit exclusions section.
 
 Implementation and focused regression paths are recorded per row above. At pushed PR 37 HEAD `b7432bc73c8b3d94d313de8d4ea5db42f532131b`, app and DB CI passed, Codex review was clean, and E2E recorded the 502×757 clip failure. The mobile repair has focused local evidence only; complete CI on the post-repair SHA remains pending. Hosted deployment identity was verified, while hosted feature acceptance and run reconciliation remain pending. Final acceptance remains pending; use later PR evidence comments for subsequent candidate outcomes, not this checkpoint.
+
+## Post-ready review fixes
+
+This appended checkpoint records three findings from the later PR 37 Codex review.
+Their fix and validation cycle is in progress; it does not supersede historical
+checkpoints or establish final acceptance. The final PR body will carry the new
+exact-SHA certification and review evidence after integration.
+
+- **Activity timestamp boundaries:** UTC normalization now preserves up to six
+  fractional-second digits, rejects unsupported precision explicitly, and compares
+  exact microsecond instants. Durable regressions cover offset normalization,
+  equal instants, pre-epoch and year boundaries, invalid calendars/offsets, URL
+  rerender/Apply/reload, and identical event-row/summary bounds. The focused date
+  batch passed **47 tests across 3 files**; targeted lint, formatting, and diff
+  checks passed.
+- **Pristine site recovery capacity:** untouched create and existing-site visits
+  keep initial baselines in memory and defer allocating a recovery storage slot
+  until needed, before any submitted transition. The focused site component
+  batch passed **40 tests**. Integrated certification remains pending.
+- **Count-correction receipt meaning:** the fix uses immutable site event-line
+  before/delta/after values to show the prior count, signed adjustment, and observed
+  count without presenting the correction as a transfer. Legacy cached receipts
+  lacking those values explicitly show unavailable details. The focused receipt
+  and shared-consumer batch passed **63 tests**; typecheck passed after correcting
+  a test fixture. The sibling history-summary correction under D201–D205 passed
+  **27 tests**, distinguishing corrections from transfers without inventing a
+  signed adjustment when historical count snapshots are missing.
+
+All three new browser scenarios passed in focused runs, including the final
+correction-and-history scenario **1/1** with zero build-input drift. Evidence is
+under `test-results/audit2-review-history-final`,
+`test-results/audit2-review-site-final`, and
+`test-results/audit2-review-regressions-second`. Independent local review was
+clean. These results cover the focused scenarios; final integrated acceptance
+remains pending.
+
+These are focused local results for the working changes, not a new exact-SHA CI,
+hosted browser, or production acceptance claim. Final integrated gates, fresh
+Codex review, unresolved-thread verification, and matching preview evidence remain
+part of the lead's completion cycle. Production state is unchanged by these local
+fixes.
