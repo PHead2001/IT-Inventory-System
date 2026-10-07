@@ -71,6 +71,32 @@ until)`, while current holdings remain current regardless of historical filter.
 Gross storage issues exclude opening entries and site-to-site transfers; the
 report never sums unlike product units into an unexplained equipment count.
 
+Activity filters validate both client input and direct URLs. Malformed dates and
+non-increasing two-sided ranges retain the site shell and current holdings, show
+field-associated guidance, and suppress activity rows and dated metrics until
+corrected. One-sided ranges remain supported. Legacy offset-less date/time URLs
+still mean UTC. Today, Yesterday and Last 7 days use the browser's existing named
+display timezone (with an explicit UTC choice) and calendar midnight boundaries,
+including daylight-saving changes. Apply stores explicit UTC instants in the URL;
+refresh never recalculates an applied preset. Applied ranges reload as Custom and
+display their inclusive From and exclusive Until boundaries with the named zone.
+Holdings and activity filters retain one another's URL context.
+
+Acknowledged custody changes render a receipt independently of refreshed source
+eligibility. The receipt reads the exact RPC event/entity link from
+`assignment_events` and immutable storage/site event lines using the caller's
+session and RLS. Endpoint names, actor, reference and time come from the event;
+the record name is identified as the name reviewed for this operation. Resulting
+balances are labelled as balances after that event, including zero after the last
+unit leaves. No current holdings read reconstructs a receipt. Receipt/cache
+failure preserves known success and event identity, with a separate exact-event
+reload action after current actor and active membership checks. Done closes the
+task without another write. Starting another operation requires the acknowledged
+version to match refreshed route data, then initializes new editable state and a
+new request identity. Unknown outcomes retain the original actor, payload,
+version and request ID for exact replay; authorization errors during uncertain
+retry cannot establish that the original operation failed.
+
 ## Lifecycle and lock order
 
 Storage structure is maintained through reviewed room/reference-data code and
@@ -107,6 +133,24 @@ without discarding edits explicitly with Cancel. A confirmed save establishes it
 matching saved baseline immediately. An uncertain result freezes edits and retries
 the exact command and request ID even if a refresh arrives. Synchronous duplicate
 submissions are suppressed, and routes scope drafts to actor plus record identity.
+
+Site create/edit/lifecycle recovery uses bounded, versioned per-tab session records
+scoped by origin, public backend origin, actor, site and draft identity. A canonical
+`siteDraft` UUID in the create URL distinguishes separate Add site instances.
+Recovery whitelists site baselines, entered values, lifecycle reasons and exact
+submitted commands; it retains no credentials, files or signed URLs. Stored
+expected versions remain original after navigation and reload. Compare-and-swap
+writes reject stale mounts; submitted commands cannot be discarded or replaced
+until the matching outcome is known. Known completion records prevent a reload
+from reopening the completed create as an editable submission. Site creation
+offers View site and Add another; only Add another starts a clean draft with a new
+identity. Recovery capacity or storage failures pause submission and expose an
+honest retry message. Browser reload/closure uses the native unsaved-entry warning;
+app links are blocked if a dirty draft could not be retained. Cleared browser data
+and closed-tab recovery are not guaranteed.
+When capacity is needed, only fully verified saved or discarded envelopes may be
+reclaimed. Editing, submitted and invalid recovery data remain intact. A stale
+mounted form cannot recreate a reclaimed envelope using its former baseline.
 
 Fresh mutations use READ COMMITTED. The order is active membership row,
 normalized receipt, catalog guard when applicable, placement guard, then
@@ -159,9 +203,64 @@ retry replays the exact captured actor, command, version and request identity ev
 if current holdings change. A refreshed lifecycle can remove a launcher without
 unmounting its existing unresolved transaction. Auth or retry-identity rejection
 cannot establish failure of an earlier unknown attempt. Confirmed results remain
-visible until New transaction; quantity moves retain their explicit Move more
+visible with operation-specific completion actions; custody provides Done and a
+deliberate new-operation action. Quantity moves retain their explicit Move more
 and durable receipt recovery flow. Reviewed refresh after a definitive stale
 rejection preserves entered values.
+
+Site detail leads with compact, separately labelled current quantity and individual
+asset totals. Grouped holdings and every activity metric remain accessible in
+expandable sections. Site emptiness uses unfiltered authoritative current totals,
+not a filtered page. Filter exclusions and out-of-range pages offer recovery;
+archived sites and viewers receive appropriate non-mutation guidance. Active staff
+can enter Issue existing stock at `/scan?mode=assign&site=<UUID>`; opening-new-record
+actions remain secondary and do not represent a past storage issue. Opening this
+entry link does not mutate inventory.
+
+## Scan and assign
+
+`/scan` remains a read-only scan-to-open workflow. Active staff enter assignment
+explicitly at `/scan?mode=assign`, optionally with an active destination site's
+UUID in `site`. The loader validates that selection; unavailable or archived
+destinations require a new active choice. Camera frames, pasted label text,
+keyboard scanners, exact quantity codes and inventory search all enter the same
+existing-record inspection. Outer scanner whitespace is trimmed; internal
+identifier content is preserved. Locations, unknown labels and ambiguous matches
+never cause a write or create a record.
+Search uses the existing caller-scoped record-level read, which deduplicates typed
+inventory identities before its 25-record pagination. Explicit Previous/Next
+candidate controls retain the destination and ticket. Responses from an earlier
+page or context cannot replace a newer inspection.
+
+The batch retains its named destination, optional ticket and selected source
+preference while the actor and backend remain unchanged. Each inspection captures
+the record version and storage availability. Multiple sources require an explicit
+choice, quantities default to one whole unit, and existing stock may leave an
+inactive storage source. Already assigned, retired, archived or depleted records
+explain why assignment is unavailable. Returning or transferring equipment uses
+the ordinary custody workflow.
+
+Confirm assign submits the existing `quantity_site_change` issue or
+`asset_site_change` assign command. One immutable request is allowed in flight;
+unknown results retain the original actor, version, payload and request ID and
+allow only the same-request retry. A bounded actor/origin/backend session record
+retains an unresolved command across navigation and reload. Storage failure before
+submission blocks the write. A failure to clear recovery after a known commit
+preserves success and blocks further writes until exact replay reconciles it.
+Authorization precedes every inspection and retry, and the RPC remains the
+transactional authority. Stale rejections require another explicit inspection and
+confirmation rather than an automatic version refresh.
+
+Success leaves the immutable event receipt visible and readies the next input
+without requiring dismissal. If event details are unavailable, captured review
+context is clearly labelled and the exact committed receipt can be reloaded;
+current holdings are never substituted for receipt balances. A fresh inspection
+and confirmation permits a legitimate repeat quantity assignment. Camera access
+starts only on a user action and releases on stop, navigation or account/backend
+change. Frames during lookup/review/submission are ignored. A held label remains
+suppressed after success until three missed frames establish loss and reentry, or
+the user chooses Rescan. Physical camera/device acceptance remains separate from
+automated frame and generated-label keyboard-input coverage.
 
 Asset detail has one primary identifier/custody summary. Retired custody is labelled
 last recorded custody. Recent events are compact rows with native expandable full

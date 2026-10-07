@@ -18,6 +18,7 @@ const location = {
 it('identifies one local unit separately from overall available and assigned stock', () => {
   render(
     <InventoryRows
+      returnTo="/inventory?q=Cable&status=all&page=2"
       rows={[
         {
           kind: 'quantity',
@@ -45,6 +46,14 @@ it('identifies one local unit separately from overall available and assigned sto
   expect(
     screen.getByText(/Overall totals: 1 assigned · 3 recorded/),
   ).toBeVisible();
+  const record = screen.getByRole('link', { name: 'Cable' });
+  expect(record.closest('li')).toHaveAttribute('id', 'inventory-row-1');
+  expect(
+    new URL(
+      record.getAttribute('href')!,
+      'https://inventory.test',
+    ).searchParams.get('returnTo'),
+  ).toBe('/inventory?q=Cable&status=all&page=2#inventory-row-1');
 });
 it('omits empty pagination and does not repeat the result count in nonempty pagination', () => {
   const { rerender } = render(
@@ -405,4 +414,47 @@ it('keeps created snapshots and bounded custom history accessible behind compact
   expect(
     screen.getByRole('link', { name: /custom metadata/i }),
   ).toHaveAttribute('href', '/history?event=asset:created-event');
+});
+it('shows the recorded movement amount and endpoints before compact details while keeping actor and time', () => {
+  const destination = {
+    ...location,
+    id: 'destination',
+    breadcrumb: 'IT Closet / Drawer 2',
+  };
+  render(
+    <HistoryList
+      compact
+      events={[
+        {
+          id: 'move',
+          kind: 'quantity',
+          entityId: 'item',
+          entityName: 'Adapters',
+          eventType: 'moved',
+          at: '2026-09-05T12:00:00Z',
+          actorName: 'Recorded Staff',
+          reason: 'Restocking',
+          assignment: null,
+          fromLocation: location,
+          toLocation: destination,
+          lines: [
+            { location, delta: -2, before: 99, after: 97 },
+            { location: destination, delta: 2, before: 5, after: 7 },
+          ],
+          metadataChanges: [],
+          customMetadataPresent: false,
+          customMetadataChanged: false,
+        },
+      ]}
+    />,
+  );
+  expect(
+    screen.getByText(
+      `2 units · ${location.breadcrumb} → ${destination.breadcrumb} (current location labels)`,
+    ),
+  ).toBeVisible();
+  expect(screen.getByText(/Recorded Staff/)).toBeVisible();
+  expect(screen.getByText('Reason: Restocking')).not.toBeVisible();
+  fireEvent.click(screen.getByText('View event details'));
+  expect(screen.getByText('Reason: Restocking')).toBeVisible();
 });

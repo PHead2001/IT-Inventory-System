@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
 import { field, panel } from '@/features/inventory/components/read-ui';
-import { submitCustody } from './actions';
+import { submitCustody, loadCustodyReceipt } from './actions';
+import { CustodyReceiptView } from './custody-receipt';
 import {
   useReportTaskState,
   useTaskReset,
@@ -30,6 +31,7 @@ type Props = {
   kind: 'quantity' | 'asset';
   action: QuantityAction | AssetAction;
   entityId: string;
+  entityName?: string;
   version: string;
   locations: LocationRef[];
   sites: Site[];
@@ -51,16 +53,16 @@ const titles: Record<string, string> = {
 };
 
 export function CustodyChangeForm(latest: Props) {
+  const [iteration, setIteration] = useState(0);
   return (
     <CustodyFields
-      key={[latest.actorId, latest.kind, latest.entityId, latest.action].join(
-        ':',
-      )}
+      key={[iteration, latest.kind, latest.entityId, latest.action].join(':')}
       {...latest}
+      startAnother={() => setIteration((value) => value + 1)}
     />
   );
 }
-function CustodyFields(latest: Props) {
+function CustodyFields(latest: Props & { startAnother: () => void }) {
   const [baseline, setBaseline] = useState(latest);
   const { kind, action, entityId, version } = baseline;
   const {
@@ -79,6 +81,14 @@ function CustodyFields(latest: Props) {
   const scope = `${kind}-${action}`;
   const [pending, startTransition] = useTransition();
   const [state, setState] = useState<CustodyState | null>(null);
+  const [closed, setClosed] = useState(false);
+  const [reviewed, setReviewed] = useState<{
+    name?: string;
+    source: string;
+    destination: string;
+    quantity: string;
+    reference: string;
+  } | null>(null);
   const [values, setValues] = useState({
     source_location_id:
       currentLocation?.id ??
@@ -98,11 +108,12 @@ function CustodyFields(latest: Props) {
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [initial, setInitial] = useState(values);
+  const [initial] = useState(values);
   const [uncertain, setUncertain] = useState(false);
   const inFlight = useRef(false);
   const submitted = useRef<Parameters<typeof submitCustody>[0] | null>(null);
   const completed = state?.ok === true;
+  const actorMismatch = baseline.actorId !== latest.actorId;
   const reportTask = useReportTaskState({
     dirty: JSON.stringify(values) !== JSON.stringify(initial),
     pending,
@@ -150,6 +161,7 @@ function CustodyFields(latest: Props) {
       pending ||
       inFlight.current ||
       completed ||
+      actorMismatch ||
       (!uncertain &&
         (unavailable ||
           stale ||
@@ -207,6 +219,26 @@ function CustodyFields(latest: Props) {
             ...(actorId ? { expectedActorId: actorId } : {}),
           };
     submitted.current = command;
+    if (!uncertain)
+      setReviewed({
+        name: latest.entityName,
+        source: fromStorage
+          ? (locations.find((row) => row.id === values.source_location_id)
+              ?.name ?? 'Recorded storage source')
+          : fromSite
+            ? (sites.find((row) => row.id === values.source_site_id)?.name ??
+              'Recorded source site')
+            : 'Opening / no source',
+        destination: toStorage
+          ? (locations.find((row) => row.id === values.destination_location_id)
+              ?.name ?? 'Recorded storage destination')
+          : requiresDestination
+            ? (sites.find((row) => row.id === values.destination_site_id)
+                ?.name ?? 'Recorded destination site')
+            : 'No destination',
+        quantity: correction ? values.observed_quantity : values.quantity,
+        reference: values.reference.trim(),
+      });
     inFlight.current = true;
     reportTask({ pending: true });
     startTransition(async () => {
@@ -248,6 +280,109 @@ function CustodyFields(latest: Props) {
       }
     });
   };
+  if (completed)
+    return (
+      <section
+        className={panel + ' max-w-4xl space-y-4'}
+        aria-label="Custody completion"
+      >
+        {state.custody ? (
+          <CustodyReceiptView
+            receipt={state.custody}
+            reviewedName={reviewed?.name}
+          />
+        ) : (
+          <>
+            <h3 className="text-lg font-semibold">Custody saved</h3>
+            {reviewed?.name && (
+              <p className="break-words">
+                {reviewed.name} (name reviewed for this operation)
+              </p>
+            )}
+            <p>
+              {titles[action]} · {reviewed?.source} → {reviewed?.destination}
+            </p>
+            <p>
+              {quantity
+                ? `${reviewed?.quantity} ${correction ? 'observed units' : 'units'}`
+                : '1 individual asset'}
+            </p>
+            {reviewed?.reference && (
+              <p>Ticket number reference: {reviewed.reference}</p>
+            )}
+            <p className="text-sm text-slate-300">
+              {state.changed
+                ? 'The transaction is confirmed. The event receipt is not available yet; current holdings are not its receipt balances.'
+                : 'No balance change was needed.'}
+            </p>
+            {state.eventId && actorId && (
+              <Button
+                type="button"
+                disabled={pending || actorMismatch}
+                onClick={() =>
+                  startTransition(async () => {
+                    const detail = await loadCustodyReceipt({
+                      kind,
+                      entityId,
+                      eventId: state.eventId,
+                      expectedActorId: actorId,
+                    });
+                    if (detail) setState({ ...state, custody: detail });
+                  })
+                }
+              >
+                Load confirmed receipt
+              </Button>
+            )}
+          </>
+        )}
+        {state.refreshFailed && (
+          <p role="status" className="text-sm text-amber-200">
+            Saved successfully. Receipt details or page refresh could not be
+            loaded. Refresh to check current holdings; do not submit this
+            operation again.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-3">
+          {!closed && (
+            <Button
+              type="button"
+              onClick={() => {
+                if (resetTask) resetTask();
+                else setClosed(true);
+              }}
+            >
+              Done
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={actorMismatch || latest.version !== state.version}
+            onClick={latest.startAnother}
+          >
+            {action === 'issue' || action === 'assign'
+              ? 'Issue another'
+              : 'Start another operation'}
+          </Button>
+          <Link
+            className="inline-flex min-h-11 items-center text-cyan-300 underline"
+            href={`/inventory/${kind === 'quantity' ? 'quantity' : 'assets'}/${entityId}`}
+          >
+            View record
+          </Link>
+        </div>
+        {closed && (
+          <p role="status">Done. The completed operation is retained above.</p>
+        )}
+        {latest.version !== state.version && (
+          <p className="text-sm text-slate-300">
+            Refresh and review current holdings before starting another
+            operation.
+          </p>
+        )}
+      </section>
+    );
   return (
     <form
       aria-label={titles[action]}
@@ -257,6 +392,12 @@ function CustodyFields(latest: Props) {
     >
       <h3 className="text-lg font-semibold">{titles[action]}</h3>
       <RequiredFieldsNote />
+      {actorMismatch && (
+        <p role="alert">
+          Return to the original signed-in account to continue or resolve this
+          operation.
+        </p>
+      )}
       {unavailable && (
         <div role="note" className="experience-feedback text-sm">
           <p>
@@ -282,7 +423,14 @@ function CustodyFields(latest: Props) {
         </div>
       )}
       <fieldset
-        disabled={pending || uncertain || completed || unavailable || stale}
+        disabled={
+          pending ||
+          uncertain ||
+          completed ||
+          unavailable ||
+          stale ||
+          actorMismatch
+        }
         className="space-y-4"
       >
         {action === 'opening' && (
@@ -475,37 +623,18 @@ function CustodyFields(latest: Props) {
           </Button>
         </div>
       )}
-      {completed ? (
-        <Button
-          type="button"
-          className="hover:translate-y-0 active:scale-100"
-          onClick={() => {
-            if (resetTask) {
-              resetTask();
-              return;
-            }
-            setBaseline(latest);
-            setState(null);
-            setReceipt(null);
-            submitted.current = null;
-            setUncertain(false);
-            setInitial(values);
-          }}
-        >
-          New transaction
-        </Button>
-      ) : (
-        <Button
-          disabled={pending || (!uncertain && (unavailable || stale))}
-          type="submit"
-        >
-          {pending
-            ? 'Saving…'
-            : uncertain
-              ? 'Retry same custody transaction'
-              : titles[action]}
-        </Button>
-      )}
+      <Button
+        disabled={
+          pending || actorMismatch || (!uncertain && (unavailable || stale))
+        }
+        type="submit"
+      >
+        {pending
+          ? 'Saving…'
+          : uncertain
+            ? 'Retry same custody transaction'
+            : titles[action]}
+      </Button>
     </form>
   );
 }

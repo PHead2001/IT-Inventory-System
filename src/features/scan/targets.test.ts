@@ -9,6 +9,17 @@ import {
 const origin = 'https://inventory.example.test';
 const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
 describe('label destinations', () => {
+  it('trims only pasted outer whitespace and preserves internal punctuation and zero padding', () => {
+    expect(
+      parseScan(' \r\n' + origin + quantityLabelPath(id) + '\n ', origin),
+    ).toEqual(parseScan(origin + quantityLabelPath(id), origin));
+    expect(parseScan('\t 0007-A/B \r\n', origin)).toEqual({
+      kind: 'bare',
+      identifier: '0007-A/B',
+    });
+    expect(parseScan('0007\nA/B', origin)).toBeNull();
+    expect(parseScan(' '.repeat(1025) + 'ITC', origin)).toBeNull();
+  });
   it('resolves stable identity without names or storage in the payload', () => {
     expect(parseScan(origin + locationLabelPath('ITC-S1A'), origin)).toEqual({
       kind: 'location',

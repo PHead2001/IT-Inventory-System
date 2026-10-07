@@ -29,6 +29,13 @@ import styles from './label-workspace.module.css';
 import { countLabel } from '@/lib/count';
 import { consumedLabelUrl } from './add-intent';
 import {
+  labelQueueEntry as entryFor,
+  selectLabelRows,
+  projectLabelSelection,
+  labelSelectionSummary,
+  type SelectedLabel,
+} from './label-selection';
+import {
   labelSettingText,
   labelSizeOptions,
   paperSizeOptions,
@@ -53,16 +60,6 @@ import {
   type QueueKey,
 } from './queue-model';
 
-function entryFor(record: LiveLabel): QueueEntry {
-  return {
-    kind: record.kind,
-    key: record.key,
-    copies: 1,
-    baselineTag: record.tag,
-    baselineState: record.state,
-    lifecycleAcknowledged: record.state === 'active',
-  };
-}
 /** Every authorized observation retains review debt, even beside missing or acknowledged rows. */
 function latchObservedChanges(
   entries: QueueEntry[],
@@ -211,7 +208,21 @@ function LabelDesignerWorkspace({
     setLiveState(next);
   }, []);
   const [filters, setFilters] = useState<LabelSearchFilters>(defaultFilters);
-  const [draft, setDraft] = useState<LabelSearchFilters>(defaultFilters);
+  const [draft, setDraftState] = useState<LabelSearchFilters>(defaultFilters);
+  const [selected, setSelected] = useState<SelectedLabel[]>([]);
+  const [queueFeedback, setQueueFeedback] = useState('');
+  const selectionEpoch = useRef(0);
+  const manualAddPending = useRef(false);
+  const setDraft = (next: LabelSearchFilters) => {
+    selectionEpoch.current++;
+    setSelected([]);
+    setQueueFeedback(
+      selected.length || manualAddPending.current
+        ? 'Unsubmitted label selection cleared because search or filters changed.'
+        : '',
+    );
+    setDraftState(next);
+  };
   const [job, setJob] = useState<JobSettings>(defaults);
   const [locationCode, setLocationCode] = useState('');
   const [search, setSearch] = useState<{
@@ -250,6 +261,7 @@ function LabelDesignerWorkspace({
     () => () => {
       queueEpoch.current++;
       manualClearEpoch.current++;
+      selectionEpoch.current++;
       activePrintAbort.current?.abort();
       clearPrintAuthorization.current?.();
     },
@@ -284,7 +296,7 @@ function LabelDesignerWorkspace({
         if (merged.length <= MAX_DISTINCT && totalCopies(merged) <= MAX_LABELS)
           setEntries(merged);
         setFilters(stored.filters);
-        setDraft(stored.filters);
+        setDraftState(stored.filters);
         setJob(stored.job);
       }
       setHydrated(true);
@@ -504,6 +516,7 @@ function LabelDesignerWorkspace({
       Object.entries(reviewed).filter(([id]) => !clear && !ids.has(id)),
     );
     if (clear) manualClearEpoch.current++;
+    selectionEpoch.current++;
     for (const id of ids) cancelledManualAdds.current.add(id);
     for (const key of addIntent) {
       const id = queueIdentity(key);
@@ -531,9 +544,10 @@ function LabelDesignerWorkspace({
       clear ? [] : keys.filter((key) => !ids.has(queueIdentity(key))),
     );
     invalidate(true);
-    setMessage(
+    setQueueFeedback(
       clear ? 'Label queue cleared.' : 'Record removed from the label queue.',
     );
+    setMessage('');
     if (
       addIntent.every((key) => handledIntent.current.has(queueIdentity(key)))
     ) {
@@ -543,64 +557,114 @@ function LabelDesignerWorkspace({
     }
     consumeIntent();
   };
-  const add = async (key: QueueKey) => {
-    if (entries.some((entry) => queueIdentity(entry) === queueIdentity(key))) {
-      setMessage('Already in the queue. Adjust its copy count below.');
+  const addSelected = async (requested: SelectedLabel[], batch: boolean) => {
+    if (manualAddPending.current || !requested.length) return;
+    const unique = selectLabelRows([], requested);
+    if (
+      !batch &&
+      currentEntries.current.some(
+        (entry) => queueIdentity(entry) === queueIdentity(unique[0]),
+      )
+    ) {
+      setQueueFeedback(
+        'Already in the queue. Existing copy counts are preserved.',
+      );
       return;
     }
+    const epoch = selectionEpoch.current;
     const clearEpoch = manualClearEpoch.current;
-    const id = queueIdentity(key);
-    cancelledManualAdds.current.delete(id);
+    for (const row of unique)
+      cancelledManualAdds.current.delete(queueIdentity(row));
+    manualAddPending.current = true;
     ++queueEpoch.current;
     activePrintAbort.current?.abort();
     setBusy(true);
+    setQueueFeedback('Checking selected records...');
     try {
-      const rows = await getQueueRecords([key]);
+      const rows: LiveLabel[] = [];
+      // The existing caller-authorized read accepts at most 200 exact identities.
+      for (let offset = 0; offset < unique.length; offset += MAX_DISTINCT) {
+        rows.push(
+          ...(await getQueueRecords(
+            unique
+              .slice(offset, offset + MAX_DISTINCT)
+              .map(({ kind, key }) => ({ kind, key })),
+          )),
+        );
+        if (
+          epoch !== selectionEpoch.current ||
+          clearEpoch !== manualClearEpoch.current
+        )
+          return;
+      }
       if (
-        clearEpoch !== manualClearEpoch.current ||
-        cancelledManualAdds.current.has(id)
+        unique.some((row) =>
+          cancelledManualAdds.current.has(queueIdentity(row)),
+        )
       )
         return;
-      if (rows.length !== 1 || queueIdentity(rows[0]) !== queueIdentity(key)) {
-        setMessage('That record is unavailable to this account.');
+      const result = projectLabelSelection(
+        currentEntries.current,
+        unique,
+        rows,
+      );
+      if (!result.next) {
+        setQueueFeedback(
+          `Nothing added. The selected records exceed the queue limit: ${MAX_DISTINCT} distinct records, ${MAX_COPIES} copies each, ${MAX_LABELS} labels total. Reduce the selection or queue copies and try again.`,
+        );
         return;
       }
       if (observeRows(rows)) {
         invalidate();
         setRetry((value) => value + 1);
       }
-      if (currentEntries.current.some((entry) => queueIdentity(entry) === id)) {
-        setMessage('Already in the queue. Existing copy counts are preserved.');
-        return;
+      // Preserve any review debt latched by observing existing queue records.
+      const final = projectLabelSelection(currentEntries.current, unique, rows);
+      if (final.added.length) {
+        setEntries(final.next!);
+        setLive((current) => [
+          ...current.filter(
+            (row) =>
+              !rows.some(
+                (fresh) => queueIdentity(fresh) === queueIdentity(row),
+              ),
+          ),
+          ...rows,
+        ]);
+        invalidate();
       }
-      const next = addEntry(currentEntries.current, entryFor(rows[0]));
-      if (!next) {
-        setMessage(
-          `Queue limit: ${MAX_DISTINCT} distinct records, ${MAX_COPIES} copies each, ${MAX_LABELS} labels total.`,
-        );
-        return;
-      }
-      setEntries(next);
-      setLive((current) => [
-        ...current.filter(
-          (row) => queueIdentity(row) !== queueIdentity(rows[0]),
-        ),
-        rows[0],
-      ]);
-      invalidate();
-      setMessage(
-        `${rows[0].name} added. Names and context refresh before printing.`,
-      );
+      if (batch) setSelected([]);
+      setQueueFeedback(labelSelectionSummary(final));
     } catch {
       if (
-        clearEpoch === manualClearEpoch.current &&
-        !cancelledManualAdds.current.has(id)
+        epoch === selectionEpoch.current &&
+        clearEpoch === manualClearEpoch.current
       )
-        setMessage('Record could not be added. Try again.');
+        setQueueFeedback(
+          'Selected records could not be added. Nothing added; try again.',
+        );
     } finally {
+      manualAddPending.current = false;
       setBusy(false);
+      // If a pending addition interrupted preview refresh, resume the existing path.
+      setRetry((value) => value + 1);
     }
   };
+  const add = (key: QueueKey) =>
+    addSelected(
+      [
+        {
+          ...key,
+          name:
+            search?.rows.find(
+              (row) => queueIdentity(row) === queueIdentity(key),
+            )?.name ??
+            locations.find((location) => location.code === key.key)?.name ??
+            key.key,
+        },
+      ],
+      false,
+    );
   const prepareFrom = (rows: LiveLabel[], generationKey: string) => {
     const candidates = removalReviews.current;
     removalReviews.current = {};
@@ -955,6 +1019,13 @@ function LabelDesignerWorkspace({
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
+    selectionEpoch.current++;
+    setSelected([]);
+    if (selected.length || manualAddPending.current)
+      setQueueFeedback(
+        'Unsubmitted label selection cleared because search or filters changed.',
+      );
+    setSearch(null);
     setFilters({ ...draft, page: 1 });
   };
   const fallbackCount = entries.filter(
@@ -1146,6 +1217,36 @@ function LabelDesignerWorkspace({
                 ? `${countLabel(search.total, 'matching record')}. Scroll this list to browse the current page.`
                 : 'Loading matching records…'}
             </p>
+            <div className={styles.queueActions}>
+              <span>{countLabel(selected.length, 'selected record')}</span>
+              <button
+                type="button"
+                className={styles.textButton}
+                disabled={busy || !search?.rows.length}
+                onClick={() =>
+                  setSelected((current) =>
+                    selectLabelRows(current, search?.rows ?? []),
+                  )
+                }
+              >
+                Select current page
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={busy || !selected.length}
+                onClick={() => void addSelected(selected, true)}
+              >
+                Add selected to queue
+              </button>
+              <a href="#label-queue" className={styles.resultLink}>
+                Review queue: {countLabel(entries.length, 'record')} {'\u00b7'}{' '}
+                {countLabel(totalCopies(entries), 'label')}
+              </a>
+            </div>
+            <p role="status" aria-live="polite" className={styles.notice}>
+              {queueFeedback}
+            </p>
             <div
               className={styles.results}
               role="region"
@@ -1156,6 +1257,28 @@ function LabelDesignerWorkspace({
               {search?.rows.map((record) => (
                 <div key={record.kind + record.key} className={styles.result}>
                   <div className={styles.resultMain}>
+                    <label className={styles.fieldLabel}>
+                      <input
+                        type="checkbox"
+                        disabled={busy}
+                        aria-label={`Select ${record.name} (${record.kind} ${record.key})`}
+                        checked={selected.some(
+                          (row) => queueIdentity(row) === queueIdentity(record),
+                        )}
+                        onChange={(event) =>
+                          setSelected((current) =>
+                            event.target.checked
+                              ? selectLabelRows(current, [record])
+                              : current.filter(
+                                  (row) =>
+                                    queueIdentity(row) !==
+                                    queueIdentity(record),
+                                ),
+                          )
+                        }
+                      />
+                      Select record
+                    </label>
                     <Link
                       href={
                         record.kind === 'quantity'
@@ -1195,14 +1318,36 @@ function LabelDesignerWorkspace({
                   </div>
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      entries.some(
+                        (entry) =>
+                          queueIdentity(entry) === queueIdentity(record),
+                      )
+                    }
                     onClick={() =>
                       void add({ kind: record.kind, key: record.key })
                     }
                     className={styles.secondaryButton}
                   >
-                    Add to queue
+                    {entries.some(
+                      (entry) => queueIdentity(entry) === queueIdentity(record),
+                    )
+                      ? 'In queue'
+                      : 'Add to queue'}
                   </button>
+                  {entries.some(
+                    (entry) => queueIdentity(entry) === queueIdentity(record),
+                  ) && (
+                    <a
+                      href="#label-queue"
+                      className={styles.resultLink}
+                      aria-label={`Review queue for ${record.name}`}
+                    >
+                      {countLabel(entries.length, 'record')} /{' '}
+                      {countLabel(totalCopies(entries), 'label')}
+                    </a>
+                  )}
                 </div>
               ))}
               {search && search.total === 0 && (
@@ -1217,18 +1362,20 @@ function LabelDesignerWorkspace({
                 </span>
                 <button
                   disabled={filters.page <= 1}
-                  onClick={() =>
+                  onClick={() => (
+                    setSearch(null),
                     setFilters({ ...filters, page: filters.page - 1 })
-                  }
+                  )}
                   className={styles.textButton}
                 >
                   Previous
                 </button>
                 <button
                   disabled={filters.page * search.pageSize >= search.total}
-                  onClick={() =>
+                  onClick={() => (
+                    setSearch(null),
                     setFilters({ ...filters, page: filters.page + 1 })
-                  }
+                  )}
                   className={styles.textButton}
                 >
                   Next
@@ -1260,6 +1407,7 @@ function LabelDesignerWorkspace({
           <section
             className={`${styles.surface} ${styles.surfaceAccent}`}
             aria-label="Label queue"
+            id="label-queue"
           >
             <p className={styles.eyebrow}>03 / Selected labels</p>
             <div className={styles.queueHeader}>

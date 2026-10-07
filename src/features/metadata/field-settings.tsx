@@ -12,6 +12,7 @@ import {
   fieldSettingErrors,
   settingRuleLabel,
 } from './field-authoring-model';
+import { requiredFieldHelp } from './field-guidance';
 import { MetadataFieldInput } from './field-value-input';
 import type { DateTimeDraft } from './field-value-input';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
@@ -41,9 +42,11 @@ export function FieldSettings({
   showTypeChooser = true,
   initialDateTimeDraft,
   onDateTimeDraftChange,
+  revisionOptionCount,
 }: {
   field: Field;
   change: (field: Field) => void;
+  revisionOptionCount?: number;
   published?: boolean;
   showTypeChooser?: boolean;
   initialDateTimeDraft?: DateTimeDraft;
@@ -136,11 +139,7 @@ export function FieldSettings({
           />{' '}
           Required
         </label>
-        <p className="text-xs text-slate-400">
-          {field.required
-            ? 'An answer is required. An unchecked checkbox counts as an answer.'
-            : 'Staff can leave this field unanswered.'}
-        </p>
+        <p className="text-xs text-slate-400">{requiredFieldHelp(field)}</p>
         {!published && showTypeChooser && (
           <label className="block text-sm">
             Field type
@@ -168,6 +167,34 @@ export function FieldSettings({
                 </option>
               ))}
             </select>
+          </label>
+        )}
+        {field.type === 'boolean' && (
+          <label className="block text-sm">
+            Answer presentation
+            <select
+              className={input}
+              aria-label="Answer presentation"
+              aria-describedby={`${prefix}-presentation-help`}
+              value={String(field.rules.booleanPresentation ?? 'checkbox')}
+              onChange={(event) => {
+                const rules = { ...field.rules };
+                if (event.target.value === 'checkbox')
+                  delete rules.booleanPresentation;
+                else rules.booleanPresentation = 'yes_no';
+                change({ ...field, rules });
+              }}
+            >
+              <option value="checkbox">Checkbox</option>
+              <option value="yes_no">Yes / No question</option>
+            </select>
+            <span
+              id={`${prefix}-presentation-help`}
+              className="text-xs text-slate-400"
+            >
+              Both presentations retain Yes, No and unanswered. Changing
+              presentation keeps existing answers.
+            </span>
           </label>
         )}
         {field.type === 'currency' && !published && (
@@ -202,9 +229,17 @@ export function FieldSettings({
         <section className="space-y-3" aria-label="Choices">
           <h4 className="font-semibold text-cyan-100">Choices</h4>
           {field.type === 'multi_select' && (
-            <p className="text-sm text-slate-400">Choose more than one.</p>
+            <p className="text-sm text-slate-400">
+              {field.required
+                ? 'Select any that apply. Record a selection or explicitly choose none.'
+                : 'Select any that apply.'}
+            </p>
           )}
-          <OptionTreeEditor field={field} change={change} />
+          <OptionTreeEditor
+            field={field}
+            change={change}
+            revisionOptionCount={revisionOptionCount}
+          />
         </section>
       )}
       <details className="rounded border border-slate-700 p-3">
@@ -233,8 +268,16 @@ export function FieldSettings({
                 }
               >
                 <option value="">No default</option>
-                <option value="true">Checked</option>
-                <option value="false">Unchecked</option>
+                <option value="true">
+                  {field.rules.booleanPresentation === 'yes_no'
+                    ? 'Yes'
+                    : 'Checked'}
+                </option>
+                <option value="false">
+                  {field.rules.booleanPresentation === 'yes_no'
+                    ? 'No'
+                    : 'Unchecked'}
+                </option>
               </select>
             </label>
           ) : starts ? (

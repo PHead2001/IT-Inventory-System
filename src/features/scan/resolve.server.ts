@@ -58,6 +58,9 @@ export async function resolveItemCode(value: string): Promise<ScanResolution> {
 }
 
 export async function resolveScan(value: string): Promise<ScanResolution> {
+  if (typeof value !== 'string' || value.length > 1024)
+    return { status: 'invalid', matches: [] };
+  value = value.trim();
   let origin = '';
   if (/^https?:/i.test(value)) {
     try {

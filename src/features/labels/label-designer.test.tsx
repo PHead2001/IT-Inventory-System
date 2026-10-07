@@ -1127,7 +1127,9 @@ it('rejects an Add response for a different identity without queueing it', async
   ]);
   fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
   expect(
-    await screen.findByText('That record is unavailable to this account.'),
+    await screen.findByText(
+      'Selected records could not be added. Nothing added; try again.',
+    ),
   ).toBeVisible();
   expect(
     screen.getByRole('region', { name: 'Label queue' }),
@@ -1921,3 +1923,184 @@ it.each([
     ).toBeNull();
   },
 );
+
+function labelResults(
+  rows: LiveLabel[],
+  page = 1,
+  total = rows.length,
+  pageSize = 25,
+) {
+  return {
+    rows: rows.map((row) => ({
+      kind: row.kind as 'quantity' | 'asset',
+      key: row.key,
+      name: row.name,
+      categoryName: row.categoryName ?? '',
+      status: row.state,
+      assetTag: row.tag,
+      itemCode: null,
+      serialNumber: null,
+      manufacturer: null,
+      model: null,
+      holdingContext: row.holdingContext,
+    })),
+    total,
+    page,
+    pageSize,
+  };
+}
+function selectRecord(row: LiveLabel) {
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: `Select ${row.name} (${row.kind} ${row.key})`,
+    }),
+  );
+}
+
+it('shows immediate single-add state and nearby live feedback through removal and re-add', async () => {
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  render(<LabelDesigner {...props} initial={[]} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to queue' }));
+  expect(
+    await screen.findByRole('button', { name: 'In queue' }),
+  ).toBeDisabled();
+  expect(
+    screen.getByRole('link', { name: 'Review queue: 1 record \u00b7 1 label' }),
+  ).toHaveAttribute('href', '#label-queue');
+  expect(
+    screen.getByText(/^Added: Adapters/).closest('[role="status"]'),
+  ).toHaveAttribute('aria-live', 'polite');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+  expect(screen.getByRole('button', { name: 'Add to queue' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Add to queue' }));
+  expect(
+    await screen.findByRole('button', { name: 'In queue' }),
+  ).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear queue' }));
+  expect(
+    screen.getByRole('link', {
+      name: 'Review queue: 0 records \u00b7 0 labels',
+    }),
+  ).toBeVisible();
+});
+
+it('retains explicit selections across pages with named added, present and unavailable results', async () => {
+  const missing = {
+    ...quantity,
+    key: '00000000-0000-4000-8000-000000000003',
+    name: 'Missing adapters',
+  };
+  mocks.searchLabelRecords.mockImplementation((filters) =>
+    Promise.resolve(
+      filters.page === 1
+        ? labelResults([quantity, missing], 1, 4, 2)
+        : labelResults([quantity, asset], 2, 4, 2),
+    ),
+  );
+  mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+    Promise.resolve(
+      [quantity, asset].filter((row) =>
+        keys.some((key) => key.key === row.key),
+      ),
+    ),
+  );
+  render(<LabelDesigner {...props} initial={[quantity]} />);
+  await screen.findByRole('button', { name: 'In queue' });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  expect(screen.getByText('2 selected records')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('checkbox', {
+    name: `Select Laptop (asset ${assetId})`,
+  });
+  expect(
+    screen.getByRole('checkbox', {
+      name: `Select Adapters (quantity ${quantityId})`,
+    }),
+  ).toBeChecked();
+  selectRecord(asset);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  expect(
+    await screen.findByText(
+      /^Added: Laptop.*Already present: Adapters.*Unavailable to this account: Missing adapters/,
+    ),
+  ).toBeVisible();
+  expect(screen.getByText('0 selected records')).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '2 distinct records \u00b7 2 labels',
+  );
+});
+
+it('cancels delayed batches on filter change and prevents rapid duplicate submissions', async () => {
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity, asset]));
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementation(
+    () =>
+      new Promise<LiveLabel[]>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<LabelDesigner {...props} initial={[]} />);
+  await screen.findByRole('checkbox', { name: new RegExp('^Select Adapters') });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  const add = screen.getByRole('button', { name: 'Add selected to queue' });
+  fireEvent.click(add);
+  fireEvent.click(add);
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), {
+    target: { value: 'quantity' },
+  });
+  expect(screen.getByText(/Unsubmitted label selection cleared/)).toBeVisible();
+  await act(async () => finish([quantity, asset]));
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '0 distinct records',
+  );
+  expect(screen.getByText('0 selected records')).toBeVisible();
+});
+
+it('discards a delayed selected addition on actor or environment replacement', async () => {
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([quantity]));
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementation(
+    () =>
+      new Promise<LiveLabel[]>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(<LabelDesigner {...props} initial={[]} />);
+  await screen.findByRole('checkbox', { name: new RegExp('^Select Adapters') });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  view.rerender(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      memberId="member-b"
+      origin="https://other.example.test"
+    />,
+  );
+  await act(async () => finish([quantity]));
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '0 distinct records',
+  );
+});
+
+it('keeps batch historical additions behind the existing lifecycle review', async () => {
+  const archived = { ...quantity, state: 'archived' };
+  mocks.searchLabelRecords.mockResolvedValue(labelResults([archived]));
+  mocks.getQueueRecords.mockResolvedValue([archived]);
+  render(<LabelDesigner {...props} initial={[]} />);
+  await screen.findByRole('checkbox', { name: new RegExp('^Select Adapters') });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  expect(
+    await screen.findByRole('button', { name: 'Review item' }),
+  ).toBeVisible();
+  expect(printButton()).toBeDisabled();
+});

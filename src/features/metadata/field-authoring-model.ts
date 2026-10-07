@@ -58,7 +58,7 @@ export const fieldTypeInfo: Record<
   },
   multi_select: {
     name: 'Multiple choice',
-    purpose: 'Choose more than one option.',
+    purpose: 'Select any options that apply.',
     example: 'Accessories: Charger, Dock',
   },
   hierarchical_select: {

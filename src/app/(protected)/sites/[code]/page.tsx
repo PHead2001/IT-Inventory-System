@@ -13,6 +13,7 @@ import {
   Pagination,
 } from '@/features/inventory/components/read-ui';
 import { SiteManagementForm } from '@/features/custody/management-form';
+import { ActivityFilter } from '@/features/custody/activity-filter';
 
 export default async function SitePage({
   params,
@@ -26,6 +27,7 @@ export default async function SitePage({
     q?: string;
     kind?: string;
     searchField?: string;
+    zone?: string;
   }>;
 }) {
   const { member } = await requireMember();
@@ -61,36 +63,50 @@ export default async function SitePage({
       </header>
       {member.role === 'staff' && site.active && (
         <div className="my-4 flex flex-wrap gap-2">
-          <div className="min-w-0 flex-1 basis-64">
-            <Link
-              className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/20"
-              href={`/sites/${encodeURIComponent(code)}/open/quantity`}
-              aria-describedby="site-quantity-choice-description"
-            >
-              Record existing quantity item
-            </Link>
-            <p
-              id="site-quantity-choice-description"
-              className="mt-2 text-sm text-slate-300"
-            >
-              Track interchangeable items by count, such as cables and adapters.
-            </p>
-          </div>
-          <div className="min-w-0 flex-1 basis-64">
-            <Link
-              className="inline-flex min-h-11 items-center rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-100 hover:border-cyan-400/50"
-              href={`/sites/${encodeURIComponent(code)}/open/asset`}
-              aria-describedby="site-asset-choice-description"
-            >
-              Record existing individual asset
-            </Link>
-            <p
-              id="site-asset-choice-description"
-              className="mt-2 text-sm text-slate-300"
-            >
-              Track one specific device, such as a laptop or switch.
-            </p>
-          </div>
+          <Link
+            className="inline-flex min-h-11 items-center rounded-lg bg-cyan-600 px-4 font-semibold text-slate-950"
+            href={`/scan?mode=assign&site=${site.id}`}
+          >
+            Issue existing stock
+          </Link>
+          <details className="w-full">
+            <summary className="min-h-11 cursor-pointer py-2 text-sm text-cyan-200">
+              Record equipment already at this site
+            </summary>
+            <div className="flex flex-wrap gap-2">
+              <div className="min-w-0 flex-1 basis-64">
+                <Link
+                  className="inline-flex min-h-11 items-center rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-2 text-sm font-medium text-cyan-100 hover:bg-cyan-400/20"
+                  href={`/sites/${encodeURIComponent(code)}/open/quantity`}
+                  aria-describedby="site-quantity-choice-description"
+                >
+                  Record existing quantity item
+                </Link>
+                <p
+                  id="site-quantity-choice-description"
+                  className="mt-2 text-sm text-slate-300"
+                >
+                  Track interchangeable items by count, such as cables and
+                  adapters.
+                </p>
+              </div>
+              <div className="min-w-0 flex-1 basis-64">
+                <Link
+                  className="inline-flex min-h-11 items-center rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-100 hover:border-cyan-400/50"
+                  href={`/sites/${encodeURIComponent(code)}/open/asset`}
+                  aria-describedby="site-asset-choice-description"
+                >
+                  Record existing individual asset
+                </Link>
+                <p
+                  id="site-asset-choice-description"
+                  className="mt-2 text-sm text-slate-300"
+                >
+                  Track one specific device, such as a laptop or switch.
+                </p>
+              </div>
+            </div>
+          </details>
         </div>
       )}
       <div className="my-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-cyan-300 underline">
@@ -101,8 +117,8 @@ export default async function SitePage({
           Download current site holdings CSV
         </ExportLink>
       </div>
-      <dl className="my-5 grid gap-3 sm:grid-cols-2">
-        <div className={panel}>
+      <dl className="my-4 flex flex-wrap gap-x-8 gap-y-3 rounded-xl border border-slate-700/70 px-4 py-3">
+        <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-300">
             Current assigned quantity units
           </dt>
@@ -110,7 +126,7 @@ export default async function SitePage({
             {detail.summary.current_quantity_units}
           </dd>
         </div>
-        <div className={panel}>
+        <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-300">
             Current individual assets
           </dt>
@@ -119,47 +135,60 @@ export default async function SitePage({
           </dd>
         </div>
       </dl>
-      <section className="my-6 space-y-3" aria-label="Grouped current holdings">
-        <h2 className="text-xl font-semibold">
-          By category, product, and model
-        </h2>
-        {detail.groups.rows.length ? (
-          <ul className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
-            {detail.groups.rows.map((group) => (
-              <li
-                className="px-4 py-3 text-sm sm:px-5"
-                key={`${group.inventory_kind}:${group.category_name}:${group.name}:${group.model ?? ''}`}
-              >
-                <strong className="break-words">
-                  {group.category_name} · {group.name}
-                </strong>{' '}
-                · {group.model || 'Model not set'}
-                <p className="mt-1 text-sm text-slate-300 tabular-nums">
-                  {group.inventory_kind === 'quantity'
-                    ? countLabel(String(group.quantity_units), 'quantity unit')
-                    : countLabel(
-                        String(group.serialized_devices),
-                        'distinct serialized device',
-                      )}
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className={panel}>No current holdings.</p>
-        )}
-        {detail.groups.total > detail.groups.rows.length && (
-          <p className="text-sm text-slate-400">
-            Showing the first 25 of {detail.groups.total} groups. Use the
-            filtered holdings list below to find a specific product.
-          </p>
-        )}
-      </section>
+      {detail.groups.rows.length > 0 && (
+        <details
+          className="my-4 space-y-3"
+          aria-label="Grouped current holdings"
+        >
+          <summary className="min-h-11 cursor-pointer py-2 font-semibold text-cyan-200">
+            By category, product, and model
+          </summary>
+          {detail.groups.rows.length ? (
+            <ul className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
+              {detail.groups.rows.map((group) => (
+                <li
+                  className="px-4 py-3 text-sm sm:px-5"
+                  key={`${group.inventory_kind}:${group.category_name}:${group.name}:${group.model ?? ''}`}
+                >
+                  <strong className="break-words">
+                    {group.category_name} · {group.name}
+                  </strong>{' '}
+                  · {group.model || 'Model not set'}
+                  <p className="mt-1 text-sm text-slate-300 tabular-nums">
+                    {group.inventory_kind === 'quantity'
+                      ? countLabel(
+                          String(group.quantity_units),
+                          'quantity unit',
+                        )
+                      : countLabel(
+                          String(group.serialized_devices),
+                          'distinct serialized device',
+                        )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={panel}>No current holdings.</p>
+          )}
+          {detail.groups.total > detail.groups.rows.length && (
+            <p className="text-sm text-slate-400">
+              Showing the first 25 of {detail.groups.total} groups. Use the
+              filtered holdings list below to find a specific product.
+            </p>
+          )}
+        </details>
+      )}
       <section id="site-holdings" aria-labelledby="holdings-heading">
         <h2 id="holdings-heading" className="mb-3 text-xl font-semibold">
           Current holdings
         </h2>
         <form className={panel + ' mb-4 grid gap-3 sm:grid-cols-3'}>
+          {(['from', 'until', 'zone'] as const).map((key) =>
+            filters[key] ? (
+              <input key={key} type="hidden" name={key} value={filters[key]} />
+            ) : null,
+          )}
           <label className="space-y-2">
             Product or model
             <input
@@ -226,7 +255,51 @@ export default async function SitePage({
             ))}
           </ul>
         ) : (
-          <p className={panel}>No current holdings match these filters.</p>
+          <div className={panel}>
+            {detail.summary.current_quantity_units === '0' &&
+            detail.summary.current_serialized_assets === '0' ? (
+              <>
+                <p>
+                  {site.active
+                    ? 'No equipment is currently assigned to this site.'
+                    : 'This archived site has no current holdings.'}
+                </p>
+                <p className="mt-2 text-sm text-slate-300">
+                  {site.active
+                    ? member.role === 'staff'
+                      ? 'Use Issue existing stock to assign inventory from storage, or record equipment already at the site.'
+                      : 'Staff can issue existing stock or record equipment already at the site.'
+                    : member.role === 'staff' && member.can_manage_configuration
+                      ? 'Restore the site under Manage site before assigning equipment.'
+                      : 'A configuration maintainer can restore the site before new assignments.'}
+                </p>
+                {site.active && member.role === 'staff' && (
+                  <Link
+                    className="mt-2 inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href={`/scan?mode=assign&site=${site.id}`}
+                  >
+                    Issue existing stock to this site
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                <p>
+                  {detail.holdingTotal > 0
+                    ? 'This results page is beyond the available holdings.'
+                    : 'No current holdings match these filters.'}
+                </p>
+                <Link
+                  className="mt-2 inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href={`/sites/${encodeURIComponent(code)}${filters.from || filters.until || filters.zone ? '?' + new URLSearchParams(Object.entries({ from: filters.from, until: filters.until, zone: filters.zone }).filter((entry): entry is [string, string] => !!entry[1])).toString() : ''}#site-holdings`}
+                >
+                  {detail.holdingTotal > 0
+                    ? 'Return to the first page / clear holdings filters'
+                    : 'Clear holdings filters'}
+                </Link>
+              </>
+            )}
+          </div>
         )}
         <Pagination
           result={{
@@ -243,135 +316,124 @@ export default async function SitePage({
         <h2 id="activity-heading" className="text-xl font-semibold">
           Assignment activity
         </h2>
-        <p className="text-sm text-slate-300">
-          Event metrics use the selected UTC date range; current holdings above
-          do not.
-        </p>
-        <form className={panel + ' flex flex-wrap items-end gap-3'}>
-          <label className="space-y-2">
-            From (UTC)
-            <input
-              name="from"
-              type="datetime-local"
-              defaultValue={filters.from?.slice(0, 16)}
-              className={field}
-            />
-          </label>
-          <label className="space-y-2">
-            Until (UTC, exclusive)
-            <input
-              name="until"
-              type="datetime-local"
-              defaultValue={filters.until?.slice(0, 16)}
-              className={field}
-            />
-          </label>
-          <button className="min-h-11 rounded-lg bg-cyan-600 px-4 font-medium text-slate-950 hover:bg-cyan-500">
-            Filter activity
-          </button>
-        </form>
-        <dl className="grid gap-2 min-[360px]:grid-cols-2 xl:grid-cols-3 [&_dd]:mt-1 [&_dd]:font-semibold [&_dd]:tabular-nums [&_dt]:text-sm [&_dt]:text-slate-300">
-          <div className={panel}>
-            <dt>Storage-issued quantity units</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.quantity.gross_issued_units}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Returned quantity units</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.quantity.return_units}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Opening quantity units</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.quantity.opening_units}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Transferred in / out (quantity units)</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.quantity.transfer_in_units} /{' '}
-              {detail.summary.quantity.transfer_out_units}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Written off quantity units</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.quantity.write_off_units}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Storage issue events (serialized)</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.serialized.gross_storage_issue_events}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Unique serialized assets issued</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.serialized.unique_issued_assets}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Opening serialized assets</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.serialized.opening_events}
-            </dd>
-          </div>
-          <div className={panel}>
-            <dt>Serialized returns / retirements</dt>
-            <dd className="text-xl font-semibold">
-              {detail.summary.serialized.return_events} /{' '}
-              {detail.summary.serialized.retirement_events}
-            </dd>
-          </div>
-        </dl>
-        {detail.events.length ? (
-          <ol className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
-            {detail.events.map((event) => (
-              <li key={event.id} className="break-words px-4 py-3 sm:px-5">
-                <p className="font-semibold capitalize">
-                  {event.kind.replaceAll('_', ' ')}
-                </p>
-                <p className="text-sm text-slate-300">
-                  <OperationalTimestamp value={event.created_at} /> ·{' '}
-                  {event.actor_name}
-                </p>
-                <p className="mt-1 text-sm">
-                  {event.from_label || 'Opening / no source'} →{' '}
-                  {event.to_label || 'No destination'}
-                  {event.quantity
-                    ? ` · ${countLabel(event.quantity, 'unit')}`
-                    : ''}
-                </p>
-                {event.reason && (
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-                    Reason: {event.reason}
-                  </p>
-                )}
-                {event.reference && (
-                  <p className="mt-1 break-all text-sm">
-                    Ticket number reference: {event.reference}
-                  </p>
-                )}
-                <Link
-                  className="text-sm text-cyan-300 underline"
-                  href={`/inventory/${event.asset_id ? 'assets' : 'quantity'}/${event.asset_id ?? event.item_id}`}
-                >
-                  View record
-                </Link>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className={panel}>No activity in this date range.</p>
-        )}
-        {detail.eventTotal > detail.events.length && (
-          <p className="text-sm text-slate-400">
-            Showing the latest 50 of {detail.eventTotal} events for this range.
-          </p>
+        <ActivityFilter
+          key={JSON.stringify([filters.from, filters.until, filters.zone])}
+          base={`/sites/${encodeURIComponent(code)}`}
+          filters={filters}
+          errors={detail.activityErrors}
+        />
+        {detail.activityValid && (
+          <>
+            <details className="experience-surface p-4">
+              <summary className="min-h-11 cursor-pointer py-2 font-medium text-cyan-200">
+                Activity breakdown · {countLabel(detail.eventTotal, 'event')}
+              </summary>
+              <dl className="grid gap-2 min-[360px]:grid-cols-2 xl:grid-cols-3 [&_dd]:mt-1 [&_dd]:font-semibold [&_dd]:tabular-nums [&_dt]:text-sm [&_dt]:text-slate-300">
+                <div className={panel}>
+                  <dt>Storage-issued quantity units</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.quantity.gross_issued_units}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Returned quantity units</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.quantity.return_units}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Opening quantity units</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.quantity.opening_units}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Transferred in / out (quantity units)</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.quantity.transfer_in_units} /{' '}
+                    {detail.summary.quantity.transfer_out_units}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Written off quantity units</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.quantity.write_off_units}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Storage issue events (serialized)</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.serialized.gross_storage_issue_events}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Unique serialized assets issued</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.serialized.unique_issued_assets}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Opening serialized assets</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.serialized.opening_events}
+                  </dd>
+                </div>
+                <div className={panel}>
+                  <dt>Serialized returns / retirements</dt>
+                  <dd className="text-xl font-semibold">
+                    {detail.summary.serialized.return_events} /{' '}
+                    {detail.summary.serialized.retirement_events}
+                  </dd>
+                </div>
+              </dl>
+            </details>
+            {detail.events.length ? (
+              <ol className="experience-surface divide-y divide-slate-700/70 overflow-hidden p-0">
+                {detail.events.map((event) => (
+                  <li key={event.id} className="break-words px-4 py-3 sm:px-5">
+                    <p className="font-semibold capitalize">
+                      {event.kind.replaceAll('_', ' ')}
+                    </p>
+                    <p className="text-sm text-slate-300">
+                      <OperationalTimestamp value={event.created_at} /> ·{' '}
+                      {event.actor_name}
+                    </p>
+                    <p className="mt-1 text-sm">
+                      {event.from_label || 'Opening / no source'} →{' '}
+                      {event.to_label || 'No destination'}
+                      {event.quantity
+                        ? ` · ${countLabel(event.quantity, 'unit')}`
+                        : ''}
+                    </p>
+                    {event.reason && (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+                        Reason: {event.reason}
+                      </p>
+                    )}
+                    {event.reference && (
+                      <p className="mt-1 break-all text-sm">
+                        Ticket number reference: {event.reference}
+                      </p>
+                    )}
+                    <Link
+                      className="text-sm text-cyan-300 underline"
+                      href={`/inventory/${event.asset_id ? 'assets' : 'quantity'}/${event.asset_id ?? event.item_id}`}
+                    >
+                      View record
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className={panel}>No activity in this date range.</p>
+            )}
+            {detail.eventTotal > detail.events.length && (
+              <p className="text-sm text-slate-400">
+                Showing the latest 50 of {detail.eventTotal} events for this
+                range.
+              </p>
+            )}
+          </>
         )}
       </section>
       {member.role === 'staff' && member.can_manage_configuration && (

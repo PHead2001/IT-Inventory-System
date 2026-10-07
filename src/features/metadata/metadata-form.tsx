@@ -57,10 +57,23 @@ import { creationSummary, normalizeCreationIntent } from './creation-summary';
 import {
   useReportTaskState,
   useTaskReset,
+  useTaskDiscard,
 } from '@/features/inventory/components/task-state';
 import { MetadataFieldInput } from './field-value-input';
 import { fieldValueError } from './field-value-validation';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
+import { useOperationalTimeZone } from '@/components/operational-time';
+import { editSummary, normalizeEditIntent } from './edit-summary';
+import {
+  editBaseline,
+  readEdit,
+  writeEdit,
+  openEditSession,
+  removeEdit,
+  type EditSession,
+  type EditEnvelope,
+  type EditCommand,
+} from './edit-recovery';
 import {
   creationDraftId,
   creationURL,
@@ -227,6 +240,7 @@ export function MetadataForm({
   creationDraftId: routeDraftId,
 }: Props) {
   const router = useRouter();
+  const timeZone = useOperationalTimeZone();
   const incoming = item ?? asset;
   const [observed, setObserved] = useState<RecordMetadata | undefined>(
     incoming,
@@ -247,7 +261,8 @@ export function MetadataForm({
   const scopeId = useId();
   const validation = useFormValidation();
   const [formActor] = useState(actorId);
-  const actorStale = formActor !== actorId;
+  const [formBackend] = useState(recoveryBackend);
+  const actorStale = formActor !== actorId || formBackend !== recoveryBackend;
   const [cleanCore, setCleanCore] = useState(() =>
     initialCore(latest, categories),
   );
@@ -282,6 +297,9 @@ export function MetadataForm({
     {},
   );
   const [review, setReview] = useState(false);
+  const [editIntent, setEditIntent] = useState<Record<string, unknown> | null>(
+    null,
+  );
   useLayoutEffect(() => {
     if (!creating || preview || !review) return;
     creationReviewHeading.current?.focus({ preventScroll: true });
@@ -297,7 +315,7 @@ export function MetadataForm({
   const [ackLegacy, setAckLegacy] = useState(false);
   const [state, setState] = useState<MutationState | CustodyState | null>(null);
   const resetTask = useTaskReset();
-  const taskCompleted = Boolean(resetTask && state?.ok);
+  const taskCompleted = Boolean(state?.ok && (resetTask || !creating));
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [openingReason, setOpeningReason] = useState('');
   const [openingReference, setOpeningReference] = useState('');
@@ -307,6 +325,22 @@ export function MetadataForm({
   );
   const [duplicates, setDuplicates] = useState<string[]>([]);
   const recoveryEnabled = creating && !preview;
+  const editRecoveryEnabled = !creating && !preview;
+  const editRecovery = useRef<EditEnvelope | null>(null);
+  const editDurable = useRef(false);
+  const editSession = useRef<EditSession | null>(null);
+  const storeEdit = (
+    next: EditEnvelope,
+    previous: EditEnvelope | null,
+    resolvedRequest?: string,
+  ) =>
+    !!editSession.current &&
+    writeEdit(next, previous, resolvedRequest, editSession.current);
+  const editPrevious = useRef<EditEnvelope | null>(null);
+  const editHydrated = useRef(false);
+  const [editReady, setEditReady] = useState(!editRecoveryEnabled);
+  const [editBlocked, setEditBlocked] = useState(false);
+  const [recoveredRecord, setRecoveredRecord] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(!recoveryEnabled);
   const [recoveryError, setRecoveryError] = useState('');
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
@@ -339,6 +373,116 @@ export function MetadataForm({
     openingReason,
     openingReference,
   };
+  const persistEdit = (
+    patch: Partial<CreationInputs> = {},
+    record = baseline,
+  ) => {
+    if (!editRecoveryEnabled) return true;
+    const active = editRecovery.current;
+    if (
+      !active ||
+      active.status !== 'editing' ||
+      !record ||
+      actorStale ||
+      editBlocked
+    )
+      return false;
+    const inputs = { ...(inputsSnapshot.current ?? currentInputs), ...patch };
+    inputsSnapshot.current = inputs;
+    const next: EditEnvelope = {
+      ...active,
+      sequence: editDurable.current ? active.sequence + 1 : 0,
+      baseline: editBaseline(record),
+      inputs,
+    };
+    if (!storeEdit(next, editDurable.current ? active : editPrevious.current)) {
+      setRecoveryError(recoveryLimitation);
+      return false;
+    }
+    editRecovery.current = next;
+    editDurable.current = true;
+    setRecoveryError('');
+    return true;
+  };
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+  useLayoutEffect(() => {
+    if (!editRecoveryEnabled || editHydrated.current) return;
+    if (!baseline || !creationDraftId(formActor) || !recoveryBackend) {
+      setRecoveryError(
+        'Edit recovery identity is unavailable. Reopen this task from the signed-in inventory page.',
+      );
+      setEditBlocked(true);
+      return;
+    }
+    let backend: string;
+    try {
+      backend = new URL(recoveryBackend).origin;
+    } catch {
+      setEditBlocked(true);
+      setRecoveryError('Edit recovery backend is unavailable.');
+      return;
+    }
+    const scope = {
+      origin: window.location.origin,
+      backend,
+      actor: formActor!,
+      kind,
+      entity: baseline.id,
+      task: 'metadata' as const,
+    };
+    editSession.current = openEditSession(scope);
+    const stored = readEdit(scope);
+    if (stored.error && stored.error !== 'Recovery storage is unavailable.') {
+      setEditBlocked(true);
+      setRecoveryError(stored.error);
+      return;
+    }
+    const reusable =
+      stored.envelope &&
+      ['editing', 'submitted'].includes(stored.envelope.status)
+        ? stored.envelope
+        : null;
+    const active: EditEnvelope = reusable ?? {
+      version: 1,
+      scope,
+      instance: crypto.randomUUID(),
+      sequence: 0,
+      status: 'editing',
+      baseline: editBaseline(baseline),
+      inputs: currentInputs,
+      command: null,
+      completedRequestId: null,
+    };
+    editRecovery.current = active;
+    editPrevious.current = stored.envelope;
+    editHydrated.current = true;
+    const values = active.inputs;
+    if (reusable && values) {
+      recoveredEditing.current = true;
+      setRecoveredRecord(true);
+      setBaseline(active.baseline);
+      inputsSnapshot.current = values;
+      setCore(values.core);
+      setCleanCore(values.cleanCore);
+      setCustom(values.custom);
+      setTouched(values.touched);
+      setReviewedForms(values.reviewedForms);
+      setPriorForms(values.priorForms);
+      setDateTimes(values.dateTimes);
+      setInputGeneration((generation) => generation + 1);
+    }
+    if (active.status === 'submitted' && active.command) {
+      setReceipt({
+        key: JSON.stringify([active.command.operation, active.command.payload]),
+        id: active.command.requestId,
+      });
+      setUncertain(true);
+    }
+    editDurable.current = !!reusable;
+    if (stored.error) setRecoveryError(recoveryLimitation);
+    setEditReady(true);
+  });
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useLayoutEffect(() => {
     if (recoveryHydrated.current && recovery.current?.status === 'editing')
       inputsSnapshot.current = currentInputs;
@@ -366,6 +510,7 @@ export function MetadataForm({
     bindCreationURL(active.instance);
   };
   const persistInputs = (patch: Partial<CreationInputs> = {}) => {
+    if (editRecoveryEnabled) return persistEdit(patch);
     if (!recoveryEnabled) return true;
     const existing = recovery.current;
     if (
@@ -393,6 +538,87 @@ export function MetadataForm({
   useLayoutEffect(() => {
     persistInputsRef.current = persistInputs;
   });
+  useLayoutEffect(() => {
+    const active = editRecovery.current;
+    if (
+      !editRecoveryEnabled ||
+      !editReady ||
+      actorStale ||
+      editBlocked ||
+      active?.status !== 'editing' ||
+      state?.ok ||
+      !baseline ||
+      (!editDurable.current &&
+        equalValue(currentInputs.core, currentInputs.cleanCore) &&
+        !currentInputs.touched.some(
+          (id) =>
+            JSON.stringify(currentInputs.custom[id]) !==
+            JSON.stringify(baseline.customValues?.[id]?.value),
+        ))
+    )
+      return;
+    inputsSnapshot.current = currentInputs;
+    if (
+      !equalValue(active.inputs, currentInputs) ||
+      !equalValue(active.baseline, editBaseline(baseline))
+    )
+      persistEdit({}, baseline);
+  });
+  useEffect(() => {
+    if (!editRecoveryEnabled) return;
+    const check = () => {
+      const active = editRecovery.current;
+      if (!active || actorStale) return;
+      const stored = readEdit(active.scope);
+      if (stored.error) {
+        setRecoveryError(stored.error);
+        return;
+      }
+      if (!stored.envelope || equalValue(active, stored.envelope)) return;
+      setReview(false);
+      if (
+        stored.envelope.instance !== active.instance ||
+        ['saved', 'discarded'].includes(stored.envelope.status)
+      ) {
+        setEditBlocked(true);
+        setUncertain(false);
+        setRecoveryError(
+          'This edit was completed, discarded or replaced in this tab. Close this task and reopen Edit details for current values.',
+        );
+      } else if (
+        stored.envelope.status === 'submitted' &&
+        stored.envelope.command
+      ) {
+        editRecovery.current = stored.envelope;
+        const values = stored.envelope.inputs!;
+        inputsSnapshot.current = values;
+        setBaseline(stored.envelope.baseline);
+        setCore(values.core);
+        setCleanCore(values.cleanCore);
+        setCustom(values.custom);
+        setTouched(values.touched);
+        setReviewedForms(values.reviewedForms);
+        setPriorForms(values.priorForms);
+        setDateTimes(values.dateTimes);
+        setInputGeneration((generation) => generation + 1);
+        setReceipt({
+          key: JSON.stringify([
+            stored.envelope.command.operation,
+            stored.envelope.command.payload,
+          ]),
+          id: stored.envelope.command.requestId,
+        });
+        setUncertain(true);
+      } else {
+        setEditBlocked(true);
+        setRecoveryError(
+          'A newer edit is retained in this tab. Close and reopen this task before continuing.',
+        );
+      }
+    };
+    window.addEventListener('pageshow', check);
+    return () => window.removeEventListener('pageshow', check);
+  }, [editRecoveryEnabled, actorStale]);
   // Hydrate the external session snapshot once before enabling controls or painting recovered fields.
   /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useLayoutEffect(() => {
@@ -681,6 +907,7 @@ export function MetadataForm({
 
     setChoices({});
     if (resetInputs) {
+      setDateTimes({});
       setAnswerErrors({});
       setInputGeneration((value) => value + 1);
     }
@@ -713,6 +940,7 @@ export function MetadataForm({
         }));
       if (
         itemStale &&
+        !recoveredEditing.current &&
         latest &&
         reconciliation &&
         !recordBlocked &&
@@ -840,11 +1068,13 @@ export function MetadataForm({
         value={value}
         initialDateTimeDraft={dateTimes[id]}
         onDateTimeDraftChange={
-          recoveryEnabled
+          recoveryEnabled || editRecoveryEnabled
             ? (draft, edited) => {
                 if (
                   !edited ||
-                  recovery.current?.status !== 'editing' ||
+                  (recoveryEnabled
+                    ? recovery.current?.status
+                    : editRecovery.current?.status) !== 'editing' ||
                   actorStale ||
                   recoveryBlocked
                 )
@@ -1007,6 +1237,8 @@ export function MetadataForm({
   });
   const dirty =
     (recoveryEnabled && Object.keys(dateTimes).length > 0) ||
+    (editRecoveryEnabled &&
+      Object.keys(dateTimes).some((id) => !!answerErrors[id])) ||
     JSON.stringify(core) !== JSON.stringify(cleanCore) ||
     openingQuantity !== '1' ||
     openingReason !== '' ||
@@ -1027,13 +1259,54 @@ export function MetadataForm({
       )
     : `/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/${baseline?.id}`;
   const reportTask = useReportTaskState({
-    dirty,
-    pending,
+    dirty: dirty && !state?.ok && !actorStale,
+    pending: pending && !state?.ok,
     uncertain,
     completed: state?.ok === true,
   });
+  const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
+  const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
+  const discardEdit = () => {
+    if (pending || uncertain || dispatched.current || actorStale) return false;
+    if (!editRecoveryEnabled || state?.ok || editBlocked) return true;
+    const active = editRecovery.current;
+    if (!active || active.status !== 'editing') return false;
+    const next: EditEnvelope = {
+      ...active,
+      sequence: active.sequence + 1,
+      status: 'discarded',
+      inputs: null,
+      command: null,
+    };
+    if (
+      !(editDurable.current && storeEdit(next, active)) &&
+      !(
+        editSession.current &&
+        removeEdit(
+          editDurable.current ? active : editPrevious.current,
+          editSession.current,
+        )
+      )
+    ) {
+      setRecoveryError(
+        recoveryLimitation +
+          ' Discard could not be recorded; keep this task open and retry.',
+      );
+      return false;
+    }
+    editRecovery.current = next;
+    return true;
+  };
+  useTaskDiscard(discardEdit);
   const discard = () => {
     if (taskCompleted || pending || uncertain || dispatched.current) return;
+    if (!creating && !discardEdit()) return;
+    if (navigationTarget && !creating) {
+      setDiscardOpen(false);
+      router.push(navigationTarget);
+      setNavigationTarget(null);
+      return;
+    }
     if (resetTask && !creating) {
       resetTask();
       return;
@@ -1107,6 +1380,33 @@ export function MetadataForm({
     setRefreshNeeded(false);
     setRecordRefreshError('');
     setDuplicates([]);
+    if (editRecoveryEnabled && editRecovery.current && latest) {
+      const active = editRecovery.current;
+      const next: EditEnvelope = {
+        ...active,
+        instance: crypto.randomUUID(),
+        sequence: 0,
+        status: 'editing',
+        baseline: editBaseline(latest),
+        inputs: {
+          ...currentInputs,
+          core: originalCore,
+          cleanCore: originalCore,
+          custom: initialCustom(latest.customValues),
+          touched: [],
+          dateTimes: {},
+          reviewedForms: publishedSnapshots(forms),
+          priorForms: {},
+        },
+        command: null,
+        completedRequestId: null,
+      };
+      editPrevious.current = readEdit(active.scope).envelope;
+      editDurable.current = false;
+      editRecovery.current = next;
+      inputsSnapshot.current = next.inputs;
+      setRecoveryError('');
+    }
     const details = formRef.current?.closest('details');
     if (details) {
       details.open = false;
@@ -1134,11 +1434,64 @@ export function MetadataForm({
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty, uncertain, pending, preview, terminalDraft, state]);
+    const guard = (event: MouseEvent) => {
+      if (
+        !editRecoveryEnabled ||
+        !recoveryError ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const anchor =
+        event.target instanceof Element
+          ? event.target.closest<HTMLAnchorElement>('a[href]')
+          : null;
+      if (
+        !anchor ||
+        anchor.hasAttribute('download') ||
+        (anchor.target && anchor.target !== '_self')
+      )
+        return;
+      const target = new URL(anchor.href, window.location.href);
+      if (
+        target.origin !== window.location.origin ||
+        !['http:', 'https:'].includes(target.protocol) ||
+        (target.pathname === window.location.pathname &&
+          target.search === window.location.search)
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      navigationAnchor.current = anchor;
+      setNavigationTarget(target.pathname + target.search + target.hash);
+      setDiscardOpen(true);
+    };
+    document.addEventListener('click', guard, true);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', guard, true);
+    };
+  }, [
+    dirty,
+    uncertain,
+    pending,
+    preview,
+    terminalDraft,
+    state,
+    editRecoveryEnabled,
+    recoveryError,
+  ]);
   const keepEditing = () => {
     setDiscardOpen(false);
-    cancelRef.current?.focus();
+    setNavigationTarget(null);
+    if (navigationAnchor.current) {
+      navigationAnchor.current.focus();
+      navigationAnchor.current = null;
+    } else cancelRef.current?.focus();
   };
   const payload = (
     values = core,
@@ -1299,6 +1652,7 @@ export function MetadataForm({
     if (
       (recoveryEnabled &&
         (!recoveryReady || recoveryBlocked || terminalDraft)) ||
+      (editRecoveryEnabled && (!editReady || editBlocked)) ||
       actorStale ||
       (!uncertain &&
         (!form ||
@@ -1326,6 +1680,11 @@ export function MetadataForm({
           return;
         }
         setCreationIntent(normalized);
+      } else {
+        const raw = payload();
+        const normalized = raw && normalizeEditIntent(kind, raw);
+        if (!normalized || itemStale) return;
+        setEditIntent(normalized);
       }
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
@@ -1367,7 +1726,21 @@ export function MetadataForm({
         return;
       }
     }
-    let commandPayload = creating ? creationIntent : payload();
+    if (!creating && !uncertain) {
+      const raw = payload();
+      const normalized = raw && normalizeEditIntent(kind, raw);
+      if (!normalized || itemStale || !equalValue(normalized, editIntent)) {
+        setReview(false);
+        setState({
+          ok: false,
+          code: 'review_changed',
+          message:
+            'The record or entered values changed. Review the changes again before saving.',
+        });
+        return;
+      }
+    }
+    let commandPayload = creating ? creationIntent : editIntent;
     let operation =
       openingSite && creating
         ? (`${kind}_site_open` as const)
@@ -1410,6 +1783,40 @@ export function MetadataForm({
       };
       setRecoveryError('');
     }
+    const persistEditCommand = (
+      payload: Record<string, unknown>,
+      id: string,
+      record = baseline,
+    ) => {
+      if (!editRecoveryEnabled) return true;
+      if (!editDurable.current && !persistEdit({}, record)) return false;
+      const active = editRecovery.current;
+      const command: EditCommand = {
+        operation: `${kind}_update_v2`,
+        requestId: id,
+        expectedActorId: formActor!,
+        payload,
+      };
+      if (active?.status === 'submitted')
+        return equalValue(active.command, command);
+      if (!active || !record) return false;
+      const next: EditEnvelope = {
+        ...active,
+        sequence: active.sequence + 1,
+        status: 'submitted',
+        baseline: editBaseline(record),
+        inputs: inputsSnapshot.current ?? currentInputs,
+        command,
+      };
+      if (!storeEdit(next, active)) {
+        setRecoveryError(recoveryLimitation);
+        return false;
+      }
+      editRecovery.current = next;
+      setRecoveryError('');
+      return true;
+    };
+    if (!persistEditCommand(commandPayload, requestId)) return;
     setReceipt({ key, id: requestId });
     dispatched.current = true;
     reportTask({ pending: true });
@@ -1479,6 +1886,23 @@ export function MetadataForm({
                 revisedForm,
               );
               if (revised) {
+                if (editRecoveryEnabled) {
+                  const active = editRecovery.current!;
+                  const editable: EditEnvelope = {
+                    ...active,
+                    sequence: active.sequence + 1,
+                    status: 'editing',
+                    command: null,
+                  };
+                  if (!storeEdit(editable, active, requestId)) {
+                    dispatched.current = false;
+                    reportTask({ pending: false, uncertain: true });
+                    setRecoveryError(recoveryLimitation);
+                    setUncertain(true);
+                    return;
+                  }
+                  editRecovery.current = editable;
+                }
                 adopt(fresh.record, merged.core, merged.custom, merged.touched);
                 setReviewedForms((prior) => ({
                   ...prior,
@@ -1487,6 +1911,24 @@ export function MetadataForm({
                 rebaseUsed.current = true;
                 commandPayload = revised;
                 requestId = crypto.randomUUID();
+                inputsSnapshot.current = {
+                  ...currentInputs,
+                  core: merged.core,
+                  cleanCore: initialCore(fresh.record, categories),
+                  custom: merged.custom,
+                  touched: merged.touched,
+                  reviewedForms: publishedSnapshots({
+                    ...reviewedForms,
+                    [merged.core.category_id]: revisedForm,
+                  }),
+                };
+                if (!persistEditCommand(revised, requestId, fresh.record)) {
+                  dispatched.current = false;
+                  reportTask({ pending: false, uncertain: false });
+                  setUncertain(false);
+                  setReview(false);
+                  return;
+                }
                 setReceipt({
                   key: JSON.stringify([operation, revised]),
                   id: requestId,
@@ -1510,6 +1952,52 @@ export function MetadataForm({
         };
       }
       dispatched.current = false;
+      if (editRecoveryEnabled) {
+        const active = editRecovery.current;
+        if (!active || active.command?.requestId !== requestId) return;
+        if (result.ok) {
+          const saved: EditEnvelope = {
+            ...active,
+            sequence: active.sequence + 1,
+            status: 'saved',
+            inputs: null,
+            command: null,
+            completedRequestId: requestId,
+          };
+          if (!storeEdit(saved, active, requestId)) {
+            setRecoveryError(
+              'Details were saved, but completion could not be retained. Retry the same save to record its acknowledgement safely.',
+            );
+            setUncertain(true);
+            setState(null);
+            return;
+          }
+          editRecovery.current = saved;
+        } else if (
+          ![
+            'unexpected',
+            'forbidden',
+            'P1001',
+            'idempotency_conflict',
+            'P1009',
+            'actor_changed',
+          ].includes(result.code)
+        ) {
+          const editable: EditEnvelope = {
+            ...active,
+            sequence: active.sequence + 1,
+            status: 'editing',
+            command: null,
+          };
+          if (!storeEdit(editable, active, requestId)) {
+            setRecoveryError(recoveryLimitation);
+            setUncertain(true);
+            setState(result);
+            return;
+          }
+          editRecovery.current = editable;
+        }
+      }
       if (creationCommand) {
         const active = recovery.current;
         if (!active || active.command?.requestId !== requestId) return;
@@ -1560,7 +2048,7 @@ export function MetadataForm({
       setUncertain(
         !result.ok &&
           (result.code === 'unexpected' ||
-            ((uncertain || recoveryEnabled) &&
+            ((uncertain || recoveryEnabled || editRecoveryEnabled) &&
               [
                 'forbidden',
                 'P1001',
@@ -1584,7 +2072,11 @@ export function MetadataForm({
               result.entityId,
               formActor,
             );
-            if (mountedActor.current === formActor && fresh.ok) {
+            if (
+              liveMount.current &&
+              mountedActor.current === formActor &&
+              fresh.ok
+            ) {
               adopt(
                 fresh.record,
                 initialCore(fresh.record, categories),
@@ -1631,6 +2123,13 @@ export function MetadataForm({
       }
     });
   };
+  if (actorStale)
+    return (
+      <p role="alert">
+        The signed-in account or environment changed. This task is hidden;
+        return to the original account and environment to recover it.
+      </p>
+    );
   return (
     <form
       ref={formRef}
@@ -1663,6 +2162,8 @@ export function MetadataForm({
           className="rounded border border-amber-700 p-3 text-amber-100"
         >
           {recoveryError}
+          {editRecoveryEnabled &&
+            ' Browser Back/Forward and reload recovery cannot be guaranteed until storage is restored. The browser warns before unloading where supported.'}
         </p>
       )}
       {terminalDraft && (
@@ -1772,6 +2273,34 @@ export function MetadataForm({
           </Button>
         </div>
       )}
+      {!creating &&
+        itemStale &&
+        recoveredRecord &&
+        !recordBlocked &&
+        reconciliation && (
+          <div role="alert">
+            The record changed while this draft was away. Review current details
+            while keeping your independent edits before saving.
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || uncertain || schemaStale}
+              onClick={() => {
+                recoveredEditing.current = false;
+                setRecoveredRecord(false);
+                adopt(
+                  latest!,
+                  reconciliation.core,
+                  reconciliation.custom,
+                  reconciliation.touched,
+                  true,
+                );
+              }}
+            >
+              Review current details
+            </Button>
+          </div>
+        )}
       {schemaConflictPending && (
         <p role="status">
           Loading the newly published category form. Your values remain
@@ -1895,9 +2424,11 @@ export function MetadataForm({
         <p role="alert">The selected category has no published form.</p>
       )}
       <fieldset
-        hidden={!!terminalDraft}
+        hidden={!!terminalDraft || (!creating && state?.ok === true)}
         disabled={
           taskCompleted ||
+          (!creating && state?.ok === true) ||
+          (editRecoveryEnabled && (!editReady || editBlocked)) ||
           (recoveryEnabled &&
             (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
           pending ||
@@ -2084,7 +2615,7 @@ export function MetadataForm({
         )}
       </fieldset>
       <ValidationSummary issues={validation.issues} />
-      {!preview && !terminalDraft && review && (
+      {!preview && !terminalDraft && review && !schemaStale && !itemStale && (
         <div
           className="rounded border border-cyan-700 p-3"
           role="region"
@@ -2146,10 +2677,41 @@ export function MetadataForm({
               );
             })()
           ) : (
-            <p>
-              Review {core.name || 'this record'} in{' '}
-              {categories.find((value) => value.id === core.category_id)?.name}.
-            </p>
+            <section aria-label="Changed details">
+              <h2 className="font-semibold">
+                Review changed details for {core.name || 'this record'}
+              </h2>
+              {editIntent &&
+                baseline &&
+                definition &&
+                (() => {
+                  const rows = editSummary({
+                    baseline,
+                    intent: editIntent,
+                    definition,
+                    categories,
+                    timeZone,
+                  });
+                  return rows.length ? (
+                    <dl className="mt-3 space-y-3">
+                      {rows.map((row) => (
+                        <div key={row.key} className="min-w-0">
+                          <dt className="text-sm text-slate-400">
+                            {row.label}
+                          </dt>
+                          <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            <span>{row.before}</span>
+                            <span aria-label=" changes to "> → </span>
+                            <span>{row.after}</span>
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <p>No changed values. Retained answers stay unchanged.</p>
+                  );
+                })()}
+            </section>
           )}
           {legacyMigration && (
             <label className="mt-2 flex items-start gap-2">
@@ -2157,7 +2719,15 @@ export function MetadataForm({
                 type="checkbox"
                 disabled={pending || uncertain}
                 checked={ackLegacy}
-                onChange={(event) => setAckLegacy(event.target.checked)}
+                onChange={(event) => {
+                  const acknowledged = event.target.checked;
+                  setAckLegacy(acknowledged);
+                  if (!creating && editIntent)
+                    setEditIntent({
+                      ...editIntent,
+                      acknowledge_legacy_values: acknowledged,
+                    });
+                }}
               />
               I understand that existing custom values from the previous
               category will remain visible as legacy values.
@@ -2188,15 +2758,57 @@ export function MetadataForm({
       )}
       {!preview && state?.ok && (
         <>
-          <p role="status">Metadata saved.</p>
-          {resetTask && (
+          <p role="status">Details saved.</p>
+          {!creating && (
             <Button
               type="button"
               className="hover:translate-y-0 active:scale-100"
-              disabled={pending}
-              onClick={resetTask}
+              disabled={pending && !state?.ok}
+              onClick={() => {
+                if (resetTask) resetTask();
+                else {
+                  const details = formRef.current?.closest('details');
+                  if (details) {
+                    details.open = false;
+                    details.querySelector('summary')?.focus();
+                  } else router.push(cancelPath);
+                }
+              }}
             >
-              New transaction
+              Done
+            </Button>
+          )}
+          {!creating && !resetTask && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || refreshNeeded}
+              onClick={() => {
+                const active = editRecovery.current;
+                if (editRecoveryEnabled && active && baseline) {
+                  const next: EditEnvelope = {
+                    ...active,
+                    instance: crypto.randomUUID(),
+                    sequence: 0,
+                    status: 'editing',
+                    baseline: editBaseline(baseline),
+                    inputs: currentInputs,
+                    command: null,
+                    completedRequestId: null,
+                  };
+                  editPrevious.current = active;
+                  editDurable.current = false;
+                  editRecovery.current = next;
+                  inputsSnapshot.current = currentInputs;
+                }
+                setState(null);
+                setReview(false);
+                setEditIntent(null);
+                recoveredEditing.current = false;
+                setRecoveredRecord(false);
+              }}
+            >
+              Edit details
             </Button>
           )}
         </>
@@ -2207,7 +2819,7 @@ export function MetadataForm({
           reviewing.
         </p>
       )}
-      {!preview && !terminalDraft && (
+      {!preview && !terminalDraft && !(!creating && state?.ok) && (
         <div
           className={
             (resetTask || creating ? '' : 'sticky bottom-0 z-10 ') +
@@ -2217,6 +2829,7 @@ export function MetadataForm({
           <Button
             disabled={
               taskCompleted ||
+              (editRecoveryEnabled && (!editReady || editBlocked)) ||
               (recoveryEnabled &&
                 (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
               pending ||
@@ -2286,7 +2899,9 @@ export function MetadataForm({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Discard changes?"
+          aria-label={
+            navigationTarget ? 'Leave this edit?' : 'Discard changes?'
+          }
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
@@ -2304,8 +2919,16 @@ export function MetadataForm({
           }}
         >
           <div className="max-w-md space-y-4 rounded border border-cyan-100/20 bg-slate-900 p-5">
-            <h2 className="text-lg font-semibold">Discard changes?</h2>
-            <p>Your entries have not been saved.</p>
+            <h2 className="text-lg font-semibold">
+              {navigationTarget ? 'Leave this edit?' : 'Discard changes?'}
+            </h2>
+            <p>
+              {navigationTarget && (uncertain || pending)
+                ? 'This save may have completed. Stay here and retry the same save to confirm its outcome.'
+                : navigationTarget
+                  ? 'Recovery storage is unavailable. Leaving will discard these unsaved entries.'
+                  : 'Your entries have not been saved.'}
+            </p>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -2313,11 +2936,13 @@ export function MetadataForm({
                 ref={keepRef}
                 onClick={keepEditing}
               >
-                Keep editing
+                {navigationTarget ? 'Stay' : 'Keep editing'}
               </Button>
-              <Button type="button" data-discard onClick={discard}>
-                Discard changes
-              </Button>
+              {!(navigationTarget && (uncertain || pending)) && (
+                <Button type="button" data-discard onClick={discard}>
+                  Discard changes
+                </Button>
+              )}
             </div>
           </div>
         </div>

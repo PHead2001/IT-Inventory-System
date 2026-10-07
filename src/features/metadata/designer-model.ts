@@ -5,6 +5,7 @@ import {
 } from './contracts';
 import { z } from 'zod';
 import { controlKinds, controlVisible, formKinds } from './effective-controls';
+import { ambiguousOptionIds, optionDisplayLabels } from './option-label';
 
 export type Field = MetadataDefinition['fields'][number];
 export type Section = MetadataDefinition['layout'][number];
@@ -223,6 +224,7 @@ export function removeSection(
 }
 
 export function optionPath(options: Option[], id: string): string | null {
+  const displayLabels = optionDisplayLabels(options);
   const byId = new Map(options.map((option) => [option.id, option]));
   const path: string[] = [];
   const visited = new Set<string>();
@@ -230,7 +232,7 @@ export function optionPath(options: Option[], id: string): string | null {
   while (current) {
     if (visited.has(current.id) || path.length >= 64) return null;
     visited.add(current.id);
-    path.unshift(current.label);
+    path.unshift(displayLabels.get(current.id) ?? current.label);
     if (current.parent_id && !byId.has(current.parent_id)) return null;
     current = current.parent_id ? byId.get(current.parent_id) : undefined;
   }
@@ -239,6 +241,7 @@ export function optionPath(options: Option[], id: string): string | null {
 
 /** Builds paths once for a choice editor render; each walk is capped at 64 hops. */
 export function buildOptionIndex(options: Option[]) {
+  const displayLabels = optionDisplayLabels(options);
   const byId = new Map(options.map((option) => [option.id, option]));
   const children = new Map<string | null, Option[]>();
   const paths = new Map<string, string | null>();
@@ -252,7 +255,7 @@ export function buildOptionIndex(options: Option[]) {
     const seen = new Set<string>();
     let current: Option | undefined = option;
     while (current && labels.length < 64 && !seen.has(current.id)) {
-      labels.unshift(current.label);
+      labels.unshift(displayLabels.get(current.id) ?? current.label);
       seen.add(current.id);
       current = current.parent_id ? byId.get(current.parent_id) : undefined;
     }
@@ -277,7 +280,7 @@ export function buildOptionIndex(options: Option[]) {
     }
     return descendants;
   };
-  return { byId, children, paths, depths, descendantsOf };
+  return { byId, children, paths, depths, descendantsOf, displayLabels };
 }
 
 export function canReparent(
@@ -518,6 +521,13 @@ export function designerIssues(def: MetadataDefinition): string[] {
   const controls = def.layout.flatMap((section) => section.controls);
   for (const field of def.fields) {
     const optionIndex = buildOptionIndex(field.options);
+    const ambiguous = ambiguousOptionIds(field.options);
+    for (const option of field.options.filter((entry) =>
+      ambiguous.has(entry.id),
+    ))
+      issues.push(
+        `${field.label || 'A field'}: ${optionPath(field.options, option.id)} has an indistinguishable active sibling. Rename or retire one choice before publishing.`,
+      );
     if (!field.label.trim()) issues.push('A field needs a label.');
     if (field.applies_to.length === 0)
       issues.push(`${field.label || 'A field'} needs inventory applicability.`);
@@ -561,9 +571,19 @@ export function designerIssues(def: MetadataDefinition): string[] {
           ? ['min', 'max']
           : field.type === 'multi_select'
             ? ['maxSelections']
-            : [];
+            : field.type === 'boolean'
+              ? ['booleanPresentation']
+              : [];
     if (Object.keys(field.rules).some((key) => !allowed.includes(key)))
       issues.push(`${field.label || 'A field'} has unsupported rules.`);
+    if (
+      field.type === 'boolean' &&
+      field.rules.booleanPresentation !== undefined &&
+      !['checkbox', 'yes_no'].includes(String(field.rules.booleanPresentation))
+    )
+      issues.push(
+        `${field.label || 'A field'} has an unsupported boolean presentation.`,
+      );
     if (['short_text', 'long_text'].includes(field.type)) {
       const min = field.rules.minLength,
         max = field.rules.maxLength;

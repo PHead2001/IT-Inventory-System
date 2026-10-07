@@ -296,5 +296,141 @@ it('replays the exact uncertain command despite newer custody and unavailable de
   );
   await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(3));
   expect(vi.mocked(submitCustody).mock.calls[2][0]).toEqual(first);
-  expect(screen.getByRole('button', { name: 'New transaction' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Done' })).toBeVisible();
+});
+
+it('keeps a last-unit committed receipt independent of depleted live sources and Done performs no new write', async () => {
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: true,
+    entityId: id(1),
+    version: '2',
+    changed: true,
+    eventId: id(10),
+    custody: {
+      eventId: id(10),
+      operation: 'issued',
+      actorName: 'Staff',
+      createdAt: '2026-10-07T12:00:00Z',
+      quantity: 1,
+      source: {
+        id: location.id,
+        kind: 'storage',
+        name: 'Red container',
+        after: 0,
+      },
+      destination: { id: site.id, kind: 'site', name: site.name, after: 1 },
+      reference: 'TICKET-1',
+      reason: null,
+    },
+  });
+  const props = {
+    kind: 'quantity' as const,
+    action: 'issue' as const,
+    entityId: id(1),
+    entityName: 'Adapters',
+    version: '1',
+    locations: [location],
+    sites: [site],
+    storageBalances: [{ location, quantity: 1 }],
+  };
+  const view = render(<CustodyChangeForm {...props} />);
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Issue stock to a site' }),
+  );
+  await screen.findByRole('button', { name: 'Done' });
+  view.rerender(
+    <CustodyChangeForm
+      {...props}
+      version="3"
+      locations={[]}
+      sites={[]}
+      storageBalances={[]}
+    />,
+  );
+  expect(
+    screen.getByRole('region', { name: 'Committed custody receipt' }),
+  ).toHaveTextContent('Red container');
+  expect(
+    screen.getByText('Red container · remaining after this operation')
+      .nextElementSibling,
+  ).toHaveTextContent('0 units');
+  expect(
+    screen.queryByRole('combobox', { name: 'Destination site' }),
+  ).toBeNull();
+  expect(screen.queryByText(/No sites are configured/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+  expect(submitCustody).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: 'Issue another' })).toBeDisabled();
+});
+
+it('preserves a last-unit return source name even when it leaves site holdings and choices', async () => {
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: true,
+    entityId: id(1),
+    version: '2',
+    changed: true,
+    custody: {
+      eventId: id(10),
+      operation: 'returned',
+      actorName: 'Staff',
+      createdAt: '2026-10-07T12:00:00Z',
+      quantity: 1,
+      source: { id: site.id, kind: 'site', name: site.name, after: 0 },
+      destination: {
+        id: location.id,
+        kind: 'storage',
+        name: location.name,
+        after: 5,
+      },
+      reference: null,
+      reason: null,
+    },
+  });
+  const props = {
+    kind: 'quantity' as const,
+    action: 'return' as const,
+    entityId: id(1),
+    version: '1',
+    locations: [location],
+    sites: [site],
+    currentSite: site,
+    siteHoldings: [
+      {
+        site_id: site.id,
+        site_code: site.code,
+        site_name: site.name,
+        site_active: true,
+        inventory_kind: 'quantity' as const,
+        entity_id: id(1),
+        name: 'Adapters',
+        category_name: 'Parts',
+        manufacturer: null,
+        model: null,
+        quantity: 1,
+        asset_tag: null,
+        serial_number: null,
+      },
+    ],
+  };
+  const view = render(<CustodyChangeForm {...props} />);
+  fireEvent.click(
+    screen
+      .getAllByRole('button', { name: 'Return to storage' })
+      .find((button) => button.getAttribute('type') === 'button')!,
+  );
+  fireEvent.submit(screen.getByRole('form', { name: 'Return to storage' }));
+  await screen.findByRole('button', { name: 'Done' });
+  view.rerender(
+    <CustodyChangeForm {...props} version="2" sites={[]} siteHoldings={[]} />,
+  );
+  expect(
+    screen.getByRole('region', { name: 'Committed custody receipt' }),
+  ).toHaveTextContent(site.name);
+  expect(
+    screen.getByText(`${site.name} · remaining after this operation`)
+      .nextElementSibling,
+  ).toHaveTextContent('0 units');
 });

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +39,11 @@ vi.mock('@/features/metadata/metadata-form', () => ({
   MetadataForm: () => null,
 }));
 vi.mock('@/features/metadata/queries.server', () => ({
-  getPublishedForms: vi.fn(),
+  getPublishedForms: async () => ({}),
+}));
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(),
+  useRouter: () => ({ push: vi.fn() }),
 }));
 vi.mock('@/features/inventory/components/archive-quantity-form', () => ({
   ArchiveQuantityPanel: () => null,
@@ -187,6 +191,11 @@ it.each([1, 2])(
           to_label: 'Remote office',
         },
       ],
+      eventTotal: 1,
+      from: null,
+      until: null,
+      activityValid: true,
+      activityErrors: {},
     });
     render(
       await SitePage({
@@ -200,9 +209,11 @@ it.each([1, 2])(
     expect(screen.getByText(/Storage → Remote office/)).toHaveTextContent(
       new RegExp(label + '\\b'),
     );
-    const groups = screen.getByRole('region', {
-      name: 'Grouped current holdings',
-    });
+    const groups = screen.getByLabelText('Grouped current holdings');
+    expect(groups).not.toHaveAttribute('open');
+    fireEvent.click(
+      within(groups).getByText('By category, product, and model'),
+    );
     expect(
       within(groups).getByText(
         `${quantity} quantity unit${quantity === 1 ? '' : 's'}`,

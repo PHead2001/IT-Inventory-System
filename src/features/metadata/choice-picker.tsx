@@ -1,5 +1,5 @@
 'use client';
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { buildOptionIndex, type Field } from './designer-model';
 
 const input =
@@ -16,6 +16,7 @@ export type ChoicePickerProps = {
   invalid?: boolean;
   disabled?: boolean;
   historicalLabel?: string;
+  required?: boolean;
 };
 
 /** Answers are canonical IDs. Selecting a different branch replaces the entire answer. */
@@ -30,9 +31,11 @@ export function ChoicePicker({
   invalid,
   disabled,
   historicalLabel,
+  required = false,
 }: ChoicePickerProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
+  const container = useRef<HTMLFieldSetElement>(null);
   const index = useMemo(() => buildOptionIndex(options), [options]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -50,6 +53,17 @@ export function ChoicePicker({
     index.paths.get(optionId) ??
     historicalLabel ??
     'Previously selected option';
+  const hasRetiredAncestor = (optionId: string) => {
+    let parent = index.byId.get(optionId)?.parent_id;
+    const seen = new Set<string>();
+    while (parent && !seen.has(parent)) {
+      seen.add(parent);
+      const ancestor = index.byId.get(parent);
+      if (!ancestor?.active) return true;
+      parent = ancestor.parent_id;
+    }
+    return false;
+  };
   const available = options.filter(
     (option) => option.active && index.paths.get(option.id) !== null,
   );
@@ -116,7 +130,7 @@ export function ChoicePicker({
             )}
           {available.map((option) => (
             <option key={option.id} value={option.id}>
-              {option.label || 'Unnamed option'}
+              {index.displayLabels.get(option.id)}
             </option>
           ))}
         </select>
@@ -124,6 +138,8 @@ export function ChoicePicker({
     );
   return (
     <fieldset
+      ref={container}
+      tabIndex={-1}
       id={id}
       aria-describedby={describedBy}
       aria-invalid={invalid || undefined}
@@ -140,7 +156,11 @@ export function ChoicePicker({
     >
       <legend>{label}</legend>
       {multiple && (
-        <p className="text-xs text-slate-400">Choose more than one.</p>
+        <p className="text-xs text-slate-400">
+          {required
+            ? 'Record an answer: select any that apply, or choose none.'
+            : 'Select any that apply. You can leave this unanswered or choose none.'}
+        </p>
       )}
       <p className="break-words text-sm" aria-live="polite">
         {selected.length
@@ -153,7 +173,14 @@ export function ChoicePicker({
         <button
           type="button"
           className="text-xs underline"
-          onClick={() => onChange(undefined)}
+          onClick={() => {
+            onChange(undefined);
+            (
+              container.current?.querySelector<HTMLElement>(
+                'input, button[aria-pressed]',
+              ) ?? container.current
+            )?.focus();
+          }}
         >
           Clear answer
         </button>
@@ -201,7 +228,7 @@ export function ChoicePicker({
                   checked={selectedSet.has(option.id)}
                   onChange={() => toggle(option.id)}
                 />
-                {option.label}
+                {index.displayLabels.get(option.id)}
               </label>
             ) : (
               <button
@@ -210,7 +237,9 @@ export function ChoicePicker({
                 className="min-h-10 w-full rounded border border-slate-700 px-2 text-left hover:bg-slate-800"
                 onClick={() => toggle(option.id)}
               >
-                {search ? path(option.id) : option.label || 'Unnamed option'}
+                {search || (hierarchy && hasRetiredAncestor(option.id))
+                  ? path(option.id)
+                  : index.displayLabels.get(option.id)}
                 {hierarchy && (index.children.get(option.id)?.length ?? 0) > 0
                   ? ' — Choose this option'
                   : ''}

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
@@ -163,6 +163,10 @@ it('explains both tracking choices before entry and preserves the selected inven
       }),
     }),
   );
+  expect(screen.getByText('Add item').closest('details')).not.toHaveAttribute(
+    'open',
+  );
+  fireEvent.click(screen.getByText('Add item'));
   const quantity = screen.getByRole('link', { name: 'Add quantity item' });
   const asset = screen.getByRole('link', { name: 'Add individual asset' });
   expect(quantity).toHaveAccessibleDescription(

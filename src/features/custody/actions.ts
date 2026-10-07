@@ -4,6 +4,8 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { Json } from '@/lib/supabase/database.types';
 import { isActiveMember, mayManageConfiguration } from '@/lib/auth/membership';
 import { mutationResultSchema } from '@/features/inventory/contracts';
+import { z } from 'zod';
+import { readCustodyReceipt } from './custody-receipt.server';
 import {
   custodyError,
   parseCustodyCommand,
@@ -63,28 +65,97 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
         message:
           'Use Archive site or Restore site to change site availability and record a reason.',
       };
-    if (error) return custodyError(error.code);
+    if (error) {
+      if (operation === 'site_create' && error.code === 'P1007')
+        return {
+          ok: false,
+          code: 'P1007',
+          message:
+            'That site code is already in use. Choose a different site code.',
+        };
+      return custodyError(error.code);
+    }
     const result = mutationResultSchema.safeParse(data);
     if (!result.success) return custodyError();
-    for (const path of [
-      '/inventory',
-      '/dashboard',
-      '/locations',
-      '/sites',
-      '/history',
-      '/settings',
-      '/labels',
-      '/room',
-      '/spaces',
-    ])
-      revalidatePath(path);
-    return {
+    const committed: Extract<CustodyState, { ok: true }> = {
       ok: true,
       entityId: result.data.entity_id,
       version: result.data.version,
       changed: result.data.changed,
+      ...(result.data.event_id ? { eventId: result.data.event_id } : {}),
     };
+    if (
+      result.data.event_id &&
+      (operation === 'quantity_site_change' ||
+        operation === 'asset_site_change' ||
+        operation === 'quantity_site_open' ||
+        operation === 'asset_site_open')
+    ) {
+      try {
+        committed.custody = await readCustodyReceipt(
+          supabase,
+          operation.startsWith('quantity') ? 'quantity' : 'asset',
+          committed.entityId,
+          result.data.event_id,
+        );
+      } catch {
+        committed.refreshFailed = true;
+      }
+    }
+    // The parsed RPC acknowledgement is authoritative even if subsequent reads
+    // or cache invalidation fail. Never invite a fresh write after that point.
+    try {
+      for (const path of [
+        '/inventory',
+        '/dashboard',
+        '/locations',
+        '/sites',
+        '/history',
+        '/settings',
+        '/labels',
+        '/room',
+        '/spaces',
+      ])
+        revalidatePath(path);
+    } catch {
+      committed.refreshFailed = true;
+    }
+    return committed;
   } catch {
     return custodyError();
+  }
+}
+
+export async function loadCustodyReceipt(input: unknown) {
+  const parsed = z
+    .strictObject({
+      kind: z.enum(['quantity', 'asset']),
+      entityId: z.uuid(),
+      eventId: z.uuid(),
+      expectedActorId: z.uuid(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return null;
+  try {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    if (error || !user || user.id !== parsed.data.expectedActorId) return null;
+    const member = await supabase
+      .from('app_members')
+      .select('user_id,display_name,role,active')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (member.error || !isActiveMember(member.data)) return null;
+    return await readCustodyReceipt(
+      supabase,
+      parsed.data.kind,
+      parsed.data.entityId,
+      parsed.data.eventId,
+    );
+  } catch {
+    return null;
   }
 }

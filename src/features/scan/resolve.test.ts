@@ -77,6 +77,26 @@ it('keeps stable URL resolution tied to live records after rename and move', asy
     label: 'Moved laptop',
   });
 });
+it('resolves a known padded production-shaped quantity label exactly like its unpadded form', async () => {
+  const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
+  db.quantity.mockResolvedValue({
+    data: {
+      id,
+      name: 'Known quantity',
+      archived: false,
+      item_code: '0007-A/B',
+    },
+    error: null,
+  });
+  const value = 'https://inventory.example.test/inventory/quantity/' + id;
+  expect(await resolveScan(' \r\n' + value + '\t ')).toEqual(
+    await resolveScan(value),
+  );
+  expect(await resolveScan(value.slice(0, -1) + '\n4')).toEqual({
+    status: 'invalid',
+    matches: [],
+  });
+});
 it('does not guess when a bare code exists in both namespaces', async () => {
   db.location.mockResolvedValue({
     data: { code: 'ITC', name: 'Room', active: false },

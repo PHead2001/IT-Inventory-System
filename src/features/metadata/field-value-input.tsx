@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { field as fieldClass } from '@/features/inventory/components/read-ui';
 import { ChoicePicker } from './choice-picker';
 import { optionPath } from './designer-model';
+import { fieldPlaceholder } from './field-guidance';
 import {
   fieldValueError,
   instantMicros,
@@ -308,25 +309,51 @@ export function MetadataFieldInput({
   const heading = label + (field.required ? ' (required)' : '');
   let input: React.ReactNode;
   if (field.type === 'boolean')
-    input = (
-      <label
-        htmlFor={id}
-        className="flex min-h-11 items-center gap-2 break-words"
-      >
-        <input
-          {...common}
-          type="checkbox"
-          className="h-6 w-6 shrink-0 accent-cyan-400"
-          checked={value === true}
-          aria-checked={value === undefined ? 'mixed' : value === true}
-          ref={(element) => {
-            if (element) element.indeterminate = value === undefined;
-          }}
-          onChange={(event) => change(event.target.checked)}
-        />
-        <span>{heading}</span>
-      </label>
-    );
+    input =
+      field.rules.booleanPresentation === 'yes_no' ? (
+        <fieldset
+          disabled={locked}
+          aria-describedby={describedBy}
+          aria-invalid={common['aria-invalid']}
+        >
+          <legend className="break-words">{heading}</legend>
+          <div className="flex gap-4">
+            {[true, false].map((answer) => (
+              <label
+                key={String(answer)}
+                className="flex min-h-11 items-center gap-2"
+              >
+                <input
+                  id={answer ? id : id + '-no'}
+                  type="radio"
+                  name={id}
+                  checked={value === answer}
+                  onChange={() => change(answer)}
+                />
+                {answer ? 'Yes' : 'No'}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : (
+        <label
+          htmlFor={id}
+          className="flex min-h-11 items-center gap-2 break-words"
+        >
+          <input
+            {...common}
+            type="checkbox"
+            className="h-6 w-6 shrink-0 accent-cyan-400"
+            checked={value === true}
+            aria-checked={value === undefined ? 'mixed' : value === true}
+            ref={(element) => {
+              if (element) element.indeterminate = value === undefined;
+            }}
+            onChange={(event) => change(event.target.checked)}
+          />
+          <span>{heading}</span>
+        </label>
+      );
   else if (
     ['single_select', 'multi_select', 'hierarchical_select'].includes(
       field.type,
@@ -343,6 +370,7 @@ export function MetadataFieldInput({
         describedBy={describedBy}
         invalid={((interacted || showErrors) && !!error) || undefined}
         disabled={locked}
+        required={field.required}
         historicalLabel={
           typeof value === 'string'
             ? (optionPath(previousOptions ?? [], value) ?? undefined)
@@ -385,7 +413,7 @@ export function MetadataFieldInput({
           <textarea
             {...common}
             rows={4}
-            placeholder="Enter a detailed note"
+            placeholder={fieldPlaceholder(field)}
             value={text}
             onChange={(event) => change(event.target.value)}
           />
@@ -401,17 +429,7 @@ export function MetadataFieldInput({
                     ? 'decimal'
                     : undefined
               }
-              placeholder={
-                field.type === 'url'
-                  ? 'https://example.com/manual'
-                  : field.type === 'integer'
-                    ? '24'
-                    : field.type === 'decimal'
-                      ? '1.5'
-                      : field.type === 'currency'
-                        ? '125.00'
-                        : 'Enter text'
-              }
+              placeholder={fieldPlaceholder(field)}
               value={text}
               onChange={(event) => {
                 const next = event.target.value;
@@ -471,6 +489,10 @@ export function MetadataFieldInput({
             onClick={() => {
               setDatetimeError('');
               change(undefined);
+              const target = document.getElementById(
+                field.type === 'datetime' ? id + '-date' : id,
+              );
+              target?.focus();
             }}
           >
             Clear answer

@@ -30,7 +30,12 @@ const area = {
   sort_order: 1,
   version: '1',
 };
-beforeEach(() => vi.mocked(submitCustody).mockReset());
+beforeEach(() => {
+  vi.mocked(submitCustody).mockReset();
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://site-test.supabase.co');
+  sessionStorage.clear();
+  window.history.replaceState(null, '', '/settings/sites');
+});
 
 it('keeps site creation errors associated and focuses Name before submission', () => {
   render(<SiteManagementForm />);
@@ -100,6 +105,196 @@ it('suggests a site code from its name and submits that visible suggestion', asy
   expect(screen.getByRole('status')).toHaveTextContent(
     'That permanent code is already in use.',
   );
+});
+
+it('finishes site creation with a named receipt and only Add another opens an empty new operation', async () => {
+  vi.mocked(submitCustody).mockResolvedValue({
+    ok: true,
+    entityId: id(9),
+    version: '1',
+    changed: true,
+  });
+  render(<SiteManagementForm />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Oak Creek' },
+  });
+  const form = screen
+    .getByRole('button', { name: 'Save site' })
+    .closest('form')!;
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  await screen.findByRole('heading', { name: 'Site created' });
+  expect(submitCustody).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button', { name: 'Save site' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'View site' })).toHaveAttribute(
+    'href',
+    '/sites/OAK-CREEK',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Add another' }));
+  expect(screen.getByLabelText('Name')).toHaveValue('');
+  expect(screen.getByLabelText('Permanent code', { exact: true })).toHaveValue(
+    '',
+  );
+  expect(submitCustody).toHaveBeenCalledTimes(1);
+});
+
+it('recovers dirty site values with their original version through navigation and blocks stale save', () => {
+  const view = render(<SiteManagementForm site={site} actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Recovered name' },
+  });
+  view.unmount();
+  render(
+    <SiteManagementForm
+      site={{ ...site, name: 'External change', version: '2' }}
+      actorId={id(8)}
+    />,
+  );
+  expect(screen.getByLabelText('Name')).toHaveValue('Recovered name');
+  expect(screen.getByRole('button', { name: 'Save site' })).toBeDisabled();
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Site settings changed elsewhere',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByLabelText('Name')).toHaveValue('External change');
+});
+
+it('recovers an unknown site-create request exactly, retains its canonical draft and completes once', async () => {
+  vi.mocked(submitCustody)
+    .mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: id(9),
+      version: '1',
+      changed: true,
+    });
+  const view = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Retry site' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+  await screen.findByRole('button', { name: 'Retry submission' });
+  const original = vi.mocked(submitCustody).mock.calls[0][0];
+  const draft = new URL(window.location.href).searchParams.get('siteDraft');
+  view.unmount();
+  render(<SiteManagementForm actorId={id(8)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue('Retry site');
+  expect(screen.getByLabelText('Name')).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry submission' }));
+  await screen.findByRole('heading', { name: 'Site created' });
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(original);
+  expect(new URL(window.location.href).searchParams.get('siteDraft')).toBe(
+    draft,
+  );
+});
+
+it('does not restore another actor or backend site draft', () => {
+  const view = render(<SiteManagementForm site={site} actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Private draft' },
+  });
+  view.unmount();
+  const other = render(<SiteManagementForm site={site} actorId={id(9)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue(site.name);
+  other.unmount();
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://other-test.supabase.co');
+  render(<SiteManagementForm site={site} actorId={id(8)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue(site.name);
+});
+
+it('masks same-mounted drafts and completion across actor/environment changes and restores the original context', () => {
+  const view = render(<SiteManagementForm site={site} actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Actor A draft' },
+  });
+  view.rerender(<SiteManagementForm site={site} actorId={id(9)} />);
+  expect(screen.queryByLabelText('Name')).toBeNull();
+  expect(screen.queryByDisplayValue('Actor A draft')).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'another signed-in account or environment',
+  );
+  view.rerender(<SiteManagementForm site={site} actorId={id(8)} />);
+  expect(screen.getByLabelText('Name')).toHaveValue('Actor A draft');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://changed.supabase.co');
+  view.rerender(<SiteManagementForm site={site} actorId={id(8)} />);
+  expect(screen.queryByLabelText('Name')).toBeNull();
+});
+
+it('keeps known site creation success while retrying only the exact durable terminal acknowledgement', async () => {
+  const original = Storage.prototype.setItem;
+  let failTerminal = false;
+  const storage = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(function (this: Storage, key: string, value: string) {
+      if (
+        failTerminal &&
+        key.startsWith('inventory-site-task-v1:') &&
+        JSON.parse(value).status === 'saved'
+      )
+        throw new Error('Storage unavailable');
+      original.call(this, key, value);
+    });
+  try {
+    vi.mocked(submitCustody).mockImplementation(async () => {
+      failTerminal = true;
+      return { ok: true, entityId: id(9), version: '1', changed: true };
+    });
+    render(<SiteManagementForm actorId={id(8)} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Confirmed site' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+    await screen.findByRole('heading', { name: 'Site created' });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Site saved, but completion recovery',
+    );
+    expect(screen.getByRole('button', { name: 'Add another' })).toBeDisabled();
+    failTerminal = false;
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry site recovery' }),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add another' })).toBeEnabled();
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    const saved = Array.from({ length: sessionStorage.length }, (_, index) =>
+      sessionStorage.getItem(sessionStorage.key(index)!),
+    ).find((raw) => raw?.includes('Confirmed site'))!;
+    expect(JSON.parse(saved).status).toBe('saved');
+  } finally {
+    storage.mockRestore();
+  }
+});
+
+it('masks a pending site response after actor change and resolves only under the original actor', async () => {
+  let finish!: (result: Awaited<ReturnType<typeof submitCustody>>) => void;
+  vi.mocked(submitCustody)
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: id(9),
+      version: '1',
+      changed: true,
+    });
+  const view = render(<SiteManagementForm actorId={id(8)} />);
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Actor A pending' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
+  const command = vi.mocked(submitCustody).mock.calls[0][0];
+  view.rerender(<SiteManagementForm actorId={id(9)} />);
+  finish({ ok: true, entityId: id(9), version: '1', changed: true });
+  await waitFor(() =>
+    expect(screen.queryByRole('heading', { name: 'Site created' })).toBeNull(),
+  );
+  view.rerender(<SiteManagementForm actorId={id(8)} />);
+  await screen.findByRole('button', { name: 'Retry submission' });
+  fireEvent.click(screen.getByRole('button', { name: 'Retry submission' }));
+  await screen.findByRole('heading', { name: 'Site created' });
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(command);
 });
 
 it('keeps a nonempty manual code through name edits and restores the suggestion when cleared', () => {

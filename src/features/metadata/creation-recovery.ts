@@ -71,7 +71,7 @@ const snapshots = z
       Object.keys(value).length <= 32 &&
       Object.entries(value).every(([key, form]) => form.category_id === key),
   );
-const inputsSchema = z.strictObject({
+export const inputsSchema = z.strictObject({
   core: coreSchema,
   cleanCore: coreSchema,
   custom: answers,
@@ -158,7 +158,7 @@ const envelopeSchema = z
     }
   });
 export type CreationEnvelope = z.infer<typeof envelopeSchema>;
-const boundedJSON = (value: unknown, depth = 0): boolean => {
+export const boundedJSON = (value: unknown, depth = 0): boolean => {
   if (depth > 12) return false;
   if (value === null || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);

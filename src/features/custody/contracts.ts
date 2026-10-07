@@ -153,14 +153,61 @@ export const custodySchemas = {
   }),
 } as const;
 export type CustodyOperation = keyof typeof custodySchemas;
+export type CustodyReceipt = {
+  eventId: string;
+  operation: string;
+  actorName: string;
+  createdAt: string;
+  quantity: number | null;
+  source: {
+    id: string;
+    kind: 'storage' | 'site';
+    name: string;
+    after?: number;
+  } | null;
+  destination: {
+    id: string;
+    kind: 'storage' | 'site';
+    name: string;
+    after?: number;
+  } | null;
+  reference: string | null;
+  reason: string | null;
+};
 export type CustodyState =
-  | { ok: true; entityId: string; version: string; changed: boolean }
+  | {
+      ok: true;
+      entityId: string;
+      version: string;
+      changed: boolean;
+      eventId?: string;
+      custody?: CustodyReceipt;
+      refreshFailed?: boolean;
+    }
   | {
       ok: false;
       code: string;
       message: string;
       fieldErrors?: Record<string, string>;
     };
+
+export function custodyOutcomeUnresolved(
+  result: CustodyState,
+  previouslyUncertain: boolean,
+) {
+  return (
+    !result.ok &&
+    (result.code === 'unexpected' ||
+      (previouslyUncertain &&
+        [
+          'P1001',
+          'P1009',
+          'forbidden',
+          'actor_changed',
+          'idempotency_conflict',
+        ].includes(result.code)))
+  );
+}
 
 export function parseCustodyCommand(input: unknown) {
   const envelope = z

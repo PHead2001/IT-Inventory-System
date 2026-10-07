@@ -38,6 +38,8 @@ export function validReturnPath(value: unknown): string | null {
 }
 
 export function parseScan(value: string, origin: string): ScanTarget | null {
+  if (typeof value !== 'string' || value.length > 1024) return null;
+  value = value.trim();
   if (
     value.length === 0 ||
     value.length > 1024 ||

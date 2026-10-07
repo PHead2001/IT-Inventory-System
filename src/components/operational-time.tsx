@@ -16,6 +16,7 @@ import {
 } from '@/lib/operational-time';
 
 const TimeZoneContext = createContext(initialDisplayTimeZone);
+export const useOperationalTimeZone = () => useContext(TimeZoneContext);
 const subscribe = () => () => {};
 export function OperationalTimeProvider({ children }: { children: ReactNode }) {
   const [store] = useState(() => {

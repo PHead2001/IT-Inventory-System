@@ -7,12 +7,17 @@ const mocks = vi.hoisted(() => ({
   eq: vi.fn(),
   member: vi.fn(),
   rpc: vi.fn(),
+  receipt: vi.fn(),
+  revalidate: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: mocks.create,
 }));
-vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
-import { submitCustody } from './actions';
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidate }));
+vi.mock('./custody-receipt.server', () => ({
+  readCustodyReceipt: mocks.receipt,
+}));
+import { submitCustody, loadCustodyReceipt } from './actions';
 const actor = 'b1000000-0000-4000-8000-000000000001';
 const requestId = 'b1000000-0000-4000-8000-000000000002';
 const other = 'b1000000-0000-4000-8000-000000000003';
@@ -112,4 +117,83 @@ it('gives legacy lifecycle callers an actionable reasoned-action upgrade', async
     message:
       'Use Archive site or Restore site to change site availability and record a reason.',
   });
+});
+
+it('names the site code without asset-tag errors for create collisions', async () => {
+  mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P1007' } });
+  expect(await submitCustody(command)).toMatchObject({
+    ok: false,
+    code: 'P1007',
+    message: expect.stringContaining('site code'),
+  });
+  expect(await submitCustody(command)).not.toHaveProperty(
+    'message',
+    expect.stringContaining('asset tag'),
+  );
+});
+it('retains commit acknowledgement and event identity after receipt or cache failure', async () => {
+  mocks.rpc.mockResolvedValue({
+    data: {
+      entity_id: other,
+      version: '2',
+      event_id: requestId,
+      changed: true,
+    },
+    error: null,
+  });
+  mocks.receipt.mockRejectedValue(new Error('read unavailable'));
+  mocks.revalidate.mockImplementation(() => {
+    throw new Error('cache unavailable');
+  });
+  expect(
+    await submitCustody({
+      operation: 'quantity_site_change',
+      requestId,
+      expectedActorId: actor,
+      payload: {
+        action: 'issue',
+        item_id: other,
+        expected_version: '1',
+        source_location_id: actor,
+        destination_site_id: requestId,
+        quantity: 1,
+      },
+    }),
+  ).toMatchObject({
+    ok: true,
+    entityId: other,
+    eventId: requestId,
+    refreshFailed: true,
+  });
+  expect(mocks.receipt).toHaveBeenCalledOnce();
+  expect(mocks.rpc).toHaveBeenCalledOnce();
+});
+it('checks current actor and active membership before loading an exact receipt', async () => {
+  expect(
+    await loadCustodyReceipt({
+      kind: 'quantity',
+      entityId: other,
+      eventId: requestId,
+      expectedActorId: other,
+    }),
+  ).toBeNull();
+  expect(mocks.receipt).not.toHaveBeenCalled();
+  mocks.member.mockResolvedValue({
+    data: {
+      user_id: actor,
+      active: false,
+      role: 'staff',
+      display_name: 'Former staff',
+    },
+    error: null,
+  });
+  expect(
+    await loadCustodyReceipt({
+      kind: 'quantity',
+      entityId: other,
+      eventId: requestId,
+      expectedActorId: actor,
+    }),
+  ).toBeNull();
+  expect(mocks.receipt).not.toHaveBeenCalled();
 });

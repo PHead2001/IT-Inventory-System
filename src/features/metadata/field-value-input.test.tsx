@@ -65,6 +65,49 @@ function Harness({
     />
   );
 }
+it('chooses No directly in Yes/No presentation, accepts required false, and clears back to unanswered with focus', () => {
+  const config = {
+    ...field('boolean'),
+    required: true,
+    rules: { booleanPresentation: 'yes_no' },
+  };
+  const changed = vi.fn();
+  render(<Harness config={config} changed={changed} />);
+  fireEvent.click(screen.getByRole('radio', { name: 'No' }));
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.getByRole('radio', { name: 'No' })).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear answer' }));
+  expect(changed).toHaveBeenLastCalledWith(undefined);
+  expect(screen.getByRole('radio', { name: 'Yes' })).toHaveFocus();
+  expect(screen.getByText('Not recorded')).toBeVisible();
+  fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+  expect(changed).toHaveBeenLastCalledWith(true);
+});
+it('keeps existing and unknown boolean presentation on the compatible checkbox path', () => {
+  render(
+    <MetadataFieldInput
+      field={{ ...field('boolean'), rules: { booleanPresentation: 'unknown' } }}
+      value={false}
+      onChange={() => {}}
+    />,
+  );
+  expect(screen.getByRole('checkbox')).not.toBeChecked();
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+});
+it('uses a neutral amount prompt inside arbitrary configured currency bounds', () => {
+  render(
+    <MetadataFieldInput
+      field={{
+        ...field('currency'),
+        rules: { currencyCode: 'USD', precision: 0, min: '0', max: '100' },
+      }}
+      value={undefined}
+      onChange={() => {}}
+    />,
+  );
+  expect(screen.getByPlaceholderText('Enter amount in USD')).toHaveValue('');
+  expect(screen.queryByPlaceholderText('125.00')).not.toBeInTheDocument();
+});
 describe('shared metadata field input', () => {
   it.each([
     'short_text',

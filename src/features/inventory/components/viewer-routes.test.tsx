@@ -118,6 +118,32 @@ beforeEach(() => {
   fixture.forms.mockClear();
 });
 it.each(['quantity', 'asset'] as const)(
+  '%s detail restores only a safe internal result scope',
+  async (kind) => {
+    const Page = kind === 'quantity' ? QuantityPage : AssetPage;
+    const scope = '/inventory?q=USB&status=all&page=2';
+    const first = render(
+      await Page({
+        params: Promise.resolve({ id: 'item' }),
+        searchParams: Promise.resolve({ returnTo: scope }),
+      }),
+    );
+    expect(
+      screen.getByRole('link', { name: '← Back to results' }),
+    ).toHaveAttribute('href', scope);
+    first.unmount();
+    render(
+      await Page({
+        params: Promise.resolve({ id: 'item' }),
+        searchParams: Promise.resolve({ returnTo: '//evil.test' }),
+      }),
+    );
+    expect(
+      screen.getByRole('link', { name: '← Back to inventory' }),
+    ).toHaveAttribute('href', '/inventory');
+  },
+);
+it.each(['quantity', 'asset'] as const)(
   'viewer %s details retain read surfaces without task or write launchers',
   async (kind) => {
     const Page = kind === 'quantity' ? QuantityPage : AssetPage;
@@ -153,7 +179,7 @@ it.each(['quantity', 'asset'] as const)(
     ).not.toBeInTheDocument();
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
     expect(screen.queryByText('File controls')).not.toBeInTheDocument();
-    expect(fixture.forms).not.toHaveBeenCalled();
+    expect(fixture.forms).toHaveBeenCalledWith(['category']);
   },
 );
 it('staff pages fetch only the initially selected category form', async () => {

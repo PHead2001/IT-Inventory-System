@@ -5,6 +5,7 @@ import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivateSpeedInsights } from '@/features/telemetry/private-speed-insights';
 import { speedInsightsEnabled } from '@/features/telemetry/speed-insights';
 import { MotionPreference } from '@/components/experience/motion-preference';
+import { AccountIdentity } from '@/components/experience/account-identity';
 import { Navigation } from '@/components/experience/navigation';
 import { PageArrival } from '@/components/experience/page-arrival';
 import { OperationalTimeProvider } from '@/components/operational-time';
@@ -36,10 +37,10 @@ export default async function ApplicationLayout({
                 </span>
               </Link>
               <div className="experience-account">
-                <span className="experience-account-name">
-                  {member.display_name}
-                </span>
-                <span className="experience-role">{member.role}</span>
+                <AccountIdentity
+                  name={member.display_name}
+                  role={member.role}
+                />
                 <QueueLogoutForm />
               </div>
             </div>

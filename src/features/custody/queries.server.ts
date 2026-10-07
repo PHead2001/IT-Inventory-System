@@ -1,6 +1,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
+import { parseActivityRange } from './activity-range';
 
 const id = z.uuid();
 const decimal = z.union([
@@ -167,17 +168,8 @@ export async function getSiteDetail(
   const page = Number.isSafeInteger(pageValue)
     ? Math.max(1, Math.min(100000, pageValue))
     : 1;
-  const bound = (value?: string) => {
-    if (!value) return null;
-    const utc = /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(value)
-      ? `${value}:00Z`
-      : value;
-    return z.iso.datetime({ offset: true }).safeParse(utc).success ? utc : null;
-  };
-  const from = bound(input.from);
-  const until = bound(input.until);
-  if (from && until && Date.parse(from) >= Date.parse(until))
-    throw new Error('Start date must precede end date.');
+  const range = parseActivityRange(input);
+  const { from, until } = range;
   const { supabase } = await requireMember();
   const holdingsQuery = supabase
     .from('site_current_holdings')
@@ -215,14 +207,16 @@ export async function getSiteDetail(
   const [holdingsResult, eventsResult, summaryResult, groupsResult] =
     await Promise.all([
       holdingsQuery.range(offset, offset + 24),
-      eventsQuery
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(0, 49),
+      range.valid
+        ? eventsQuery
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(0, 49)
+        : Promise.resolve({ data: [], count: 0, error: null }),
       supabase.rpc('site_activity_summary', {
         p_site_id: siteId,
-        p_from: from ?? undefined,
-        p_until: until ?? undefined,
+        p_from: range.valid ? (from ?? undefined) : undefined,
+        p_until: range.valid ? (until ?? undefined) : undefined,
       }),
       supabase.rpc('site_holding_groups', {
         p_site_id: siteId,
@@ -247,6 +241,8 @@ export async function getSiteDetail(
     groups: groupPage.parse(groupsResult.data),
     from,
     until,
+    activityErrors: range.errors,
+    activityValid: range.valid,
   };
 }
 export async function getEntitySiteHoldings(
