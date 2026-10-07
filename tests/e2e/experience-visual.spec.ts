@@ -1,8 +1,9 @@
 import { openRecordTask } from './record-task-controls';
 import { auditCreateRecord, auditReadback } from './audit-two-controls';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
+import { writeFileSync } from 'node:fs';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -20,6 +21,132 @@ async function noHorizontalOverflow(page: Page) {
     content: document.documentElement.scrollWidth,
   }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+}
+
+async function captureInventoryComposition(
+  page: Page,
+  info: TestInfo,
+  name: string,
+  title: string,
+) {
+  const firstName = page
+    .locator('li[id^="inventory-row-"] a[href^="/inventory/"]')
+    .first();
+  await captureAccountDisclosure(page, info, name + '-account');
+  const geometry = await page.evaluate(() => {
+    const bounds = (selector: string) => {
+      const rect = document.querySelector(selector)!.getBoundingClientRect();
+      return {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        right: rect.right,
+        bottom: rect.bottom,
+      };
+    };
+    return {
+      viewport: {
+        width: innerWidth,
+        height: innerHeight,
+        scrollX,
+        scrollY,
+        documentWidth: document.documentElement.scrollWidth,
+      },
+      title: bounds('li[id^="inventory-row-"] a[href^="/inventory/"]'),
+      header: bounds('.experience-header'),
+      brand: bounds('.experience-header .experience-brand'),
+      account: bounds('.experience-account summary'),
+      signOut: bounds('.experience-account button'),
+      menu: bounds('.experience-mobile-menu'),
+      chip: bounds('.experience-filter-chip'),
+    };
+  });
+  const geometryPath = info.outputPath(name + '-geometry.json');
+  writeFileSync(geometryPath, JSON.stringify(geometry, null, 2));
+  await info.attach(name + '-geometry', {
+    path: geometryPath,
+    contentType: 'application/json',
+  });
+  await page.screenshot({ path: info.outputPath(name + '.png') });
+  await expect(firstName).toHaveText(title);
+  await expect(firstName).toBeInViewport({ ratio: 1 });
+  expect(geometry.viewport.scrollY).toBe(0);
+  expect(geometry.viewport.documentWidth).toBeLessThanOrEqual(
+    geometry.viewport.width,
+  );
+  expect(geometry.brand.right).toBeLessThanOrEqual(geometry.account.x);
+  expect(geometry.account.right).toBeLessThanOrEqual(geometry.signOut.x);
+  expect(Math.abs(geometry.account.y - geometry.signOut.y)).toBeLessThan(1);
+  expect(geometry.menu.y).toBeGreaterThanOrEqual(geometry.header.bottom);
+  expect(geometry.account.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.signOut.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.chip.right).toBeLessThanOrEqual(geometry.viewport.width);
+  expect(geometry.chip.height).toBeGreaterThanOrEqual(32);
+}
+
+async function captureAccountDisclosure(
+  page: Page,
+  info: TestInfo,
+  name: string,
+) {
+  const account = page.getByLabel('Account: Test staff, staff', {
+    exact: true,
+  });
+  await account.focus();
+  await page.keyboard.press('Enter');
+  const disclosure = account.locator('xpath=ancestor::details[1]');
+  const popup = disclosure.locator(':scope > div');
+  await expect(popup.getByText('Test staff', { exact: true })).toBeVisible();
+  await expect(popup.getByText('staff', { exact: true })).toBeVisible();
+  const geometry = await popup.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const readableText = [...element.querySelectorAll(':scope > p')].map(
+      (paragraph) => {
+        const range = document.createRange();
+        range.selectNodeContents(paragraph);
+        const text = range.getBoundingClientRect();
+        return [0.1, 0.5, 0.9].every((fraction) =>
+          paragraph.contains(
+            document.elementFromPoint(
+              text.x + text.width * fraction,
+              text.y + text.height / 2,
+            ),
+          ),
+        );
+      },
+    );
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      popup: {
+        x: rect.x,
+        y: rect.y,
+        right: rect.right,
+        bottom: rect.bottom,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      },
+      readableText,
+    };
+  });
+  const geometryPath = info.outputPath(name + '-geometry.json');
+  writeFileSync(geometryPath, JSON.stringify(geometry, null, 2));
+  await info.attach(name + '-geometry', {
+    path: geometryPath,
+    contentType: 'application/json',
+  });
+  await page.screenshot({ path: info.outputPath(name + '-open.png') });
+  expect(geometry.popup.x).toBeGreaterThanOrEqual(0);
+  expect(geometry.popup.y).toBeGreaterThanOrEqual(0);
+  expect(geometry.popup.right).toBeLessThanOrEqual(geometry.viewport.width);
+  expect(geometry.popup.bottom).toBeLessThanOrEqual(geometry.viewport.height);
+  expect(geometry.popup.scrollWidth).toBeLessThanOrEqual(
+    geometry.popup.clientWidth,
+  );
+  expect(geometry.readableText).toEqual([true, true]);
+  await page.keyboard.press('Enter');
+  await expect(disclosure).not.toHaveAttribute('open', '');
+  await expect(account).toBeFocused();
 }
 
 async function openInventoryRecord(
@@ -84,14 +211,18 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
   // A unique ordinary search makes the long owned title deterministic across
   // retries, independent of database collation and earlier suites' fixtures.
   const identity = crypto.randomUUID();
-  const firstRowName = 'Audit two deep answer ' + identity;
+  const query = 'Fictional Audit2 ' + identity;
+  const firstRowName = query + ' Adapter';
+  const companionName = query + ' Laptop';
   const owned = await auditCreateRecord(
     page,
     'quantity',
     'Tools',
     firstRowName,
   );
+  let companion: { id: string } | undefined;
   try {
+    companion = await auditCreateRecord(page, 'asset', 'Tools', companionName);
     await page.goto('/dashboard');
     await expect(
       page.getByRole('heading', { name: 'Low-stock overview' }),
@@ -205,8 +336,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     await page.screenshot({
       path: testInfo.outputPath('inventory-phone-502-global-viewport.png'),
     });
-    await page.setViewportSize({ width: 390, height: 844 });
-    const query = identity.slice(0, 8);
+    await page.setViewportSize({ width: 390, height: 800 });
     const scopedSearch = page.getByRole('form', { name: 'Search inventory' });
     await scopedSearch.getByRole('textbox').fill(query);
     await scopedSearch
@@ -217,22 +347,35 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
         url.pathname === '/inventory' && url.searchParams.get('q') === query,
     );
     await expect(
-      page.getByText('1 matching row', { exact: true }),
+      page.getByText('2 matching rows', { exact: true }),
     ).toBeVisible();
-    await expect(firstName).toHaveText(firstRowName);
-    await expect(firstName).toBeInViewport({ ratio: 1 });
+    const activeFilters = page.getByRole('navigation', {
+      name: 'Active inventory filters',
+    });
+    await expect(
+      activeFilters.getByRole('link', {
+        name: `Remove Search: ${query} filter`,
+        exact: true,
+      }),
+    ).toContainText('Search: ' + query);
+    await captureInventoryComposition(
+      page,
+      testInfo,
+      'inventory-phone-390-viewport',
+      firstRowName,
+    );
     await page.screenshot({
       path: testInfo.outputPath('inventory-phone-390.png'),
       fullPage: true,
     });
-    await page.screenshot({
-      path: testInfo.outputPath('inventory-phone-390-viewport.png'),
-      fullPage: false,
-    });
     await page.setViewportSize({ width: 502, height: 757 });
     await noHorizontalOverflow(page);
-    await expect(firstName).toHaveText(firstRowName);
-    await expect(firstName).toBeInViewport({ ratio: 1 });
+    await captureInventoryComposition(
+      page,
+      testInfo,
+      'inventory-phone-502-viewport',
+      firstRowName,
+    );
     const search = page.getByRole('form', { name: 'Search inventory' });
     for (const control of [
       search.getByRole('textbox'),
@@ -250,9 +393,16 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       path: testInfo.outputPath('inventory-phone-502-viewport.png'),
       fullPage: false,
     });
+    await page.setViewportSize({ width: 320, height: 800 });
+    await noHorizontalOverflow(page);
+    await captureAccountDisclosure(page, testInfo, 'account-phone-320');
     await page.setViewportSize({ width: 390, height: 844 });
     // Form GET includes empty/default controls; record return scope is canonical.
-    await openInventoryRecord(page, 'quantity', '/inventory?q=' + query);
+    await openInventoryRecord(
+      page,
+      'quantity',
+      '/inventory?' + new URLSearchParams({ q: query }),
+    );
     await noHorizontalOverflow(page);
     await page.screenshot({
       path: testInfo.outputPath('quantity-detail-phone-390.png'),
@@ -350,6 +500,26 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
         },
       });
       expect(archived.error).toBeNull();
+    }
+    if (companion) {
+      const asset = await client
+        .from('serialized_assets')
+        .select('name,version,status')
+        .eq('id', companion.id)
+        .single();
+      expect(asset.error).toBeNull();
+      expect(asset.data!.name).toBe(companionName);
+      if (asset.data!.status === 'active') {
+        const retired = await client.rpc('asset_retire', {
+          p_request_id: crypto.randomUUID(),
+          p_payload: {
+            asset_id: companion.id,
+            expected_version: asset.data!.version,
+            reason: 'Completed disposable browser visibility fixture',
+          },
+        });
+        expect(retired.error).toBeNull();
+      }
     }
     await client.auth.signOut();
   }
