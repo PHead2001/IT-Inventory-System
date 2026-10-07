@@ -53,7 +53,12 @@ async function createSite(page: Page, siteCode: string, name: string) {
   await form.getByLabel('Name', { exact: true }).fill(name);
   await form.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await form.getByRole('button', { name: 'Save site' }).click();
-  await expect(form.getByRole('status')).toContainText('Site saved');
+  await expect(
+    page.getByRole('heading', { name: 'Site created' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toContainText(name);
   await page.goto('/sites/' + siteCode);
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 }
@@ -83,7 +88,9 @@ async function createQuantity(
 }
 async function submitCustody(form: Locator, title: string) {
   await form.getByRole('button', { name: title, exact: true }).click();
-  await expect(form.getByRole('status')).toContainText('Custody saved');
+  await expect(
+    form.page().getByRole('region', { name: 'Custody completion' }),
+  ).toContainText('Custody saved');
 }
 function decodeQrDataUrl(source: string) {
   expect(source).toMatch(/^data:image\/png;base64,/);
@@ -349,9 +356,14 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   );
   await page.goto('/sites/' + siteCode);
   await expect(page.getByRole('link', { name })).toBeVisible();
-  await expect(
-    page.getByRole('region', { name: 'Grouped current holdings' }),
-  ).toContainText('1 distinct serialized device');
+  const groupedHoldings = page.getByRole('group', {
+    name: 'Grouped current holdings',
+    exact: true,
+  });
+  await groupedHoldings
+    .getByText('By category, product, and model', { exact: true })
+    .click();
+  await expect(groupedHoldings).toContainText('1 distinct serialized device');
   await expect(
     page.getByText('Current individual assets').locator('..'),
   ).toContainText('1');
@@ -407,7 +419,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await labelSearch.getByRole('button', { name: 'Search' }).click();
   await page
     .getByRole('region', { name: 'Label search results' })
-    .getByRole('link', { name })
+    .getByRole('link', { name, exact: true })
     .scrollIntoViewIfNeeded();
   await page.screenshot({
     path: testInfo.outputPath('mobile-label-search.png'),
@@ -576,7 +588,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await page.screenshot({
     path: testInfo.outputPath('desktop-site-holdings.png'),
   });
-  await page.getByLabel('From (UTC)').fill('2000-01-01T00:00');
+  await page.getByLabel('From (UTC, inclusive)').fill('2000-01-01T00:00');
   await page.getByLabel('Until (UTC, exclusive)').fill('2000-01-02T00:00');
   await page.getByRole('button', { name: 'Filter activity' }).click();
   await expect(page.getByText('No activity in this date range.')).toBeVisible();
@@ -654,6 +666,9 @@ test('opening holdings and write-off retain history without inventing a closet i
   const siteCode = code('E2E-OPEN');
   const siteName = 'Fictional opening site ' + siteCode;
   await createSite(page, siteCode, siteName);
+  await page
+    .getByText('Record equipment already at this site', { exact: true })
+    .click();
   await page
     .getByRole('link', { name: 'Record existing quantity item' })
     .click();

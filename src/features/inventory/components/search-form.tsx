@@ -89,7 +89,7 @@ export function SearchForm({
   });
 
   return (
-    <div className="experience-inventory-search experience-surface mb-4 p-4">
+    <div className="experience-inventory-search experience-surface mb-3 px-4 py-2 sm:mb-4 sm:p-4">
       <form action={action} aria-label="Search inventory">
         <div className="experience-search-top">
           <div className="min-w-0 flex-1">

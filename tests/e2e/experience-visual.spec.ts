@@ -21,6 +21,30 @@ async function noHorizontalOverflow(page: Page) {
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
 }
 
+async function openInventoryRecord(page: Page, kind: 'quantity' | 'assets') {
+  const inventory = new URL(page.url());
+  const record = page
+    .locator(`a[href^="/inventory/${kind}/"]:not([href*="/new"])`)
+    .first();
+  const destination = new URL((await record.getAttribute('href'))!, inventory);
+  expect(destination.pathname).toMatch(
+    new RegExp(`^/inventory/${kind}/[0-9a-f-]{36}$`),
+  );
+  const rowId = await record
+    .locator('xpath=ancestor::li[1]')
+    .getAttribute('id');
+  expect(rowId).toMatch(/^inventory-row-\d+$/);
+  const returnTo = inventory.pathname + inventory.search + '#' + rowId;
+  expect(destination.searchParams.get('returnTo')).toBe(returnTo);
+  await record.click();
+  await expect(page).toHaveURL(
+    (url) =>
+      url.pathname === destination.pathname &&
+      url.searchParams.size === 1 &&
+      url.searchParams.get('returnTo') === returnTo,
+  );
+}
+
 test('representative shell and auth surfaces render at desktop and phone sizes with keyboard navigation and motion preference', async ({
   page,
 }, testInfo) => {
@@ -74,11 +98,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('inventory-desktop-1440.png'),
     fullPage: true,
   });
-  await page
-    .locator('a[href^="/inventory/quantity/"]:not([href*="/new"])')
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  await openInventoryRecord(page, 'quantity');
   await noHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath('quantity-detail-desktop-1440.png'),
@@ -94,11 +114,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     fullPage: true,
   });
   await page.goto('/inventory?type=asset');
-  await page
-    .locator('a[href^="/inventory/assets/"]:not([href*="/new"])')
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  await openInventoryRecord(page, 'assets');
   await noHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath('asset-detail-desktop-1440.png'),
@@ -165,11 +181,21 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     path: testInfo.outputPath('inventory-phone-390.png'),
     fullPage: true,
   });
-  await page
-    .locator('a[href^="/inventory/quantity/"]:not([href*="/new"])')
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  await page.screenshot({
+    path: testInfo.outputPath('inventory-phone-390-viewport.png'),
+    fullPage: false,
+  });
+  await page.setViewportSize({ width: 502, height: 757 });
+  await noHorizontalOverflow(page);
+  await expect(
+    page.locator('li[id^="inventory-row-"] a[href^="/inventory/"]').first(),
+  ).toBeInViewport({ ratio: 1 });
+  await page.screenshot({
+    path: testInfo.outputPath('inventory-phone-502-viewport.png'),
+    fullPage: false,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openInventoryRecord(page, 'quantity');
   await noHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath('quantity-detail-phone-390.png'),
@@ -185,11 +211,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
     fullPage: true,
   });
   await page.goto('/inventory?type=asset');
-  await page
-    .locator('a[href^="/inventory/assets/"]:not([href*="/new"])')
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+  await openInventoryRecord(page, 'assets');
   await noHorizontalOverflow(page);
   await page.screenshot({
     path: testInfo.outputPath('asset-detail-phone-390.png'),
@@ -391,8 +413,14 @@ test('configuration, site custody, and location browsing remain legible at deskt
     await expect(
       page.getByRole('heading', { name: 'Assignment activity' }),
     ).toBeVisible();
-    await expect(page.getByLabel('From (UTC)')).toBeVisible();
+    await expect(
+      page.getByLabel('From (UTC, inclusive)', { exact: true }),
+    ).toBeVisible();
     await expect(page.getByLabel('Until (UTC, exclusive)')).toBeVisible();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Activity breakdown ·/ })
+      .click();
     const siteLayout = await page.evaluate(() => {
       const heading = document.querySelector('main h1')!;
       const hero = heading.closest('header')!;

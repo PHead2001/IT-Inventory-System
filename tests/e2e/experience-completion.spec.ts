@@ -24,15 +24,20 @@ async function reviewMetadata(form: Locator) {
   await metadataSaveButton(form).click();
   if ((await form.getAttribute('aria-label')) === 'Edit quantity metadata') {
     await expect(
-      form.getByRole('status').filter({ hasText: /^Metadata saved\.$/ }),
+      form.getByRole('status').filter({ hasText: /^Details saved\.$/ }),
     ).toBeVisible();
-    await expect(metadataReviewButton(form)).toBeDisabled();
+    await expect(metadataReviewButton(form)).toHaveCount(0);
     await expect(
       form.getByRole('button', { name: 'New transaction', exact: true }),
-    ).toBeEnabled();
+    ).toHaveCount(0);
     await expect(
       form.getByRole('button', { name: 'Retry saved record refresh' }),
     ).toHaveCount(0);
+    await form.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(form).toBeHidden();
+    await expect(
+      form.page().getByRole('button', { name: 'Edit details', exact: true }),
+    ).toBeFocused();
   }
 }
 
@@ -101,7 +106,12 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await site.getByLabel('Name', { exact: true }).fill(`Label site ${suffix}`);
   await site.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await site.getByRole('button', { name: 'Save site' }).click();
-  await expect(site.getByRole('status')).toContainText('Site saved');
+  await expect(
+    page.getByRole('heading', { name: 'Site created' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toContainText(siteCode);
 
   await page.goto('/inventory/quantity/new');
   const create = page.getByRole('form', { name: 'Add quantity item' });
@@ -164,7 +174,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
   await issue.getByLabel('Units').fill('3');
   await issue.getByRole('button', { name: 'Issue stock to a site' }).click();
-  await expect(issue.getByRole('status')).toContainText('Custody saved');
+  await expect(
+    page.getByRole('region', { name: 'Custody completion' }),
+  ).toContainText('Custody saved');
   await expectStock(page, 12, 3, {
     'ITC-S1A': 8,
     'ITC-S1B': 2,
@@ -180,7 +192,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await chooseLocation(returned, 'Return to storage', 'ITC-S1B');
   await returned.getByLabel('Units').fill('1');
   await returned.getByRole('button', { name: 'Return to storage' }).click();
-  await expect(returned.getByRole('status')).toContainText('Custody saved');
+  await expect(
+    page.getByRole('region', { name: 'Custody completion' }),
+  ).toContainText('Custody saved');
   await expectStock(page, 13, 2, {
     'ITC-S1A': 8,
     'ITC-S1B': 3,

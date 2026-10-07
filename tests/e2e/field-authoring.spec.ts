@@ -93,14 +93,25 @@ function choicePaths(
   return (Array.isArray(value) ? value : [value]).map(path);
 }
 async function followHistoryLink(page: Page, name: string) {
-  const link = page.getByRole('link', { name, exact: true }).first();
+  const link = page
+    .getByRole('link', { name, exact: true, includeHidden: true })
+    .first();
+  if (!(await link.isVisible()))
+    await link.locator('xpath=ancestor::details[1]').locator('summary').click();
   const destination = new URL((await link.getAttribute('href'))!, page.url());
   await link.click();
   await expect(page).toHaveURL(destination.href);
   const history = page.getByRole('region', { name: 'Custom history field' });
   await expect(history).toBeVisible();
+  const technical = history.getByText('Technical recorded value', {
+    exact: true,
+  });
+  if (await technical.count()) await technical.click();
   const fieldId = destination.searchParams.get('field');
-  if (fieldId) await expect(history).toContainText('field ' + fieldId);
+  if (fieldId)
+    await expect(
+      history.getByText('Field: ' + fieldId, { exact: true }),
+    ).toBeVisible();
 }
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -380,6 +391,25 @@ function metadataAnswer(page: Page, label: string) {
     .first();
 }
 
+async function expectMetadataAnswer(page: Page, label: string, value: string) {
+  const answer = metadataAnswer(page, label);
+  if (label !== 'Manual URL') {
+    await expect(answer).toHaveText(value);
+    return;
+  }
+  await expect(answer.getByText(value, { exact: true })).toBeVisible();
+  const open = answer.getByRole('link', {
+    name: `Open ${value} in a new tab`,
+    exact: true,
+  });
+  await expect(open).toHaveAttribute('href', value);
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(
+    answer.getByRole('button', { name: `Copy ${value}`, exact: true }),
+  ).toBeVisible();
+}
+
 test('authors all twelve types through the UI and preserves their preview, create/edit, history and export contracts', async ({
   page,
 }, info) => {
@@ -594,7 +624,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
     'Connection type': 'Connection / USB / USB-C',
   };
   for (const [label, value] of Object.entries(initialDetail))
-    await expect(metadataAnswer(page, label)).toHaveText(value);
+    await expectMetadataAnswer(page, label, value);
   await expect(metadataAnswer(page, 'Appointment')).toContainText('2026');
   await openRecordTask(page, 'Edit quantity metadata');
   form = await openRecordTask(page, 'Edit quantity metadata');
@@ -687,7 +717,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   };
   delete editedDetail.Features;
   for (const [label, value] of Object.entries(editedDetail))
-    await expect(metadataAnswer(page, label)).toHaveText(value);
+    await expectMetadataAnswer(page, label, value);
   expect(after.data!.custom_values[ids['Port count']].value).toBe(0);
   await page.goto('/history?entityId=' + quantityId);
   await followHistoryLink(
@@ -735,11 +765,16 @@ test('authors all twelve types through the UI and preserves their preview, creat
         page,
         side === 'before' ? 'Before event' : 'After event',
       );
-      await expect(historyField).toContainText(
-        (side === 'before' ? 'Before' : 'After') +
-          ' · field ' +
-          historicalField.id,
-      );
+      await expect(
+        historyField.getByText(
+          side === 'before' ? 'Before event' : 'After event',
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(
+        historyField.getByText('Field: ' + historicalField.id, { exact: true }),
+      ).toBeVisible();
+      await expect(historyField.locator('pre')).toBeVisible();
       expect(
         JSON.parse((await historyField.locator('pre').textContent())!),
       ).toEqual(expected[historicalField.id].value);
@@ -760,11 +795,24 @@ test('authors all twelve types through the UI and preserves their preview, creat
           exact: true,
         }),
       ).toBeVisible();
-      expect(await historyField.locator('li').allTextContents()).toEqual(
-        choicePaths(historicalField, expected[historicalField.id].value).map(
-          (path) => path.join(' / '),
-        ),
-      );
+      if (
+        ['single_select', 'multi_select', 'hierarchical_select'].includes(
+          historicalField.type,
+        )
+      ) {
+        const paths = choicePaths(
+          historicalField,
+          expected[historicalField.id].value,
+        );
+        await expect(
+          historyField.getByText(
+            paths.length
+              ? paths.map((path) => path.join(' / ')).join('; ')
+              : 'No options selected',
+            { exact: true },
+          ),
+        ).toBeVisible();
+      }
     }
     if (index < fields.length - 1)
       await followHistoryLink(page, 'Next custom field');
@@ -1094,6 +1142,7 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await expect(
       page.getByRole('link', { name: query + ' 25', exact: true }),
     ).toHaveCount(1);
+    await page.getByLabel('Add item', { exact: true }).click();
     await page.getByRole('link', { name: 'Add quantity item' }).click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page).toHaveURL(
@@ -1141,8 +1190,17 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await siteForm.getByLabel('Name', { exact: true }).fill('Cancel property');
     await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
     await siteForm.getByRole('button', { name: 'Save site' }).click();
-    await expect(siteForm.getByRole('status')).toContainText('Site saved');
+    const receipt = page.getByRole('region', {
+      name: 'Site creation complete',
+    });
+    await expect(
+      receipt.getByRole('heading', { name: 'Site created', exact: true }),
+    ).toBeVisible();
+    await expect(receipt.getByRole('status')).toContainText(siteCode);
     await page.goto('/sites/' + siteCode);
+    await page
+      .getByText('Record equipment already at this site', { exact: true })
+      .click();
     await page
       .getByRole('link', {
         name: 'Record existing quantity item',
@@ -1151,6 +1209,9 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
       .click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
+    await page
+      .getByText('Record equipment already at this site', { exact: true })
+      .click();
     await page
       .getByRole('link', {
         name: 'Record existing individual asset',
@@ -1164,8 +1225,35 @@ test('whole-form Cancel preserves inventory filters, dirty drafts and focus at n
     await page.getByRole('button', { name: 'Discard changes' }).click();
     await expect(page).toHaveURL(new RegExp('/sites/' + siteCode + '$'));
     await expect(
-      page.getByRole('region', { name: 'Grouped current holdings' }),
-    ).not.toContainText('Discarded opening asset');
+      page.getByRole('group', { name: 'Grouped current holdings' }),
+    ).toHaveCount(0);
+    const holdings = page.getByRole('region', {
+      name: 'Current holdings',
+      exact: true,
+    });
+    await expect(holdings).toContainText(
+      'No equipment is currently assigned to this site.',
+    );
+    await expect(
+      holdings.getByRole('link', {
+        name: 'Discarded opening asset',
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    for (const label of [
+      'Current assigned quantity units',
+      'Current individual assets',
+    ])
+      await expect(
+        page
+          .locator('dl > div')
+          .filter({
+            has: page
+              .locator('dt')
+              .filter({ hasText: new RegExp('^' + label + '$') }),
+          })
+          .locator('dd'),
+      ).toHaveText('0');
     await capture(page, info, 'cancel-site-opening-no-holding');
   });
 });

@@ -740,6 +740,19 @@ html[data-motion='full'] .experience-auth-panel {
     display: none;
   }
 }
+/* Inventory lookup retains 44px controls while reducing only narrow-page space. */
+@media (max-width: 639px) {
+  .experience-add-item-launcher:not([open]) {
+    padding-block: 0;
+  }
+  .experience-inventory-search .experience-search-top {
+    row-gap: 6px;
+  }
+  .experience-inventory-search .experience-filter-toggle {
+    min-height: 44px;
+    margin-top: 4px;
+  }
+}
 @media (max-width: 640px) {
   .experience-search-top {
     grid-template-columns: repeat(2, minmax(0, 1fr));

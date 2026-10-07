@@ -39,7 +39,12 @@ async function inspectControl(control: Locator) {
   );
   const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
   if (await tab.isVisible()) await tab.click();
-  await expect(inspectorFor(control).getByLabel('Width')).toBeVisible();
+  await expect(
+    inspectorFor(control).getByRole('combobox', {
+      name: 'Preferred width',
+      exact: true,
+    }),
+  ).toBeVisible();
 }
 
 async function chooseControlSection(control: Locator, name: string) {
@@ -168,6 +173,10 @@ test('phone designer edits publish with one save and render in quantity and asse
   await edit.getByLabel('Connector type').fill('USB-A');
   await metadataReviewButton(edit).click();
   await metadataSaveButton(edit).click();
+  await expect(
+    edit.getByRole('status').filter({ hasText: /^Details saved\.$/ }),
+  ).toBeVisible();
+  await edit.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByText('USB-A', { exact: true })).toBeVisible();
   await page.goto(quantityUrl);
   await expect(page.getByText('USB-A', { exact: true })).toBeVisible();
@@ -193,6 +202,10 @@ test('phone designer edits publish with one save and render in quantity and asse
   await editAsset.getByLabel('Connector type').fill('HDMI');
   await metadataReviewButton(editAsset).click();
   await metadataSaveButton(editAsset).click();
+  await expect(
+    editAsset.getByRole('status').filter({ hasText: /^Details saved\.$/ }),
+  ).toBeVisible();
+  await editAsset.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByText('HDMI', { exact: true })).toBeVisible();
   await page.goto(assetUrl);
   await expect(page.getByText('HDMI', { exact: true })).toBeVisible();
@@ -408,7 +421,9 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
   await inspectControl(nameControl);
-  await inspectorFor(nameControl).getByLabel('Width').selectOption('6');
+  await inspectorFor(nameControl)
+    .getByRole('combobox', { name: 'Preferred width', exact: true })
+    .selectOption('6');
   await inspectorFor(nameControl)
     .getByRole('button', { name: 'Move down' })
     .focus();
@@ -427,7 +442,12 @@ test('saved layout survives reload and unsaved navigation requires explicit reco
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
   await inspectControl(reloadedName);
-  await expect(inspectorFor(reloadedName).getByLabel('Width')).toHaveValue('6');
+  await expect(
+    inspectorFor(reloadedName).getByRole('combobox', {
+      name: 'Preferred width',
+      exact: true,
+    }),
+  ).toHaveValue('6');
   await expect(
     designer
       .locator('[data-section-id]')

@@ -1,8 +1,4 @@
-import {
-  beginNewRecordTransaction,
-  expectStableReceiptAction,
-  openRecordTask,
-} from './record-task-controls';
+import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
@@ -17,6 +13,62 @@ async function signIn(page: Page) {
   await expect(
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
+}
+
+async function finishMetadata(page: Page) {
+  const form = page.getByRole('form', {
+    name: 'Edit quantity metadata',
+    exact: true,
+  });
+  await expect(form.getByRole('status')).toHaveText('Details saved.');
+  await form.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(
+    page
+      .getByRole('region', { name: 'Record tasks' })
+      .getByRole('button', { name: 'Edit details', exact: true }),
+  ).toBeFocused();
+}
+
+async function expectStableMetadataDone(page: Page) {
+  const form = page.getByRole('form', {
+    name: 'Edit quantity metadata',
+    exact: true,
+  });
+  const saved = form.getByRole('status');
+  await expect(saved).toHaveText('Details saved.');
+  const done = form.getByRole('button', { name: 'Done', exact: true });
+  await expect(done).toBeEnabled();
+  await page.mouse.move(0, 0);
+  await done.scrollIntoViewIfNeeded();
+  const neutral = await done.boundingBox();
+  expect(neutral).not.toBeNull();
+  await page.mouse.move(
+    neutral!.x + neutral!.width / 2,
+    neutral!.y + neutral!.height - 0.02,
+  );
+  const samples = await done.evaluate(async (element) => {
+    const frames = [];
+    for (let frame = 0; frame < 20; frame++) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const rect = element.getBoundingClientRect();
+      frames.push({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        hovered: element.matches(':hover'),
+      });
+    }
+    return frames;
+  });
+  for (const frame of samples) {
+    expect(frame.hovered).toBe(true);
+    for (const key of ['x', 'y', 'width', 'height'] as const)
+      expect(Math.abs(frame[key] - neutral![key])).toBeLessThan(0.001);
+  }
+  await expect(saved).toHaveText('Details saved.');
 }
 
 async function publishDefinition(
@@ -160,6 +212,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   const detailUrl = page.url();
   const itemId = detailUrl.split('/').at(-1)!;
   await page.goto('/history?entityId=' + itemId);
+  await page.getByText('View event details', { exact: true }).first().click();
   await page
     .getByRole('link', {
       name: 'Custom metadata changed — inspect before and after',
@@ -171,6 +224,8 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expect(
     page.getByRole('heading', { name: 'Tracking note' }),
   ).toBeVisible();
+  await page.getByText('Technical recorded value', { exact: true }).click();
+  await expect(page.locator('pre')).toBeVisible();
   await expect(page.locator('pre')).toContainText('hello');
   await page.goto(detailUrl);
 
@@ -180,9 +235,9 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 2$/)).toBeVisible();
-  await expectStableReceiptAction(page, 'New transaction');
+  await expectStableMetadataDone(page);
   await expect(page.getByText(/Version 2$/)).toBeVisible();
-  await beginNewRecordTransaction(page, 'New transaction');
+  await finishMetadata(page);
   await expect(
     page.getByRole('region', { name: 'Record tasks' }).getByRole('button', {
       name: 'Edit details',
@@ -215,7 +270,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 4$/)).toBeVisible();
-    await beginNewRecordTransaction(page, 'New transaction');
+    await finishMetadata(page);
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
@@ -235,7 +290,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
     await expect(page.getByText(/Version 6$/)).toBeVisible();
-    await beginNewRecordTransaction(page, 'New transaction');
+    await finishMetadata(page);
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
       converged,
@@ -265,7 +320,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 7$/)).toBeVisible();
-  await beginNewRecordTransaction(page, 'New transaction');
+  await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
   // A successful category change establishes its own complete baseline too.
@@ -276,7 +331,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     .check();
   await metadataSaveButton(editForm).click();
   await expect(page.getByText(/Version 8$/)).toBeVisible();
-  await beginNewRecordTransaction(page, 'New transaction');
+  await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(metadataReviewButton(editForm)).toBeEnabled();
   await editForm

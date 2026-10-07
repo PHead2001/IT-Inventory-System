@@ -151,6 +151,7 @@ test('Settings deep links retain active navigation through Back and Forward and 
   await expect(
     page.getByRole('region', { name: 'Forms and fields' }),
   ).toHaveCount(0);
+  let siteDraft: string | null = null;
   for (const [label, path, heading] of [
     ['Categories', '/settings/categories', 'Categories'],
     ['Forms & fields', '/settings/forms', 'Forms & fields'],
@@ -159,7 +160,18 @@ test('Settings deep links retain active navigation through Back and Forward and 
     ['Labels & printing', '/settings/labels', 'Labels & printing defaults'],
   ] as const) {
     await navigation.getByRole('link', { name: label, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(path + '$'));
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === path &&
+        (path === '/settings/sites'
+          ? url.searchParams.size === 1 &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+              url.searchParams.get('siteDraft') ?? '',
+            )
+          : url.search === ''),
+    );
+    if (path === '/settings/sites')
+      siteDraft = new URL(page.url()).searchParams.get('siteDraft');
     await expect(
       navigation.getByRole('link', { name: label, exact: true }),
     ).toHaveAttribute('aria-current', 'page');
@@ -172,7 +184,9 @@ test('Settings deep links retain active navigation through Back and Forward and 
       ).toHaveCount(0);
   }
   await page.goBack();
-  await expect(page).toHaveURL(/\/settings\/sites$/);
+  await expect(page).toHaveURL(
+    new URL('/settings/sites?siteDraft=' + siteDraft, page.url()).href,
+  );
   await expect(
     navigation.getByRole('link', { name: 'Properties & sites' }),
   ).toHaveAttribute('aria-current', 'page');
@@ -323,7 +337,9 @@ test('designer gestures reflow while held, resize before release, cancel, undo a
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
   await nameControl.press('Enter');
-  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
+  const width = designer
+    .getByTestId('designer-inspector')
+    .getByRole('combobox', { name: 'Preferred width', exact: true });
   await width.selectOption('12');
   const initialWidth = await width.inputValue();
   const resize = nameControl.getByRole('button', { name: 'Resize Name' });
@@ -678,7 +694,9 @@ test('account switch during a held designer gesture permanently masks the old pr
     '[data-control-id]:has(button[aria-label="Resize Name"])',
   );
   await nameControl.press('Enter');
-  const width = designer.getByTestId('designer-inspector').getByLabel('Width');
+  const width = designer
+    .getByTestId('designer-inspector')
+    .getByRole('combobox', { name: 'Preferred width', exact: true });
   await width.selectOption('12');
   const beforeResize = await width.inputValue();
   const handle = designer.getByRole('button', { name: 'Resize Name' });

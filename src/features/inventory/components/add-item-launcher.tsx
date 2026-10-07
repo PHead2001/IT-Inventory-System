@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react';
 /** Native disclosure keeps both creation paths available without displacing results. */
 export function AddItemLauncher({ query }: { query: string }) {
   return (
-    <details className="experience-surface relative my-3 max-w-xl p-3">
+    <details className="experience-add-item-launcher experience-surface relative my-2 max-w-xl p-3 sm:my-3">
       <summary
         aria-label="Add item"
         className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-cyan-100"

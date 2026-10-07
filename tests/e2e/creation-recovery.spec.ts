@@ -36,6 +36,8 @@ test('creation recovery retains serialized input across Back/Forward, internal n
   });
   await login(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel('Add item', { exact: true }).focus();
+  await page.keyboard.press('Enter');
   await page
     .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();
@@ -132,6 +134,7 @@ test('quantity creation preserves stock input; explicit discard survives return 
     await dialog.accept();
   });
   await login(page);
+  await page.getByLabel('Add item', { exact: true }).click();
   await page
     .getByRole('link', { name: 'Add quantity item', exact: true })
     .click();
@@ -197,6 +200,7 @@ test('unavailable creation storage explains internal-navigation limits, blocks d
     };
   });
   await login(page);
+  await page.getByLabel('Add item', { exact: true }).click();
   await page
     .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();
@@ -274,6 +278,7 @@ test('creation response lost after real commit reloads and resolves the original
   await expect(
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
+  await page.getByLabel('Add item', { exact: true }).click();
   await page
     .getByRole('link', { name: 'Add individual asset', exact: true })
     .click();

@@ -18,6 +18,70 @@ function richStatePath(name: string) {
   mkdirSync(directory, { recursive: true });
   return join(directory, name + '.png');
 }
+async function confirmNamedRemoval(files: Locator, filename: string) {
+  const page = files.page();
+  let removalRequests = 0;
+  const countRemoval = (request: import('@playwright/test').Request) => {
+    if (request.url().endsWith('/rest/v1/rpc/inventory_file_remove'))
+      removalRequests++;
+  };
+  page.on('request', countRemoval);
+  try {
+    const parentName = await page
+      .getByRole('heading', { level: 1 })
+      .innerText();
+    const trigger = files.getByRole('button', { name: 'Remove', exact: true });
+    await expect(trigger).toBeEnabled();
+    await trigger.focus();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    // Native modal dialogs enter the accessibility top layer; locate the named
+    // confirmation from the page rather than through its inert file region.
+    const dialog = page.getByRole('dialog', {
+      name: `Remove ${filename}?`,
+      exact: true,
+    });
+    await expect(dialog).toContainText(filename);
+    await expect(dialog).toContainText(parentName);
+    await expect(dialog).toContainText('This cannot be undone');
+    await expect(
+      dialog.getByRole('button', { name: 'Cancel', exact: true }),
+    ).toBeFocused();
+    const viewport = page.viewportSize();
+    for (const width of [1280, 502, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(dialog).toBeVisible();
+      await page.screenshot({
+        path: richStatePath(`named-removal-${filename}-${width}`),
+        fullPage: true,
+      });
+    }
+    if (viewport) await page.setViewportSize(viewport);
+    await page.keyboard.press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    expect(removalRequests).toBe(0);
+    await expect(
+      files.locator('ul').first().getByText(filename, { exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press('Enter');
+    await dialog
+      .getByRole('button', { name: 'Remove file', exact: true })
+      .focus();
+    const removed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/rest/v1/rpc/inventory_file_remove') &&
+        response.request().method() === 'POST',
+    );
+    await page.keyboard.press('Enter');
+    expect((await removed).ok()).toBe(true);
+    // This successful observation proves the same real transport counter used
+    // by the preceding Cancel assertion is engaged, rather than vacuous.
+    expect(removalRequests).toBe(1);
+  } finally {
+    page.off('request', countRemoval);
+  }
+}
 async function expectRemovedFile(files: Locator, filename: string) {
   await expect(
     files
@@ -73,7 +137,9 @@ async function custodyForm(page: Page, title: string) {
 }
 async function submitCustody(form: Locator, title: string) {
   await form.getByRole('button', { name: title, exact: true }).click();
-  await expect(form.getByRole('status')).toContainText('Custody saved');
+  await expect(
+    form.page().getByRole('region', { name: 'Custody completion' }),
+  ).toContainText('Custody saved');
 }
 function png(color: number) {
   const image = new PNG({ width: 4, height: 4 });
@@ -368,7 +434,7 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     cards.getByRole('listitem').getByText('second.png', { exact: true }),
   ).toBeVisible();
   await expect(cards.getByText('first.png', { exact: true })).toHaveCount(0);
-  await files.getByRole('button', { name: 'Remove' }).click();
+  await confirmNamedRemoval(files, 'second.png');
   await expectRemovedFile(files, 'second.png');
   await expect(
     page.getByRole('heading', {
@@ -389,7 +455,9 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   await siteForm.getByLabel('Permanent code', { exact: true }).fill(siteCode);
   await siteForm.getByLabel('Name', { exact: true }).fill(siteName);
   await siteForm.getByRole('button', { name: 'Save site' }).click();
-  await expect(siteForm.getByRole('status')).toContainText('Site saved');
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toBeVisible();
   await page.goto('/inventory/assets/new');
   const form = page.getByRole('form', { name: 'Add individual asset' });
   const assetName = 'PDF browser ' + crypto.randomUUID();
@@ -566,7 +634,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   expect(sha256(await readFile(await savedReplacement.path()))).toBe(
     sha256(replacementBytes),
   );
-  await files.getByRole('button', { name: 'Remove' }).click();
+  await confirmNamedRemoval(files, 'replacement.pdf');
   await expectRemovedFile(files, 'replacement.pdf');
 });
 
@@ -686,7 +754,7 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
     expect(sha256(await readFile(await download.path()))).toBe(
       sha256(nearLimit),
     );
-    await files.getByRole('button', { name: 'Remove' }).click();
+    await confirmNamedRemoval(files, 'large-manual.pdf');
     await expectRemovedFile(files, 'large-manual.pdf');
     published = true;
   } catch (error) {

@@ -97,19 +97,18 @@ export default async function InventoryPage({
       <p className="experience-eyebrow">
         Logical storage and site custody · Inventory
       </p>
-      <h1 className="experience-heading mt-2">Inventory</h1>
+      <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>
       {params.scopeAdjusted === 'true' && (
         <p role="status" className="mt-2 text-sm text-amber-100">
           The previous results page is no longer available. Showing the nearest
           available page with your filters retained.
         </p>
       )}
-      <p className="experience-muted mt-2 max-w-2xl text-sm">
-        Search available storage, assigned site holdings, and individually
-        tracked assets.
+      <p className="experience-muted mt-1 max-w-2xl text-sm sm:mt-2">
+        Search stock, site holdings, and individual assets.
       </p>
       {member.role === 'staff' && <AddItemLauncher query={createQuery} />}
-      <div className="mt-4">
+      <div className="mt-2 sm:mt-4">
         <SearchForm
           key={exportParams.toString()}
           params={params}
@@ -118,7 +117,7 @@ export default async function InventoryPage({
           sites={sites}
           diagnosticsEnabled={authDiagnosticsEnabled()}
         />
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
           <div>
             <h2 className="text-lg font-semibold">Matching inventory</h2>
             <InventoryCount result={result} />
