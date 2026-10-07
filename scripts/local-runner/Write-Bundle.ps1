@@ -3,7 +3,13 @@
 param([Parameter(Mandatory)][ValidatePattern('^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$')][string] $Version)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$names = @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
+$repository = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+Push-Location $repository
+try {
+    & node (Join-Path $repository 'scripts/runner-image-inputs.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Trusted image snapshot generation failed; bundle was not published.' }
+} finally { Pop-Location }
+$names = @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
     'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
 $files = foreach ($name in $names) {
     $path = Join-Path $PSScriptRoot $name

@@ -41,9 +41,14 @@ while ($true) {
     Write-Host '7. Exit'
     Write-Host '8. Diagnose recorded converter (read-only; no install)'
     Write-Host '9. Maintainer retry/resume (archives evidence; exact recorded SHA/reason resumes interruption)'
-    $choice = Read-Host 'Choose 1-9'
+    Write-Host '10. Prepare trusted image while idle (resumes active pickup after success; preserves explicit Stop)'
+    $choice = Read-Host 'Choose 1-10'
     try {
         switch ($choice) {
+            '10' {
+                Assert-RunnerBundleCurrent $PSScriptRoot
+                & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action PrepareImage
+            }
             '1' { & (Join-Path $PSScriptRoot 'Setup.ps1') -EnableHyperV }
             '2' {
                 $publication = Read-RunnerJson (Join-Path $script:RunnerRoot 'setup-publication.json')
@@ -93,7 +98,7 @@ while ($true) {
                 }
                 & (Join-Path (Join-Path $script:RunnerRoot 'bin') 'Runner.ps1') -Action RetryPilot -ExpectedPilotSha $pilotSha -RetryReason $reason
             }
-            default { Write-Host 'Choose a number from 1 to 9.' }
+            default { Write-Host 'Choose a number from 1 to 10.' }
         }
     } catch {
         Write-Host "Setup stopped safely: $($_.Exception.Message)" -ForegroundColor Yellow

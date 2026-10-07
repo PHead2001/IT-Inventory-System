@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
@@ -19,6 +20,7 @@ function Assert-SecureRoot {}
 function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
+function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-RunnerVmInventory { return @(Get-VM) }
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
@@ -66,6 +68,7 @@ param($Scripts, $Root, $Mode, $Point, $Source)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $Scripts 'Common.ps1')
+. (Join-Path $Scripts 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Scripts $name), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
@@ -80,6 +83,7 @@ function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Assert-InstalledHost { param($Config) }
 function Get-OwnerToken { 'dummy' }
+function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
 function Start-ScheduledTask { [IO.File]::WriteAllText((Join-Path $Root 'unexpected-task'), 'started') }

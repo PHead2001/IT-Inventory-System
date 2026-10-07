@@ -56,6 +56,97 @@ before normal ephemeral cleanup, to establish actual candidate allocation.
 
 ## Owner setup
 
+### Prepared guest image
+
+After installing the reviewed bundle, choose **Prepare trusted image while idle**
+in Setup once. This owner action builds a credential-free guest from the pinned
+generic Ubuntu base. It waits for the idle supervisor to acknowledge pickup
+suspension and refuses an existing session; it never stops a running job. The
+builder uses the fixed heavy memory/CPU profile, the existing network isolation,
+guardian, readiness checks, hard deadline and owned cleanup. It never decrypts
+the GitHub credential, downloads/registers a runner, receives a JIT value, checks
+out a PR or executes a job. Successful preparation resumes previously active
+pickup when no explicit Stop marker existed. Previously stopped or inactive
+pickup stays suspended; failed preparation stays suspended for investigation.
+
+The trusted installed bundle contains five builder inputs: `Image.Prepare.sh`,
+`Image.Inputs.json`, `Image.Package.json`, `Image.PackageLock.json` and
+`Image.Supabase.toml`. The fixed recipe installs OS/Docker prerequisites, the
+pinned Node/npm toolchain, npm download cache, Playwright headless browser/system
+dependencies and the enabled Supabase service/test images. It pulls images without
+starting Supabase or creating database containers/volumes. The builder scrubs its
+temporary checkout, input files, SSH keys, credentials/config/history and cloud-init
+identity before emitting a bounded receipt and shutting down gracefully. It uses
+[cloud-init's documented clean options](https://docs.cloud-init.io/en/latest/reference/cli.html)
+to remove generated network configuration and reset the machine ID, then requires
+the builder's `50-cloud-init.yaml` to be absent and the systemd machine ID to be
+`uninitialized`. The fresh-clone gate verifies the resulting boot behavior. No job
+disk is ever retained as an image.
+
+Storage is pulled once from an available official mirror. The builder adds the
+four exact-version runtime mirror aliases to that verified local image ID, checks
+each alias resolves to the same ID, and records this proof in the bounded receipt.
+Alias creation does not pull more images. The host verifies the exact alias set
+against the installed trusted manifest before accepting scrub/publication proof.
+
+The host requires successful scrub proof, the exact recorded VM identity in
+`Off` state, verified VM removal, and an offline disk with no registered VM
+references. It copies that disk to a new protected, unselected candidate and
+hashes it. While pickup remains suspended under the same owner control, a second
+credential-free `verify-image` session boots a full copy through the ordinary
+prepared path, with a fresh MAC, SSH key and NoCloud instance. The verifier must
+pass the canonical cloud-init and runner prerequisites (including Docker for its
+fixed heavy profile), network isolation and live guardian checks. Its VM removal
+and unreferenced instance cleanup must then complete successfully. The original
+candidate is never booted: its hash is checked before verification and again
+after verifier cleanup, before publishing `prepared-image.json` last. Receipts
+bind the complete installed bundle, five inputs, generic base hash, scrub proof,
+actual Docker image digests, browser/OS provenance, and the fresh verifier's
+identity, readiness and cleanup proof. Failed/interrupted builds or verification
+cannot replace the selected image. Retention keeps the selected image and one
+prior image, deleting only recognized protected unreferenced candidates.
+
+Each job still receives a **full fresh disk copy**, a new MAC/SSH key/NoCloud
+instance ID and its ordinary memory profile. Prepared copies omit apt installation
+only after all protection/provenance/content checks pass. Their cloud-config also
+omits creation of the existing Docker group while retaining the runner's sudo and
+Docker memberships. A captured failed verifier confirmed that redeclaring this
+group produced cloud-init's existing-group warning and exit 2, which correctly
+failed strict readiness even though all initialization stages completed. Generic
+guests still declare the group before installing packages. Node uses a guest-local
+`/opt/hostedtoolcache` with setup-node completed markers; npm and browser caches
+live in the guest's normal runner home. New PR pins download cache misses inside
+that one disposable guest. A job cannot write caches or disks back to the host;
+its entire disk is deleted after execution. The separate verified runner archive
+cache keeps its existing metadata/hash checks.
+
+Candidate copy and full hashes run outside the state lock, allowing the guardian
+to cancel the builder during this work. Staging requires a fresh builder
+session/GUID, committed scrub proof, unchanged trusted binding and
+offline/unreferenced source and candidate. Publication follows successful
+verifier cleanup and briefly reacquires the state lock to confirm idle ownership,
+unchanged binding/selector and an offline, unreferenced candidate. Failed
+verification keeps Stop in place and removes only its unselected candidate;
+uncertain VM removal retains the canonical VM/state for investigation. Interrupted
+unselected files are purged by the next explicit preparation after reference
+checks. There is no resumable verification or publication action.
+
+Absent prepared images or changed trusted inputs use the generic base, with an
+explicit reason. Generic guests use the runner's default writable tool-cache path.
+Corrupt hashes, unexpected ACLs and reparse points fail closed. Status compares
+built and installed recipe identities and reports fallback; it checks metadata
+only to stay fast. Full disk hashing and offline/reference checks occur before
+job pickup. An image remains installation-specific evidence: offline tests do not
+prove live guest boot, scrub, graceful shutdown, cache hits or workload timing.
+
+To refresh trusted pins reproducibly, review the recipe and repository pins, then
+run `Write-Bundle.ps1 -Version <strictly newer version>` in the source checkout.
+That helper runs `node scripts/runner-image-inputs.mjs`, using the already installed
+pinned Playwright package to create deterministic snapshots without downloads.
+`node scripts/runner-image-inputs.mjs --check` detects stale source snapshots.
+Install the new bundle through Setup, then explicitly prepare its image. PR changes
+never trigger host image preparation or host writeback.
+
 Double-click `scripts/local-runner/Setup.cmd` and accept the Windows elevation prompt. Its small menu offers **Enable Hyper-V**, **Install or resume**, and **Store GitHub token**. Enabling the feature never restarts Windows automatically; restart if Windows requests it, then open Setup again and choose Install. A failed step stays visible and can be retried from the menu. The defaults target `PHead2001/IT-Inventory-System` and GitHub's default runner group ID `1`; the JIT API will reject an invalid group rather than silently choose another repository. Setup stops if another Windows NAT occupies the host, including one used by Rancher/WSL. It never removes or changes that NAT, the Rancher distribution, or an existing VM.
 
 Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: the generic [Noble cloud QCOW2 image](https://cloud-images.ubuntu.com/releases/noble/release-20260926/) and [Ubuntu 24.04.5 WSL image](https://releases.ubuntu.com/24.04/). A dedicated WSL image converter installs `qemu-utils` and converts the verified QCOW2 into a Hyper-V VHDX. WSL retains Windows host integration and is a trusted setup tool, not an isolated job sandbox. Its random distribution name is recorded in the protected setup stage before import; resume requires the same Windows WSL registration and owned base path. An unrecognized or preexisting converter is refused. Conversion writes a temporary VHDX, validates and resizes it, then records the completed output hash. Resume verifies both the source and output hashes; a partial or unreceipted VHDX is regenerated. Before setup completes or the token menu can run, setup verifies the exact owned converter registration, terminates it, verifies ownership again, unregisters it, and verifies its absence. Retirement failure keeps setup incomplete; retry uses the protected stage. The Azure VHD is intentionally excluded: [Canonical says it will not work on local Hyper-V](https://ubuntu.com/docs/public-images/public-images-reference/artifacts/). Canonical documents [generic image conversion and NoCloud on Hyper-V](https://ubuntu.com/blog/how-to-use-ubuntu-on-windows). The full converted VHDX is copied for each job, never attached as a shared parent disk.
@@ -79,6 +170,8 @@ After pulling reviewed runner changes, open the repository's `scripts/local-runn
 `Update.ps1` checks for an idle session and publishes the protected `stop.requested` marker together under the state lock, then waits up to 35 seconds for idle pickup to exit gracefully. Session-state/pilot-receipt publication uses that same lock: either suspension wins and no pilot is consumed, or the complete claim wins and update refuses. It never invokes destructive Stop, including during resume. Any session/VM that appears, timeout, or unexpected removal of the marker causes refusal without deleting the session or its evidence. Windows management calls and lock acquisition may take additional time. The updater then obtains the supervisor lifetime lock followed by the state lock, rechecks idle state, the marker and version, journals the old config and installed hashes, and retains protected staged files for recovery. It disables activation before any script replacement, verifies every final file and the installed bundle receipt, restores the exact old config, then marks the update complete. Config, credentials, images, task definitions and pilot evidence are preserved, and pickup stays stopped. A pending update is explicitly resumed through option 2 or `Update.ps1 -Resume` using its exact retained staged bundle; later checkout changes cannot silently alter that plan, and partial installed versions do not prevent recovery. New controls refuse pending lifecycle journals. Legacy controls may run the original coherent bundle if an interruption occurs before activation is disabled; no partially replaced bundle is allowed to run. A raced legacy claim causes update refusal. New supervisors recheck suspension and lifecycle journals before pilot consumption and session creation.
 
 Owner controls share a dedicated fail-fast control mutex across Update/resume, Start, Restart, Stop, pilot activation/retry, active activation and credential storage. A concurrent command refuses immediately; it cannot wait and run after the first command completes. Internal Restart reuses its command ownership. The lock order is control, supervisor lifetime when needed, then state; the background supervisor, guardian and watchdog never take the control mutex. Start uses the state lock without taking the persistent supervisor lifetime lock. **Before the first installation of this protocol, close every older Setup/control window and stop the supervisor through the owner controls, then keep controls quiescent until the update completes.** Already loaded older scripts cannot participate in a newly added mutex. New source and installed controls participate after installation.
+
+Named locks use an explicit protected DACL granting full control only to SYSTEM and built-in Administrators, with a trusted SYSTEM or Administrators owner. Each returned object is validated before waiting. Migration also accepts an existing SYSTEM-owned lock with only SYSTEM full control, or the captured Task Scheduler descriptor on the four exact runner mutex names: three explicit allow entries for Owner Rights read-control only, SYSTEM full control, and the exact `NT SERVICE\Schedule` service SID full control. Other service identities, extra rights/grants, inherited entries or deny entries refuse this legacy exception. Legacy ACLs are never changed in place. An elevated administrator cannot open the historical lifetime lock, so migration must run the canonical idle suspension/update under SYSTEM and let the old supervisor release its lock gracefully. It must not kill a job or replace the existing lock. Offline checks prove descriptor policy and retain real process contention/abandonment through an unbundled GUID-only ordinary-user test factory. Administrator/SYSTEM kernel access requires a separately reviewed elevated migration smoke test before installation.
 
 Initial setup retains a protected `setup-publication.json` before publishing its final scripts, manifest, installed receipt or config. Its intent includes the exact owned setup-stage evidence, disabled config and bundle bytes/hashes/receipt. Config is published last, after the verified bundle and receipt. Option 2 detects pending publication before choosing the updater, even when config already exists, and resumes that exact intent without adopting a later checkout. Only absent or byte-for-byte expected artifacts are accepted; tampered files/config/receipt or changed setup-stage evidence refuse recovery. Completion is recorded before the owned setup stage is removed. A completed publication cannot recreate arbitrarily missing installed artifacts. Preserve both protected records after an interruption and use option 2; do not delete the receipt or substitute another checkout's files.
 
@@ -184,11 +277,11 @@ and independent security review remain required before installation/acceptance.
 
 The host-side Hyper-V extended port ACL denies IPv6, private/link-local/CGNAT destinations, current host addresses and all non-default IPv4 routes, including routes through corporate/VPN gateways, and all unlisted traffic. Split-default VPN routes (`0.0.0.0/1` and `128.0.0.0/1`) intentionally block Internet readiness and fail closed. It allows public HTTP/HTTPS, public TCP 5432 for the linked Supabase session endpoint, and public DNS, plus host-to-guest SSH for setup. The pinned Supabase CLI uses pooler session port 5432; port 6543 is not opened. A linked database workflow requires a public IPv4 session endpoint; these checks do not connect to production or prove actual production connectivity. Higher-priority private/host/route denies also apply to port 5432. Each rule has a distinct weight: public TCP 100-102, DNS 110-113, inbound SSH 150, then ascending private, route, host and IPv6 denies from 200; default denies use 1 and 2. Host addresses and route prefixes are sorted and deduplicated. Invalid inspection data or more than 4096 total deny rules aborts before ACL modification. Rules are installed and read back before VM boot and checked again before JIT registration. A live guest-to-host TCP denial and public GitHub TLS/DNS probe must pass before registration. These controls are host-side; a guest firewall rule cannot replace them. [Microsoft documents rule weights and stateful return traffic](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/create-security-policies-extended-port-access-control-lists).
 
-Before constructing the NoCloud seed, the host assigns a collision-checked random locally administered static MAC to the owned, never-booted guest adapter. The assigned address is journaled and read back before/after boot and before JIT registration; the seed matches that exact address. Hyper-V may report an all-zero dynamic MAC before first boot, which cannot be used as the guest match. Cloud-init declares the Docker group before creating the `runner` user and installing Docker. Guest readiness requires successful cloud-init completion and `docker info` as the unprivileged `runner` user; a Docker socket alone is insufficient. Docker access failures keep readiness pending instead of registering a runner.
+Before constructing the NoCloud seed, the host assigns a collision-checked random locally administered static MAC to the owned, never-booted guest adapter. The assigned address is journaled and read back before/after boot and before JIT registration; the seed matches that exact address. Hyper-V may report an all-zero dynamic MAC before first boot, which cannot be used as the guest match. Generic cloud-init declares the Docker group before creating the `runner` user and installing Docker; prepared seeds retain membership without recreating the group. Guest readiness requires successful cloud-init completion (exit 0) and `docker info` as the unprivileged `runner` user; a Docker socket alone is insufficient. Cloud-init warnings or Docker access failures keep readiness pending instead of registering a runner.
 
 After a consumed pilot fails, preserve `pilot-attempt.json` and the recorded failure; do not clear the receipt or restart pickup blindly. The owner can run `DiagnoseNetwork.ps1` elevated for read-only host routes, ACL capability and owned-network evidence. After independent review and explicit owner authorization, `ProbeNetworkAcl.ps1` can reproduce the current policy on one fresh, diskless VM that is never booted. It reports the exact failing rule or readback error and removes only its verified VM ID/name/Off state/path/tag/diskless identity and owned folder. Inspect its JSON `cleanupVerified` and `cleanupError` fields; a successful shell exit alone is insufficient. Its two-minute limit applies between ACL commands, not to the duration of an individual Windows management call. Coordinate concurrent WSL/Docker network work so it does not change the network during the diagnosis.
 
-A separate per-session Windows guardian starts and confirms readiness before VM boot. It compares a canonical snapshot of all host IPv4/IPv6 addresses and routes, including destination, next hop, and interface, once per second throughout cloud-init, downloads, SSH, and job execution. Address/route drift or inspection failure removes the session VM instead of adopting a new baseline; a fresh comparison also runs immediately before JIT registration. Boot holds the state lock and rechecks the session/guardian so cancelled sessions cannot subsequently start. The one-second interval plus host inspection, lock acquisition and VM stop time creates a nonzero exposure window; this is not instantaneous network isolation.
+A separate per-session Windows guardian starts and confirms readiness before VM boot. It compares a canonical snapshot of all host IPv4/IPv6 addresses and routes, including destination, next hop, and interface, once per second throughout cloud-init, downloads, SSH, and job execution. Address/route drift or inspection failure removes the session VM instead of adopting a new baseline; a fresh comparison also runs immediately before JIT registration. Boot dispatch holds the state lock briefly, rechecks the session/guardian and passes the verified VM object and GUID to Start-VM -AsJob. Its bounded completion wait runs outside the lock, checks session/network/guardian validity, and requires fresh GUID/owner/running-state readback before continuation. Cleanup remains authoritative: cancelling a PowerShell job is not proof that Hyper-V cancelled the operation; unverified removal or disk references retain state and files. The one-second interval plus host inspection, lock acquisition and VM stop time creates a nonzero exposure window; this is not instantaneous network isolation.
 
 Before enabling active pickup on the live host, security evidence must establish the exact ACL and guardian on Windows: live guest isolation, synthetic route/address drift termination, deadline and process-loss cleanup, real GitHub assignment, and normal one-job exit/cleanup. Provisional creation and boot recovery also require verification. Active pickup needs the owner's explicit acceptance of the measured residual window and independent review. The exact-SHA diagnostic Docker pilot proves assignment and basic guest readiness; it does not certify Supabase or Playwright. After normal job routing is enabled for the live host, the first normal PR CI run must exercise the full Supabase/Playwright workload and pass the complete repository gate before PR readiness. Repository label changes alone are not evidence that host security acceptance, activation, or workload certification has occurred.
 

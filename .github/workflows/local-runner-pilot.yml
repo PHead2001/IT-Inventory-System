@@ -37,14 +37,16 @@ jobs:
           printf 'Workflow SHA: %s; head SHA: %s\n' "$GITHUB_SHA" "$PILOT_HEAD_SHA"
           timeout 30s docker version --format 'Docker client: {{.Client.Version}}; server: {{.Server.Version}}'
 
-          # Alpine 3.23.3 index digest: pull reads the registry; the container has no network.
+          # Alpine 3.23.3 index digest: pull only on a miss; the container has no network.
           image='alpine@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659'
           container="it-inventory-pilot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
             timeout 30s docker rm --force "$container" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          timeout 180s docker pull --quiet "$image" >/dev/null
+          if ! timeout 30s docker image inspect "$image" >/dev/null 2>&1; then
+            timeout 180s docker pull --quiet "$image" >/dev/null
+          fi
           timeout 30s docker create --name "$container" \
             --network none --read-only --cap-drop ALL \
             --security-opt no-new-privileges --pids-limit 32 \

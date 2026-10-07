@@ -12,6 +12,7 @@ $script:RunnerConfigPath = Join-Path $script:RunnerRoot 'config.json'
 $script:RunnerStatePath = Join-Path $script:RunnerRoot 'state.json'
 $script:RunnerOperationStage = 'idle'
 $script:RunnerSessionName = $null
+$script:RunnerPreparationAuthorized = $false
 
 function Initialize-RunnerDpapi {
     # Fresh Windows PowerShell 5.1 sessions do not preload ProtectedData.
@@ -74,9 +75,65 @@ function Assert-OwnedPath([string] $Path) {
     return $target
 }
 
+function New-RunnerMutexSecurity([string] $Name) {
+    $security = [Security.AccessControl.MutexSecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $owner = if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ceq 'S-1-5-18') { 'S-1-5-18' } else { 'S-1-5-32-544' }
+    $security.SetOwner([Security.Principal.SecurityIdentifier]::new($owner))
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $security.AddAccessRule([Security.AccessControl.MutexAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new($sid), [Security.AccessControl.MutexRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow))
+    }
+    return $security
+}
+
+function Assert-RunnerMutexSecurity($Security, [string] $Name) {
+    $owner = $Security.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($owner -cnotin @('S-1-5-18', 'S-1-5-32-544')) { throw 'Runner mutex owner is untrusted.' }
+    $rights = @{}
+    $rules = @($Security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    # Captured Task Scheduler legacy descriptor: owner rights can read the ACL,
+    # while SYSTEM and this exact Schedule service identity have full control.
+    # Accept only the existing fixed runner objects, never a service-SID pattern.
+    if ($owner -ceq 'S-1-5-18' -and $rules.Count -eq 3 -and $Name -cin @(
+        'Global\ITInventoryLocalRunner-v1', 'Global\ITInventoryLocalRunner-Control-v1',
+        'Global\ITInventoryLocalRunner-Supervisor-v1', 'Global\ITInventoryLocalRunner-Archive-v1')) {
+        $expected = @{
+            'S-1-3-4' = [int][Security.AccessControl.MutexRights]::ReadPermissions
+            'S-1-5-18' = [int][Security.AccessControl.MutexRights]::FullControl
+            'S-1-5-80-4125092361-1567024937-842823819-2091237918-836075745' = [int][Security.AccessControl.MutexRights]::FullControl
+        }
+        $seen = @{}
+        foreach ($rule in $rules) {
+            $sid = $rule.IdentityReference.Value
+            if ($rule.AccessControlType -ne 'Allow' -or $rule.IsInherited -or -not $expected.ContainsKey($sid) -or
+                [int]$rule.MutexRights -ne $expected[$sid] -or $seen.ContainsKey($sid)) { break }
+            $seen[$sid] = $true
+        }
+        if ($seen.Count -eq 3) { return } # Use as-is; never repair legacy security.
+    }
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if ($sid -cnotin @('S-1-5-18', 'S-1-5-32-544') -or $rule.AccessControlType -ne 'Allow' -or $rule.IsInherited) { throw 'Runner mutex ACL is untrusted.' }
+        if (-not $rights.ContainsKey($sid)) { $rights[$sid] = 0 }
+        $rights[$sid] = $rights[$sid] -bor [int]$rule.MutexRights
+    }
+    $full = [int][Security.AccessControl.MutexRights]::FullControl
+    if ($rights.Count -eq 1 -and $rights.ContainsKey('S-1-5-18') -and $rights['S-1-5-18'] -eq $full -and $owner -ceq 'S-1-5-18') {
+        return # Historical SYSTEM-only object: use under SYSTEM; never change it in place.
+    }
+    if (-not $Security.AreAccessRulesProtected -or $rights.Count -ne 2 -or
+        $rights['S-1-5-18'] -ne $full -or $rights['S-1-5-32-544'] -ne $full) { throw 'Runner mutex ACL does not match protected SYSTEM/Administrators access.' }
+}
+
 function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
-    $mutex = [Threading.Mutex]::new($false, $Name)
+    $created = $false
+    # Windows ignores the supplied descriptor for an existing object. Validate
+    # that object's owner/DACL before waiting; never repair its ACL in place.
+    $mutex = [Threading.Mutex]::new($false, $Name, [ref]$created, (New-RunnerMutexSecurity $Name))
     try {
+        Assert-RunnerMutexSecurity ($mutex.GetAccessControl()) $Name
         try {
             $timeout = if ($FailFast) { [TimeSpan]::Zero } else { [TimeSpan]::FromSeconds(20) }
             if (-not $mutex.WaitOne($timeout)) {
@@ -609,6 +666,10 @@ function Invoke-RunnerTransitionCheckpoint([string] $Name) {}
 # A committed initial state is the durable claim. Complete its exact receipt
 # before any recovery can erase that state, including watchdog/Stop cleanup.
 function Complete-RunnerPilotClaim($State) {
+    if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -ceq 'prepare') {
+        Assert-StateIdentity $State
+        return
+    }
     if ($State.PSObject.Properties.Name -contains 'claimMode' -and
         ($State.claimMode -cnotin @('pilot', 'active') -or
         ($State.claimMode -ceq 'pilot' -and $State.PSObject.Properties.Name -notcontains 'pilotClaim') -or
@@ -630,6 +691,18 @@ function Complete-RunnerPilotClaim($State) {
 }
 
 function Assert-StateIdentity($State) {
+    if ($State.PSObject.Properties.Name -contains 'purpose') {
+        if ($State.purpose -cnotin @('job', 'prepare', 'verify-image') -or
+            ($State.purpose -cne 'job' -and ($State.PSObject.Properties.Name -contains 'claimMode' -or $State.PSObject.Properties.Name -contains 'pilotClaim'))) {
+            throw 'Session purpose may not carry job authorization in a preparation session.'
+        }
+        $hasCandidate = $State.PSObject.Properties.Name -contains 'imageCandidate'
+        if ($State.purpose -ceq 'verify-image') {
+            if (-not $hasCandidate -or $State.imageCandidate.id -cnotmatch '^[0-9a-f]{32}$' -or
+                $State.imageCandidate.diskHash -cnotmatch '^[0-9A-F]{64}$' -or $State.imageCandidate.bindingHash -cnotmatch '^[0-9A-F]{64}$' -or
+                $State.imageCandidate.recipeId -cnotmatch '^[0-9A-F]{64}$') { throw 'Image verifier requires its protected candidate binding.' }
+        } elseif ($hasCandidate) { throw 'Only the credential-free verifier may carry an image candidate.' }
+    }
     if ($State.tag -ne $script:RunnerTag -or $State.vmName -notmatch '^ITIR-[0-9a-f]{32}$') {
         throw 'Runner state identity is invalid; manual investigation is required.'
     }
@@ -718,3 +791,5 @@ function Remove-RunnerInstance($State) {
         Remove-Item -LiteralPath $script:RunnerStatePath -Force
     }
 }
+
+. (Join-Path $PSScriptRoot 'PreparedImage.ps1')

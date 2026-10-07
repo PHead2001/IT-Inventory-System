@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 foreach ($name in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
@@ -88,6 +89,24 @@ function Invoke-RunnerTransitionCheckpoint {
     }
 }
 try {
+    # Previously installed twelve-file bundles remain verifiable only at the
+    # protected installed path and bounded historical version, then upgrade to
+    # the full current set including trusted image snapshots.
+    $source = New-Fixture 'legacy-image-upgrade' '2026-10-06.1' '2026-10-06.2'
+    $bin = Join-Path $script:RunnerRoot 'bin'
+    $legacyFiles = foreach ($name in Get-RunnerLegacyBundleNames) { [ordered]@{ name = $name; hash = (Get-FileHash -LiteralPath (Join-Path $bin $name) -Algorithm SHA256).Hash } }
+    $legacy = [ordered]@{ schema = 1; tag = $script:RunnerTag; version = '2026-10-06.1'; files = @($legacyFiles) }
+    [IO.File]::WriteAllText((Join-Path $bin 'Bundle.json'), (ConvertTo-Json -InputObject $legacy -Depth 5), [Text.UTF8Encoding]::new($false))
+    foreach ($name in Get-RunnerBundleNames | Where-Object { $_ -cnotin @(Get-RunnerLegacyBundleNames) }) { Remove-Item -LiteralPath (Join-Path $bin $name) }
+    $legacyHash = (Get-FileHash -LiteralPath (Join-Path $bin 'Bundle.json')).Hash
+    Write-RunnerJson (Join-Path $script:RunnerRoot 'installed-bundle.json') ([ordered]@{ tag = $script:RunnerTag; version = $legacy.version; manifestHash = $legacyHash })
+    [void](Get-CoherentInstalledRunnerBundle)
+    Assert-Rejected { Get-RunnerBundle $bin } 'old-format source must not be used as a new bundle'
+    $outside = Join-Path $base 'legacy-outside'; [void][IO.Directory]::CreateDirectory($outside)
+    foreach ($entry in @(Get-ChildItem -LiteralPath $bin -File)) { [IO.File]::Copy($entry.FullName, (Join-Path $outside $entry.Name)) }
+    Assert-Rejected { Get-RunnerBundle $outside -AllowLegacyInstalled } 'legacy dependency exception outside installed protected path'
+    Install-RunnerBundle $source
+    if ((Get-CoherentInstalledRunnerBundle).manifest.files.Count -ne @(Get-RunnerBundleNames).Count -or -not (Test-InstalledRunnerBundle $source)) { throw 'Legacy image upgrade did not install the complete current bundle.' }
     # A separate process models a legacy supervisor claiming after the precheck.
     $childPath = Join-Path $base 'claim.ps1'
     [IO.File]::WriteAllText($childPath, @'

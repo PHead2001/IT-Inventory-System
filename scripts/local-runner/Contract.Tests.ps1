@@ -11,6 +11,8 @@ foreach ($file in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1')) {
 
 # Keep DPAPI proof in a fresh -NoProfile process rather than inheriting any
 # assemblies imported by these contract checks or an interactive owner shell.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Mutex.Security.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell mutex policy regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Dpapi.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell DPAPI regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Setup.Download.Tests.ps1')
@@ -47,7 +49,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regression failed.' }
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
+
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Image.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Prepared image tests failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guardian.Boot.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Guardian boot tests failed.' }
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"
 [void][IO.Directory]::CreateDirectory($testRoot)
 $script:RunnerRoot = $testRoot
@@ -380,12 +388,14 @@ public class ArgvSink {
             $remoteCommand -notmatch 'test "\$\(id -un\)" = runner' -or $remoteCommand -notmatch 'timeout 10 docker info' -or $remoteCommand -match '\bsudo\b') {
             throw 'Guest readiness did not check unprivileged runner access to Docker.'
         }
-        # A socket can exist while runner access fails. That attempt must retry.
-        if ($script:readinessCalls -eq 1) { return 1 }
+        # A completed cloud-init with a recoverable warning exits 2. Neither it
+        # nor failed Docker access (1) may satisfy the strict readiness contract.
+        if ($script:readinessCalls -eq 1) { return 2 }
+        if ($script:readinessCalls -eq 2) { return 1 }
         return 0
     }
     Wait-Guest ([pscustomobject]@{ instancePath = Join-Path $testRoot 'readiness' }) ([pscustomobject]@{ guestIp = '172.30.240.2' })
-    if ($script:readinessCalls -ne 2 -or $script:readinessSleeps -ne 1) { throw 'Guest readiness accepted a Docker access failure.' }
+    if ($script:readinessCalls -ne 3 -or $script:readinessSleeps -ne 2) { throw 'Guest readiness accepted cloud-init warnings or a Docker access failure.' }
     Set-Item -Path Function:\Assert-SessionAlive -Value $realSessionAlive
     Set-Item -Path Function:\Invoke-RunnerNative -Value $realNativeCommand
     Remove-Item -Path Function:\Start-Sleep
@@ -397,7 +407,7 @@ public class ArgvSink {
     $script:fakeDisks = @([pscustomobject]@{ Path = Join-Path $validInstance 'guest.vhdx' })
     $script:deletions = 0
     $script:fakeVmRemoved = $false
-    function Get-VM { param($Name) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
+    function Get-VM { param($Name, $Id) if (-not $script:fakeVmRemoved) { return $script:fakeVm } }
     # Provider coherence is tested separately by Cleanup.Integrity.Tests.ps1.
     function Get-RunnerVmInventory { return @(Get-VM) }
     function Get-VMHardDiskDrive { param($VM, $VMName) return $script:fakeDisks }
@@ -473,6 +483,7 @@ public class ArgvSink {
     Write-RunnerJson $script:RunnerStatePath $creating
     $name = $validName; $instance = $validInstance; $key = 'dummy public key'; $Config = [pscustomobject]@{}
     $profile = Get-RunnerResourceProfile 'it-inventory-heavy'
+    $image = [pscustomobject]@{ prepared = $false }
     $sessionDefinition = $runnerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-RunnerSession' }, $true)
     $segmentStart = $sessionDefinition.Extent.Text.IndexOf('$guestMac = Set-RunnerGuestMac')
     $segmentEnd = $sessionDefinition.Extent.Text.IndexOf('$script:RunnerOperationStage = ''network-isolation''')
@@ -567,7 +578,7 @@ public class ArgvSink {
     [Array]::Reverse($script:fakeAddresses)
     if ((Get-HostNetworkFingerprint) -cne $fingerprint) { throw 'Network fingerprint depends on enumeration order.' }
     $networkState = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = $validName; instancePath = $validInstance
+        tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
         networkFingerprint = $fingerprint; supervisorPid = $PID
         heartbeatUtc = [DateTime]::UtcNow.ToString('o')
         supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
@@ -600,7 +611,7 @@ public class ArgvSink {
         $script:inspectionFailure = $false
     }
     $script:starts = 0
-    function Start-VM { param($Name) $script:starts++ }
+    function Start-VM { param($VM, [switch] $AsJob) $script:starts++; $script:fakeVm.State = 'Running'; $job = Start-Job {}; [void](Wait-Job $job); return $job }
     $rejected = $false
     try { Start-GuardedVm $networkState } catch { $rejected = $true }
     if (-not $rejected -or $script:starts -ne 0) { throw 'Cancelled session booted after guardian removed its state.' }
@@ -624,6 +635,7 @@ public class ArgvSink {
     $guardJob = Start-Job -ArgumentList $PSScriptRoot, $testRoot, $validName, $readyName, $script:contractLockPrefix -ScriptBlock {
         param($source, $root, $name, $eventName, $lockPrefix)
         . (Join-Path $source 'Common.ps1')
+            . (Join-Path $source 'Test.Mutex.ps1')
         $script:guardEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
         $script:guardLockName = $lockPrefix + '-state'
         function Enter-RunnerLock { return & $script:guardEnterLock $script:guardLockName }

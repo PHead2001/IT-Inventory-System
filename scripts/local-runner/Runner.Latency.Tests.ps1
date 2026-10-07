@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
 $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-latency-' + [guid]::NewGuid().ToString('N'))
@@ -104,6 +105,7 @@ try {
                 param($Source, $FixtureRoot, $LockName)
                 Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'
                 . (Join-Path $Source 'Common.ps1')
+                . (Join-Path $Source 'Test.Mutex.ps1')
                 $definitions = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Source 'Runner.ps1'), [ref]$null, [ref]$null)
                 foreach ($definition in $definitions.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
                 $script:RunnerRoot = $FixtureRoot
