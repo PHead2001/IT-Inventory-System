@@ -36,6 +36,15 @@ it('rejects duplicate and oversized scopes before making a request', async () =>
     getLocationEntryCounts(Array.from({ length: 101 }, (_, i) => `L${i}`)),
   ).rejects.toThrow();
   expect(mocks.rpc).not.toHaveBeenCalled();
+  expect(mocks.member).not.toHaveBeenCalled();
+});
+it('retains standalone membership authorization and blocks counts after denial', async () => {
+  mocks.member.mockRejectedValue(new Error('membership revoked'));
+  await expect(getLocationEntryCounts(['ITC-D01'])).rejects.toThrow(
+    'membership revoked',
+  );
+  expect(mocks.member).toHaveBeenCalledOnce();
+  expect(mocks.rpc).not.toHaveBeenCalled();
 });
 it('keeps backend failure unknown and rejects mismatched response identity', async () => {
   mocks.rpc.mockResolvedValueOnce({ data: null, error: { code: 'P1001' } });

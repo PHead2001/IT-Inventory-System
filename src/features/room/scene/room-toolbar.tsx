@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Focus,
   Maximize,
@@ -60,6 +60,13 @@ export function RoomToolbar({
     setOpen(false);
     setHelp(false);
     more.current?.focus();
+  };
+  const handleEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      onActiveChange(false);
+      close();
+    }
   };
   const secondary: [ViewCommandKind, string][] = [
     ['recenter', 'Recenter'],
@@ -150,6 +157,7 @@ export function RoomToolbar({
           title="More map controls"
           aria-expanded={open}
           aria-controls={panelId}
+          onKeyDown={handleEscape}
           onClick={() => {
             setOpen(!open);
             setHelp(false);
@@ -164,13 +172,7 @@ export function RoomToolbar({
           role="region"
           aria-label="More map controls"
           className={styles.moreMenu}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.stopPropagation();
-              onActiveChange(false);
-              close();
-            }
-          }}
+          onKeyDown={handleEscape}
         >
           <Button
             variant="outline"

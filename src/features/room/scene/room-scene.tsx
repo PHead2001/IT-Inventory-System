@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/immutability -- Three.js camera objects are intentionally mutated inside effects/frame callbacks at this imperative graphics boundary. */
 'use client';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { Edges, OrbitControls } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import {
   useCallback,
   useEffect,
@@ -39,6 +39,11 @@ import {
 import { attachMapInput } from './map-input';
 import { RoomToolbar, type ViewCommandKind } from './room-toolbar';
 import { SelectionMaterial } from './selection-material';
+import {
+  ScenePaletteProvider,
+  ScenePaletteLighting,
+  SelectionEdges,
+} from './scene-palette';
 import { SceneDepth } from './scene-depth';
 import { RoomLabel, knownOccupiedCount } from './room-label';
 import { RoomLabelHtml } from './room-label-html';
@@ -384,15 +389,9 @@ function NodeVisual({
               opacity={node.visual?.opacity ?? 1}
             />
             {(node.visual?.edges || selected) && (
-              <Edges
-                color={
-                  selected
-                    ? '#a5f3fc'
-                    : hasRenderedSelection
-                      ? '#64748b'
-                      : '#94a3b8'
-                }
-                threshold={15}
+              <SelectionEdges
+                selected={selected}
+                dimmed={hasRenderedSelection}
               />
             )}
           </mesh>
@@ -1299,65 +1298,60 @@ export default function RoomScene(props: RoomSceneProps) {
             <p>Graphics are unavailable. Use the location controls below.</p>
           }
         >
-          <color attach="background" args={['#07111f']} />
-          <ambientLight intensity={1.1} />
-          <directionalLight position={[100, 220, 100]} intensity={2} />
-          <directionalLight
-            position={[-80, 100, -100]}
-            intensity={0.7}
-            color="#bae6fd"
-          />
-          <LabelLayoutProvider registry={registry}>
-            <LabelLayoutDriver registry={registry} />
-            <SceneDepth room={props.room} />
-            <Envelope
-              room={props.room}
-              onRecenter={() => requestCommand('recenter')}
-              canRecenter={(delta) =>
-                floorDoubleClickAllowed(
-                  delta,
-                  manualGesture.current.active,
-                  manualGesture.current.lastMotionAt,
-                  performance.now(),
-                )
-              }
-              showAllLabels={showAllLabels}
-            />
-            {props.room.nodes.map((node) => (
-              <NodeVisual
-                key={node.id}
-                node={node}
-                locationNames={props.locationNames}
-                selectedCode={props.selectedCode}
-                hasRenderedSelection={renderedSelection}
-                highlighted={highlighted}
-                onSelect={props.onSelect}
-                profiles={props.room.rackFaceProfiles}
+          <ScenePaletteProvider>
+            <ScenePaletteLighting />
+            <LabelLayoutProvider registry={registry}>
+              <LabelLayoutDriver registry={registry} />
+              <SceneDepth room={props.room} />
+              <Envelope
+                room={props.room}
+                onRecenter={() => requestCommand('recenter')}
+                canRecenter={(delta) =>
+                  floorDoubleClickAllowed(
+                    delta,
+                    manualGesture.current.active,
+                    manualGesture.current.lastMotionAt,
+                    performance.now(),
+                  )
+                }
                 showAllLabels={showAllLabels}
-                hoveredCode={activeHover?.target.code ?? null}
-                locationEntryCounts={props.locationEntryCounts}
-                showCounts={showCounts}
-                canSelect={canSelect}
               />
-            ))}
-            <CameraRig
-              {...props}
-              command={command}
-              orbitMode={orbitMode}
-              manualGesture={manualGesture}
-              active={active}
-              selectionGesture={selectionGesture}
-              onDraggingChange={setDragging}
-            />
-            <VisibleHoverTracker
-              showAllLabels={showAllLabels}
-              active={active}
-              suspended={active && dragging}
-              retainDuringLabelHandoff={retainDuringLabelHandoff}
-              onHit={onVisibleHover}
-              onCanvasLeave={onCanvasHoverLeave}
-            />
-          </LabelLayoutProvider>
+              {props.room.nodes.map((node) => (
+                <NodeVisual
+                  key={node.id}
+                  node={node}
+                  locationNames={props.locationNames}
+                  selectedCode={props.selectedCode}
+                  hasRenderedSelection={renderedSelection}
+                  highlighted={highlighted}
+                  onSelect={props.onSelect}
+                  profiles={props.room.rackFaceProfiles}
+                  showAllLabels={showAllLabels}
+                  hoveredCode={activeHover?.target.code ?? null}
+                  locationEntryCounts={props.locationEntryCounts}
+                  showCounts={showCounts}
+                  canSelect={canSelect}
+                />
+              ))}
+              <CameraRig
+                {...props}
+                command={command}
+                orbitMode={orbitMode}
+                manualGesture={manualGesture}
+                active={active}
+                selectionGesture={selectionGesture}
+                onDraggingChange={setDragging}
+              />
+              <VisibleHoverTracker
+                showAllLabels={showAllLabels}
+                active={active}
+                suspended={active && dragging}
+                retainDuringLabelHandoff={retainDuringLabelHandoff}
+                onHit={onVisibleHover}
+                onCanvasLeave={onCanvasHoverLeave}
+              />
+            </LabelLayoutProvider>
+          </ScenePaletteProvider>
         </Canvas>
         {activeHover?.needsTooltip && (
           <div

@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import { Color, MeshStandardMaterial } from 'three';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
+import { useScenePalette } from './scene-palette';
 
 export function SelectionMaterial({
   color,
@@ -20,6 +21,7 @@ export function SelectionMaterial({
   const material = useRef<MeshStandardMaterial>(null);
   const pulse = useRef<number | null>(null);
   const reduced = useEffectiveReducedMotion();
+  const palette = useScenePalette();
   const { invalidate, gl } = useThree();
   const physicalColor = useMemo(
     () => new Color(color).multiplyScalar(dimmed ? 0.72 : 1),
@@ -53,7 +55,7 @@ export function SelectionMaterial({
     <meshStandardMaterial
       ref={material}
       color={physicalColor}
-      emissive={selected || hovered ? '#22d3ee' : '#000000'}
+      emissive={palette.selectionEmissive}
       emissiveIntensity={baseEmissive}
       roughness={0.8}
       transparent={opacity < 1}

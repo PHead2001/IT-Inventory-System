@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createInventoryReadScope } from '@/features/inventory/queries.server';
-import { getLocationEntryCounts } from '@/features/room/occupancy.server';
 import {
   availableSpaces,
   spaceRoom,
@@ -36,7 +35,7 @@ export async function GET(request: NextRequest) {
     )
     .map((entry) => entry.code);
   try {
-    const counts = await getLocationEntryCounts(codes);
+    const counts = await scope.getLocationEntryCounts(codes);
     return NextResponse.json(
       {
         identity: {

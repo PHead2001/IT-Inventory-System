@@ -11,12 +11,8 @@ const countRows = z
   )
   .max(100);
 
-/** One caller-scoped snapshot. Missing codes remain unknown, never zero.
- * Decimal strings preserve aggregate precision; format with BigInt at display.
- */
-export async function getLocationEntryCounts(
-  locationCodes: string[],
-): Promise<Record<string, string>> {
+type MemberContext = Awaited<ReturnType<typeof requireMember>>;
+function validateLocationCodes(locationCodes: string[]) {
   const requested = new Set(locationCodes);
   if (
     requested.size !== locationCodes.length ||
@@ -25,7 +21,15 @@ export async function getLocationEntryCounts(
     Buffer.byteLength(JSON.stringify(locationCodes), 'utf8') > 16384
   )
     throw new Error('Invalid location count request.');
-  const { supabase } = await requireMember();
+  return requested;
+}
+
+/** Internal read using the handler's already authorized caller context. */
+export async function readLocationEntryCounts(
+  { supabase }: MemberContext,
+  locationCodes: string[],
+): Promise<Record<string, string>> {
+  const requested = validateLocationCodes(locationCodes);
   const { data, error } = await supabase.rpc(
     'inventory_location_entry_counts',
     {
@@ -47,4 +51,14 @@ export async function getLocationEntryCounts(
     result[row.location_code] = row.entry_count;
   }
   return result;
+}
+
+/** One caller-scoped snapshot. Missing codes remain unknown, never zero.
+ * Decimal strings preserve aggregate precision; format with BigInt at display.
+ */
+export async function getLocationEntryCounts(
+  locationCodes: string[],
+): Promise<Record<string, string>> {
+  validateLocationCodes(locationCodes);
+  return readLocationEntryCounts(await requireMember(), locationCodes);
 }
