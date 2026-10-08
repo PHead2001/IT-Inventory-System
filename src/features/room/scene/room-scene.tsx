@@ -106,6 +106,21 @@ function selectedSceneLabel(
   }
   return null;
 }
+export function hasRenderedSelection(
+  nodes: RoomNode[],
+  selectedCode: string | null,
+  highlighted: ReadonlySet<string>,
+): boolean {
+  return nodes.some(
+    (node) =>
+      (node.kind === 'box' &&
+        !!node.size &&
+        !!node.locationCode &&
+        (node.locationCode === selectedCode ||
+          highlighted.has(node.locationCode))) ||
+      hasRenderedSelection(node.children ?? [], selectedCode, highlighted),
+  );
+}
 function Solid({
   position,
   size,
@@ -302,6 +317,7 @@ function NodeVisual({
   node,
   locationNames,
   selectedCode,
+  hasRenderedSelection,
   highlighted,
   onSelect,
   profiles,
@@ -315,6 +331,7 @@ function NodeVisual({
   profiles: RoomDefinition['rackFaceProfiles'];
   node: RoomNode;
   selectedCode: string | null;
+  hasRenderedSelection: boolean;
   highlighted: Set<string>;
   onSelect: (code: string) => void;
   showAllLabels: boolean;
@@ -362,14 +379,18 @@ function NodeVisual({
             <SelectionMaterial
               color={node.visual?.color ?? '#475569'}
               selected={selected}
-              dimmed={!!selectedCode && !selected}
+              dimmed={hasRenderedSelection && !selected}
               hovered={hoveredCode === node.locationCode}
               opacity={node.visual?.opacity ?? 1}
             />
             {(node.visual?.edges || selected) && (
               <Edges
                 color={
-                  selected ? '#a5f3fc' : selectedCode ? '#64748b' : '#94a3b8'
+                  selected
+                    ? '#a5f3fc'
+                    : hasRenderedSelection
+                      ? '#64748b'
+                      : '#94a3b8'
                 }
                 threshold={15}
               />
@@ -470,6 +491,7 @@ function NodeVisual({
           node={child}
           locationNames={locationNames}
           selectedCode={selectedCode}
+          hasRenderedSelection={hasRenderedSelection}
           highlighted={highlighted}
           onSelect={onSelect}
           profiles={profiles}
@@ -1151,6 +1173,13 @@ export default function RoomScene(props: RoomSceneProps) {
     () => new Set(props.highlightedCodes),
     [props.highlightedCodes],
   );
+  // Logical selections can have no represented mesh. Only a highlighted box
+  // should dim its physical neighbors, including descendants of aggregates.
+  const renderedSelection = useMemo(
+    () =>
+      hasRenderedSelection(props.room.nodes, props.selectedCode, highlighted),
+    [props.room.nodes, props.selectedCode, highlighted],
+  );
   const [interaction, setInteraction] = useState({
     room: props.room,
     active: false,
@@ -1300,6 +1329,7 @@ export default function RoomScene(props: RoomSceneProps) {
                 node={node}
                 locationNames={props.locationNames}
                 selectedCode={props.selectedCode}
+                hasRenderedSelection={renderedSelection}
                 highlighted={highlighted}
                 onSelect={props.onSelect}
                 profiles={props.room.rackFaceProfiles}

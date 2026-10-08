@@ -3,13 +3,20 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { attachMapInput } from './map-input';
 import { OrthographicCamera, Vector3 } from 'three';
+import { Children, isValidElement, type ReactNode } from 'react';
+import type { RoomNode } from '../schema';
 import RoomScene, {
   finishFocusAnimation,
+  hasRenderedSelection,
   type RoomSceneProps,
 } from './room-scene';
 
+const sceneCanvas = vi.hoisted(() => ({ children: null as ReactNode }));
 vi.mock('./safe-canvas', () => ({
-  SafeCanvas: () => <canvas data-testid="mock-canvas" />,
+  SafeCanvas: ({ children }: { children: ReactNode }) => {
+    sceneCanvas.children = children;
+    return <canvas data-testid="mock-canvas" />;
+  },
 }));
 
 function sceneProps(overrides: Partial<RoomSceneProps> = {}): RoomSceneProps {
@@ -33,6 +40,106 @@ function sceneProps(overrides: Partial<RoomSceneProps> = {}): RoomSceneProps {
 }
 
 beforeEach(() => window.localStorage.clear());
+
+describe('rendered mesh selection', () => {
+  const box = (overrides: Partial<RoomNode> = {}): RoomNode => ({
+    id: 'represented-box',
+    kind: 'box',
+    position: [0, 0, 0],
+    rotationZDegrees: 0,
+    size: [10, 10, 10],
+    locationCode: 'ITC-RED',
+    ...overrides,
+  });
+  const group: RoomNode = {
+    id: 'represented-parent',
+    kind: 'group',
+    position: [0, 0, 0],
+    rotationZDegrees: 0,
+    locationCode: 'ITC-PARENT',
+    children: [box()],
+  };
+
+  it.each([null, '', 'OFFICE-ONLY', 'NOT-A-LOCATION', 'ITC-PARENT'])(
+    'keeps normal physical colors for %s without a selected rendered box',
+    (code) => {
+      expect(hasRenderedSelection([group], code, new Set())).toBe(false);
+    },
+  );
+  it('uses actual rendered box bindings, including highlighted represented descendants', () => {
+    expect(hasRenderedSelection([group], 'ITC-RED', new Set())).toBe(true);
+    expect(
+      hasRenderedSelection([group], 'ITC-PARENT', new Set(['ITC-RED'])),
+    ).toBe(true);
+    expect(
+      hasRenderedSelection(
+        [group],
+        'OFFICE-ONLY',
+        new Set(['UNMODELED-CHILD']),
+      ),
+    ).toBe(false);
+    expect(
+      hasRenderedSelection([box({ size: undefined })], 'ITC-RED', new Set()),
+    ).toBe(false);
+  });
+  it('preserves logical selection and focus while passing visual availability to the scene nodes', () => {
+    const props = sceneProps({
+      room: { ...sceneProps().room, nodes: [group] },
+      selectedCode: 'OFFICE-ONLY',
+      locationNames: { 'OFFICE-ONLY': 'Office storage' },
+      focusRequest: { code: 'OFFICE-ONLY', requestId: 7 },
+    });
+    const visualProps = () => {
+      const found: Record<string, unknown>[] = [];
+      const visit = (children: ReactNode) =>
+        Children.forEach(children, (child) => {
+          if (!isValidElement<Record<string, unknown>>(child)) return;
+          if (child.props.node)
+            found.push({
+              selectedCode: child.props.selectedCode,
+              hasRenderedSelection: child.props.hasRenderedSelection,
+            });
+          visit(child.props.children as ReactNode);
+        });
+      visit(sceneCanvas.children);
+      return found;
+    };
+    const view = render(<RoomScene {...props} />);
+    expect(visualProps()).toEqual([
+      expect.objectContaining({
+        selectedCode: 'OFFICE-ONLY',
+        hasRenderedSelection: false,
+      }),
+    ]);
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Selected location: Office storage (OFFICE-ONLY)',
+    );
+    const rigProps: Record<string, unknown>[] = [];
+    const findRig = (children: ReactNode) =>
+      Children.forEach(children, (child) => {
+        if (!isValidElement<Record<string, unknown>>(child)) return;
+        if (child.props.focusRequest)
+          rigProps.push({ focusRequest: child.props.focusRequest });
+        findRig(child.props.children as ReactNode);
+      });
+    findRig(sceneCanvas.children);
+    expect(rigProps[0].focusRequest).toBe(props.focusRequest);
+    expect(props.onSelect).not.toHaveBeenCalled();
+    view.rerender(
+      <RoomScene
+        {...props}
+        selectedCode="ITC-PARENT"
+        highlightedCodes={['ITC-RED']}
+      />,
+    );
+    expect(visualProps()).toEqual([
+      expect.objectContaining({
+        selectedCode: 'ITC-PARENT',
+        hasRenderedSelection: true,
+      }),
+    ]);
+  });
+});
 
 describe('room scene controls', () => {
   it('finishes an interrupted focus at its intended valid target and zoom', () => {
