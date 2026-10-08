@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   resetPasswordForEmail: vi.fn(),
   verifyOtp: vi.fn(),
   getUser: vi.fn(),
+  getClaims: vi.fn(),
   updateUser: vi.fn(),
   member: vi.fn(),
   from: vi.fn(),
@@ -47,6 +48,18 @@ beforeEach(() => {
   mocks.updateUser.mockResolvedValue({ error: null });
   mocks.getUser.mockResolvedValue({
     data: { user: { id: 'user' } },
+    error: null,
+  });
+  mocks.getClaims.mockResolvedValue({
+    data: {
+      claims: {
+        sub: 'user',
+        session_id: 'b81d6f4b-692a-4d6c-a958-732e26d4c9d8',
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+        amr: [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }],
+      },
+    },
     error: null,
   });
   mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
@@ -338,10 +351,147 @@ describe('auth boundaries', () => {
           role: 'staff',
         }),
       ),
-    ).rejects.toThrow('REDIRECT:/inventory');
+    ).rejects.toThrow('REDIRECT:/login?password=updated');
     expect(mocks.updateUser).toHaveBeenCalledWith({
       password: 'Password123456',
     });
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+  it('requires current credentials for ordinary sessions and never trusts form flags', async () => {
+    const claims = (await mocks.getClaims()).data.claims;
+    mocks.getClaims.mockResolvedValue({
+      data: {
+        claims: {
+          ...claims,
+          amr: [
+            { method: 'password', timestamp: Math.floor(Date.now() / 1000) },
+          ],
+        },
+      },
+      error: null,
+    });
+    const values = {
+      password: 'NewPassword123456',
+      confirmation: 'NewPassword123456',
+      recovery: 'true',
+      emailedCompletion: 'true',
+    };
+    expect(await setPassword({}, form(values))).toHaveProperty('error');
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+    await expect(
+      setPassword(
+        {},
+        form({ ...values, current_password: 'CurrentPassword123456' }),
+      ),
+    ).rejects.toThrow('REDIRECT:/login?password=updated');
+    expect(mocks.updateUser).toHaveBeenCalledWith({
+      password: values.password,
+      current_password: 'CurrentPassword123456',
+    });
+  });
+  it('rechecks email proof when the form is submitted after its window', async () => {
+    const claims = (await mocks.getClaims()).data.claims;
+    mocks.getClaims.mockResolvedValue({
+      data: {
+        claims: {
+          ...claims,
+          amr: [
+            { method: 'otp', timestamp: Math.floor(Date.now() / 1000) - 601 },
+          ],
+        },
+      },
+      error: null,
+    });
+    expect(
+      await setPassword(
+        {},
+        form({
+          password: 'NewPassword123456',
+          confirmation: 'NewPassword123456',
+        }),
+      ),
+    ).toHaveProperty('error');
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+  it.each([
+    'claims error',
+    'identity mismatch',
+    'missing session',
+    'expired token',
+  ])('rejects %s before password mutation', async (failure) => {
+    const claims = (await mocks.getClaims()).data.claims;
+    mocks.getClaims.mockResolvedValue(
+      failure === 'claims error'
+        ? { data: null, error: {} }
+        : {
+            data: {
+              claims: {
+                ...claims,
+                ...(failure === 'identity mismatch'
+                  ? { sub: 'other' }
+                  : failure === 'missing session'
+                    ? { session_id: null }
+                    : { exp: 1 }),
+              },
+            },
+            error: null,
+          },
+    );
+    expect(
+      await setPassword(
+        {},
+        form({
+          password: 'NewPassword123456',
+          confirmation: 'NewPassword123456',
+          current_password: 'CurrentPassword123456',
+        }),
+      ),
+    ).toHaveProperty('error');
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
+  it('does not claim completion or redirect when provider rejects current credentials', async () => {
+    mocks.updateUser.mockResolvedValue({
+      error: { code: 'invalid_credentials' },
+    });
+    expect(
+      await setPassword(
+        {},
+        form({
+          password: 'NewPassword123456',
+          confirmation: 'NewPassword123456',
+        }),
+      ),
+    ).toHaveProperty('error');
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+  it('reports a committed change honestly if local sign-out fails', async () => {
+    mocks.signOut.mockResolvedValue({ error: {} });
+    expect(
+      await setPassword(
+        {},
+        form({
+          password: 'NewPassword123456',
+          confirmation: 'NewPassword123456',
+        }),
+      ),
+    ).toEqual({
+      error:
+        'Your password was updated, but sign-out failed. Sign out before continuing.',
+      passwordUpdated: true,
+    });
+  });
+  it('also retains the committed result when sign-out transport throws', async () => {
+    mocks.signOut.mockRejectedValue(new Error('transport'));
+    expect(
+      await setPassword(
+        {},
+        form({
+          password: 'NewPassword123456',
+          confirmation: 'NewPassword123456',
+        }),
+      ),
+    ).toMatchObject({ passwordUpdated: true });
+    expect(mocks.updateUser).toHaveBeenCalledTimes(1);
   });
   it('signs out only the current session', async () => {
     await expect(logout()).rejects.toThrow('REDIRECT:/login');

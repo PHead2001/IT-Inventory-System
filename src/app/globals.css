@@ -1,4 +1,10 @@
 @import 'tailwindcss';
+@theme inline {
+  --font-sans: var(--font-ui), system-ui, sans-serif;
+  --font-mono: var(--font-code), Consolas, monospace;
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.45;
+}
 :root {
   color-scheme: dark;
   --background: #060d18;
@@ -16,7 +22,9 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
 }
 * {
   box-sizing: border-box;
@@ -98,7 +106,7 @@ a {
 .experience-brand small {
   display: block;
   margin-top: 3px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
   color: var(--muted);
   text-transform: uppercase;
@@ -176,7 +184,7 @@ a {
 .experience-nav-heading {
   padding: 0 11px 8px;
   color: #8da7bf;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -251,7 +259,7 @@ a {
   border-radius: 999px;
   background: #101e30e8;
   color: #bad2e0;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   text-align: left;
   transition:
@@ -265,7 +273,7 @@ a {
 .experience-motion-toggle small {
   margin-top: 2px;
   color: #91b4c9;
-  font-size: 10px;
+  font-size: 12px;
 }
 .experience-motion-toggle:hover {
   border-color: var(--accent);
@@ -338,13 +346,13 @@ a {
 }
 .experience-eyebrow {
   color: var(--accent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.19em;
   text-transform: uppercase;
 }
 .experience-heading {
-  font-size: clamp(28px, 3.4vw, 42px);
+  font-size: clamp(32px, 3.4vw, 42px);
   line-height: 1.08;
   font-weight: 700;
   letter-spacing: -0.045em;
@@ -590,7 +598,7 @@ html[data-motion='full'] .experience-closet-preview svg {
   border-radius: 999px;
   background: #bc8a291e;
   color: var(--warning);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 .experience-status[data-state='out_of_stock'] {
@@ -898,5 +906,57 @@ html[data-motion='reduced'] .experience-ambient::after {
     animation: none !important;
     transition: none !important;
     box-shadow: none !important;
+  }
+}
+
+.experience-code,
+code,
+kbd {
+  font-family: var(--font-code), Consolas, monospace;
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.experience-record-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.experience-record-status[data-state='retired'],
+.experience-record-status[data-state='archived'],
+.experience-record-status[data-state='pending'] {
+  color: var(--warning);
+}
+.experience-danger-action {
+  min-height: 44px;
+  border: 2px solid var(--danger);
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: var(--danger);
+  background: var(--background);
+  font-weight: 600;
+  transition:
+    background-color var(--motion-feedback),
+    border-color var(--motion-feedback);
+}
+.experience-danger-action:hover:not(:disabled) {
+  background: var(--surface);
+}
+.experience-danger-action:disabled {
+  opacity: 0.5;
+}
+@media (max-width: 640px), (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
   }
 }

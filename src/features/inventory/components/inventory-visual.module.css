@@ -52,6 +52,7 @@
   border-radius: 0;
 }
 .name {
+  scroll-margin-block: 12px;
   display: inline-block;
   max-width: 100%;
   color: var(--foreground);
@@ -68,8 +69,8 @@
 .meta {
   margin-top: 4px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .metric {
@@ -102,8 +103,8 @@
   margin-top: 9px;
   margin-left: 68px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .footer a {
   color: #83e6f3;
@@ -127,7 +128,7 @@
   border-radius: 999px;
   padding: 2px 7px;
   color: #b8cfdf;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: capitalize;
 }
 .detailHero {

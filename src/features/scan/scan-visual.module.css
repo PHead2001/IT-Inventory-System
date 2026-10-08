@@ -27,7 +27,7 @@
 }
 .eyebrow {
   color: #67e0ef;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -194,7 +194,8 @@
   border-radius: 999px;
   background: #4b76984a;
   color: #d9ecf5;
-  font-size: 11px;
+  font-size: 13px;
+  line-height: 1.45;
   text-transform: capitalize;
 }
 @media (max-width: 780px) {

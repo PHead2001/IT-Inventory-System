@@ -26,6 +26,40 @@ History lists summarize quantities from immutable event deltas or custody snapsh
 
 ## System boundaries
 
+### Login and password sessions
+
+An ordinary signed-in visit to `/login` verifies the current Auth user and active
+application membership, then opens the validated internal return path or Overview.
+Inactive and nonmember accounts go to Access is not enabled. Auth or membership
+transport failures show a recoverable error. Explicit `/login?switch=1` permits a
+different account's credentials to be entered; it grants no access or password-change
+authority and preserves the existing actor-scoped draft and queue contracts.
+
+Ordinary password changes submit `current_password` and the new password to Auth.
+The provider's **Require current password** setting is the direct-API enforcement
+boundary; the application form alone cannot establish provider-wide enforcement.
+Invitation/recovery email confirmation remains an explicit POST exchange. Before
+rendering emailed completion and again on submission, the server checks a live Auth
+identity and verified current-session JWT claims: matching subject, valid session
+UUID, unexpired token and an `otp`, `magiclink` or `recovery` AMR timestamp no more
+than ten minutes old. The pinned GoTrue provider represents invitation and recovery
+with emailed AMR; this is not proof of a specific email template. Query flags and
+client state cannot grant the exception. Expired proof requires current credentials
+or a new reset email; an unavailable verification never mutates the password.
+
+After a successful password update, the action signs out the local session and
+requires normal sign-in. If sign-out fails after the update commits, the UI states
+that the password changed and offers the existing guarded Sign out action rather
+than retrying the password change. Email-token replay rejection does not imply
+one-use password mutation: an already issued recovery JWT may remain usable through
+the provider until its session/expiry policy rejects it. GoTrue `v2.196.0` checks
+the session's emailed AMR methods without an AMR-age limit for this provider
+exemption; the ten-minute limit is an application policy, not a direct-API limit.
+The disposable direct-provider check accepted a second password update using the
+same already-issued recovery JWT while rejecting a second email-token exchange.
+Hosted policy verification
+and activation remain separate owner prerequisites in [deployment](deployment.md).
+
 Next.js App Router serves the operational dashboard. Request-scoped Supabase clients use the signed-in user's credentials. PostgreSQL owns logical data; Git owns geometry. The scene emits location codes and receives selection/focus state; it never owns persistence. Conventional workflows remain independent of 3D.
 
 ## Reference model

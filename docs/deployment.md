@@ -61,6 +61,42 @@ The application reports only exact static `/dashboard`, `/inventory`, `/location
 
 Keep the email/password provider enabled while disabling new-user signup and anonymous sign-in. Set custom SMTP before real invitations and apply the checked-in invite/recovery templates. Invitations do not grant data access until the owner creates an active viewer/staff membership.
 
+The owner must separately enable Supabase Auth **Require current password** for
+ordinary password changes in each intended hosted environment, then verify direct
+`PUT /auth/v1/user` behavior with an authorized disposable account: missing and wrong
+`current_password` reject without changing credentials, correct current credentials
+succeed, and legitimate invitation/recovery completion works without an old password.
+This is the provider boundary, not an application-only claim. For the locally pinned
+GoTrue `v2.196.0`, the setting is
+`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD=true`; Supabase CLI
+`2.116.0` has no matching project TOML option. See the pinned
+[Auth user-update implementation](https://github.com/supabase/auth/blob/v2.196.0/internal/api/user.go)
+and [client update contract](https://supabase.com/docs/reference/javascript/auth-updateuser).
+No hosted Auth setting is activated by this repository change.
+
+The provider's recovery exemption is broader than the application's ten-minute
+completion window: pinned GoTrue
+[session recovery classification](https://github.com/supabase/auth/blob/v2.196.0/internal/models/sessions.go)
+checks emailed AMR methods without checking their age. Direct local validation
+accepted password-update reuse of an already issued recovery JWT while rejecting
+replay of the consumed email token. **Require current password** therefore protects
+ordinary sessions; it does not impose the application's ten-minute limit or make
+recovery sessions single-use. Hosted tests must assess the actual configured
+session/token lifetime and recovery exemption, without claiming stronger enforcement.
+
+The disposable local check is
+`npm run test:auth:policy`. Add `-- --browser` for canonical foundation browser
+checks after the integrated app is ready to build. The fixture requires exclusive use
+of the already running loopback `it-inventory` stack, keeps the original Auth
+container intact, recreates only a temporary Auth container from its in-memory
+configuration with the policy enabled, runs direct provider checks (and requested
+browser checks), and restores the original container in `finally`. It refuses other
+projects, versions, hosted Docker sockets and hosted database targets. It never edits
+Docker internals or vendored CLI code. Run it only when no other database/browser
+validation owns the stack. Forced process or host termination can interrupt cleanup;
+retain the original named backup container and restore it before continuing.
+Local tests do not establish hosted enforcement or owner release approval.
+
 Configuration editing is a separate, owner-granted membership capability. An owner must first verify the intended person's Auth UUID in the correct environment and read both records in the SQL editor (replace the placeholder; do not commit a real UUID):
 
 ```sql

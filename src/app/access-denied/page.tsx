@@ -1,6 +1,7 @@
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { MotionPreference } from '@/components/experience/motion-preference';
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Access denied' };
 export default function AccessDeniedPage() {
   return (
     <MotionPreference>

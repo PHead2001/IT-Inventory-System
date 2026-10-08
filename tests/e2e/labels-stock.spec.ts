@@ -1,6 +1,6 @@
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
@@ -262,11 +262,64 @@ async function readyPreview(page: Page, count: number) {
   );
 }
 
-async function verifiedPreviewPdf(page: Page, destination: string) {
+async function verifiedPreviewPdf(
+  page: Page,
+  destination: string,
+  info: TestInfo,
+) {
   const cards = page.locator('.label-card');
-  await expect(page.locator('.label-card[data-code-ready="true"]')).toHaveCount(
-    await cards.count(),
-  );
+  try {
+    await expect(
+      page.locator('.label-card[data-code-ready="true"]'),
+    ).toHaveCount(await cards.count());
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => {
+      const geometry = (element: HTMLElement) => {
+        const bounds = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          width: bounds.width,
+          height: bounds.height,
+          clientWidth: element.clientWidth,
+          clientHeight: element.clientHeight,
+          scrollWidth: element.scrollWidth,
+          scrollHeight: element.scrollHeight,
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+        };
+      };
+      return {
+        fonts: document.fonts?.status ?? 'unavailable',
+        printMedia: matchMedia('print').matches,
+        printAuthorized:
+          document
+            .querySelector('.label-print-root')
+            ?.getAttribute('data-print-authorized') === 'true',
+        cards: Array.from(
+          document.querySelectorAll<HTMLElement>('.label-card'),
+        ).map((card) => ({
+          ready: card.dataset.codeReady,
+          measured: card.dataset.textMeasured,
+          overflow: card.dataset.textOverflow,
+          failed: card.dataset.codeFailed,
+          geometry: geometry(card),
+          text: Array.from(
+            card.querySelectorAll<HTMLElement>('[data-fit-text]'),
+          ).map(geometry),
+          images: Array.from(card.querySelectorAll('img')).map((image) => ({
+            complete: image.complete,
+            naturalWidth: image.naturalWidth,
+          })),
+        })),
+      };
+    });
+    // Geometry/font lifecycle only: omit names, codes, URLs and generation keys.
+    await info.attach('label-readiness-failure.json', {
+      body: JSON.stringify(diagnostic, null, 2),
+      contentType: 'application/json',
+    });
+    throw error;
+  }
   await page.evaluate(() => {
     window.print = () => {
       window.dispatchEvent(new Event('beforeprint'));
@@ -434,6 +487,7 @@ test('printed QR and Code 128 decode from rendered label cards with physical siz
   const pdf = await verifiedPreviewPdf(
     page,
     testInfo.outputPath('labels-letter.pdf'),
+    testInfo,
   );
   const pdfText = pdf.toString('latin1');
   expect((pdfText.match(/\/Type\s*\/Page\b/g) ?? []).length).toBeGreaterThan(1);
@@ -912,6 +966,7 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   const pdf = await verifiedPreviewPdf(
     page,
     testInfo.outputPath('mixed-label-queue.pdf'),
+    testInfo,
   );
   expect(
     (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length,

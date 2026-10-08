@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { isActiveMember } from './membership';
 import { validReturnPath } from '@/features/scan/targets';
 import { createAuthDiagnostic, observeAuthStage } from './diagnostic.server';
+import { readPasswordSession } from './password-session.server';
 import {
   confirmationSchema,
   emailSchema,
@@ -119,18 +120,45 @@ export async function setPassword(
       error: 'Use at least 12 characters and enter the same password twice.',
     };
   const supabase = await createSupabaseServerClient(true);
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user)
-    return { error: 'Your session has expired. Request a new email.' };
+  const session = await readPasswordSession(supabase.auth);
+  if (!session)
+    return {
+      error:
+        'Unable to verify your session. Sign in again or request a new reset email.',
+    };
+  const currentPassword = form.get('current_password');
+  if (
+    !session.emailedCompletion &&
+    (typeof currentPassword !== 'string' ||
+      !currentPassword.length ||
+      currentPassword.length > 128)
+  )
+    return {
+      error: 'Enter your current password, or request a new reset email.',
+    };
   const result = await supabase.auth.updateUser({
     password: parsed.data.password,
+    ...(!session.emailedCompletion
+      ? { current_password: currentPassword as string }
+      : {}),
   });
   if (result.error)
     return {
-      error: 'Unable to update the password. Use a new password and try again.',
+      error:
+        'Unable to update the password. Check your current password, use a new password, or request a new reset email.',
     };
-  redirect('/inventory');
+  let sessionClosed = false;
+  try {
+    const signedOut = await supabase.auth.signOut({ scope: 'local' });
+    sessionClosed = !signedOut.error;
+  } catch {
+    // The password has already committed; do not invite a blind mutation retry.
+  }
+  if (!sessionClosed)
+    return {
+      error:
+        'Your password was updated, but sign-out failed. Sign out before continuing.',
+      passwordUpdated: true,
+    };
+  redirect('/login?password=updated');
 }

@@ -1,5 +1,5 @@
 import { render, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const engines = vi.hoisted(() => ({ qr: vi.fn(), barcode: vi.fn() }));
 vi.mock('qrcode', () => ({ default: { toDataURL: engines.qr } }));
 vi.mock('jsbarcode', () => ({ default: engines.barcode }));
@@ -22,12 +22,16 @@ const props = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  // Engine tests require rendered text geometry; JSDOM has none by default.
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1);
   engines.qr.mockResolvedValue('data:image/png;base64,iVBORw0KGgo=');
   engines.barcode.mockImplementation((element: SVGSVGElement) => {
     element.setAttribute('width', '120');
     element.setAttribute('height', '80');
   });
 });
+afterEach(() => vi.restoreAllMocks());
 it('does not invoke a barcode engine for QR and cancels a late barcode import after a mode change', async () => {
   const view = render(<LabelSheet {...props} format="code128" />);
   // The import resolves asynchronously. A changed context must cancel its SVG

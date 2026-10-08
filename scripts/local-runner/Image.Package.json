@@ -17,6 +17,8 @@
     "test": "vitest run",
     "test:preview-access": "node --test tests/preview-access.test.mjs",
     "test:local-storage": "node --test tests/local-storage-version.test.mjs",
+    "test:auth:policy": "node scripts/test-auth-password-policy.mjs",
+    "test:auth:policy:contract": "node --test tests/local-auth-password-policy.test.mjs",
     "test:export:memory": "node --conditions=react-server --expose-gc --import tsx tests/integration/export-memory.ts",
     "test:file:inspection": "node --conditions=react-server --import tsx tests/integration/file-inspection.ts",
     "test:watch": "vitest",

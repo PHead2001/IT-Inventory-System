@@ -21,4 +21,8 @@ export const passwordSchema = z
     message: 'Passwords must match',
     path: ['confirmation'],
   });
-export type AuthState = { error?: string; message?: string };
+export type AuthState = {
+  error?: string;
+  message?: string;
+  passwordUpdated?: boolean;
+};

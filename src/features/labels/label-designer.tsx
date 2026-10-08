@@ -1075,6 +1075,7 @@ function LabelDesignerWorkspace({
         (!document.fonts || document.fonts.status === 'loaded')
       )
         setReadySheetKey(sheetKey);
+      else setReadySheetKey((key) => (key === sheetKey ? '' : key));
     };
     const observer = new MutationObserver(check);
     observer.observe(sheet, {
