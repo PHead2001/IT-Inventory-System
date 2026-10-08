@@ -5,7 +5,11 @@ vi.mock('@/lib/auth/login-session.server', () => ({
   readLoginSession: mocks.session,
 }));
 vi.mock('@/components/auth/auth-form', () => ({
-  AuthForm: () => <form aria-label="Sign in" />,
+  AuthForm: ({ next }: { next?: string }) => (
+    <form aria-label="Sign in">
+      <input type="hidden" name="next" value={next ?? ''} readOnly />
+    </form>
+  ),
 }));
 vi.mock('next/navigation', () => ({
   redirect: (path: string) => {
@@ -19,6 +23,7 @@ beforeEach(() => {
 });
 it.each([
   ['/locations/ITC', '/locations/ITC'],
+  ['/dashboard', '/dashboard'],
   ['https://evil.test', '/dashboard'],
   ['/login', '/dashboard'],
   [undefined, '/dashboard'],
@@ -34,6 +39,21 @@ it('denies an inactive or missing member without returning to login', async () =
     LoginPage({ searchParams: Promise.resolve({}) }),
   ).rejects.toThrow('REDIRECT:/access-denied');
 });
+it.each([
+  ['/dashboard', '/dashboard'],
+  ['/dashboard?next=https://evil.test', ''],
+  ['https://evil.test/dashboard', ''],
+])(
+  'passes only the safe Overview return into the anonymous login form: %s',
+  async (next, expected) => {
+    render(await LoginPage({ searchParams: Promise.resolve({ next }) }));
+    expect(
+      screen
+        .getByRole('form', { name: 'Sign in' })
+        .querySelector('input[name="next"]'),
+    ).toHaveValue(expected);
+  },
+);
 it('supports deliberate account switching without a redirect loop', async () => {
   mocks.session.mockResolvedValue('member');
   render(await LoginPage({ searchParams: Promise.resolve({ switch: '1' }) }));

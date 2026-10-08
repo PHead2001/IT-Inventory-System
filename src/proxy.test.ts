@@ -76,6 +76,14 @@ it('overwrites a caller-supplied return header with a canonical matched path', a
   expect(
     validResponse.headers.get('x-middleware-request-x-inventory-return'),
   ).toBe('/locations/ITC');
+  const overview = new NextRequest('http://localhost:3000/dashboard', {
+    headers: { 'x-inventory-return': 'https://evil.test' },
+  });
+  expect(
+    (await proxy(overview)).headers.get(
+      'x-middleware-request-x-inventory-return',
+    ),
+  ).toBe('/dashboard');
   const invalid = new NextRequest('http://localhost:3000/inventory', {
     headers: { 'x-inventory-return': '/locations/ITC' },
   });

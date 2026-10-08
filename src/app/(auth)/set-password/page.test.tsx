@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ session: vi.fn() }));
 vi.mock('@/lib/auth/password-session.server', () => ({
@@ -54,6 +55,26 @@ it('rejects unusable emailed sessions without offering the current-password form
   expect(screen.getByRole('alert')).toHaveTextContent('Sign in again');
   expect(screen.queryByRole('form')).not.toBeInTheDocument();
   expect(
-    screen.getByRole('link', { name: 'request a new reset email' }),
+    screen.getByRole('link', { name: 'Request a new reset email' }),
   ).toHaveAttribute('href', '/forgot-password');
 });
+it.each([null, { emailedCompletion: false, emailProof: 'unusable' }])(
+  'offers separate keyboard-operable recovery links for an unverifiable session',
+  async (session) => {
+    mocks.session.mockResolvedValue(session);
+    const user = userEvent.setup();
+    render(await SetPasswordPage());
+    const recovery = screen.getByRole('navigation', {
+      name: 'Password recovery',
+    });
+    const links = within(recovery).getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute('href', '/login?switch=1');
+    expect(links[1]).toHaveAttribute('href', '/forgot-password');
+    await user.tab();
+    expect(links[0]).toHaveFocus();
+    await user.tab();
+    expect(links[1]).toHaveFocus();
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  },
+);

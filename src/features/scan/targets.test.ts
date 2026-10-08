@@ -90,4 +90,24 @@ describe('label destinations', () => {
       validReturnPath('https://inventory.example.test/locations/ITC'),
     ).toBeNull();
   });
+  it('allows the exact Overview login return without turning it into a label target', () => {
+    expect(validReturnPath('/dashboard')).toBe('/dashboard');
+    expect(parseScan('/dashboard', origin)).toBeNull();
+  });
+  it.each([
+    '/dashboard/',
+    '/dashboard/settings',
+    '/dashboard?next=https://evil.test',
+    '/dashboard#https://evil.test',
+    '/dashboard.evil.test',
+    '//dashboard',
+    'https://inventory.example.test/dashboard',
+    '/%64ashboard',
+    '/dashboard%2f',
+    '/dashboard\\evil.test',
+    ' /dashboard',
+    ['/dashboard'],
+  ])('rejects noncanonical Overview return %s', (value) => {
+    expect(validReturnPath(value)).toBeNull();
+  });
 });

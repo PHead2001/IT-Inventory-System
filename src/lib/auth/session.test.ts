@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   maybeSingle: vi.fn(),
   from: vi.fn(),
   requestCache: null as Map<string, Promise<unknown>> | null,
+  returnPath: '/locations/ITC',
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('react', () => ({
@@ -29,12 +30,13 @@ vi.mock('next/navigation', () => ({
   },
 }));
 vi.mock('next/headers', () => ({
-  headers: async () => new Headers({ 'x-inventory-return': '/locations/ITC' }),
+  headers: async () => new Headers({ 'x-inventory-return': mocks.returnPath }),
 }));
 import { requireMember } from './session.server';
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.requestCache = null;
+  mocks.returnPath = '/locations/ITC';
   mocks.getUser.mockResolvedValue({
     data: { user: { id: 'current-user' } },
     error: null,
@@ -76,6 +78,19 @@ it('rejects anonymous/invalid sessions before querying membership', async () => 
   );
   expect(mocks.from).not.toHaveBeenCalled();
 });
+it.each([
+  ['/dashboard', '/login?next=%2Fdashboard'],
+  ['/dashboard?next=https://evil.test', '/login'],
+  ['//evil.test/dashboard', '/login'],
+])(
+  'keeps only the canonical Overview destination through anonymous authentication: %s',
+  async (path, expected) => {
+    mocks.returnPath = path;
+    mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
+    await expect(requireMember()).rejects.toThrow('REDIRECT:' + expected);
+    expect(mocks.from).not.toHaveBeenCalled();
+  },
+);
 it.each([
   null,
   {

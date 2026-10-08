@@ -10,6 +10,10 @@ import { getPublishedForms } from '@/features/metadata/queries.server';
 import { MetadataForm } from '@/features/metadata/metadata-form';
 import { panel } from '@/features/inventory/components/read-ui';
 
+export const metadata = {
+  title: { absolute: 'Record site holdings · IT Inventory' },
+};
+
 export default async function SiteOpeningPage({
   params,
   searchParams,
