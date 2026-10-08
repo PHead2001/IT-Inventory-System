@@ -26,13 +26,13 @@ export function UnavailablePage({
       <nav aria-label="Recovery options" className="mt-5 flex flex-wrap gap-3">
         <Link
           href="/inventory"
-          className="inline-flex min-h-11 items-center rounded border border-cyan-400 px-4 text-cyan-200"
+          className="inline-flex min-h-11 items-center rounded border border-[var(--accent)] px-4 text-[var(--accent)]"
         >
           Search inventory
         </Link>
         <Link
           href="/dashboard"
-          className="inline-flex min-h-11 items-center px-4 text-cyan-200 underline"
+          className="inline-flex min-h-11 items-center px-4 text-[var(--accent)] underline"
         >
           Open Overview
         </Link>
