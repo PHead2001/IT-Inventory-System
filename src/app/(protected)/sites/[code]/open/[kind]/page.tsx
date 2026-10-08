@@ -19,6 +19,7 @@ export default async function SiteOpeningPage({
 }) {
   const query = await searchParams;
   const draft = typeof query?.draft === 'string' ? query.draft : undefined;
+  const instance = draft ?? crypto.randomUUID();
   const { member } = await requireMember();
   const { code, kind } = await params;
   const site = await getSite(code);
@@ -62,7 +63,8 @@ export default async function SiteOpeningPage({
       </p>
       <div className={panel + ' max-w-5xl'}>
         <MetadataForm
-          key={`${member.user_id}:${site.id}:${kind}:${draft ?? 'new'}`}
+          key={`${member.user_id}:${site.id}:${kind}:${instance}`}
+          creationInstanceId={instance}
           creationDraftId={draft}
           recoveryBackend={process.env.NEXT_PUBLIC_SUPABASE_URL}
           actorId={member.user_id}

@@ -38,6 +38,7 @@ const row = {
   kind: 'quantity',
   event_type: 'moved',
   entity_name: 'Checkpoint cables',
+  created_at: '2026-10-07T12:00:00Z',
   lines: [
     { location_id: source, delta: -1, before_quantity: 2, after_quantity: 1 },
     {
@@ -98,6 +99,7 @@ beforeEach(() => {
 it('reads only the exact authorized move event and derives balances from immutable lines', async () => {
   const receipt = await reloadMoveReceipt(input);
   expect(receipt).toEqual({
+    createdAt: row.created_at,
     itemName: row.entity_name,
     quantity: 1,
     source: { id: source, name: 'Red Container', after: 1 },

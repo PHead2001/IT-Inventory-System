@@ -75,6 +75,12 @@ Write for the staff member in the moment, not for a reviewer of the implementati
 | LOGICAL STORAGE AND SITE CUSTODY · INVENTORY                                               | Inventory _(or omit the eyebrow)_                                                           |
 | Fields marked * or (required) are required. Other fields are optional.                     | _(remove; mark optional fields instead)_                                                    |
 | From: Red Container / To: Red Container                                                    | At: Red Container                                                                           |
+| Serialized asset                                                                           | Individual asset                                                                            |
+| Settings saved (after a category operation)                                                | Category added / Category name saved / Category removed                                     |
+| Metadata edited / Record details updated                                                   | Details updated / Details saved                                                             |
+| Correct recorded location                                                                  | Correct: update the record without physically moving equipment                              |
+| Move asset                                                                                 | Move: physically relocate the asset                                                         |
+| Write off / Retire                                                                         | Write off quantity stock / Retire an individual asset                                       |
 
 Add rows here when a recurring phrase is replaced, so later work reuses the same wording.
 
@@ -125,6 +131,7 @@ Rules:
 
 - Pickers and popovers are at least as wide as their trigger, anchor below it and never cover their own label.
 - File inputs use one styled drop zone with a browse button and show the selected file name and thumbnail. Do not render the native "Choose File" control.
+- Drop and Browse share local type/size/name validation. Image previews use revocable local object URLs; PDFs show a filename/document marker and are never embedded before review. Selection grants no publication or inspection trust. Existing upload, inspection, review, replacement and cleanup boundaries remain authoritative.
 - Long option lists use a themed scrollbar and keep the search field in view.
 - Destructive confirmations follow §3. Free-text reasons may offer preset chips that fill the field.
 - Touch targets are at least 44 × 44 px (the existing `min-h-11` button base meets this).
@@ -154,6 +161,13 @@ by streaming can retain HTTP 200 with the not-found UI. A rendered 404 screen al
 does not prove transport status. Preserve existing loading boundaries and verify
 both direct HTTP and client navigation on the deployed candidate. See the
 [Next.js not-found contract](https://nextjs.org/docs/app/api-reference/file-conventions/not-found).
+
+History summaries collapse an unchanged endpoint to **At** using custody snapshot
+identity, retaining immutable recorded labels. Older storage histories explicitly
+identify current reference labels. Relative times use one shared 30-second browser
+clock, paused when hidden and stopped without subscribers. Server/first hydration
+uses exact UTC; focus/click opens the exact display timestamp, timezone and original
+recorded instant with its precision. Date-only controls and export formats are unchanged.
 
 - **Empty** (nothing exists yet): say so and offer the create action.
 - **Filtered-empty** (filters exclude everything): name the active filters and offer "Clear filters".

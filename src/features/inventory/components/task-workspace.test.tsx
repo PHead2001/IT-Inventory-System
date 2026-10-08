@@ -67,7 +67,7 @@ it('returns keyboard focus to the enabled launcher after an explicit new transac
   const launcher = screen.getByRole('button', { name: 'Receive stock' });
   await user.click(launcher);
   await user.click(screen.getByRole('button', { name: 'complete' }));
-  expect(launcher).toBeDisabled();
+  expect(launcher).toBeEnabled();
   screen.getByRole('button', { name: 'New transaction' }).focus();
   await user.keyboard('{Enter}');
   expect(screen.queryByLabelText('receive entry')).toBeNull();
@@ -135,7 +135,7 @@ it('mounts lazily, retains a dirty draft on Stay, then discards only explicitly'
   fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
   expect(screen.getByRole('button', { name: 'Move stock' })).toHaveFocus();
 });
-it.each(['pending', 'unknown', 'complete'])(
+it.each(['pending', 'unknown'])(
   'blocks switching during %s and retains the mounted task after eligibility changes',
   (phase) => {
     const view = render(<Workspace />);
@@ -148,13 +148,22 @@ it.each(['pending', 'unknown', 'complete'])(
     expect(
       screen.getByRole('heading', { name: 'Receive stock' }),
     ).toBeVisible();
-    if (phase === 'complete') {
-      fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));
-      expect(screen.queryByLabelText('receive entry')).toBeNull();
-      expect(screen.getByRole('button', { name: 'Move stock' })).toBeEnabled();
-    }
   },
 );
+it('allows another task or Close after a known committed operation without discard confirmation', () => {
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'Saved entries' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'complete' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.getByLabelText('move entry')).toBeVisible();
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.getByRole('button', { name: 'Move stock' })).toHaveFocus();
+});
 it('isolates drafts when the actor and record workspace identity changes', () => {
   const view = render(<Workspace key="actor1:item1" />);
   fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
@@ -198,7 +207,6 @@ it('keeps completed pending work truthful and locked until the follow-up finishe
     'Updating this task. Wait before starting another transaction.',
   );
   expect(screen.getByRole('status')).not.toHaveTextContent('Saving');
-  expect(screen.getByText(/Completed transaction retained/)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Move stock' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));

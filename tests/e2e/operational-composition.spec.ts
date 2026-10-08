@@ -12,6 +12,10 @@ import { resolve } from 'node:path';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { captureE2eEvidence } from '../../scripts/e2e-diagnostics';
+import {
+  expectRecordStatus,
+  expectRecordVersion,
+} from './record-task-controls';
 
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -230,7 +234,8 @@ async function retire(page: Page, url: string) {
   await form
     .getByRole('button', { name: 'Confirm retire asset', exact: true })
     .click();
-  await expect(page.getByText(/retired · Version/)).toBeVisible();
+  await expectRecordStatus(page, 'retired');
+  await expectRecordVersion(page, 2);
 }
 
 test('CP3 U04 U09 review shows exact normalized intent, Back preserves answers and creates only the edited review', async ({
@@ -394,7 +399,7 @@ test('CP3 U05 one task retains dirty intent, discards explicitly, and keeps a co
   );
   await expect(
     tasks.getByRole('button', { name: 'Receive stock', exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect(form.getByText(/Baseline refreshed/)).toHaveCount(0);
   await capture(page, info, 'task-success-receipt');
   await form.getByRole('button', { name: 'Move more', exact: true }).click();
@@ -436,7 +441,7 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await page.setViewportSize({ width: 1180, height: 757 });
   const suffix = randomUUID(),
     name = 'CP3 lifecycle asset ' + suffix,
-    tag = 'cp3-' + suffix;
+    tag = ('cp3-' + suffix).toUpperCase();
   await page.goto('/inventory/assets/new');
   const form = page.getByRole('form', {
     name: 'Add individual asset',
@@ -580,7 +585,8 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await restore
     .getByRole('button', { name: 'Confirm restore asset', exact: true })
     .click();
-  await expect(other.getByText(/active · Version/)).toBeVisible();
+  await expectRecordStatus(other, 'active');
+  await expectRecordVersion(other, 3);
   await page.bringToFront();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(decisions).toHaveCount(1);
@@ -611,7 +617,7 @@ test('CP3 U08 designer starts with useful canvas and supports keyboard recovery,
   const category = 'CP3 canvas ' + randomUUID().slice(0, 8);
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Settings saved.');
+  await expect(page.getByRole('status')).toContainText('Category added.');
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await page.setViewportSize({ width: 1180, height: 757 });
@@ -886,7 +892,7 @@ test('CP3 U15 empty file panel leads with the permitted task and viewer cannot m
   ).toBeVisible();
   await expect(files.getByText('No photo yet.', { exact: true })).toBeVisible();
   await expect(
-    files.getByRole('button', { name: 'Add photo', exact: true }),
+    files.getByRole('button', { name: 'Browse files', exact: true }),
   ).toBeVisible();
   await expect(
     files.getByRole('button', { name: 'Check file cleanup' }),
@@ -912,7 +918,7 @@ test('CP3 U15 empty file panel leads with the permitted task and viewer cannot m
       readOnly.getByText('No photo yet.', { exact: true }),
     ).toBeVisible();
     await expect(
-      readOnly.getByRole('button', { name: 'Add photo' }),
+      readOnly.getByRole('button', { name: 'Browse files' }),
     ).toHaveCount(0);
     await expect(
       viewer.getByRole('region', { name: 'Record tasks' }),

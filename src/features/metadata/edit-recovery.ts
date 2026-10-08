@@ -120,7 +120,11 @@ const scopeSchema = z.strictObject({
 });
 export type EditScope = z.infer<typeof scopeSchema>;
 const commandSchema = z.strictObject({
-  operation: z.enum(['quantity_update_v2', 'asset_update_v2']),
+  operation: z.enum([
+    'quantity_update_v2',
+    'asset_update_v2',
+    'asset_update_v3',
+  ]),
   requestId: uuid,
   expectedActorId: uuid,
   payload: z.record(z.string(), z.unknown()),
@@ -148,7 +152,10 @@ const envelopeSchema = z
         !!value.inputs ||
       (value.status === 'saved') !== !!value.completedRequestId ||
       (command &&
-        (command.operation !== `${value.scope.kind}_update_v2` ||
+        (![
+          `${value.scope.kind}_update_v2`,
+          ...(value.scope.kind === 'asset' ? ['asset_update_v3'] : []),
+        ].includes(command.operation) ||
           command.expectedActorId !== value.scope.actor ||
           command.payload[
             value.scope.kind === 'quantity' ? 'item_id' : 'asset_id'

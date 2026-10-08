@@ -73,6 +73,7 @@ const committed = {
   changed: true,
   eventId: '00000000-0000-4000-8000-000000000030',
   movement: {
+    createdAt: '2026-10-07T12:00:00Z',
     itemName: item.name,
     quantity: 1,
     source: { id: source.id, name: source.name, after: 1 },
@@ -118,10 +119,10 @@ it('rejects the audited 2-unit source / 3-unit overdraw inline before review and
   ).not.toBeInTheDocument();
   expect(amount).toHaveAttribute('aria-invalid', 'true');
   expect(amount).toHaveFocus();
-  expect(screen.getByRole('alert')).toHaveTextContent(/only 2 units/i);
+  expect(screen.getByText(/only 2 units/i)).toBeVisible();
   expect(amount).toHaveAttribute(
     'aria-describedby',
-    expect.stringContaining('quantity-error'),
+    expect.stringContaining('quantity-validation-error'),
   );
   expect(mocks.submit).not.toHaveBeenCalled();
   fireEvent.change(amount, { target: { value: '1' } });
@@ -152,6 +153,7 @@ it('keeps committed receipt complete across its own refresh and requires Move mo
     'Moved 1 unit from Red Container to Black Container',
   );
   expect(screen.getByRole('status')).toHaveTextContent('After this move');
+  expect(screen.queryByText('Previous move receipt')).toBeNull();
   expect(screen.queryByText(/Baseline refreshed/)).not.toBeInTheDocument();
   expect(
     screen.queryByRole('button', { name: 'Review move stock' }),
@@ -172,7 +174,7 @@ it.each(['', '0', '-1', '1.5', '2147483648', '1e100'])(
       target: { value },
     });
     await user.click(screen.getByRole('button', { name: 'Review move stock' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('whole number');
+    expect(screen.getByText(/whole number/)).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Confirm move stock' }),
     ).not.toBeInTheDocument();
@@ -637,7 +639,7 @@ it('reports unavailable browser storage on initial recovery without preventing i
   get.mockRestore();
 });
 
-it('blocks workspace switching while an existing move receipt is unverified or unavailable', async () => {
+it('does not block unrelated tasks while a known completed receipt is unverified or unavailable', async () => {
   sessionStorage.setItem(
     completionKey(),
     JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
@@ -661,12 +663,111 @@ it('blocks workspace switching while an existing move receipt is unverified or u
     </TaskWorkspace>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
-  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeEnabled();
   await waitFor(() => expect(mocks.receipt).toHaveBeenCalledOnce());
   await act(async () => reject(new Error('unavailable')));
   await screen.findByRole('button', { name: 'Retry loading move receipt' });
-  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Close task' })).toBeEnabled();
+  expect(sessionStorage.getItem(completionKey())).not.toBeNull();
+});
+
+it.each(['Done', 'Close task', 'Receive stock'])(
+  'closes only the matching committed pointer through %s and never reopens it after another task',
+  async (closeAction) => {
+    sessionStorage.setItem('unrelated-recovery', 'preserve');
+    render(
+      <TaskWorkspace
+        choices={[
+          { id: 'move', label: 'Move stock' },
+          { id: 'receive', label: 'Receive stock' },
+        ]}
+        context={item.name}
+      >
+        {(task) =>
+          task === 'move' ? <MutationForm {...props} /> : <p>Receiving task</p>
+        }
+      </TaskWorkspace>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+    const user = await prepare();
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm move stock' }),
+    );
+    await screen.findByText(/move completed/);
+    expect(sessionStorage.getItem(completionKey())).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: closeAction }));
+    expect(sessionStorage.getItem(completionKey())).toBeNull();
+    expect(sessionStorage.getItem('unrelated-recovery')).toBe('preserve');
+    await user.click(screen.getByRole('button', { name: 'Move stock' }));
+    await screen.findByLabelText('Destination location');
+    expect(screen.queryByText(/move completed/)).toBeNull();
+    expect(mocks.submit).toHaveBeenCalledOnce();
+  },
+);
+
+it('labels a restored committed receipt as previous and retains its event timestamp and balances through later stock changes', async () => {
+  sessionStorage.setItem(
+    completionKey(),
+    JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+  );
+  const view = render(<MutationForm {...props} />);
+  await screen.findByText('Previous move receipt');
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'After this move: Red Container 1 unit',
+  );
+  expect(screen.getByRole('status').querySelector('time')).toHaveAttribute(
+    'dateTime',
+    committed.movement.createdAt,
+  );
+  view.rerender(
+    <MutationForm
+      {...props}
+      item={{ ...item, version: 4 }}
+      balances={[{ location: source, quantity: 50 }]}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'After this move: Red Container 1 unit',
+  );
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('closing an older committed receipt preserves a newer pointer for that item and unrelated recovery', async () => {
+  render(<MutationForm {...props} />);
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByText(/move completed/);
+  const newer = JSON.stringify({
+    entityId: item.id,
+    eventId: '00000000-0000-4000-8000-000000000031',
+  });
+  sessionStorage.setItem(completionKey(), newer);
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(sessionStorage.getItem(completionKey())).toBe(newer);
+  expect(mocks.submit).toHaveBeenCalledOnce();
+});
+
+it('retains a known receipt when pointer cleanup fails and retries cleanup without another write', async () => {
+  render(<MutationForm {...props} />);
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByText(/move completed/);
+  const remove = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementationOnce(() => {
+      throw new Error('Unavailable');
+    });
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(screen.getByText(/receipt could not be closed/)).toBeVisible();
+  expect(sessionStorage.getItem(completionKey())).not.toBeNull();
+  remove.mockRestore();
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(sessionStorage.getItem(completionKey())).toBeNull();
+  expect(mocks.submit).toHaveBeenCalledOnce();
 });
 
 it('closes an untouched explicitly new move after Move more and returns launcher focus', async () => {

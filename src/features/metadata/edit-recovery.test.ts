@@ -72,6 +72,46 @@ const submitted = (previous: EditEnvelope): EditEnvelope => ({
   },
 });
 describe('existing metadata recovery', () => {
+  it.each(['asset_update_v2', 'asset_update_v3'] as const)(
+    'preserves an uncertain %s command exactly',
+    (operation) => {
+      const envelope = submitted(draft());
+      const shared = {
+        id: baseline.id,
+        name: baseline.name,
+        categoryId: baseline.categoryId,
+        categoryName: baseline.categoryName,
+        description: baseline.description,
+        manufacturer: baseline.manufacturer,
+        model: baseline.model,
+        version: baseline.version,
+      };
+      envelope.scope.kind = 'asset';
+      envelope.baseline = {
+        ...shared,
+        status: 'active',
+        assetTag: '000Ab/C.02',
+        serialNumber: null,
+      };
+      envelope.command = {
+        operation,
+        requestId: id(9),
+        expectedActorId: id(3),
+        payload: {
+          asset_id: id(1),
+          expected_version: 1,
+          category_id: id(2),
+          name: 'Device',
+          expected_published_revision_id: id(10),
+          asset_tag: '000aB/C.02',
+          custom_patch: { set: {}, unset: [] },
+        },
+      };
+      expect(
+        parseEdit(JSON.stringify(envelope), envelope.scope)?.command,
+      ).toEqual(envelope.command);
+    },
+  );
   beforeEach(() => sessionStorage.clear());
   afterEach(() => {
     vi.restoreAllMocks();

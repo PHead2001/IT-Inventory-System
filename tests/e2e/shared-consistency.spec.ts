@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Locator } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { openRecordTask } from './record-task-controls';
+import {
+  expectRecordStatus,
+  expectRecordVersion,
+  openRecordTask,
+} from './record-task-controls';
 import { displayedInstant } from '../helpers/displayed-instant';
 
 async function login(page: Page, email = fixture.emails.staff) {
@@ -111,17 +115,19 @@ for (const fallback of [false, true]) {
       await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
       detail = page.url();
       const time = page.locator('time').first();
-      await expect(time).toContainText(zoneLabel);
+      await expect(await exactTime(time)).toContainText(zoneLabel);
       const canonical = await time.getAttribute('datetime');
-      expect(displayedInstant((await time.textContent())!)).toBe(
-        Math.floor(new Date(canonical!).getTime() / 1000) * 1000,
-      );
+      expect(
+        displayedInstant((await (await exactTime(time)).textContent())!),
+      ).toBe(Math.floor(new Date(canonical!).getTime() / 1000) * 1000);
       await page.reload();
       await expect(time).toHaveAttribute('datetime', canonical!);
-      await expect(time).toContainText(zoneLabel);
+      await expect(await exactTime(time)).toContainText(zoneLabel);
       await page.getByRole('link', { name: 'View all item history' }).click();
       await expect(page).toHaveURL(/\/history\?/);
-      await expect(page.locator('time').first()).toContainText(zoneLabel);
+      await expect(await exactTime(page.locator('time').first())).toContainText(
+        zoneLabel,
+      );
       await page.screenshot({
         path: info.outputPath('history-los-angeles.png'),
         fullPage: true,
@@ -205,7 +211,8 @@ for (const fallback of [false, true]) {
         await archive
           .getByRole('button', { name: 'Confirm archive and clear stock' })
           .click();
-        await expect(page.getByText(/Archived · Version/)).toBeVisible();
+        await expectRecordStatus(page, 'archived');
+        await expectRecordVersion(page, 2);
       }
       await context.close();
     }
@@ -318,7 +325,7 @@ test('category actions retain keyboard focus and identity across long names, nav
       .getByRole('button', { name: 'Remove ' + renamed, exact: true })
       .click();
     await expect(
-      row.getByRole('button', { name: 'Confirm removal' }),
+      row.getByRole('button', { name: /^Remove category / }),
     ).toHaveCount(0);
     await row.getByRole('button', { name: 'Review impact' }).click();
     await expect(
@@ -401,7 +408,7 @@ test('category actions retain keyboard focus and identity across long names, nav
       if (!(await row.count())) continue;
       await row.getByRole('button', { name: /^Remove / }).click();
       await row.getByRole('button', { name: 'Review impact' }).click();
-      await row.getByRole('button', { name: 'Confirm removal' }).click();
+      await row.getByRole('button', { name: /^Remove category / }).click();
       await expect(row.getByRole('button', { name: /^Remove / })).toHaveCount(
         0,
       );
@@ -450,7 +457,9 @@ test('shared print defaults persist while job overrides and printable output ret
         .getByRole('combobox', { name: settingNames[index], exact: true })
         .selectOption(value);
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText('Settings saved.');
+    await expect(page.getByRole('status')).toContainText(
+      'Label settings saved.',
+    );
     owned = {
       ...selected,
       version: (BigInt(starting.version) + 1n).toString(),
@@ -498,7 +507,9 @@ test('shared print defaults persist while job overrides and printable output ret
       .getByRole('combobox', { name: 'Barcode type', exact: true })
       .selectOption('code128');
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText('Settings saved.');
+    await expect(page.getByRole('status')).toContainText(
+      'Label settings saved.',
+    );
     owned = {
       ...selected,
       format: 'code128',
@@ -596,3 +607,23 @@ test('shared print defaults persist while job overrides and printable output ret
     await reader.auth.signOut({ scope: 'local' });
   }
 });
+
+async function exactTime(time: Locator) {
+  const summary = time.locator('xpath=parent::summary');
+  if (await summary.count()) {
+    const disclosure = summary.locator('xpath=parent::details');
+    await summary.focus();
+    if (
+      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
+    )
+      await summary.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+    const exact = disclosure.locator(':scope > p').first();
+    await expect(exact).toBeVisible();
+    await expect(disclosure).toContainText(
+      (await time.getAttribute('datetime'))!,
+    );
+    return exact;
+  }
+  return time;
+}

@@ -1,4 +1,5 @@
-import { openRecordTask } from './record-task-controls';
+import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
+import { expectRecordVersion, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -40,7 +41,8 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
     .fill('Checkpoint fictional retired label fixture');
   await retire.getByRole('button', { name: 'Review retire asset' }).click();
   await retire.getByRole('button', { name: 'Confirm retire asset' }).click();
-  await expect(page.getByText(/retired · Version 2/)).toBeVisible();
+  await expect(page.getByText('Retired', { exact: true })).toBeVisible();
+  await expectRecordVersion(page, 2);
   await page.getByRole('link', { name: 'Print asset label' }).click();
   await expect(page).toHaveURL(/\/labels$/);
   const queue = page.getByRole('region', { name: 'Label queue' });
@@ -175,7 +177,8 @@ test('an individual pending linked quantity can be removed while an unrelated de
     await archive
       .getByRole('button', { name: 'Confirm archive and clear stock' })
       .click();
-    await expect(page.getByText(/Archived · Version 2/)).toBeVisible();
+    await expect(page.getByText('Archived', { exact: true })).toBeVisible();
+    await expectRecordVersion(page, 2);
   }
 });
 
@@ -746,7 +749,7 @@ test('asset UUID label survives rename and move, while a bare colliding identifi
   const existing = await local
     .from('serialized_assets')
     .select('id')
-    .eq('asset_tag', 'itc')
+    .eq('asset_tag_normalized', 'itc')
     .maybeSingle();
   expect(existing.error).toBeNull();
   let id = existing.data?.id;
@@ -1113,4 +1116,127 @@ test('empty CSV retains headers and anonymous export is denied', async ({
   const csv = await response.text();
   expect(csv).toContain('"Record ID","Type","Name"');
   expect(csv.trim().split(/\r?\n/)).toHaveLength(1);
+});
+
+test('mixed-case zero-prefixed punctuated asset tag retains exact spelling across save reload lookup barcode print CSV and duplicate rejection', async ({
+  page,
+}, info) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  const tag = `00aZ-._/${owned.suffix.slice(0, 6).toLowerCase()}`;
+  const name = `Display spelling ${owned.suffix}`;
+  let id: string | undefined;
+  try {
+    await signIn(page);
+    await page.goto('/inventory/assets/new');
+    let form = page.getByRole('form', {
+      name: 'Add individual asset',
+      exact: true,
+    });
+    await form.getByLabel('Name', { exact: true }).fill(name);
+    await form
+      .getByLabel('Category', { exact: true })
+      .selectOption(owned.categoryId);
+    await form.getByLabel('Asset tag', { exact: true }).fill(` ${tag} `);
+    await chooseLocation(form, 'Current location', 'ITC-RED');
+    await metadataReviewButton(form).click();
+    await metadataSaveButton(form).click();
+    await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
+    id = new URL(page.url()).pathname.split('/').at(-1)!;
+    owned.assets.add(id);
+    await page.reload();
+    await expect(page.getByText(tag, { exact: true })).toBeVisible();
+    await page.goto('/scan');
+    await page
+      .getByLabel('Paste a label URL, barcode text, or exact identifier')
+      .fill(`AST:${tag.toUpperCase()}`);
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/inventory/assets/${id}$`));
+    await page
+      .getByRole('link', { name: 'Print asset label', exact: true })
+      .click();
+    await page
+      .getByRole('combobox', { name: 'Paper size', exact: true })
+      .selectOption('letter');
+    await page
+      .getByRole('combobox', { name: 'Label size', exact: true })
+      .selectOption('90x50');
+    await page
+      .getByRole('combobox', { name: 'Barcode type', exact: true })
+      .selectOption('code128');
+    await readyPreview(page, 1);
+    const card = page.locator('.label-card');
+    await expect(card).toContainText(`Asset tag: ${tag}`);
+    const barcode = card.getByRole('img', {
+      name: `Code 128 AST:${tag}`,
+      exact: true,
+    });
+    await expect(barcode).toBeVisible();
+    expect(
+      await decodeScreenshot(
+        page,
+        await barcode.screenshot({ scale: 'device' }),
+        BarcodeFormat.CODE_128,
+      ),
+    ).toBe(`AST:${tag}`);
+    const pdf = await verifiedPreviewPdf(
+      page,
+      info.outputPath('display-spelling-label.pdf'),
+      info,
+    );
+    expect(pdf.toString('latin1')).toMatch(
+      /\/MediaBox\s*\[\s*0\s+0\s+612\s+792\s*\]/,
+    );
+    await page.goto('/inventory?q=' + encodeURIComponent(tag.toLowerCase()));
+    await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
+    await page.locator('details.experience-export-menu > summary').click();
+    const downloaded = page.waitForEvent('download');
+    await page
+      .getByRole('link', { name: 'Filtered inventory', exact: true })
+      .click();
+    const destination = info.outputPath('display-spelling.csv');
+    await (await downloaded).saveAs(destination);
+    const { readFile } = await import('node:fs/promises');
+    const lines = (await readFile(destination, 'utf8'))
+      .replace(/^\uFEFF/, '')
+      .trimEnd()
+      .split(/\r?\n/)
+      .map((line) =>
+        (line.match(/(?:"(?:[^"]|"")*"|[^,]*)(?:,|$)/g) ?? [])
+          .slice(0, -1)
+          .map((cell) =>
+            cell.replace(/,$/, '').replace(/^"|"$/g, '').replaceAll('""', '"'),
+          ),
+      );
+    const row = lines.slice(1).find((cells) => cells[0] === id);
+    expect(row).toBeDefined();
+    expect(row![lines[0].indexOf('Asset Tag')]).toBe(tag);
+    await page.goto('/inventory/assets/new');
+    form = page.getByRole('form', {
+      name: 'Add individual asset',
+      exact: true,
+    });
+    await form.getByLabel('Name', { exact: true }).fill(name + ' duplicate');
+    await form
+      .getByLabel('Category', { exact: true })
+      .selectOption(owned.categoryId);
+    await form.getByLabel('Asset tag', { exact: true }).fill(tag.toLowerCase());
+    await chooseLocation(form, 'Current location', 'ITC-RED');
+    await metadataReviewButton(form).click();
+    await metadataSaveButton(form).click();
+    await expect(form.getByRole('alert')).toContainText(
+      'That asset tag is already in use',
+    );
+    await expect(form.getByLabel('Asset tag', { exact: true })).toHaveValue(
+      tag.toLowerCase(),
+    );
+    const stored = await owned.caller
+      .from('serialized_assets')
+      .select('id,asset_tag')
+      .eq('asset_tag_normalized', tag.toLowerCase());
+    expect(stored.error).toBeNull();
+    expect(stored.data).toEqual([{ id, asset_tag: tag }]);
+  } finally {
+    await owned.cleanup();
+  }
 });

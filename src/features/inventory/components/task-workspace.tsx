@@ -64,7 +64,7 @@ export function TaskWorkspace({
       !returnFocusRequested.current
     )
       return;
-    // A completed task disables its launcher until this clean commit.
+    // Return focus after the closed task's clean state commits.
     returnFocusRequested.current = false;
     const target = launcher.current;
     if (target?.isConnected && !target.disabled) target.focus();
@@ -81,12 +81,16 @@ export function TaskWorkspace({
     if (
       stateRef.current.pending ||
       stateRef.current.uncertain ||
-      (stateRef.current.completed &&
-        !(selected === 'metadata' && id === null)) ||
       id === selected
     )
       return;
-    if (state.dirty) setRequested(id);
+    if (
+      stateRef.current.completed &&
+      discardTask.current &&
+      !discardTask.current()
+    )
+      return;
+    if (state.dirty && !state.completed) setRequested(id);
     else {
       setActiveLabel(
         choices.find((choice) => choice.id === id)?.label ?? activeLabel,
@@ -118,10 +122,10 @@ export function TaskWorkspace({
                 key={choice.id}
                 type="button"
                 variant="outline"
-                disabled={locked || state.completed}
+                disabled={locked}
                 aria-pressed={choice.id === selected}
                 onClick={(event) => {
-                  if (stateRef.current.dirty)
+                  if (stateRef.current.dirty && !stateRef.current.completed)
                     requestedLauncher.current = event.currentTarget;
                   else launcher.current = event.currentTarget;
                   change(choice.id);
@@ -162,13 +166,6 @@ export function TaskWorkspace({
               : 'Saving this task. Wait for its result before switching.'}
         </p>
       )}
-      {state.completed && (
-        <p className="text-sm text-cyan-200">
-          {selected === 'metadata'
-            ? 'Details saved. Choose Done or Close task to finish.'
-            : 'Completed transaction retained. Start a new transaction explicitly before switching tasks.'}
-        </p>
-      )}
       {requested !== undefined && (
         <div
           role="alertdialog"
@@ -179,7 +176,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             autoFocus
-            disabled={locked || (state.completed && selected !== 'metadata')}
+            disabled={locked}
             onClick={() => {
               setRequested(undefined);
               heading.current?.focus();
@@ -235,7 +232,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             variant="outline"
-            disabled={locked || (state.completed && selected !== 'metadata')}
+            disabled={locked}
             onClick={() => change(null)}
           >
             Close task

@@ -18,7 +18,10 @@ export function normalizeEditIntent(
   kind: 'quantity' | 'asset',
   payload: Record<string, unknown>,
 ) {
-  const parsed = payloadSchemas[`${kind}_update_v2`].safeParse(payload);
+  const parsed =
+    payloadSchemas[
+      kind === 'quantity' ? 'quantity_update_v2' : 'asset_update_v3'
+    ].safeParse(payload);
   if (!parsed.success) return null;
   const intent: Record<string, unknown> = { ...parsed.data };
   for (const key of [
@@ -29,8 +32,6 @@ export function normalizeEditIntent(
     'serial_number',
   ])
     if (intent[key] === '') intent[key] = null;
-  if (typeof intent.asset_tag === 'string')
-    intent.asset_tag = intent.asset_tag.toLowerCase();
   return intent;
 }
 export function editSummary(input: {

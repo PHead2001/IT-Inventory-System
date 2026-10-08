@@ -252,7 +252,16 @@ test('site count corrections show authoritative signed before and after counts, 
       .selectOption(savedSite.id);
     await issue.getByLabel('Units', { exact: true }).fill('4');
     await issue
-      .getByRole('button', { name: 'Issue stock to a site', exact: true })
+      .getByRole('button', {
+        name: 'Review issue stock to a site',
+        exact: true,
+      })
+      .click();
+    await issue
+      .getByRole('button', {
+        name: 'Confirm issue stock to a site',
+        exact: true,
+      })
       .click();
     const completion = page.getByRole('region', {
       name: 'Custody completion',
@@ -330,7 +339,21 @@ test('site count corrections show authoritative signed before and after counts, 
         .fill(reference);
       await form
         .getByRole('button', {
-          name: 'Correct recorded site holding',
+          name: 'Review correct recorded site holding',
+          exact: true,
+        })
+        .click();
+      const review = form.getByRole('region', {
+        name: 'Review changes',
+        exact: true,
+      });
+      await expect(review).toBeVisible();
+      await expect(review).toContainText(name);
+      await expect(review).toContainText(reason);
+      await expect(review).toContainText(reference);
+      await form
+        .getByRole('button', {
+          name: 'Confirm correct recorded site holding',
           exact: true,
         })
         .click();

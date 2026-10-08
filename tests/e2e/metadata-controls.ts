@@ -3,7 +3,7 @@ import type { Locator } from '@playwright/test';
 /** Creation and editing intentionally use different decision/action wording. */
 export function metadataReviewButton(scope: Locator) {
   return scope.getByRole('button', {
-    name: /^(Review quantity item|Review individual asset|Review metadata)$/,
+    name: /^(Review quantity item|Review individual asset|Review details)$/,
   });
 }
 

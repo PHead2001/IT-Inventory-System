@@ -171,12 +171,16 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     expect(name).toHaveFocus();
     expect(name).toHaveAttribute('aria-invalid', 'true');
     expect(name).toHaveAccessibleDescription(/Enter/);
+    fireEvent.change(name, { target: { value: 'Corrected cable' } });
+    expect(name).toHaveFocus();
+    expect(name).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByRole('link', { name: 'Name' })).toBeNull();
     expect(screen.getByRole('checkbox')).not.toBeChecked();
     expect(submitInventory).not.toHaveBeenCalled();
     expect(
@@ -196,7 +200,7 @@ describe('published metadata form', () => {
     await user.type(screen.getByLabelText('Name'), 'Cable');
     await user.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     const answer = screen.getByRole('checkbox', {
@@ -210,9 +214,10 @@ describe('published metadata form', () => {
     ).toBeNull();
     await user.click(answer);
     await user.click(answer);
+    expect(screen.queryByRole('link', { name: 'Inspected' })).toBeNull();
     await user.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     expect(answer).not.toBeChecked();
@@ -244,7 +249,7 @@ describe('published metadata form', () => {
       await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
       await user.click(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       );
       expect(screen.getByLabelText('Name')).toHaveFocus();
@@ -277,6 +282,9 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     first.unmount();
     const second = render(<MetadataForm {...creation} />);
+    expect(screen.getByLabelText('Name')).toHaveValue('');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore draft' }));
     await waitFor(() =>
       expect(screen.getByLabelText('Name')).toHaveValue('Recovered cable'),
     );
@@ -312,7 +320,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -364,7 +372,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -382,34 +390,235 @@ describe('published metadata form', () => {
     expect(unload.defaultPrevented).toBe(true);
     failure.mockRestore();
   });
-  it('keeps canonical creation controls behind the barrier until URL normalization remounts the durable instance', () => {
+  it('keeps a recovered legacy asset site-opening command exact after v3 adoption', async () => {
+    const creation = {
+      ...props,
+      kind: 'asset' as const,
+      item: undefined,
+      creationDraftId: secondRevision,
+      openingSite: { id: item.id, code: 'SITE-A', name: 'Site A' },
+      forms: { [categoryId]: form() },
+    };
+    vi.mocked(submitCustody).mockRejectedValueOnce(new Error('lost response'));
+    const first = render(<MetadataForm {...creation} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Legacy site asset' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review individual asset' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add individual asset' }),
+    );
+    await screen.findByRole('button', { name: 'Retry same save' });
+    const key = Object.keys(sessionStorage).find((key) =>
+      key.startsWith('inventory-creation-v1:'),
+    )!;
+    const stored = JSON.parse(sessionStorage.getItem(key)!);
+    expect(stored.command.operation).toBe('asset_site_open_v3');
+    stored.command.operation = 'asset_site_open';
+    first.unmount();
+    sessionStorage.setItem(key, JSON.stringify(stored));
+    render(<MetadataForm {...creation} />);
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Restore draft' })).toBeNull();
+    vi.mocked(submitCustody).mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: true,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(stored.command);
+  });
+  it('retains typed edits and selections in the same instance through delayed URL acknowledgement without stealing focus', async () => {
+    const user = userEvent.setup();
     const first = render(
       <MetadataForm
         {...props}
         item={undefined}
         creationDraftId={undefined}
-        forms={{ [categoryId]: form() }}
-      />,
-    );
-    expect(screen.getByLabelText('Name')).toBeDisabled();
-    expect(screen.getByText('Checking creation recovery…')).toBeInTheDocument();
-    expect(replace).toHaveBeenCalledTimes(1);
-    const id = new URL(
-      replace.mock.calls[0][0],
-      'http://localhost',
-    ).searchParams.get('draft')!;
-    first.unmount();
-    render(
-      <MetadataForm
-        {...props}
-        item={undefined}
-        creationDraftId={id}
+        creationInstanceId={secondRevision}
         forms={{ [categoryId]: form() }}
       />,
     );
     expect(screen.getByLabelText('Name')).toBeEnabled();
+    expect(screen.getByText('Checking creation recovery…')).toBeInTheDocument();
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.length).toBe(0);
+    expect(
+      screen.queryByRole('button', { name: 'Retry creation recovery' }),
+    ).toBeNull();
+    const name = screen.getByLabelText<HTMLInputElement>('Name');
+    await user.type(name, 'Draft before URL');
+    await user.click(screen.getByRole('checkbox'));
+    name.focus();
+    name.setSelectionRange(5, 5);
+    expect(sessionStorage.length).toBe(1);
+    expect(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    ).toBeDisabled();
+    const id = new URL(
+      replace.mock.calls[0][0],
+      'http://localhost',
+    ).searchParams.get('draft')!;
+    first.rerender(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={id}
+        creationInstanceId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(screen.getByLabelText('Name')).toBeEnabled();
+    expect(screen.getByLabelText('Name')).toBe(name);
+    expect(name).toHaveFocus();
+    expect(name.selectionStart).toBe(5);
+    expect(name).toHaveValue('Draft before URL');
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(
+      screen.getByRole('button', { name: 'Review quantity item' }),
+    ).toBeEnabled();
+    expect(sessionStorage.length).toBe(1);
+    first.rerender(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={id}
+        creationInstanceId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(name).toHaveValue('Draft before URL');
+    expect(name).toHaveFocus();
   });
-  it('offers an explicit retry when canonical URL normalization does not remount and retains the same durable instance', () => {
+  it('recovers a timed-out URL acknowledgement without creating a second instance or moving focus', () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <MetadataForm
+          {...props}
+          item={undefined}
+          creationDraftId={undefined}
+          creationInstanceId={secondRevision}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Retry creation recovery' }),
+      ).toBeNull();
+      act(() => vi.advanceTimersByTime(10000));
+      const retry = screen.getByRole('button', {
+        name: 'Retry creation recovery',
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent('has not opened');
+      fireEvent.click(retry);
+      expect(replace).toHaveBeenCalledTimes(2);
+      expect(replace.mock.calls[0][0]).toBe(replace.mock.calls[1][0]);
+      view.rerender(
+        <MetadataForm
+          {...props}
+          item={undefined}
+          creationDraftId={secondRevision}
+          creationInstanceId={secondRevision}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      expect(screen.getByLabelText('Name')).toBeEnabled();
+      expect(sessionStorage.length).toBe(0);
+      expect(
+        screen.queryByRole('button', { name: 'Retry creation recovery' }),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('opens more than 32 pristine creation instances without consuming recovery capacity', () => {
+    for (let n = 100; n < 140; n++) {
+      const instance = `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+      const view = render(
+        <MetadataForm
+          {...props}
+          item={undefined}
+          creationDraftId={undefined}
+          creationInstanceId={instance}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      expect(screen.getByLabelText('Name')).toBeEnabled();
+      expect(screen.getByLabelText('Name')).toHaveValue('');
+      view.unmount();
+    }
+    expect(sessionStorage.length).toBe(0);
+    expect(new Set(replace.mock.calls.map(([url]) => url)).size).toBe(40);
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('discards stored editing entries explicitly and keeps the same draft terminal on reload', () => {
+    const creation = {
+      ...props,
+      item: undefined,
+      creationDraftId: secondRevision,
+      forms: { [categoryId]: form() },
+    };
+    const first = render(<MetadataForm {...creation} />);
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Discard this stored draft' },
+    });
+    first.unmount();
+    const second = render(<MetadataForm {...creation} />);
+    expect(screen.getByLabelText('Name')).toHaveValue('');
+    expect(screen.getByLabelText('Name')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+    expect(
+      screen.getByText('This creation draft was discarded.'),
+    ).toBeInTheDocument();
+    second.unmount();
+    render(<MetadataForm {...creation} />);
+    expect(
+      screen.getByText('This creation draft was discarded.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore draft' })).toBeNull();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it.each(['backend', 'site', 'kind'] as const)(
+    'does not offer or restore creation entries from another %s scope',
+    (boundary) => {
+      const creation = {
+        ...props,
+        item: undefined,
+        creationDraftId: secondRevision,
+        forms: { [categoryId]: form() },
+      };
+      const first = render(<MetadataForm {...creation} />);
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Private pending entries' },
+      });
+      first.unmount();
+      render(
+        <MetadataForm
+          {...creation}
+          {...(boundary === 'backend'
+            ? { recoveryBackend: 'https://other-project.supabase.co' }
+            : boundary === 'site'
+              ? { openingSite: { id: item.id, code: 'SITE-A', name: 'Site A' } }
+              : { kind: 'asset' })}
+        />,
+      );
+      expect(screen.getByLabelText('Name')).toHaveValue('');
+      expect(
+        screen.queryByRole('button', { name: 'Restore draft' }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: /Recover Private pending/ }),
+      ).toBeNull();
+    },
+  );
+  it('offers Retry only after a failed binding and retries the same pristine instance', () => {
+    replace.mockImplementationOnce(() => {
+      throw new Error('Interrupted navigation');
+    });
     render(
       <MetadataForm
         {...props}
@@ -422,15 +631,13 @@ describe('published metadata form', () => {
     const retry = screen.getByRole('button', {
       name: 'Retry creation recovery',
     });
-    replace.mockImplementationOnce(() => {
-      throw new Error('Interrupted navigation');
+    expect(screen.getByRole('alert')).toHaveTextContent('creation URL');
+    expect(screen.getByLabelText('Name')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Retained through failed binding' },
     });
     fireEvent.click(retry);
-    expect(screen.getByRole('alert')).toHaveTextContent('creation URL');
-    expect(screen.getByLabelText('Name')).toBeDisabled();
-    fireEvent.click(retry);
     expect(replace.mock.calls.map(([url]) => url)).toEqual([
-      initialURL,
       initialURL,
       initialURL,
     ]);
@@ -439,7 +646,10 @@ describe('published metadata form', () => {
         key.startsWith('inventory-creation-v1:'),
       ),
     ).toHaveLength(1);
-    expect(screen.getByLabelText('Name')).toBeDisabled();
+    expect(screen.getByLabelText('Name')).toBeEnabled();
+    expect(screen.getByLabelText('Name')).toHaveValue(
+      'Retained through failed binding',
+    );
   });
   it('never remounts an unstored canonical creation after a material edit when storage is unavailable', () => {
     const failure = vi
@@ -447,19 +657,32 @@ describe('published metadata form', () => {
       .mockImplementation(() => {
         throw new DOMException('quota', 'QuotaExceededError');
       });
-    render(
+    const view = render(
       <MetadataForm
         {...props}
         item={undefined}
         creationDraftId={undefined}
+        creationInstanceId={secondRevision}
         forms={{ [categoryId]: form() }}
       />,
     );
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Retain this in memory' },
     });
-    expect(replace).not.toHaveBeenCalled();
+    view.rerender(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        creationDraftId={secondRevision}
+        creationInstanceId={secondRevision}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    expect(replace).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('Name')).toHaveValue('Retain this in memory');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'browser and internal navigation may lose',
+    );
     failure.mockRestore();
   });
   it('offers another pending draft explicitly while canonical entry starts empty and another actor sees none', () => {
@@ -539,6 +762,7 @@ describe('published metadata form', () => {
         forms={{ [categoryId]: changed }}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Restore draft' }));
     expect(screen.getByLabelText('Date')).toHaveValue('2026-10-03');
     expect(screen.getByLabelText('Time')).toHaveValue('');
     expect(screen.getByLabelText('Display timezone')).toHaveValue(
@@ -546,7 +770,7 @@ describe('published metadata form', () => {
     );
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeDisabled();
     fireEvent.click(
@@ -626,7 +850,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -702,6 +926,7 @@ describe('published metadata form', () => {
         });
       first.unmount();
       render(<MetadataForm {...creation} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Restore draft' }));
       expect(screen.getByLabelText('Name')).toHaveValue('Opening equipment');
       expect(screen.getByLabelText('Reason (optional)')).toHaveValue(
         '  Original note  ',
@@ -837,7 +1062,7 @@ describe('published metadata form', () => {
     ).toEqual(['Name *', 'Category *', 'Inspected (required)']);
     expect(
       screen.queryByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeNull();
     expect(screen.queryByLabelText('Initial quantity')).toBeNull();
@@ -889,7 +1114,7 @@ describe('published metadata form', () => {
     expect(input).toHaveAttribute('aria-invalid', 'true');
     await user.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     expect(input).toHaveFocus();
@@ -901,7 +1126,7 @@ describe('published metadata form', () => {
     fireEvent.change(input, { target: { value: '😀'.repeat(100) } });
     await user.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     expect(input).not.toHaveAttribute('aria-invalid');
@@ -1044,7 +1269,7 @@ describe('published metadata form', () => {
     expect(screen.queryByLabelText('Initial location')).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1098,7 +1323,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1111,7 +1336,7 @@ describe('published metadata form', () => {
       operation: string;
       payload: Record<string, unknown>;
     };
-    expect(command.operation).toBe('asset_site_open');
+    expect(command.operation).toBe('asset_site_open_v3');
     expect(command.payload).toMatchObject({
       name: 'Existing tablet',
       site_id: item.id,
@@ -1145,14 +1370,14 @@ describe('published metadata form', () => {
     );
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Use my Name edit' }));
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       ).toBeEnabled(),
     );
@@ -1210,7 +1435,7 @@ describe('published metadata form', () => {
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       ).toBeEnabled(),
     );
@@ -1219,7 +1444,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1247,7 +1472,7 @@ describe('published metadata form', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
     expect(
-      screen.getByRole('button', { name: 'Review metadata' }),
+      screen.getByRole('button', { name: 'Review details' }),
     ).toBeDisabled();
     expect(submitInventory).toHaveBeenCalledOnce();
     await act(async () => finishSchema({ ok: true, form: revised }));
@@ -1257,7 +1482,7 @@ describe('published metadata form', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Edited cable');
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeDisabled();
     await waitFor(() =>
@@ -1272,12 +1497,12 @@ describe('published metadata form', () => {
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       ).toBeEnabled(),
     );
     expect(submitInventory).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
     expect(submitInventory).toHaveBeenCalledOnce();
     vi.mocked(submitInventory).mockResolvedValueOnce({
       ok: true,
@@ -1395,7 +1620,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1450,7 +1675,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1478,7 +1703,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1529,7 +1754,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1571,7 +1796,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1620,7 +1845,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1668,7 +1893,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -1741,7 +1966,7 @@ describe('published metadata form', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeDisabled();
   });
@@ -1772,7 +1997,7 @@ describe('published metadata form', () => {
     });
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     expect(
@@ -1889,7 +2114,7 @@ describe('published metadata form', () => {
       expect(screen.queryByRole('alert')).toBeNull();
       fireEvent.click(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       );
       expect(
@@ -1918,7 +2143,7 @@ describe('published metadata form', () => {
       });
       fireEvent.click(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       );
       fireEvent.click(
@@ -2031,7 +2256,7 @@ describe('published metadata form', () => {
     fireEvent.click(checkbox);
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -2075,7 +2300,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -2130,7 +2355,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -2174,7 +2399,7 @@ describe('published metadata form', () => {
     );
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeEnabled();
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
@@ -2182,7 +2407,7 @@ describe('published metadata form', () => {
     });
     await user.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     const invalid = screen.getByLabelText('Old note (required)');
@@ -2198,7 +2423,7 @@ describe('published metadata form', () => {
     });
     expect(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     ).toBeEnabled();
   });
@@ -2231,7 +2456,7 @@ describe('published metadata form', () => {
       fireEvent.click(screen.getByRole('checkbox'));
       fireEvent.click(
         screen.getByRole('button', {
-          name: /^Review (metadata|quantity item|individual asset)$/,
+          name: /^Review (details|quantity item|individual asset)$/,
         }),
       );
       fireEvent.click(
@@ -2291,7 +2516,7 @@ describe('published metadata form', () => {
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
       screen.getByRole('button', {
-        name: /^Review (metadata|quantity item|individual asset)$/,
+        name: /^Review (details|quantity item|individual asset)$/,
       }),
     );
     fireEvent.click(
@@ -2550,7 +2775,7 @@ describe('creation intent review', () => {
       ).toBeEnabled(),
     );
     const summary = screen.getByRole('region', { name: 'Metadata review' });
-    expect(summary).toHaveTextContent('tag-upper');
+    expect(summary).toHaveTextContent('TAG-UPPER');
     expect(summary).toHaveTextContent('SerialCase');
     expect(summary).toHaveTextContent('1 individually tracked asset');
     fireEvent.click(
@@ -2558,10 +2783,10 @@ describe('creation intent review', () => {
     );
     await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
     expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
-      operation: 'asset_create_v2',
+      operation: 'asset_create_v3',
       payload: {
         name: 'Device',
-        asset_tag: 'tag-upper',
+        asset_tag: 'TAG-UPPER',
         serial_number: 'SerialCase',
         location_id: destination.id,
       },
@@ -2635,7 +2860,7 @@ it('retains completed workspace metadata until explicit Done', async () => {
   fireEvent.change(screen.getByLabelText('Name'), {
     target: { value: 'Saved name' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
   fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
   await screen.findByText('Details saved.');
   expect(screen.getByLabelText('Name')).toBeDisabled();
@@ -2643,8 +2868,8 @@ it('retains completed workspace metadata until explicit Done', async () => {
     target: { value: 'Unsafe new intent' },
   });
   expect(screen.getByLabelText('Name')).toHaveValue('Saved name');
-  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeDisabled();
-  expect(screen.queryByRole('button', { name: 'Review metadata' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Receive stock' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Review details' })).toBeNull();
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Close task' })).toBeEnabled(),
   );
@@ -2712,7 +2937,7 @@ describe('existing edit recovery and review', () => {
         'Changed elsewhere',
       );
       expect(
-        screen.getByRole('button', { name: 'Review metadata' }),
+        screen.getByRole('button', { name: 'Review details' }),
       ).toBeDisabled();
       fireEvent.click(screen.getByRole('button', { name: 'Use my Name edit' }));
       await waitFor(() =>
@@ -2723,7 +2948,7 @@ describe('existing edit recovery and review', () => {
       fireEvent.click(
         screen.getByRole('button', { name: 'Review current details' }),
       );
-      fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
       expect(
         screen.getByRole('region', { name: 'Changed details' }),
       ).toHaveTextContent('Changed elsewhere → My unsaved entry');
@@ -2734,54 +2959,88 @@ describe('existing edit recovery and review', () => {
       expect(submitInventory).not.toHaveBeenCalled();
     },
   );
-  it('replays the identical unknown existing save after navigation and clears recovery only after acknowledgement', async () => {
-    vi.mocked(submitInventory)
-      .mockRejectedValueOnce(new Error('lost response'))
-      .mockResolvedValueOnce({
-        ok: true,
-        entityId: item.id,
-        version: '2',
-        changed: true,
+  it.each(['quantity', 'asset', 'legacy asset'] as const)(
+    'replays the identical unknown existing %s save after navigation and clears recovery only after acknowledgement',
+    async (variant) => {
+      const kind =
+        variant === 'quantity' ? ('quantity' as const) : ('asset' as const);
+      const asset = {
+        ...item,
+        assetTag: null,
+        serialNumber: null,
+        status: 'active' as const,
+      };
+      const entityProps =
+        kind === 'quantity' ? { item } : { item: undefined, asset };
+      vi.mocked(submitInventory)
+        .mockRejectedValueOnce(new Error('lost response'))
+        .mockResolvedValueOnce({
+          ok: true,
+          entityId: item.id,
+          version: '2',
+          changed: true,
+        });
+      const first = render(
+        <MetadataForm
+          {...props}
+          {...entityProps}
+          kind={kind}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Unsure saved entry' },
       });
-    const first = render(
-      <MetadataForm {...props} forms={{ [categoryId]: form() }} />,
-    );
-    fireEvent.change(screen.getByLabelText('Name'), {
-      target: { value: 'Unsure saved entry' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Retry same save' }),
-      ).toBeEnabled(),
-    );
-    const submitted = vi.mocked(submitInventory).mock.calls[0][0] as {
-      requestId: string;
-    };
-    first.unmount();
-    render(
-      <MetadataForm
-        {...props}
-        item={{ ...item, version: 2, name: 'Unsure saved entry' }}
-        forms={{ [categoryId]: form() }}
-      />,
-    );
-    expect(screen.getByLabelText('Name')).toHaveValue('Unsure saved entry');
-    expect(screen.getByLabelText('Name')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
-    await screen.findByText('Details saved.');
-    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(submitted);
-    const raw = sessionStorage.getItem(sessionStorage.key(0)!)!;
-    expect(JSON.parse(raw)).toMatchObject({
-      status: 'saved',
-      inputs: null,
-      command: null,
-      completedRequestId: submitted.requestId,
-    });
-    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
-  });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeEnabled(),
+      );
+      let submitted = vi.mocked(submitInventory).mock.calls[0][0] as {
+        requestId: string;
+      };
+      first.unmount();
+      if (variant === 'legacy asset') {
+        const key = Object.keys(sessionStorage).find((key) =>
+          key.startsWith('inventory-metadata-edit-v1:'),
+        )!;
+        const stored = JSON.parse(sessionStorage.getItem(key)!);
+        expect(stored.command.operation).toBe('asset_update_v3');
+        stored.command.operation = 'asset_update_v2';
+        submitted = stored.command;
+        sessionStorage.setItem(key, JSON.stringify(stored));
+      }
+      render(
+        <MetadataForm
+          {...props}
+          {...(kind === 'quantity'
+            ? { item: { ...item, version: 2, name: 'Unsure saved entry' } }
+            : {
+                item: undefined,
+                asset: { ...asset, version: 2, name: 'Unsure saved entry' },
+              })}
+          kind={kind}
+          forms={{ [categoryId]: form() }}
+        />,
+      );
+      expect(screen.getByLabelText('Name')).toHaveValue('Unsure saved entry');
+      expect(screen.getByLabelText('Name')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+      await screen.findByText('Details saved.');
+      expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(submitted);
+      const raw = sessionStorage.getItem(sessionStorage.key(0)!)!;
+      expect(JSON.parse(raw)).toMatchObject({
+        status: 'saved',
+        inputs: null,
+        command: null,
+        completedRequestId: submitted.requestId,
+      });
+      expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+    },
+  );
   it('keeps Stay entries and explicit workspace discard clears only the owning edit draft', async () => {
     const workspace = () => (
       <TaskWorkspace
@@ -2864,7 +3123,7 @@ describe('existing edit recovery and review', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Recovery storage is unavailable or full',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
     expect(submitInventory).not.toHaveBeenCalled();
     storage.mockRestore();
@@ -3054,7 +3313,7 @@ describe('existing edit recovery and review', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Possibly saved' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
     await waitFor(() =>
       expect(
@@ -3104,7 +3363,7 @@ describe('existing edit recovery and review', () => {
       target: { value: ' New maker ' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review metadata' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
     expect(
       screen.getByRole('region', { name: 'Changed details' }),
     ).toHaveTextContent('Old maker → New maker');

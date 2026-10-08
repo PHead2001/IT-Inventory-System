@@ -180,6 +180,8 @@ for (const kind of ['quantity', 'asset'] as const) {
       .fill('Committed despite lost response');
     await metadataReviewButton(form).click();
     const commands: string[] = [];
+    const expectedOperation =
+      kind === 'asset' ? 'asset_update_v3' : 'quantity_update_v2';
     const routePattern =
       '**/inventory/' +
       (kind === 'asset' ? 'assets' : 'quantity') +
@@ -189,7 +191,7 @@ for (const kind of ['quantity', 'asset'] as const) {
     await page.route(routePattern, async (route) => {
       const request = route.request();
       const body = request.postData();
-      if (request.method() !== 'POST' || !body?.includes(`${kind}_update_v2`))
+      if (request.method() !== 'POST' || !body?.includes(expectedOperation))
         return route.continue();
       commands.push(body);
       if (commands.length > 1) return route.continue();
@@ -206,6 +208,7 @@ for (const kind of ['quantity', 'asset'] as const) {
     ).toBeVisible();
     const submitted = await editEnvelope(page, record.id);
     expect(submitted.status).toBe('submitted');
+    expect(submitted.command.operation).toBe(expectedOperation);
     expect(submitted.command.payload.expected_version).toBe(1);
     await page.reload();
     form = await auditOpenMetadataTask(page, `Edit ${kind} metadata`);

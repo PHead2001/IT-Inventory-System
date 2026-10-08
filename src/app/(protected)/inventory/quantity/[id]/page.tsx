@@ -1,3 +1,4 @@
+import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
@@ -72,8 +73,14 @@ export default async function QuantityPage({
             </p>
             <h1 className="experience-heading mt-2">{item.name}</h1>
             <p className="experience-muted mt-2 text-sm">
-              {item.archived ? 'Archived' : 'Active'} · Version {item.version}
+              <RecordStatus status={item.archived ? 'archived' : 'active'} />
             </p>
+            <details className="mt-2 text-xs text-slate-400">
+              <summary className="min-h-11 cursor-pointer py-2">
+                Technical record details
+              </summary>
+              <p>Record version: {item.version}</p>
+            </details>
           </div>
           <div className={styles.detailActions}>
             <Link href={'/labels?quantity=' + item.id}>
@@ -105,7 +112,7 @@ export default async function QuantityPage({
           {item.itemCode && (
             <div className={styles.fact}>
               <dt>Item code (SKU)</dt>
-              <dd>{item.itemCode}</dd>
+              <dd className="experience-code">{item.itemCode}</dd>
             </div>
           )}
         </dl>

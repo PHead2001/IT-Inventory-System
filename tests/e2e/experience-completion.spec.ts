@@ -145,6 +145,9 @@ test('quantity label identity survives receipt, move, issue and return while pri
   await page.goto(detail);
   const receive = await openRecordTask(page, 'Receive stock');
   await openRecordTask(page, 'Receive stock');
+  await expect(receive.getByLabel('Receive at', { exact: true })).toContainText(
+    'ITC-S1A',
+  );
   await chooseLocation(receive, 'Receive at', 'ITC-S1B');
   await receive.getByLabel('Quantity to receive').fill('5');
   await receive.getByLabel('Reason (required)').fill('Label stability receipt');
@@ -173,7 +176,12 @@ test('quantity label identity survives receipt, move, issue and return while pri
     .getByLabel('Destination site')
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
   await issue.getByLabel('Units').fill('3');
-  await issue.getByRole('button', { name: 'Issue stock to a site' }).click();
+  await issue
+    .getByRole('button', { name: 'Review issue stock to a site' })
+    .click();
+  await issue
+    .getByRole('button', { name: 'Confirm issue stock to a site' })
+    .click();
   await expect(
     page.getByRole('region', { name: 'Custody completion' }),
   ).toContainText('Custody saved');
@@ -191,7 +199,12 @@ test('quantity label identity survives receipt, move, issue and return while pri
     .selectOption({ label: `Label site ${suffix} (${siteCode})` });
   await chooseLocation(returned, 'Return to storage', 'ITC-S1B');
   await returned.getByLabel('Units').fill('1');
-  await returned.getByRole('button', { name: 'Return to storage' }).click();
+  await returned
+    .getByRole('button', { name: 'Review return to storage' })
+    .click();
+  await returned
+    .getByRole('button', { name: 'Confirm return to storage' })
+    .click();
   await expect(
     page.getByRole('region', { name: 'Custody completion' }),
   ).toContainText('Custody saved');
@@ -299,7 +312,7 @@ test('designer hide and restore retain false, zero and empty values while an uns
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Settings saved.');
+  await expect(page.getByRole('status')).toContainText('Category added.');
   let designer = await openDesigner(page, category);
   const fields = [
     { type: 'boolean', name: 'False flag' },

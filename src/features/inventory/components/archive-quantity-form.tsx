@@ -3,6 +3,10 @@ import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useReportTaskState, useTaskReset } from './task-state';
 import { Button } from '@/components/ui/button';
+import {
+  useFormValidation,
+  ValidationSummary,
+} from '@/components/forms/validation';
 import { submitInventory } from '../actions';
 import type { MutationState } from '../contracts';
 import type { QuantityArchiveReview } from '../queries.server';
@@ -15,9 +19,11 @@ function displayCount(value: string) {
 export function ArchiveQuantityForm({
   latestReview,
   actorId,
+  itemName,
 }: {
   latestReview: QuantityArchiveReview;
   actorId?: string;
+  itemName?: string;
 }) {
   const resetTask = useTaskReset();
   const router = useRouter();
@@ -27,6 +33,7 @@ export function ArchiveQuantityForm({
   const [reviewing, setReviewing] = useState(false);
   const [refreshRequested, setRefreshRequested] = useState(false);
   const [done, setDone] = useState(false);
+  const [closed, setClosed] = useState(false);
   const [state, setState] = useState<MutationState | null>(null);
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -35,9 +42,20 @@ export function ArchiveQuantityForm({
   const [uncertain, setUncertain] = useState(false);
   const inFlight = useRef(false);
   const submitted = useRef<Parameters<typeof submitInventory>[0] | null>(null);
+  const validation = useFormValidation(() =>
+    acknowledged
+      ? []
+      : [
+          {
+            id: 'archive-clear-acknowledgement',
+            label: 'Stock removal acknowledgement',
+            message: 'Acknowledge stock removal before continuing.',
+          },
+        ],
+  );
   const reportTask = useReportTaskState({
     dirty: reason !== '' || acknowledged,
-    pending,
+    pending: pending && !done,
     uncertain,
     completed: done,
   });
@@ -65,9 +83,10 @@ export function ArchiveQuantityForm({
       pending ||
       inFlight.current ||
       done ||
-      (!uncertain && (refreshRequested || newerVersion || !acknowledged))
+      (!uncertain && (refreshRequested || newerVersion))
     )
       return;
+    if (!uncertain && !validation.validate(event.currentTarget)) return;
     if (!reviewing && !uncertain) {
       setReviewing(true);
       setState(null);
@@ -107,6 +126,7 @@ export function ArchiveQuantityForm({
         setUncertain(unresolved);
         setState(result);
         if (result.ok) {
+          validation.clear();
           setDone(true);
           setReviewing(false);
           try {
@@ -132,12 +152,16 @@ export function ArchiveQuantityForm({
       }
     });
   };
+  if (closed) return <p role="status">Done.</p>;
   return (
     <form
+      {...validation.formProps}
+      noValidate
       aria-label="Archive quantity item and clear stock"
       className="space-y-4"
       onSubmit={submit}
     >
+      <ValidationSummary issues={validation.issues} />
       <p className="text-sm text-amber-100">
         Archiving removes every recorded balance, including stock at inactive
         locations. Restoring this quantity item will return it with zero stock;
@@ -184,6 +208,7 @@ export function ArchiveQuantityForm({
           Reason (required)
         </label>
         <textarea
+          {...validation.props('archive-clear-reason')}
           id="archive-clear-reason"
           className={field}
           rows={2}
@@ -196,8 +221,11 @@ export function ArchiveQuantityForm({
             setState(null);
           }}
         />
+        {validation.error('archive-clear-reason')}
         <label className="mt-3 flex min-h-11 items-center gap-3 text-sm">
           <input
+            {...validation.props('archive-clear-acknowledgement')}
+            id="archive-clear-acknowledgement"
             type="checkbox"
             checked={acknowledged}
             required
@@ -210,13 +238,21 @@ export function ArchiveQuantityForm({
           I understand that all {displayCount(baseline.removed_total)} recorded
           units will be removed and restore will not recreate them.
         </label>
+        {validation.error('archive-clear-acknowledgement')}
       </fieldset>
       {refreshRequested && (
         <p role="status">Loading the latest stock review…</p>
       )}
       {reviewing && (
         <section aria-label="Review changes" className={panel}>
-          <h3 className="font-semibold">Confirm stock removal</h3>
+          <h3 id="archive-clear-review-context" className="font-semibold">
+            Confirm stock removal for{' '}
+            {itemName ?? `quantity item ${baseline.item_id}`}
+          </h3>
+          <p className="text-sm text-[var(--warning)]">
+            Warning: this removes every recorded balance. Restore will not
+            recreate this stock.
+          </p>
           <p className="mt-2 text-sm">
             Archive this quantity item and remove{' '}
             {displayCount(baseline.removed_total)} units from{' '}
@@ -240,19 +276,21 @@ export function ArchiveQuantityForm({
       {state?.ok && (
         <>
           <p role="status">Stock removed and quantity item archived.</p>
-          {resetTask && (
-            <Button
-              type="button"
-              className="hover:translate-y-0 active:scale-100"
-              onClick={resetTask}
-            >
-              New transaction
-            </Button>
-          )}
+          <Button
+            type="button"
+            className="hover:translate-y-0 active:scale-100"
+            onClick={() => (resetTask ? resetTask() : setClosed(true))}
+          >
+            Done
+          </Button>
         </>
       )}
       <Button
         type="submit"
+        aria-describedby={
+          reviewing ? 'archive-clear-review-context' : undefined
+        }
+        className="experience-danger-action"
         disabled={
           pending || done || (!uncertain && (refreshRequested || newerVersion))
         }

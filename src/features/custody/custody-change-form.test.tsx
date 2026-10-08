@@ -15,7 +15,7 @@ vi.mock('@/features/locations/location-picker', () => ({
   }) => (
     <button
       type="button"
-      onClick={() => onValueChange('00000000-0000-4000-8000-000000000003')}
+      onClick={() => onValueChange('00000000-0000-4000-8000-000000000002')}
     >
       {label}
     </button>
@@ -61,7 +61,7 @@ it('explains absent sites and disables only the unavailable assignment', () => {
     />,
   );
   expect(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   ).toBeDisabled();
   expect(screen.getByText(/No sites are configured/)).toBeVisible();
   expect(screen.queryByRole('link', { name: /site settings/i })).toBeNull();
@@ -99,7 +99,7 @@ it('offers existing site settings only to a maintainer and distinguishes inactiv
   expect(screen.queryByText(/No sites are configured/)).toBeNull();
   expect(screen.queryByRole('link', { name: 'Open site settings' })).toBeNull();
   expect(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   ).toBeDisabled();
 });
 
@@ -117,7 +117,7 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(screen.getByText(/No other active site/)).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Transfer between sites' }),
+    screen.getByRole('button', { name: 'Review transfer between sites' }),
   ).toBeDisabled();
   view.rerender(
     <CustodyChangeForm
@@ -132,10 +132,112 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(
     screen
-      .getAllByRole('button', { name: 'Return to storage' })
+      .getAllByRole('button', { name: 'Review return to storage' })
       .find((button) => button.getAttribute('type') === 'submit'),
   ).toBeEnabled();
   expect(screen.queryByText(/No active sites/)).toBeNull();
+});
+
+it('collects destination and overdraw together and clears only corrected issues without moving focus', () => {
+  render(
+    <CustodyChangeForm
+      kind="quantity"
+      action="issue"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      storageBalances={[{ location, quantity: 3 }]}
+    />,
+  );
+  const amount = screen.getByLabelText('Units');
+  fireEvent.change(amount, { target: { value: '4' } });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review issue stock to a site' }),
+  );
+  expect(screen.getByRole('link', { name: 'Destination site' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Units' })).toBeVisible();
+  amount.focus();
+  fireEvent.change(amount, { target: { value: '2' } });
+  expect(amount).toHaveFocus();
+  expect(screen.queryByRole('link', { name: 'Units' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Destination site' })).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('invalidates custody review after an edit or an observed catalog change, even when that catalog returns', () => {
+  const props = {
+    kind: 'asset' as const,
+    action: 'assign' as const,
+    entityId: id(1),
+    entityName: 'Laptop',
+    version: '1',
+    locations: [location],
+    sites: [site],
+    currentLocation: location,
+  };
+  const view = render(<CustodyChangeForm {...props} />);
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('Laptop');
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'T-2' } },
+  );
+  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /^Review assign/ }));
+  view.rerender(
+    <CustodyChangeForm {...props} sites={[{ ...site, active: false }]} />,
+  );
+  view.rerender(<CustodyChangeForm {...props} />);
+  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('requires review for asset return and fences double confirmation before dispatch renders', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof submitCustody>>) => void;
+  vi.mocked(submitCustody).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(
+    <CustodyChangeForm
+      kind="asset"
+      action="return"
+      entityId={id(1)}
+      entityName="Laptop"
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      currentSite={site}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Return to storage' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review return to storage' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('Laptop');
+  expect(submitCustody).not.toHaveBeenCalled();
+  const form = screen.getByRole('form', { name: 'Return to storage' });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(submitCustody).toHaveBeenCalledOnce();
+  finish({ ok: true, entityId: id(1), version: '2', changed: true });
+  await screen.findByRole('button', { name: 'Done' });
 });
 
 it('assigns an asset from its authoritative storage source without duplicating a current drawer', async () => {
@@ -160,8 +262,10 @@ it('assigns an asset from its authoritative storage source without duplicating a
     target: { value: site.id },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   );
+  expect(submitCustody).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
     operation: 'asset_site_change',
@@ -219,8 +323,10 @@ it('transfers only the specified site-held quantity with stable version and no s
   });
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: '2' } });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Transfer between sites' }),
+    screen.getByRole('button', { name: 'Review transfer between sites' }),
   );
+  expect(submitCustody).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   const payload = (
     vi.mocked(submitCustody).mock.calls[0][0] as {
@@ -268,8 +374,9 @@ it('replays the exact uncertain command despite newer custody and unavailable de
     target: { value: site.id },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   );
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByText(/result could not be confirmed/);
   const first = vi.mocked(submitCustody).mock.calls[0][0];
   expect(first).toMatchObject({
@@ -338,8 +445,9 @@ it('keeps a last-unit committed receipt independent of depleted live sources and
     target: { value: site.id },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Issue stock to a site' }),
+    screen.getByRole('button', { name: 'Review issue stock to a site' }),
   );
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm
@@ -422,6 +530,7 @@ it('preserves a last-unit return source name even when it leaves site holdings a
       .find((button) => button.getAttribute('type') === 'button')!,
   );
   fireEvent.submit(screen.getByRole('form', { name: 'Return to storage' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm {...props} version="2" sites={[]} siteHoldings={[]} />,
@@ -481,6 +590,7 @@ it.each([true, false])(
     fireEvent.submit(
       screen.getByRole('form', { name: 'Correct recorded site holding' }),
     );
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
     await screen.findByRole('button', { name: 'Done' });
     const completion = screen.getByRole('region', {
       name: 'Custody completion',

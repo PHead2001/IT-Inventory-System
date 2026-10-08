@@ -73,7 +73,11 @@ it('real source picker accepts the asset current storage location without quanti
   await user.keyboard('{Escape}');
   await user.selectOptions(screen.getByLabelText('Destination site'), site.id);
   await user.click(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
+  );
+  expect(submitCustody).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm assign asset to a site' }),
   );
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({

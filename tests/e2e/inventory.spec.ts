@@ -1,6 +1,8 @@
 import {
   beginNewRecordTransaction,
   expectStableReceiptAction,
+  expectRecordVersion,
+  expectRecordStatus,
   openRecordTask,
 } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -56,9 +58,7 @@ async function confirm(form: Locator, name: string) {
     .click();
 }
 async function version(page: Page, value: number) {
-  await expect(
-    page.getByText(new RegExp('Version ' + value + '$')),
-  ).toBeVisible();
+  await expectRecordVersion(page, value);
 }
 async function createQuantity(
   page: Page,
@@ -111,7 +111,7 @@ async function archiveFixture(
   await form
     .getByRole('button', { name: 'Confirm archive and clear stock' })
     .click();
-  await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await expectRecordStatus(page, 'archived');
   if (finalVersion !== undefined) await version(page, finalVersion);
 }
 
@@ -130,20 +130,36 @@ test('quantity move rejects an overdraw and retains committed receipt through da
   const detailUrl = page.url();
   try {
     let form = await openForm(page, 'Move stock');
-    await choose(form, 'Destination location', 'ITC-BLACK');
     const amount = form.getByLabel('Quantity to move');
     await expect(
       form.getByText('Recorded source availability: 2 units.'),
     ).toBeVisible();
     await amount.fill('3');
     await form.getByRole('button', { name: 'Review move stock' }).click();
-    await expect(form.getByRole('alert')).toContainText('only 2 units');
-    await expect(amount).toBeFocused();
+    await expect(
+      form.getByText(/This source has only 2 units available/),
+    ).toBeVisible();
+    await expect(
+      form.getByRole('link', { name: 'Destination location', exact: true }),
+    ).toBeVisible();
+    await expect(
+      form.getByRole('link', { name: 'Quantity to move', exact: true }),
+    ).toBeVisible();
     await expect(amount).toHaveAttribute('aria-invalid', 'true');
     await expect(
       form.getByRole('button', { name: 'Confirm move stock' }),
     ).toHaveCount(0);
     await amount.fill('1');
+    await expect(amount).toBeFocused();
+    await expect(amount).not.toHaveAttribute('aria-invalid', 'true');
+    await expect(
+      form.getByRole('link', { name: 'Quantity to move', exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      form.getByRole('link', { name: 'Destination location', exact: true }),
+    ).toBeVisible();
+    await choose(form, 'Destination location', 'ITC-BLACK');
+    await expect(form.getByRole('alert')).toHaveCount(0);
     await confirm(form, 'Move stock');
     await version(page, 2);
     await expect(form.getByRole('status')).toContainText(
@@ -160,6 +176,10 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     ).toHaveCount(0);
     await page.reload();
     form = await openForm(page, 'Move stock');
+    await expect(
+      form.getByText('Previous move receipt', { exact: true }),
+    ).toBeVisible();
+    await expect(form.locator('time')).toBeVisible();
     await expect(form.getByRole('status')).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
@@ -175,6 +195,22 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(form.getByRole('status')).toContainText(
       'After this move: Red Container 0 units; Black Container 2 units',
     );
+    await form.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(form).toBeHidden();
+    expect(
+      await page.evaluate(
+        () =>
+          Object.keys(sessionStorage).filter((key) =>
+            key.startsWith('it-inventory-move-completion:v1:'),
+          ).length,
+      ),
+    ).toBe(0);
+    // Done clears the committed transaction; a new form uses its normal quantity default.
+    form = await openForm(page, 'Move stock');
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('1');
+    await expect(
+      form.getByText('Previous move receipt', { exact: true }),
+    ).toHaveCount(0);
     await page.getByRole('link', { name: 'View all item history' }).click();
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
@@ -225,7 +261,22 @@ test('a separate authenticated writer changes stock after move review and reject
       form.getByText('Recorded source availability: 1 unit.'),
     ).toBeVisible();
     await form.getByRole('button', { name: 'Review move stock' }).click();
-    await expect(form.getByRole('alert')).toContainText('only 1 unit');
+    await expect(
+      form
+        .getByRole('alert')
+        .getByRole('link', { name: 'Quantity to move', exact: true }),
+    ).toBeVisible();
+    await expect(form.getByLabel('Quantity to move')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await expect(
+      form.getByLabel('Quantity to move'),
+    ).toHaveAccessibleDescription(/only 1 unit/);
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('2');
+    await expect(
+      form.getByRole('button', { name: 'Confirm move stock' }),
+    ).toHaveCount(0);
     await page.reload();
     await page.getByRole('link', { name: 'View all item history' }).click();
     await expect(
@@ -386,10 +437,11 @@ test('archiving stocked quantity clears every location in one reviewed operation
     }),
   ).toBeVisible();
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
-  await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await expectRecordStatus(page, 'archived');
+  await expectRecordVersion(page, 3);
   await page.getByRole('link', { name: 'View all item history' }).click();
   const event = page.locator('li').filter({
-    has: page.getByRole('heading', { name: 'Definition archived' }),
+    has: page.getByRole('heading', { name: 'Quantity item archived' }),
   });
   await event.getByText('View event details', { exact: true }).click();
   await expect(
@@ -569,7 +621,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
     .click();
   await version(page, 9);
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
-  await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await expectRecordStatus(page, 'archived');
   await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Restore quantity definition');
   await form.getByLabel('Reason (required)').fill('Needed again');
@@ -595,7 +647,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
     }),
   ).toHaveCount(3);
   await expect(
-    page.getByRole('heading', { name: 'Definition archived', exact: true }),
+    page.getByRole('heading', { name: 'Quantity item archived', exact: true }),
   ).toBeVisible();
   const historyFilter = page.getByRole('form', { name: 'Filter history' });
   await chooseLocation(historyFilter, 'Location', 'ITC-L');
@@ -788,6 +840,8 @@ test('overlapping two-page edits renew field choices after further races and vie
   await metadataSaveButton(firstForm).click();
   await version(page, 5);
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
   await login(page, 'viewer');
   await page.goto(detailUrl);
   await expect(
@@ -803,7 +857,7 @@ test('overlapping two-page edits renew field choices after further races and vie
   ).toHaveCount(0);
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Metadata edited', exact: true }),
+    page.getByRole('heading', { name: 'Details updated', exact: true }),
   ).toHaveCount(4);
   await page.goto('/inventory/quantity/new');
   await expect(page.getByText(/Read-only access/)).toBeVisible();

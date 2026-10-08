@@ -114,7 +114,14 @@ export function SettingsPanel({
       }
       setReceipt(null);
       setMessage(
-        result.result.changed ? 'Settings saved.' : 'No values changed.',
+        result.result.changed
+          ? {
+              category_create: 'Category added.',
+              category_rename: 'Category name saved.',
+              category_remove: 'Category removed.',
+              label_defaults_update: 'Label settings saved.',
+            }[operation]
+          : 'No values changed.',
       );
       onSuccess?.();
       router.refresh();
@@ -318,6 +325,7 @@ export function SettingsPanel({
                     className="mt-4 space-y-3 rounded border border-amber-700 p-4"
                     aria-label={'Remove ' + category.name}
                   >
+                    <h3 className="font-semibold">Remove {category.name}?</h3>
                     <p className="text-sm">
                       Review every affected quantity item and individual asset,
                       including archived and retired records. Current stock and
@@ -414,9 +422,9 @@ export function SettingsPanel({
                             After reassignment,{' '}
                             {review.quantity_needs_metadata_count} quantity
                             items and {review.asset_needs_metadata_count}{' '}
-                            individual assets will need metadata review under
-                            the replacement form. Their source custom values
-                            stay visible as legacy values.
+                            individual assets will need details review under the
+                            replacement form. Their previous answers stay
+                            available for review.
                           </p>
                         )}
                         <p className="text-sm text-slate-400">
@@ -431,6 +439,9 @@ export function SettingsPanel({
                         ) : (
                           <Button
                             type="button"
+                            variant="outline"
+                            className="experience-danger-action"
+                            aria-label={'Remove category ' + category.name}
                             disabled={pending}
                             onClick={() =>
                               submit(
@@ -447,7 +458,7 @@ export function SettingsPanel({
                               )
                             }
                           >
-                            Confirm removal
+                            Remove category
                           </Button>
                         )}
                       </div>

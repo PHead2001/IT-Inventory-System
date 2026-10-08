@@ -69,6 +69,48 @@ function submitted(): CreationEnvelope {
   };
 }
 describe('creation recovery storage boundary', () => {
+  it.each([
+    'asset_create_v2',
+    'asset_create_v3',
+    'asset_site_open',
+    'asset_site_open_v3',
+  ] as const)(
+    'retains the exact uncertain %s command without upgrading its receipt identity',
+    (operation) => {
+      const envelope = submitted();
+      envelope.scope = {
+        ...envelope.scope,
+        kind: 'asset',
+        site: operation.startsWith('asset_site_open') ? category : null,
+      };
+      envelope.command = {
+        operation,
+        requestId: revision,
+        expectedActorId: actor,
+        payload: {
+          name: 'Device',
+          category_id: category,
+          description: null,
+          manufacturer: null,
+          model: null,
+          asset_tag: '000Ab/C.02',
+          serial_number: null,
+          expected_published_revision_id: revision,
+          custom_patch: { set: {}, unset: [] },
+          ...(envelope.scope.site
+            ? { site_id: category, reason: null, reference: null }
+            : { location_id: category }),
+        },
+      };
+      expect(
+        parseCreationEnvelope(
+          JSON.stringify(envelope),
+          envelope.scope,
+          instance,
+        )?.command,
+      ).toEqual(envelope.command);
+    },
+  );
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();

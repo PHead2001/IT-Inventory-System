@@ -26,7 +26,6 @@ import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
 import { pickerLocations } from '@/features/locations/picker-model';
 import {
-  RequiredFieldsNote,
   RequiredMark,
   useFormValidation,
   ValidationSummary,
@@ -45,7 +44,10 @@ import type {
   LocationRef,
   QuantityItem,
 } from '@/features/inventory/contracts-ui';
-import { field as fieldClass } from '@/features/inventory/components/read-ui';
+import {
+  field as fieldClass,
+  panel,
+} from '@/features/inventory/components/read-ui';
 import {
   normalizeItemCode,
   itemCodeValid,
@@ -100,6 +102,7 @@ type Props = {
   actorId?: string;
   recoveryBackend?: string;
   creationDraftId?: string;
+  creationInstanceId?: string;
   openingSite?: { id: string; code: string; name: string };
 };
 export function buildCustomPatch(
@@ -238,6 +241,7 @@ export function MetadataForm({
   actorId,
   recoveryBackend,
   creationDraftId: routeDraftId,
+  creationInstanceId,
 }: Props) {
   const router = useRouter();
   const timeZone = useOperationalTimeZone();
@@ -259,7 +263,6 @@ export function MetadataForm({
   }, [actorId]);
   const creating = !latest;
   const scopeId = useId();
-  const validation = useFormValidation();
   const [formActor] = useState(actorId);
   const [formBackend] = useState(recoveryBackend);
   const actorStale = formActor !== actorId || formBackend !== recoveryBackend;
@@ -343,6 +346,14 @@ export function MetadataForm({
   const [recoveredRecord, setRecoveredRecord] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(!recoveryEnabled);
   const [recoveryError, setRecoveryError] = useState('');
+  const [bindingError, setBindingError] = useState('');
+  const bindingFailed = !!bindingError;
+  const [storedEditing, setStoredEditing] = useState<CreationEnvelope | null>(
+    null,
+  );
+  const creationInstance = useRef(
+    creationInstanceId ?? routeDraftId ?? crypto.randomUUID(),
+  );
   const [recoveryBlocked, setRecoveryBlocked] = useState(false);
   const [terminalDraft, setTerminalDraft] = useState<CreationEnvelope | null>(
     null,
@@ -490,24 +501,57 @@ export function MetadataForm({
   const bindCreationURL = (instance: string) => {
     recoveryURLQueued.current = true;
     setRecoveryReady(false);
+    setBindingError('');
     try {
       router.replace(creationURL(instance), { scroll: false });
     } catch {
-      setRecoveryError(
-        'The creation URL could not be opened. Retry creation recovery to reopen this same durable draft.',
-      );
+      setBindingError('The creation URL could not open.');
     }
   };
   const retryCreationURL = () => {
     const active = recovery.current;
     if (!active || routeDraftId || recoveryReady || recoveryBlocked) return;
-    const stored = readCreation(active.scope, active.instance);
-    if (!stored.envelope || stored.error) {
-      setRecoveryError(stored.error || recoveryLimitation);
+    bindCreationURL(active.instance);
+  };
+  const restoreCreation = () => {
+    if (!storedEditing?.inputs || !recoveryReady || actorStale) return;
+    const values = storedEditing.inputs;
+    recovery.current = storedEditing;
+    inputsSnapshot.current = values;
+    setCore(values.core);
+    setCleanCore(values.cleanCore);
+    setCustom(values.custom);
+    setTouched(values.touched);
+    setReviewedForms(values.reviewedForms);
+    setPriorForms(values.priorForms);
+    setDateTimes(values.dateTimes);
+    setOpeningQuantity(values.openingQuantity);
+    setOpeningReason(values.openingReason);
+    setOpeningReference(values.openingReference);
+    setInputGeneration((value) => value + 1);
+    recoveredEditing.current = true;
+    setStoredEditing(null);
+  };
+  const discardStoredCreation = () => {
+    if (!storedEditing || !recoveryReady || actorStale) return;
+    const discarded: CreationEnvelope = {
+      ...storedEditing,
+      status: 'discarded',
+      inputs: null,
+      command: null,
+      entityId: null,
+    };
+    if (!writeCreation(discarded)) {
+      setRecoveryError(
+        recoveryLimitation +
+          ' Discard could not be recorded; retry when storage is available.',
+      );
       return;
     }
+    recovery.current = discarded;
+    setStoredEditing(null);
+    setTerminalDraft(discarded);
     setRecoveryError('');
-    bindCreationURL(active.instance);
   };
   const persistInputs = (patch: Partial<CreationInputs> = {}) => {
     if (editRecoveryEnabled) return persistEdit(patch);
@@ -516,6 +560,7 @@ export function MetadataForm({
     if (
       !existing ||
       existing.status !== 'editing' ||
+      storedEditing ||
       actorStale ||
       recoveryBlocked
     )
@@ -627,7 +672,8 @@ export function MetadataForm({
       !creationDraftId(formActor) ||
       !recoveryBackend ||
       (openingSite && !creationDraftId(openingSite.id)) ||
-      (routeDraftId && !creationDraftId(routeDraftId))
+      (routeDraftId && !creationDraftId(routeDraftId)) ||
+      !creationDraftId(creationInstance.current)
     ) {
       setRecoveryError(
         'Creation recovery identity is unavailable or invalid. Reload from the inventory or site creation link before saving.',
@@ -643,7 +689,7 @@ export function MetadataForm({
       setRecoveryError('Creation recovery backend identity is unavailable.');
       return;
     }
-    const instance = routeDraftId ?? crypto.randomUUID();
+    const instance = creationInstance.current;
     const scope = {
       origin: window.location.origin,
       backend,
@@ -669,7 +715,9 @@ export function MetadataForm({
     };
     recovery.current = envelope;
     recoveryHydrated.current = true;
-    if (envelope.inputs) {
+    if (envelope.status === 'editing' && stored.envelope) {
+      setStoredEditing(envelope);
+    } else if (envelope.inputs) {
       const values = envelope.inputs;
       inputsSnapshot.current = values;
       setCore(values.core);
@@ -696,19 +744,38 @@ export function MetadataForm({
       setUncertain(true);
     } else if (envelope.status === 'saved' || envelope.status === 'discarded')
       setTerminalDraft(envelope);
-    const durable =
-      !stored.error && (!!stored.envelope || writeCreation(envelope));
-    if (!durable) setRecoveryError(recoveryLimitation);
+    if (stored.error) setRecoveryError(recoveryLimitation);
     setOtherDrafts(pendingCreations(scope, instance));
-    if (!routeDraftId && durable) {
+    if (!routeDraftId) {
       bindCreationURL(instance);
     }
-    // A canonical route replaces its component key when the supported router
-    // binds this instance. Keep controls disabled until that remount has read
-    // durable state; never remount a storage-failed in-memory draft.
-    setRecoveryReady(!!routeDraftId || !durable);
+    // The server keeps this instance's key across canonical URL acknowledgement.
+    // A pristine envelope remains in memory until the first material edit.
+    setRecoveryReady(routeDraftId === instance);
+  });
+  useLayoutEffect(() => {
+    if (!recoveryEnabled || !recoveryHydrated.current || !routeDraftId) return;
+    if (routeDraftId !== recovery.current?.instance) {
+      setRecoveryBlocked(true);
+      setRecoveryError(
+        'Creation recovery identity changed. Reopen the requested draft before saving.',
+      );
+      return;
+    }
+    if (!recoveryReady) {
+      setRecoveryReady(true);
+      setBindingError('');
+    }
   });
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (!recoveryEnabled || recoveryReady || recoveryBlocked || bindingFailed)
+      return;
+    const timeout = window.setTimeout(() => {
+      setBindingError('The creation URL has not opened.');
+    }, 10000);
+    return () => window.clearTimeout(timeout);
+  }, [recoveryEnabled, recoveryReady, recoveryBlocked, bindingFailed]);
   useEffect(() => {
     if (!recoveryEnabled) return;
     const checkTerminal = () => {
@@ -1064,7 +1131,7 @@ export function MetadataForm({
         key={`${id}-${inputGeneration}`}
         id={`${scopeId}-metadata-${id}`}
         field={config}
-        showErrors={validation.issues.length > 0}
+        showErrors={validation.attempted}
         value={value}
         initialDateTimeDraft={dateTimes[id]}
         onDateTimeDraftChange={
@@ -1592,10 +1659,8 @@ export function MetadataForm({
       );
     }
   };
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (taskCompleted) return;
-    if (!uncertain && !pending && !dispatched.current) {
+  function collectValidationIssues() {
+    if (!uncertain && !pending && !dispatched.current && !taskCompleted) {
       const issues: FieldIssue[] = [];
       for (const field of visibleFields) {
         if (!creating && !touched.includes(field.id)) continue;
@@ -1647,11 +1712,27 @@ export function MetadataForm({
             message: 'Choose an available inventory destination.',
           });
       }
-      if (!validation.validate(event.currentTarget, issues)) return;
+      return issues;
     }
+    return [];
+  }
+  const validation = useFormValidation(collectValidationIssues);
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (taskCompleted) return;
+    if (
+      !uncertain &&
+      !pending &&
+      !dispatched.current &&
+      !validation.validate(event.currentTarget)
+    )
+      return;
     if (
       (recoveryEnabled &&
-        (!recoveryReady || recoveryBlocked || terminalDraft)) ||
+        (!recoveryReady ||
+          recoveryBlocked ||
+          terminalDraft ||
+          storedEditing)) ||
       (editRecoveryEnabled && (!editReady || editBlocked)) ||
       actorStale ||
       (!uncertain &&
@@ -1743,8 +1824,12 @@ export function MetadataForm({
     let commandPayload = creating ? creationIntent : editIntent;
     let operation =
       openingSite && creating
-        ? (`${kind}_site_open` as const)
-        : (`${kind}_${creating ? 'create' : 'update'}_v2` as const);
+        ? kind === 'asset'
+          ? ('asset_site_open_v3' as const)
+          : ('quantity_site_open' as const)
+        : kind === 'asset'
+          ? (`asset_${creating ? 'create' : 'update'}_v3` as const)
+          : (`quantity_${creating ? 'create' : 'update'}_v2` as const);
     if (uncertain && receipt)
       [operation, commandPayload] = JSON.parse(receipt.key) as [
         typeof operation,
@@ -1792,7 +1877,12 @@ export function MetadataForm({
       if (!editDurable.current && !persistEdit({}, record)) return false;
       const active = editRecovery.current;
       const command: EditCommand = {
-        operation: `${kind}_update_v2`,
+        operation:
+          active?.status === 'submitted' && active.command
+            ? active.command.operation
+            : kind === 'asset'
+              ? 'asset_update_v3'
+              : 'quantity_update_v2',
         requestId: id,
         expectedActorId: formActor!,
         payload,
@@ -1911,6 +2001,8 @@ export function MetadataForm({
                 rebaseUsed.current = true;
                 commandPayload = revised;
                 requestId = crypto.randomUUID();
+                operation =
+                  kind === 'asset' ? 'asset_update_v3' : 'quantity_update_v2';
                 inputsSnapshot.current = {
                   ...currentInputs,
                   core: merged.core,
@@ -2132,6 +2224,7 @@ export function MetadataForm({
     );
   return (
     <form
+      {...validation.formProps}
       ref={formRef}
       className="min-w-0 space-y-5"
       aria-label={
@@ -2146,15 +2239,63 @@ export function MetadataForm({
       onSubmit={preview ? (event) => event.preventDefault() : submit}
       noValidate
     >
-      {recoveryEnabled && !recoveryReady && !recoveryBlocked && (
-        <div role="status">
-          <p>Checking creation recovery…</p>
-          {!routeDraftId && (
-            <Button type="button" variant="outline" onClick={retryCreationURL}>
-              Retry creation recovery
-            </Button>
+      {recoveryEnabled && (
+        <div
+          role={!recoveryReady && !bindingError ? 'status' : undefined}
+          className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-sm"
+          aria-label={!recoveryReady ? 'Creation recovery status' : undefined}
+        >
+          {!recoveryReady && !recoveryBlocked && !bindingFailed && (
+            <p>Checking creation recovery…</p>
+          )}
+          {bindingFailed && !recoveryReady && !recoveryBlocked && (
+            <>
+              <p role="alert" className="text-amber-100">
+                {bindingError}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                aria-label="Retry creation recovery"
+                onClick={retryCreationURL}
+              >
+                Retry
+              </Button>
+            </>
           )}
         </div>
+      )}
+      {storedEditing && !terminalDraft && (
+        <section aria-label="Stored creation draft" className={panel}>
+          <h3
+            id={scopeId + '-stored-creation-context'}
+            className="font-semibold"
+          >
+            Stored draft: {storedEditing.inputs?.core.name || 'Unnamed record'}
+          </h3>
+          <p>
+            Unsaved entries are stored for this draft. Restore them or discard
+            this draft before continuing.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={restoreCreation}
+            disabled={!recoveryReady || actorStale}
+          >
+            Restore draft
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={discardStoredCreation}
+            className="experience-danger-action"
+            aria-describedby={scopeId + '-stored-creation-context'}
+            disabled={!recoveryReady || actorStale}
+          >
+            Discard draft
+          </Button>
+        </section>
       )}
       {recoveryError && (
         <p
@@ -2204,6 +2345,7 @@ export function MetadataForm({
             <Button
               key={draft.instance}
               type="button"
+              disabled={!recoveryReady || actorStale}
               variant="outline"
               onClick={() =>
                 router.replace(creationURL(draft.instance), { scroll: false })
@@ -2430,7 +2572,7 @@ export function MetadataForm({
           (!creating && state?.ok === true) ||
           (editRecoveryEnabled && (!editReady || editBlocked)) ||
           (recoveryEnabled &&
-            (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
+            (recoveryBlocked || !!terminalDraft || !!storedEditing)) ||
           pending ||
           uncertain ||
           actorStale ||
@@ -2442,7 +2584,6 @@ export function MetadataForm({
         }
         className="min-w-0 w-full max-w-full space-y-5"
       >
-        <RequiredFieldsNote />
         {definition?.layout
           .filter((section) =>
             section.controls.some((control) =>
@@ -2831,7 +2972,10 @@ export function MetadataForm({
               taskCompleted ||
               (editRecoveryEnabled && (!editReady || editBlocked)) ||
               (recoveryEnabled &&
-                (!recoveryReady || recoveryBlocked || !!terminalDraft)) ||
+                (!recoveryReady ||
+                  recoveryBlocked ||
+                  !!terminalDraft ||
+                  !!storedEditing)) ||
               pending ||
               actorStale ||
               (!uncertain &&
@@ -2856,7 +3000,7 @@ export function MetadataForm({
                   ? kind === 'quantity'
                     ? 'Review quantity item'
                     : 'Review individual asset'
-                  : 'Review metadata'}
+                  : 'Review details'}
           </Button>
           <Button
             ref={cancelRef}
@@ -2867,7 +3011,7 @@ export function MetadataForm({
               pending ||
               uncertain ||
               !!terminalDraft ||
-              (recoveryEnabled && !recoveryReady)
+              !!storedEditing
             }
             onClick={cancel}
           >
@@ -2919,8 +3063,12 @@ export function MetadataForm({
           }}
         >
           <div className="max-w-md space-y-4 rounded border border-cyan-100/20 bg-slate-900 p-5">
-            <h2 className="text-lg font-semibold">
-              {navigationTarget ? 'Leave this edit?' : 'Discard changes?'}
+            <h2
+              id={scopeId + '-discard-context'}
+              className="text-lg font-semibold"
+            >
+              {navigationTarget ? 'Leave this edit?' : 'Discard changes?'}{' '}
+              {core.name || latest?.name || 'Unnamed record'}
             </h2>
             <p>
               {navigationTarget && (uncertain || pending)
@@ -2939,7 +3087,13 @@ export function MetadataForm({
                 {navigationTarget ? 'Stay' : 'Keep editing'}
               </Button>
               {!(navigationTarget && (uncertain || pending)) && (
-                <Button type="button" data-discard onClick={discard}>
+                <Button
+                  type="button"
+                  className="experience-danger-action"
+                  aria-describedby={scopeId + '-discard-context'}
+                  data-discard
+                  onClick={discard}
+                >
                   Discard changes
                 </Button>
               )}

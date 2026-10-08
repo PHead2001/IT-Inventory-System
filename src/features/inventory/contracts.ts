@@ -13,10 +13,12 @@ export const operations = [
   'quantity_restore',
   'asset_create',
   'asset_create_v2',
+  'asset_create_v3',
   'asset_move',
   'asset_correct_location',
   'asset_update',
   'asset_update_v2',
+  'asset_update_v3',
   'asset_retire',
   'asset_restore',
 ] as const;
@@ -47,6 +49,7 @@ export type MutationState =
     };
 
 export type MoveReceipt = {
+  createdAt?: string;
   itemName: string;
   quantity: number;
   source: { id: string; name: string; after: number };
@@ -202,6 +205,12 @@ export const payloadSchemas = {
     ...published,
     location_id: uuid,
   }),
+  asset_create_v3: z.strictObject({
+    ...metadata,
+    ...identifiers,
+    ...published,
+    location_id: uuid,
+  }),
   asset_move: z.strictObject({
     ...asset,
     location_id: uuid,
@@ -214,6 +223,13 @@ export const payloadSchemas = {
   }),
   asset_update: z.strictObject({ ...asset, ...metadata, ...identifiers }),
   asset_update_v2: z.strictObject({
+    ...asset,
+    ...metadata,
+    ...identifiers,
+    ...published,
+    acknowledge_legacy_values: z.boolean().optional(),
+  }),
+  asset_update_v3: z.strictObject({
     ...asset,
     ...metadata,
     ...identifiers,

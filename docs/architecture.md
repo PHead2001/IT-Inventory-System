@@ -78,8 +78,10 @@ display values in the same transaction as the receipt. A retry with different
 display spelling is different intent. Existing lowercase rows retain their
 spelling unless an explicit metadata edit changes it; migrations do not infer
 original case or rewrite historical events. Legacy operations keep their
-lowercased receipt identity and original successful results. The v3 operations are additive; existing clients retain their original mutation
-commands and receipt behavior until they adopt the new operations. Authorization is checked before successful receipt replay.
+lowercased receipt identity and original successful results. Recovery accepts
+the original create/site-open command names alongside the new asset v3 names;
+an uncertain submitted command retains its original operation, payload, actor
+and request UUID. Authorization is checked before successful receipt replay.
 Permanent QR identity remains the asset UUID.
 
 `inventory_asset_tag_lookup(p_tag text)` supplies the existing scanner's exact

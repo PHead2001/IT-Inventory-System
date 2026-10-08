@@ -30,6 +30,59 @@ import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
 import { HistoryList } from '@/features/inventory/components/read-ui';
 
+it('uses one local browse/drop path, revokes image previews, and never embeds or publishes a selected PDF', async () => {
+  const create = vi
+    .spyOn(URL, 'createObjectURL')
+    .mockReturnValue('blob:selected-image');
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const { unmount } = render(
+    <FilesPanel
+      parentType="asset"
+      parentId="00000000-0000-4000-8000-000000000001"
+      active
+      staff
+      actorId="staff"
+    />,
+  );
+  await screen.findByText('Uploaded · review required');
+  const image = new File(['benign image fixture'], 'selected.png', {
+    type: 'image/png',
+  });
+  fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
+    target: { files: [image] },
+  });
+  expect(
+    screen.getByRole('img', { name: 'Selected file preview' }),
+  ).toHaveAttribute('src', 'blob:selected-image');
+  expect(screen.getByLabelText('Add photo or PDF')).toHaveClass('sr-only');
+  const pdf = new File(['benign private fixture'], 'selected.pdf', {
+    type: 'application/pdf',
+  });
+  expect(
+    fireEvent.drop(
+      screen.getByRole('group', { name: 'Choose an inventory file' }),
+      { dataTransfer: { files: [pdf], types: ['Files'] } },
+    ),
+  ).toBe(false);
+  expect(revoke).toHaveBeenCalledWith('blob:selected-image');
+  expect(screen.getByText(/Selected: selected.pdf/)).toBeVisible();
+  expect(
+    screen.queryByRole('img', { name: 'Selected file preview' }),
+  ).not.toBeInTheDocument();
+  expect(document.querySelector('iframe, embed, object')).toBeNull();
+  expect(mocks.reserve).not.toHaveBeenCalled();
+  expect(mocks.upload).not.toHaveBeenCalled();
+  expect(create).toHaveBeenCalledOnce();
+  expect(
+    fireEvent.drop(document.body, {
+      dataTransfer: { files: [pdf], types: ['Files'] },
+    }),
+  ).toBe(false);
+  unmount();
+  create.mockRestore();
+  revoke.mockRestore();
+});
+
 const id = '00000000-0000-4000-8000-000000000001';
 const pending = {
   id,
@@ -185,9 +238,11 @@ it('labels the actual file upload/activity instants in the one shared display zo
     expect(times).toHaveLength(3);
     for (const time of times) {
       expect(time).toHaveAttribute('datetime', at);
-      expect(time).toHaveTextContent(
-        '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)',
-      );
+      const exact = '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)';
+      if (time.closest('summary')) {
+        expect(time.closest('summary')).toHaveAttribute('title', exact);
+        expect(time.closest('details')).toHaveTextContent(at);
+      } else expect(time).toHaveTextContent(exact);
     }
     expect(container.textContent).toContain('Uploaded:');
     expect(mocks.upload).not.toHaveBeenCalled();
@@ -214,7 +269,7 @@ describe('authoritative file readiness and cleanup', () => {
         staff
       />,
     );
-    await screen.findByRole('button', { name: 'Add photo' });
+    await screen.findByRole('button', { name: 'Browse files' });
     fireEvent.change(screen.getByLabelText('Add recognition photo'), {
       target: {
         files: [new File(['fictional'], 'safe.png', { type: 'image/png' })],
@@ -255,7 +310,7 @@ describe('authoritative file readiness and cleanup', () => {
         staff
       />,
     );
-    await screen.findByRole('button', { name: 'Add photo' });
+    await screen.findByRole('button', { name: 'Browse files' });
     fireEvent.click(screen.getByText(/File activity/));
     fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
     await screen.findByText('No file cleanup is needed for this record.');
@@ -291,7 +346,7 @@ describe('authoritative file readiness and cleanup', () => {
         staff
       />,
     );
-    await screen.findByRole('button', { name: 'Add photo' });
+    await screen.findByRole('button', { name: 'Browse files' });
     fireEvent.click(screen.getByText(/File activity/));
     fireEvent.click(screen.getByRole('button', { name: 'Check file cleanup' }));
     await screen.findByText(
@@ -352,21 +407,21 @@ describe('fresh native picker intent', () => {
     {
       kind: 'asset' as const,
       cards: [first, second],
-      action: 'Add attachment',
+      action: 'Browse files',
       index: 0,
       target: '',
     },
     {
       kind: 'quantity' as const,
       cards: [],
-      action: 'Add photo',
+      action: 'Browse files',
       index: 0,
       target: '',
     },
     {
       kind: 'quantity' as const,
       cards: [{ ...first, purpose: 'quantity_photo' }],
-      action: 'Replace photo',
+      action: 'Browse files',
       index: 0,
       target: first.id,
     },
@@ -399,12 +454,7 @@ describe('fresh native picker intent', () => {
         />,
       );
       await screen.findByRole('button', {
-        name:
-          kind === 'quantity'
-            ? cards.length
-              ? 'Replace photo'
-              : 'Add photo'
-            : 'Add attachment',
+        name: 'Browse files',
       });
       const input = screen.getByLabelText(
         kind === 'quantity' ? 'Add recognition photo' : 'Add photo or PDF',
@@ -418,6 +468,10 @@ describe('fresh native picker intent', () => {
       expect(
         screen.getByRole('button', { name: 'Upload and review' }),
       ).toBeEnabled();
+      if (kind === 'asset' && action === 'Browse files')
+        fireEvent.change(screen.getByLabelText('Replace a ready file'), {
+          target: { value: target },
+        });
       await user.click(screen.getAllByRole('button', { name: action })[index]);
       // Cancel/no-change: a new picker intent must not reuse the prior native selection.
       expect(input.value).toBe('');
@@ -469,7 +523,7 @@ describe('fresh native picker intent', () => {
         staff
       />,
     );
-    await screen.findByRole('button', { name: 'Add attachment' });
+    await screen.findByRole('button', { name: 'Browse files' });
     const fresh = image('reviewed-selection.png');
     await user.upload(screen.getByLabelText('Add photo or PDF'), fresh);
     await user.selectOptions(
@@ -1382,7 +1436,7 @@ describe('file state and role fixtures', () => {
       const choose = vi.spyOn(picker, 'click');
       fireEvent.click(
         screen.getByRole('button', {
-          name: parentType === 'quantity' ? 'Add photo' : 'Add attachment',
+          name: 'Browse files',
         }),
       );
       expect(choose).toHaveBeenCalledOnce();
@@ -1397,7 +1451,7 @@ describe('file state and role fixtures', () => {
       );
       expect(
         screen.queryByRole('button', {
-          name: /Add photo|Add attachment|Upload and review/,
+          name: /Browse files|Upload and review/,
         }),
       ).not.toBeInTheDocument();
       expect(screen.queryByText('Check file cleanup')).not.toBeInTheDocument();
@@ -1530,7 +1584,7 @@ describe('file state and role fixtures', () => {
     expect(screen.getAllByRole('listitem')[0]).toHaveTextContent(
       'Original photo',
     );
-    expect(screen.getByRole('button', { name: 'Replace photo' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
     expect(screen.getByLabelText('Replace a ready file')).toHaveValue(
       `${id}-ready`,
@@ -1725,7 +1779,7 @@ describe('ready private file reads', () => {
 });
 
 describe('explicit add intent and terminal invalidation', () => {
-  it('clears an abandoned replacement choice when staff explicitly adds an attachment', async () => {
+  it('uses the explicit new attachment choice after an abandoned replacement', async () => {
     const original = { ...pending, state: 'ready', type: 'application/pdf' };
     mocks.operation.mockImplementation(async (name: string) => {
       if (name === 'inventory_file_cards')
@@ -1752,7 +1806,10 @@ describe('explicit add intent and terminal invalidation', () => {
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Replace' }));
     expect(screen.getByLabelText('Replace a ready file')).toHaveValue(id);
-    fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    fireEvent.change(screen.getByLabelText('Replace a ready file'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Browse files' }));
     fireEvent.change(screen.getByLabelText('Add photo or PDF'), {
       target: {
         files: [new File(['fiction'], 'new.pdf', { type: 'application/pdf' })],

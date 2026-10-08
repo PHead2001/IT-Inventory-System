@@ -151,6 +151,11 @@ export const custodySchemas = {
     asset_tag: text(100).nullable(),
     serial_number: text(200).nullable(),
   }),
+  asset_site_open_v3: z.strictObject({
+    ...published,
+    asset_tag: text(100).nullable(),
+    serial_number: text(200).nullable(),
+  }),
 } as const;
 export type CustodyOperation = keyof typeof custodySchemas;
 export type CustodyReceipt = {

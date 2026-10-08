@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 export type FieldIssue = { id: string; label: string; message: string };
 
@@ -30,9 +30,11 @@ function focusField(id: string) {
 }
 
 /** Retain native constraints, add domain/schema issues, and never change values. */
-export function useFormValidation() {
+export function useFormValidation(additionalIssues?: () => FieldIssue[]) {
   const [issues, setIssues] = useState<FieldIssue[]>([]);
-  const validate = (form: HTMLFormElement, additional: FieldIssue[] = []) => {
+  const [attempted, setAttempted] = useState(false);
+  const activeForm = useRef<HTMLFormElement | null>(null);
+  const collect = (form: HTMLFormElement, additional: FieldIssue[] = []) => {
     const next = new Map<string, FieldIssue>();
     for (const element of Array.from(form.elements)) {
       if (
@@ -45,11 +47,14 @@ export function useFormValidation() {
         !element.id
       )
         continue;
-      const label =
+      const label = (
         element.getAttribute('aria-label') ||
         element.labels?.[0]?.textContent?.replace(/\s*\*\s*$/, '').trim() ||
         element.name ||
-        'This field';
+        'This field'
+      )
+        .replace(/\s*\((?:required|optional)\)\s*$/i, '')
+        .trim();
       const missing =
         element.required &&
         element.type !== 'checkbox' &&
@@ -83,6 +88,19 @@ export function useFormValidation() {
         ? -1
         : 1;
     });
+    return ordered;
+  };
+  const revalidate = (form = activeForm.current) => {
+    if (!attempted || !form) return;
+    const next = collect(form, additionalIssues?.() ?? []);
+    if (JSON.stringify(next) !== JSON.stringify(issues)) setIssues(next);
+  };
+  // Controlled domain values and native validity must describe the same render.
+  useLayoutEffect(() => revalidate());
+  const validate = (form: HTMLFormElement, additional?: FieldIssue[]) => {
+    activeForm.current = form;
+    const ordered = collect(form, additional ?? additionalIssues?.() ?? []);
+    setAttempted((previous) => previous || ordered.length > 0);
     setIssues(ordered);
     if (ordered[0]) focusField(ordered[0].id);
     return ordered.length === 0;
@@ -108,7 +126,24 @@ export function useFormValidation() {
       </p>
     ) : null;
   };
-  return { validate, props, error, clear: () => setIssues([]), issues };
+  return {
+    validate,
+    props,
+    error,
+    issues,
+    attempted,
+    formProps: {
+      onChange: (event: React.FormEvent<HTMLFormElement>) =>
+        revalidate(event.currentTarget),
+      onBlur: (event: React.FocusEvent<HTMLFormElement>) =>
+        revalidate(event.currentTarget),
+    },
+    clear: () => {
+      setIssues([]);
+      setAttempted(false);
+      activeForm.current = null;
+    },
+  };
 }
 
 export function ValidationSummary({ issues }: { issues: FieldIssue[] }) {
@@ -116,6 +151,7 @@ export function ValidationSummary({ issues }: { issues: FieldIssue[] }) {
   return (
     <div
       role="alert"
+      aria-live="polite"
       className="space-y-2 rounded border border-amber-700 p-3 text-sm text-amber-100"
     >
       <p>
@@ -123,7 +159,7 @@ export function ValidationSummary({ issues }: { issues: FieldIssue[] }) {
           ? 'Correct the highlighted field before continuing.'
           : 'Correct the highlighted fields before continuing.'}
       </p>
-      {issues.length > 1 && (
+      {issues.length > 0 && (
         <ul>
           {issues.map((issue) => (
             <li key={issue.id}>

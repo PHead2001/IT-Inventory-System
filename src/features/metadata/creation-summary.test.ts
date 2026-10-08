@@ -199,7 +199,7 @@ describe('exact creation summary', () => {
       expect(intent.reason).toBeNull();
       if (kind === 'asset')
         expect(intent).toMatchObject({
-          asset_tag: 'tag-upper',
+          asset_tag: 'TAG-UPPER',
           serial_number: 'SerialCase',
         });
       const result = creationSummary({

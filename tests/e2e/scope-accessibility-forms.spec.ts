@@ -1,4 +1,4 @@
-import { openRecordTask } from './record-task-controls';
+import { expectRecordStatus, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page, type Locator } from '@playwright/test';
@@ -33,7 +33,7 @@ async function archive(page: Page, detail: string) {
   await form
     .getByRole('button', { name: 'Confirm archive and clear stock' })
     .click();
-  await expect(page.getByText(/Archived · Version/)).toBeVisible();
+  await expectRecordStatus(page, 'archived');
 }
 async function associatedError(input: Locator) {
   await expect(input).toBeFocused();
@@ -110,9 +110,7 @@ test('category Rename preserves keyboard focus through invalid, Cancel, Escape a
       await row
         .getByRole('button', { name: 'Review impact', exact: true })
         .click();
-      await row
-        .getByRole('button', { name: 'Confirm removal', exact: true })
-        .click();
+      await row.getByRole('button', { name: /^Remove category / }).click();
       await expect(row).toHaveCount(0);
     }
   }
@@ -132,7 +130,10 @@ test('creation and receive keep associated errors, entered values and correction
   });
   const name = 'Accessibility quantity ' + randomUUID();
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
-  await expect(form.getByText(/Fields marked/)).toBeVisible();
+  await expect(form.getByLabel('Name', { exact: true })).toHaveAttribute(
+    'required',
+    '',
+  );
   await metadataReviewButton(form).click();
   await associatedError(form.getByLabel('Name', { exact: true }));
   await expect(

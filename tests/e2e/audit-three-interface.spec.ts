@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-
 import {
   expect,
   test as base,
@@ -7,10 +6,9 @@ import {
   type Request,
   type Route,
 } from '@playwright/test';
-
 import fixture from '../fixtures/auth.json' with { type: 'json' };
-
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { displayedInstant } from '../helpers/displayed-instant';
 
 async function command(
   caller: SupabaseClient,
@@ -24,7 +22,6 @@ async function command(
   expect(result.error, `${operation}: ${result.error?.message}`).toBeNull();
   return result.data as Record<string, string>;
 }
-
 const test = base.extend<{
   interfaceRecord: { id: string; categoryId: string; name: string };
 }>({
@@ -165,6 +162,229 @@ test('local UI and code fonts load on an existing location label', async ({
   expect(fonts.resources.some((url) => /jetbrains.*\.woff2/.test(url))).toBe(
     true,
   );
+});
+
+async function fits(page: Page) {
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+}
+
+test('loaded local fonts and populated scan, labels and form designer remain usable at phone widths', async ({
+  page,
+  interfaceRecord,
+}, info) => {
+  await login(page);
+  const origin = new URL(process.env.APP_ORIGIN!);
+  expect(['localhost', '127.0.0.1']).toContain(origin.hostname);
+  const id = interfaceRecord.id;
+  await page.goto(`/inventory/quantity/${id}`);
+  await expect(page).toHaveTitle('Quantity item · IT Inventory');
+  const disclosure = page
+    .locator('details')
+    .filter({ has: page.locator('summary > time') })
+    .first();
+  await disclosure.locator('summary').click();
+  const code = disclosure.locator('.experience-code');
+  await expect(code).toBeVisible();
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const fonts = await code.evaluate((node) => {
+    const root = getComputedStyle(document.documentElement);
+    return {
+      body: getComputedStyle(document.body).fontFamily,
+      code: getComputedStyle(node).fontFamily,
+      ui: root
+        .getPropertyValue('--font-ui')
+        .split(',')[0]
+        .trim()
+        .replaceAll('"', ''),
+      mono: root
+        .getPropertyValue('--font-code')
+        .split(',')[0]
+        .trim()
+        .replaceAll('"', ''),
+      loaded: [...document.fonts]
+        .filter((face) => face.status === 'loaded')
+        .map((face) => face.family.replaceAll('"', '')),
+      resources: performance
+        .getEntriesByType('resource')
+        .map((entry) => entry.name),
+    };
+  });
+  expect(fonts.ui).not.toBe('');
+  expect(fonts.mono).not.toBe('');
+  expect(fonts.body.replaceAll('"', '')).toContain(fonts.ui);
+  expect(fonts.code.replaceAll('"', '')).toContain(fonts.mono);
+  expect(fonts.loaded).toContain(fonts.ui);
+  expect(fonts.loaded).toContain(fonts.mono);
+  expect(fonts.resources.some((url) => /inter.*\.woff2/.test(url))).toBe(true);
+  expect(fonts.resources.some((url) => /jetbrains.*\.woff2/.test(url))).toBe(
+    true,
+  );
+  for (const width of [375, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`/labels?quantity=${id}`);
+    await expect(page.locator('.label-card')).not.toHaveCount(0);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await expect(
+      page.getByRole('combobox', { name: 'Label size', exact: true }),
+    ).toBeEnabled();
+    await fits(page);
+    await page.screenshot({
+      path: info.outputPath(`labels-${width}.png`),
+      fullPage: true,
+    });
+    await page.goto('/scan');
+    const manual = page.getByRole('textbox').first();
+    await manual.fill(
+      new URL(`/inventory/quantity/${id}`, process.env.APP_ORIGIN!).href,
+    );
+    await expect(
+      page.getByRole('button', { name: 'Open', exact: true }),
+    ).toBeEnabled();
+    await fits(page);
+    await page.screenshot({
+      path: info.outputPath(`scan-${width}.png`),
+      fullPage: true,
+    });
+    await page.getByRole('button', { name: 'Open', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/inventory/quantity/${id}$`));
+    await page.goto('/settings/forms');
+    await page
+      .locator(`main a[href="/settings/forms/${interfaceRecord.categoryId}"]`)
+      .click();
+    await expect(
+      page.getByRole('region', { name: 'Forms and fields' }),
+    ).toBeVisible();
+    await expect(page).toHaveTitle('Category forms · IT Inventory');
+    await expect(
+      page.getByRole('navigation', { name: 'Designer panels' }),
+    ).toBeVisible();
+    await fits(page);
+    await page.screenshot({
+      path: info.outputPath(`form-designer-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test('designer dialog hands focus to visible additions and existing fields while Cancel returns to its trigger', async ({
+  page,
+  interfaceRecord,
+}) => {
+  await login(page);
+  await page.goto(`/settings/forms/${interfaceRecord.categoryId}`);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    const designer = page.getByRole('region', { name: 'Forms and fields' });
+    const panels = designer.getByRole('navigation', {
+      name: 'Designer panels',
+    });
+    const library = async () => {
+      if (width === 390)
+        await panels
+          .getByRole('button', { name: 'Library', exact: true })
+          .click();
+    };
+    await library();
+    const trigger = designer.getByRole('button', {
+      name: 'Add field',
+      exact: true,
+    });
+    await trigger.click();
+    let dialog = page.getByRole('dialog', { name: 'Add field' });
+    const fieldName = `Focus field ${width}`;
+    await dialog.getByLabel('Field name', { exact: true }).fill(fieldName);
+    await dialog
+      .getByRole('button', { name: 'Add to form', exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    const control = designer
+      .getByRole('button', {
+        name: `Drag ${fieldName}`,
+        exact: true,
+        includeHidden: true,
+      })
+      .locator('xpath=ancestor::*[@data-control-id][1]');
+    const inspector = designer.getByTestId('designer-inspector');
+    await expect(control).toHaveAttribute('data-selected', 'true');
+    if (width === 1440) await expect(control).toBeFocused();
+    else {
+      await expect(
+        inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+      ).toBeFocused();
+      await expect(inspector).toBeVisible();
+    }
+    await library();
+    await trigger.click();
+    dialog = page.getByRole('dialog', { name: 'Add field' });
+    await dialog
+      .getByRole('button', { name: 'Cancel field addition', exact: true })
+      .click();
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    dialog = page.getByRole('dialog', { name: 'Add field' });
+    await dialog
+      .getByRole('tab', { name: 'Standard fields', exact: true })
+      .click();
+    await dialog
+      .getByText('Name', { exact: true })
+      .locator('..')
+      .getByRole('button', { name: 'Go to field', exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    const name = designer
+      .getByRole('button', {
+        name: 'Drag Name',
+        exact: true,
+        includeHidden: true,
+      })
+      .locator('xpath=ancestor::*[@data-control-id][1]');
+    await expect(name).toHaveAttribute('data-selected', 'true');
+    await expect(
+      inspector.getByRole('region', {
+        name: 'Name layout properties',
+        exact: true,
+      }),
+    ).toBeVisible();
+    if (width === 1440) await expect(name).toBeFocused();
+    else
+      await expect(
+        inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+      ).toBeFocused();
+  }
+});
+
+test('relative history exposes exact timezone and original precision through keyboard disclosure', async ({
+  page,
+  interfaceRecord,
+}, info) => {
+  await login(page);
+  await page.goto(`/history?type=quantity&entityId=${interfaceRecord.id}`);
+  const time = page.locator('summary > time').first();
+  await expect(time).toBeVisible();
+  const original = await time.getAttribute('datetime');
+  const summary = time.locator('xpath=parent::summary');
+  const disclosure = summary.locator('xpath=parent::details');
+  await summary.focus();
+  await expect(summary).toBeFocused();
+  await summary.press('Enter');
+  await expect(disclosure).toHaveAttribute('open', '');
+  const exact = disclosure.locator(':scope > p').first();
+  await expect(exact).toBeVisible();
+  await expect(exact).toContainText(/UTC|GMT/);
+  expect(displayedInstant((await exact.textContent())!)).toBe(
+    Math.floor(Date.parse(original!) / 1000) * 1000,
+  );
+  await expect(disclosure.getByText(original!, { exact: true })).toBeVisible();
+  await expect(time).toHaveAttribute('datetime', original!);
+  await page.screenshot({
+    path: info.outputPath('history-exact-disclosure.png'),
+    fullPage: true,
+  });
 });
 
 // Synthetic navigation-boundary fixture: the record remains real and intact.

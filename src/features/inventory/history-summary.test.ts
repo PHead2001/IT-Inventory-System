@@ -25,6 +25,35 @@ const event: HistoryEvent = {
   customMetadataPresent: false,
   customMetadataChanged: false,
 };
+it('collapses unchanged snapshot identity to At while preserving actual moves between equally named sites', () => {
+  const assignment = {
+    eventId: 'assignment',
+    kind: 'retired',
+    quantity: null,
+    from: { locationId: null, siteId: 'site', label: 'Recorded site' },
+    to: { locationId: null, siteId: 'site', label: 'Recorded site' },
+    reference: null,
+  };
+  expect(historySummary({ ...event, kind: 'asset', assignment })).toBe(
+    'At Recorded site',
+  );
+  expect(
+    historySummary({
+      ...event,
+      kind: 'asset',
+      assignment: { ...assignment, to: { ...assignment.to, siteId: 'other' } },
+    }),
+  ).toBe('Recorded site → Recorded site');
+  expect(
+    historySummary({
+      ...event,
+      kind: 'asset',
+      eventType: 'location_corrected',
+      fromLocation: from,
+      toLocation: from,
+    }),
+  ).toBe('Recorded location corrected');
+});
 it('summarizes moved amount from balanced recorded deltas, not current balance or repeated item names', () => {
   expect(historySummary(event)).toBe(
     '3 units · Original source → Destination (current location labels)',

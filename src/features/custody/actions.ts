@@ -96,7 +96,8 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
       (operation === 'quantity_site_change' ||
         operation === 'asset_site_change' ||
         operation === 'quantity_site_open' ||
-        operation === 'asset_site_open')
+        operation === 'asset_site_open' ||
+        operation === 'asset_site_open_v3')
     ) {
       try {
         committed.custody = await readCustodyReceipt(

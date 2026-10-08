@@ -60,6 +60,7 @@ export function AddFieldDialog({
   const [inputError, setInputError] = useState('');
   const prefix = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  const placementHandoff = useRef(false);
   const [focusBefore] = useState(
     () => document.activeElement as HTMLElement | null,
   );
@@ -79,10 +80,27 @@ export function AddFieldDialog({
     else element?.setAttribute('open', '');
     element?.querySelector<HTMLInputElement>('input')?.focus();
     return () => {
-      if (focusBefore?.isConnected) focusBefore.focus();
+      // Successful additions/navigation hand focus to the parent placement.
+      // Cancellation alone returns to the trigger or its visible fallback.
+      if (placementHandoff.current) return;
+      let visible = Boolean(focusBefore?.isConnected);
+      for (
+        let ancestor = focusBefore;
+        ancestor;
+        ancestor = ancestor.parentElement
+      ) {
+        if (ancestor.hidden || getComputedStyle(ancestor).display === 'none')
+          visible = false;
+      }
+      if (visible && focusBefore) focusBefore.focus();
       else onRestoreFocus?.();
     };
   }, [focusBefore, onRestoreFocus]);
+  const goToPlacement = (id: string, next?: MetadataDefinition) => {
+    placementHandoff.current = true;
+    if (next) onGo(id, next);
+    else onGo(id);
+  };
   const restriction = additionRestriction(section, field.applies_to);
   const validation = designerIssues({
     fields: [{ ...field, required: false }],
@@ -133,7 +151,7 @@ export function AddFieldDialog({
         ),
       };
       onChange(next);
-      onGo(existing.control.id, next);
+      goToPlacement(existing.control.id, next);
       onCancel();
       return;
     }
@@ -147,7 +165,7 @@ export function AddFieldDialog({
       ),
     };
     onChange(next);
-    onGo(control.id, next);
+    goToPlacement(control.id, next);
     onCancel();
   };
   const entry = (control: Control) => {
@@ -196,7 +214,7 @@ export function AddFieldDialog({
           disabled={Boolean(reason)}
           onClick={() =>
             existing && !hidden
-              ? (onGo(existing.control.id), onCancel())
+              ? (goToPlacement(existing.control.id), onCancel())
               : showOrPlace(control)
           }
         >
@@ -451,8 +469,10 @@ export function AddFieldDialog({
             disabled={definition.fields.length >= 100}
             onClick={() => {
               setSubmitted(true);
-              if (!issues.length && definition.fields.length < 100)
+              if (!issues.length && definition.fields.length < 100) {
+                placementHandoff.current = true;
                 onAdd({ ...field, label: field.label.trim() }, destination);
+              }
             }}
           >
             Add to form

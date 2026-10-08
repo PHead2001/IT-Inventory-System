@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
+import { pickerLocations } from '@/features/locations/picker-model';
 import type { LocationRef } from '@/features/inventory/contracts-ui';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody, loadCustodyReceipt } from './actions';
@@ -77,12 +78,12 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   } = latest;
   const resetTask = useTaskReset();
   const router = useRouter();
-  const validation = useFormValidation();
   const scope = `${kind}-${action}`;
   const [pending, startTransition] = useTransition();
   const [state, setState] = useState<CustodyState | null>(null);
   const [closed, setClosed] = useState(false);
   const [reviewed, setReviewed] = useState<{
+    key: string;
     name?: string;
     source: string;
     destination: string;
@@ -116,7 +117,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const actorMismatch = baseline.actorId !== latest.actorId;
   const reportTask = useReportTaskState({
     dirty: JSON.stringify(values) !== JSON.stringify(initial),
-    pending,
+    pending: pending && !completed,
     uncertain,
     completed,
   });
@@ -124,6 +125,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const update = (key: keyof typeof values, value: string) => {
     if (pending || uncertain || completed || inFlight.current) return;
     setValues((old) => ({ ...old, [key]: value }));
+    setReviewed(null);
     setState(null);
   };
   const fromStorage = action === 'issue' || action === 'assign';
@@ -155,6 +157,104 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const noDestination = requiresDestination && destinationSites.length === 0;
   const noSource = fromSite && sourceSites.length === 0;
   const unavailable = noDestination || noSource;
+  const reviewKey = JSON.stringify({
+    values,
+    version: latest.version,
+    locations,
+    sites,
+    storageBalances,
+    siteHoldings,
+    currentLocation,
+    currentSite,
+  });
+  if (
+    reviewed &&
+    reviewed.key !== reviewKey &&
+    !uncertain &&
+    !pending &&
+    !completed
+  )
+    setReviewed(null);
+  function collectIssues() {
+    if (uncertain || pending || completed) return [];
+    const issues = [];
+    if (
+      fromStorage &&
+      !(quantity
+        ? storageBalances.some(
+            (row) =>
+              row.location.id === values.source_location_id && row.quantity > 0,
+          )
+        : currentLocation?.id === values.source_location_id &&
+          !!values.source_location_id)
+    )
+      issues.push({
+        id: scope + '-source',
+        label: 'Storage source',
+        message: 'Choose a storage source with recorded stock.',
+      });
+    if (
+      toStorage &&
+      !pickerLocations(locations, 'destination').some(
+        (row) => row.id === values.destination_location_id,
+      )
+    )
+      issues.push({
+        id: scope + '-destination',
+        label: 'Return to storage',
+        message: 'Choose an available return destination.',
+      });
+    if (
+      fromSite &&
+      !sourceSites.some((row) => row.id === values.source_site_id)
+    )
+      issues.push({
+        id: scope + '-source-site',
+        label: 'Source site',
+        message: 'Choose a site with recorded stock.',
+      });
+    if (
+      requiresDestination &&
+      !destinationSites.some((row) => row.id === values.destination_site_id)
+    )
+      issues.push({
+        id: scope + '-destination-site',
+        label: 'Destination site',
+        message: 'Choose an available destination site.',
+      });
+    if (quantity && !correction && (fromStorage || fromSite)) {
+      const available = fromStorage
+        ? storageBalances.find(
+            (row) => row.location.id === values.source_location_id,
+          )?.quantity
+        : siteHoldings.find((row) => row.site_id === values.source_site_id)
+            ?.quantity;
+      if (available !== undefined && Number(values.quantity) > available)
+        issues.push({
+          id: scope + '-quantity',
+          label: 'Units',
+          message: `This source has only ${available} units available. Enter no more than ${available}.`,
+        });
+    }
+    if (quantity && !correction && (toStorage || toSite)) {
+      const destinationCount = toStorage
+        ? (storageBalances.find(
+            (row) => row.location.id === values.destination_location_id,
+          )?.quantity ?? 0)
+        : (siteHoldings.find(
+            (row) => row.site_id === values.destination_site_id,
+          )?.quantity ?? 0);
+      if (destinationCount + Number(values.quantity) > 2147483647)
+        issues.push({
+          id: scope + '-quantity',
+          label: 'Units',
+          message:
+            'This change would exceed the destination quantity limit. Enter a smaller amount.',
+        });
+    }
+    return issues;
+  }
+  const validation = useFormValidation(collectIssues);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
@@ -163,28 +263,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       completed ||
       actorMismatch ||
       (!uncertain &&
-        (unavailable ||
-          stale ||
-          !validation.validate(event.currentTarget, [
-            ...(fromStorage && !values.source_location_id
-              ? [
-                  {
-                    id: scope + '-source',
-                    label: 'Storage source',
-                    message: 'Choose a storage source.',
-                  },
-                ]
-              : []),
-            ...(toStorage && !values.destination_location_id
-              ? [
-                  {
-                    id: scope + '-destination',
-                    label: 'Return to storage',
-                    message: 'Choose a return destination.',
-                  },
-                ]
-              : []),
-          ])))
+        (unavailable || stale || !validation.validate(event.currentTarget)))
     )
       return;
     const payload: Record<string, unknown> = {
@@ -205,22 +284,9 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         payload.observed_quantity = Number(values.observed_quantity);
       else payload.quantity = Number(values.quantity);
     }
-    const operation = quantity ? 'quantity_site_change' : 'asset_site_change';
-    const key = JSON.stringify([operation, payload]);
-    const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
-    setReceipt({ key, id: requestId });
-    const command =
-      uncertain && submitted.current
-        ? submitted.current
-        : {
-            operation,
-            requestId,
-            payload,
-            ...(actorId ? { expectedActorId: actorId } : {}),
-          };
-    submitted.current = command;
-    if (!uncertain)
+    if (!uncertain && !reviewed) {
       setReviewed({
+        key: reviewKey,
         name: latest.entityName,
         source: fromStorage
           ? (locations.find((row) => row.id === values.source_location_id)
@@ -239,6 +305,22 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         quantity: correction ? values.observed_quantity : values.quantity,
         reference: values.reference.trim(),
       });
+      return;
+    }
+    const operation = quantity ? 'quantity_site_change' : 'asset_site_change';
+    const key = JSON.stringify([operation, payload]);
+    const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
+    setReceipt({ key, id: requestId });
+    const command =
+      uncertain && submitted.current
+        ? submitted.current
+        : {
+            operation,
+            requestId,
+            payload,
+            ...(actorId ? { expectedActorId: actorId } : {}),
+          };
+    submitted.current = command;
     inFlight.current = true;
     reportTask({ pending: true });
     startTransition(async () => {
@@ -258,12 +340,14 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               ].includes(result.code)));
         setUncertain(unresolved);
         if (result.ok) {
+          validation.clear();
           try {
             router.refresh();
           } catch {
             /* The confirmed receipt remains authoritative. */
           }
         } else if (!unresolved) {
+          setReviewed(null);
           submitted.current = null;
           setReceipt(null);
         }
@@ -389,12 +473,19 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     );
   return (
     <form
+      {...validation.formProps}
       aria-label={titles[action]}
       className={panel + ' max-w-4xl space-y-4'}
       onSubmit={submit}
       noValidate
     >
       <h3 className="text-lg font-semibold">{titles[action]}</h3>
+      {['write_off', 'retire'].includes(action) && (
+        <p className="text-sm text-slate-300">
+          Write off removes missing or consumed quantity from recorded stock.
+          Retire ends tracking of an individual asset.
+        </p>
+      )}
       <RequiredFieldsNote />
       {actorMismatch && (
         <p role="alert">
@@ -598,6 +689,30 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         </label>
       </fieldset>
       <ValidationSummary issues={validation.issues} />
+      {reviewed && !uncertain && (
+        <section aria-label="Review changes" className={panel}>
+          <h3 id={scope + '-review-context'} className="font-semibold">
+            Review {titles[action].toLowerCase()} for{' '}
+            {reviewed.name ?? latest.entityName ?? 'this record'}
+          </h3>
+          {['write_off', 'retire'].includes(action) && (
+            <p className="text-sm text-[var(--warning)]">
+              Warning: confirm this removal for the named record before saving.
+            </p>
+          )}
+          <p>
+            {reviewed.name ?? 'This record'} ·{' '}
+            {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
+          </p>
+          <p>
+            {reviewed.source} → {reviewed.destination}
+          </p>
+          {reviewed.reference && (
+            <p>Ticket number reference: {reviewed.reference}</p>
+          )}
+          {values.reason && <p>Reason: {values.reason}</p>}
+        </section>
+      )}
       {state && (
         <p
           role="status"
@@ -620,6 +735,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
             variant="outline"
             onClick={() => {
               setBaseline(latest);
+              setReviewed(null);
               setState(null);
             }}
           >
@@ -628,6 +744,14 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         </div>
       )}
       <Button
+        aria-describedby={
+          reviewed && !uncertain ? scope + '-review-context' : undefined
+        }
+        className={
+          ['write_off', 'retire'].includes(action)
+            ? 'experience-danger-action'
+            : undefined
+        }
         disabled={
           pending || actorMismatch || (!uncertain && (unavailable || stale))
         }
@@ -637,7 +761,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           ? 'Saving…'
           : uncertain
             ? 'Retry same custody transaction'
-            : titles[action]}
+            : `${reviewed ? 'Confirm' : 'Review'} ${titles[action].toLowerCase()}`}
       </Button>
     </form>
   );

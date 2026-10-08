@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
+import userEvent from '@testing-library/user-event';
 import {
   cleanup,
   act,
@@ -542,6 +543,179 @@ describe('category form designer', () => {
     expect(
       screen.getByRole('navigation', { name: 'Designer panels' }),
     ).toContainElement(screen.getByRole('button', { name: 'Library' }));
+  });
+  it.each(['desktop', 'phone'] as const)(
+    'hands focused Add field dialog focus to the visible %s destination',
+    async (viewport) => {
+      mount();
+      const user = userEvent.setup();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(
+        (callback) => {
+          frames.push(callback);
+          return frames.length;
+        },
+      );
+      const canvas = screen.getByTestId('designer-canvas');
+      if (viewport === 'phone') canvas.style.display = 'none';
+      const trigger = screen.getByRole('button', {
+        name: 'Add field',
+      });
+      await user.click(trigger);
+      const dialog = screen.getByRole('dialog', { name: 'Add field' });
+      await user.type(
+        within(dialog).getByLabelText('Field name'),
+        'Focus transfer',
+      );
+      await user.click(
+        within(dialog).getByRole('button', {
+          name: 'Add to form',
+        }),
+      );
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      const control = [
+        ...canvas.querySelectorAll<HTMLElement>('[data-control-id]'),
+      ].at(-1)!;
+      expect(control).toHaveAttribute('data-selected', 'true');
+      if (viewport === 'desktop') expect(control).toHaveFocus();
+      else {
+        const inspector = screen.getByTestId('designer-inspector');
+        expect(inspector).toBeVisible();
+        expect(
+          within(inspector).getByRole('heading', {
+            name: 'Inspector',
+          }),
+        ).toHaveFocus();
+      }
+    },
+  );
+  it('hands focused dialog Go to field focus to its existing placement', async () => {
+    mount();
+    const user = userEvent.setup();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    await user.click(screen.getByRole('button', { name: 'Add field' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add field' });
+    await user.click(
+      within(dialog).getByRole('tab', { name: 'Standard fields' }),
+    );
+    await user.click(
+      within(
+        within(dialog).getByText('Name', { exact: true }).parentElement!,
+      ).getByRole('button', { name: 'Go to field' }),
+    );
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    const name = screen
+      .getByTestId('designer-canvas')
+      .querySelector<HTMLElement>(`[data-control-id="${id(4)}"]`)!;
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('data-selected', 'true');
+  });
+  it.each(['pointer', 'keyboard'] as const)(
+    'keeps ordinary %s custom control selection focus while mounting Inspector settings',
+    async (input) => {
+      mount();
+      const user = userEvent.setup();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(
+        (callback) => {
+          frames.push(callback);
+          return frames.length;
+        },
+      );
+      addField('Click focus');
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      const canvas = screen.getByTestId('designer-canvas');
+      const name = canvas.querySelector<HTMLElement>(
+        `[data-control-id="${id(4)}"]`,
+      )!;
+      await user.click(name);
+      const custom = [
+        ...canvas.querySelectorAll<HTMLElement>('[data-control-id]'),
+      ].at(-1)!;
+      if (input === 'pointer') await user.click(custom);
+      else
+        for (
+          let attempt = 0;
+          attempt < 30 && document.activeElement !== custom;
+          attempt++
+        )
+          await user.tab();
+      expect(custom).toHaveFocus();
+      expect(custom).toHaveAttribute('data-selected', 'true');
+      expect(
+        within(screen.getByTestId('designer-inspector')).getByRole('region', {
+          name: 'Click focus field settings',
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+  it('returns canceled dialog focus to its focused Add field trigger', async () => {
+    mount();
+    const user = userEvent.setup();
+    const trigger = screen.getByRole('button', {
+      name: 'Add field',
+    });
+    await user.click(trigger);
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Add field' })).getByRole(
+        'button',
+        { name: 'Cancel field addition' },
+      ),
+    );
+    expect(trigger).toHaveFocus();
+  });
+  it('keeps newer toolbar focus when queued section focus runs later', () => {
+    mount();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+    const save = within(
+      screen.getByRole('toolbar', { name: 'Form designer' }),
+    ).getByRole('button', { name: 'Save changes' });
+    act(() => save.focus());
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(save).toHaveFocus();
+  });
+  it('focuses the new section when no later user intent supersedes it', () => {
+    mount();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(screen.getAllByLabelText('Section heading').at(-1)).toHaveFocus();
+  });
+  it('keeps newer control focus when a queued Add section focus runs later', () => {
+    mount();
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const name = screen
+      .getByTestId('designer-canvas')
+      .querySelector<HTMLElement>(`[data-control-id="${id(4)}"]`)!;
+    fireEvent.click(screen.getByRole('button', { name: 'Add section' }));
+    act(() => name.focus());
+    fireEvent.keyDown(name, { key: 'Enter' });
+    expect(name).toHaveAttribute('data-selected', 'true');
+    act(() => frames.splice(0).forEach((callback) => callback(0)));
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('data-selected', 'true');
+    expect(
+      within(screen.getByTestId('designer-inspector')).getByRole('region', {
+        name: 'Name layout properties',
+      }),
+    ).toBeInTheDocument();
   });
   it('keeps canvas previews inert and selects stable controls into the Inspector by focus or keyboard', () => {
     mount();

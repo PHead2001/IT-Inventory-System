@@ -9,6 +9,7 @@ it('retains native constraints, orders actionable errors, links focus and preser
     const validation = useFormValidation();
     return (
       <form
+        {...validation.formProps}
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
@@ -59,7 +60,12 @@ it('retains native constraints, orders actionable errors, links focus and preser
   expect(screen.getByLabelText('Units')).toHaveValue(1.5);
   await user.clear(screen.getByLabelText('Name'));
   await user.type(screen.getByLabelText('Name'), 'Cable');
+  expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid');
+  expect(screen.getByLabelText('Name')).toHaveFocus();
+  expect(screen.queryByRole('link', { name: 'Name' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Units' })).toBeVisible();
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: '0' } });
+  expect(screen.queryByRole('alert')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(saved).toHaveBeenCalledOnce();
   expect(saved.mock.calls[0][0].get('units')).toBe('0');
