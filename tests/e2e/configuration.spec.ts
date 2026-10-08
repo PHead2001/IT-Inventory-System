@@ -112,7 +112,7 @@ test('phone Settings reviews referenced removal and shares label defaults with n
       current.getByRole('region', { name: 'Removal impact review' }),
     ).toContainText('1 current quantity items');
     await noHorizontalOverflow(page);
-    await current.getByRole('button', { name: 'Confirm removal' }).click();
+    await current.getByRole('button', { name: /^Remove category / }).click();
     await expect(current).toContainText('Removed');
     await page.goto('/settings/labels');
     await expect(
@@ -129,7 +129,9 @@ test('phone Settings reviews referenced removal and shares label defaults with n
       .getByRole('combobox', { name: 'Barcode type' })
       .selectOption('code128');
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText('Settings saved.');
+    await expect(page.getByRole('status')).toContainText(
+      'Label settings saved.',
+    );
     await page.goto('/labels');
     await expect(
       page.getByRole('combobox', { name: 'Label size' }),

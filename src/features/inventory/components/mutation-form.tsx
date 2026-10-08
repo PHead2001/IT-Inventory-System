@@ -26,9 +26,15 @@ import type {
   LocationRef,
   QuantityItem,
 } from '../contracts-ui';
-import { useReportTaskState, useTaskReset } from './task-state';
+import {
+  useReportTaskState,
+  useTaskReset,
+  useTaskDiscard,
+  useTaskWarning,
+} from './task-state';
 import { field, panel } from './read-ui';
 import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
+import { OperationalTimestamp } from '@/components/operational-time';
 
 type Operation = MutationCommand['operation'];
 const labels: Record<string, string> = {
@@ -97,8 +103,8 @@ function MoveRecovery(props: Props) {
   useReportTaskState(
     {
       dirty: false,
-      pending: !loaded && !error,
-      uncertain: !loaded && Boolean(error),
+      pending: false,
+      uncertain: false,
       completed: false,
     },
     !loaded,
@@ -260,8 +266,8 @@ function MutationFormFields({
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
   const resetTask = useTaskReset();
+  const reportTaskWarning = useTaskWarning();
   const router = useRouter();
-  const validation = useFormValidation();
   // The editable values and their optimistic-concurrency baseline travel together.
   const [baseline, setBaseline] = useState(() => ({
     item: freshStart?.item ?? latestItem,
@@ -281,6 +287,12 @@ function MutationFormFields({
   const [refreshRequested, setRefreshRequested] = useState(false);
   const [thresholdTouched, setThresholdTouched] = useState(false);
   const [refreshedVersion, setRefreshedVersion] = useState<number | null>(null);
+  const eligibleDefaultLocations = new Set(
+    pickerLocations(latestLocations, 'destination').map((row) => row.id),
+  );
+  const positiveDefaultHoldings = balances.filter(
+    (row) => row.quantity > 0 && eligibleDefaultLocations.has(row.location.id),
+  );
   const [values, setValues] = useState<Record<string, string>>({
     name: entity?.name ?? '',
     description: entity?.description ?? '',
@@ -301,13 +313,24 @@ function MutationFormFields({
       balances.filter((b) => b.quantity > 0).length === 1
         ? balances.find((b) => b.quantity > 0)!.location.id
         : '',
-    location_id: '',
+    location_id:
+      operation === 'asset_restore' &&
+      currentLocation &&
+      eligibleDefaultLocations.has(currentLocation.id)
+        ? currentLocation.id
+        : operation === 'quantity_receive' &&
+            positiveDefaultHoldings.length === 1
+          ? positiveDefaultHoldings[0].location.id
+          : '',
     destination_location_id: '',
     initial_location_id: '',
     reason: '',
     move_all: 'false',
   });
   const [state, setState] = useState<MutationState | null>(initialCompletion);
+  const [previousReceipt, setPreviousReceipt] = useState(
+    Boolean(initialCompletion),
+  );
   const [storageWarning, setStorageWarning] = useState(initialStorageWarning);
   const [locationError, setLocationError] = useState('');
   const [review, setReview] = useState(false);
@@ -319,15 +342,43 @@ function MutationFormFields({
   const inFlight = useRef(false);
   const submitted = useRef<MutationCommand | null>(null);
   const [uncertain, setUncertain] = useState(false);
-  const [amountError, setAmountError] = useState('');
   const [completedError, setCompletedError] = useState('');
+  const [closed, setClosed] = useState(false);
   const [reviewKey, setReviewKey] = useState('');
   const completionRef = useRef<HTMLDivElement>(null);
   const completed = state?.ok === true;
+  const clearCompletionPointer = () => {
+    if (!completed || !completionStorageKey || !state.eventId) return true;
+    try {
+      const raw = sessionStorage.getItem(completionStorageKey);
+      if (raw) {
+        let pointer;
+        try {
+          pointer = parseMoveCompletion(raw, state.entityId);
+        } catch {
+          return true;
+        }
+        if (pointer.eventId === state.eventId)
+          sessionStorage.removeItem(completionStorageKey);
+      }
+      return true;
+    } catch {
+      const warning =
+        'The move is saved. Browser storage could not clear its receipt, so this completed move may appear again after a reload.';
+      if (reportTaskWarning) reportTaskWarning(warning);
+      else setStorageWarning(warning);
+      return true;
+    }
+  };
+  useTaskDiscard(() => {
+    if (uncertain || (!completed && (pending || inFlight.current)))
+      return false;
+    return clearCompletionPointer();
+  });
   const [initialValues, setInitialValues] = useState(values);
   const reportTask = useReportTaskState({
     dirty: JSON.stringify(values) !== JSON.stringify(initialValues),
-    pending,
+    pending: pending && !completed,
     uncertain,
     completed,
   });
@@ -434,6 +485,118 @@ function MutationFormFields({
     'asset_retire',
     'asset_restore',
   ].includes(operation);
+  function collectIssues() {
+    if (uncertain || completed || pending) return [];
+    const amountIssues = [];
+    if (
+      operation === 'quantity_receive' &&
+      Number(values.quantity) +
+        (balances.find((row) => row.location.id === values.location_id)
+          ?.quantity ?? 0) >
+        2147483647
+    )
+      amountIssues.push({
+        id: operation + '-quantity',
+        label: 'Quantity to receive',
+        message:
+          'This receipt would exceed the location quantity limit. Enter a smaller amount.',
+      });
+    if (moving) {
+      const amount =
+        values.move_all === 'true'
+          ? sourceBalance?.quantity
+          : Number(values.quantity);
+      const invalid =
+        !sourceBalance || sourceBalance.quantity <= 0
+          ? 'Choose a source with recorded stock before reviewing.'
+          : values.move_all !== 'true' &&
+              (!values.quantity.trim() ||
+                !Number.isSafeInteger(amount) ||
+                amount! <= 0 ||
+                amount! > 2147483647)
+            ? 'Enter a whole number of units between 1 and 2,147,483,647.'
+            : amount! > sourceBalance.quantity
+              ? `This source has only ${countLabel(sourceBalance.quantity, 'unit')} available. Enter no more than ${sourceBalance.quantity}.`
+              : amount! +
+                    (balances.find(
+                      (b) => b.location.id === values.destination_location_id,
+                    )?.quantity ?? 0) >
+                  2147483647
+                ? 'This move would exceed the destination quantity limit. Enter a smaller amount.'
+                : '';
+      if (invalid) {
+        amountIssues.push({
+          id:
+            operation +
+            (values.move_all === 'true' ? '-source_location_id' : '-quantity'),
+          label:
+            values.move_all === 'true' ? 'Source location' : 'Quantity to move',
+          message: invalid,
+        });
+      }
+    }
+    const needed =
+      operation === 'quantity_create'
+        ? Number(values.initial_quantity) > 0
+          ? ['initial_location_id']
+          : []
+        : operation === 'quantity_move'
+          ? ['source_location_id', 'destination_location_id']
+          : [
+                'quantity_receive',
+                'quantity_adjust',
+                'asset_create',
+                'asset_move',
+                'asset_correct_location',
+                'asset_restore',
+              ].includes(operation)
+            ? ['location_id']
+            : [];
+    const locationIssues = [...amountIssues];
+    for (const name of uncertain ? [] : needed) {
+      const source = name === 'source_location_id';
+      const valid = pickerLocations(
+        locations,
+        source ? 'source' : 'destination',
+        {
+          sourceIds: source
+            ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
+            : undefined,
+          excludeIds: !source
+            ? [
+                ...(moving ? [values.source_location_id] : []),
+                ...(['asset_move', 'asset_correct_location'].includes(
+                  operation,
+                ) && currentLocation
+                  ? [currentLocation.id]
+                  : []),
+              ]
+            : undefined,
+        },
+      ).some((location) => location.id === values[name]);
+      if (!valid) {
+        locationIssues.push({
+          id: operation + '-' + name,
+          label:
+            name === 'source_location_id'
+              ? 'Source location'
+              : name === 'destination_location_id'
+                ? 'Destination location'
+                : name === 'initial_location_id'
+                  ? 'Initial location'
+                  : 'Location',
+          message: values[name]
+            ? 'Selected location is unavailable. Choose another location.'
+            : 'Choose a location.',
+        });
+      }
+    }
+    return locationIssues;
+  }
+  const validation = useFormValidation(collectIssues);
+  const amountError =
+    validation.issues.find((issue) => issue.id === operation + '-quantity')
+      ?.message ?? '';
   const update = useCallback(
     (name: string, value: string) => {
       if (pending || inFlight.current || uncertain || completed) return;
@@ -442,7 +605,6 @@ function MutationFormFields({
       setReview(false);
       setState(null);
       setLocationError('');
-      setAmountError('');
       if (name === 'serial_number') setDuplicates([]);
     },
     [pending, uncertain, completed],
@@ -484,9 +646,7 @@ function MutationFormFields({
           validation.props(
             operation + '-' + name,
             moving && name === 'quantity'
-              ? operation +
-                  '-availability' +
-                  (amountError ? ' ' + operation + '-quantity-error' : '')
+              ? operation + '-availability'
               : undefined,
           )['aria-describedby']
         }
@@ -723,112 +883,25 @@ function MutationFormFields({
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (pending || inFlight.current || refreshRequested || completed) return;
-    if (!uncertain && moving) {
-      if (
-        moveSnapshotChanged ||
-        (state &&
-          !state.ok &&
-          ['stale_version', 'insufficient_stock'].includes(state.code))
-      ) {
-        setReview(false);
-        setState({
-          ok: false,
-          kind: 'domain',
-          code: 'stale_version',
-          message:
-            'Stock changed. Refresh balances and review your entered move again.',
-        });
-        return;
-      }
-      const amount =
-        values.move_all === 'true'
-          ? sourceBalance?.quantity
-          : Number(values.quantity);
-      const invalid =
-        !sourceBalance || sourceBalance.quantity <= 0
-          ? 'Choose a source with recorded stock before reviewing.'
-          : values.move_all !== 'true' &&
-              (!values.quantity.trim() ||
-                !Number.isSafeInteger(amount) ||
-                amount! <= 0 ||
-                amount! > 2147483647)
-            ? 'Enter a whole number of units between 1 and 2,147,483,647.'
-            : amount! > sourceBalance.quantity
-              ? `This source has only ${countLabel(sourceBalance.quantity, 'unit')} available. Enter no more than ${sourceBalance.quantity}.`
-              : amount! +
-                    (balances.find(
-                      (b) => b.location.id === values.destination_location_id,
-                    )?.quantity ?? 0) >
-                  2147483647
-                ? 'This move would exceed the destination quantity limit. Enter a smaller amount.'
-                : '';
-      if (invalid) {
-        setAmountError(invalid);
-        setReview(false);
-        document.getElementById(operation + '-quantity')?.focus();
-        return;
-      }
-    }
-    const needed =
-      operation === 'quantity_create'
-        ? Number(values.initial_quantity) > 0
-          ? ['initial_location_id']
-          : []
-        : operation === 'quantity_move'
-          ? ['source_location_id', 'destination_location_id']
-          : [
-                'quantity_receive',
-                'quantity_adjust',
-                'asset_create',
-                'asset_move',
-                'asset_correct_location',
-                'asset_restore',
-              ].includes(operation)
-            ? ['location_id']
-            : [];
-    const locationIssues = [];
-    for (const name of uncertain ? [] : needed) {
-      const source = name === 'source_location_id';
-      const valid = pickerLocations(
-        locations,
-        source ? 'source' : 'destination',
-        {
-          sourceIds: source
-            ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
-            : undefined,
-          excludeIds: !source
-            ? [
-                ...(moving ? [values.source_location_id] : []),
-                ...(['asset_move', 'asset_correct_location'].includes(
-                  operation,
-                ) && currentLocation
-                  ? [currentLocation.id]
-                  : []),
-              ]
-            : undefined,
-        },
-      ).some((location) => location.id === values[name]);
-      if (!valid) {
-        locationIssues.push({
-          id: operation + '-' + name,
-          label:
-            name === 'source_location_id'
-              ? 'Source location'
-              : name === 'destination_location_id'
-                ? 'Destination location'
-                : name === 'initial_location_id'
-                  ? 'Initial location'
-                  : 'Location',
-          message: values[name]
-            ? 'Selected location is unavailable. Choose another location.'
-            : 'Choose a location.',
-        });
-      }
-    }
     if (
       !uncertain &&
-      !validation.validate(event.currentTarget, locationIssues)
+      moving &&
+      (moveSnapshotChanged ||
+        (state &&
+          !state.ok &&
+          ['stale_version', 'insufficient_stock'].includes(state.code)))
     ) {
+      setReview(false);
+      setState({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message:
+          'Stock changed. Refresh balances and review your entered move again.',
+      });
+      return;
+    }
+    if (!uncertain && !validation.validate(event.currentTarget)) {
       setReview(false);
       return;
     }
@@ -896,6 +969,7 @@ function MutationFormFields({
           }
         }
         if (result.ok) {
+          validation.clear();
           setReview(false);
           if (moving && completionStorageKey && result.eventId) {
             try {
@@ -965,15 +1039,7 @@ function MutationFormFields({
         setCompletedError('');
         setReview(false);
         if (startNew) {
-          if (completionStorageKey) {
-            try {
-              sessionStorage.removeItem(completionStorageKey);
-            } catch {
-              setStorageWarning(
-                'The saved receipt pointer could not be cleared. A page reload may restore the previous move receipt.',
-              );
-            }
-          }
+          if (!clearCompletionPointer()) return;
           const newValues = {
             ...values,
             quantity: '',
@@ -983,10 +1049,11 @@ function MutationFormFields({
           setValues(newValues);
           setInitialValues(newValues);
           setState(null);
+          setPreviousReceipt(false);
           setReceipt(null);
           submitted.current = null;
           setUncertain(false);
-          setAmountError('');
+          validation.clear();
         } else if (!state?.ok) setState(null);
         router.refresh();
       } catch {
@@ -1017,13 +1084,39 @@ function MutationFormFields({
       }
     });
   };
+  if (closed)
+    return (
+      <div className="space-y-2">
+        <p role="status">Done.</p>
+        {storageWarning && (
+          <p role="alert" className="text-sm text-amber-200">
+            {storageWarning}
+          </p>
+        )}
+      </div>
+    );
+  const destructive = ['asset_retire', 'quantity_archive'].includes(operation);
+  const reviewContextId = operation + '-review-context';
   return (
     <form
+      {...validation.formProps}
       onSubmit={submit}
       aria-label={labels[operation]}
       className="space-y-4"
       noValidate
     >
+      {['asset_move', 'asset_correct_location'].includes(operation) && (
+        <p className="text-sm text-slate-300">
+          Move physically relocates this asset. Correct updates its recorded
+          location without moving equipment.
+        </p>
+      )}
+      {operation === 'asset_retire' && (
+        <p className="text-sm text-slate-300">
+          Write off removes missing or consumed quantity from recorded stock.
+          Retire ends tracking of an individual asset.
+        </p>
+      )}
       <fieldset
         disabled={pending || uncertain}
         className="space-y-4"
@@ -1195,15 +1288,6 @@ function MutationFormFields({
                 numeric: true,
                 min: 1,
               })}
-            {amountError && (
-              <p
-                id={operation + '-quantity-error'}
-                role="alert"
-                className="text-sm text-red-300"
-              >
-                {amountError}
-              </p>
-            )}
           </>
         )}
         {operation === 'quantity_adjust' && (
@@ -1226,6 +1310,14 @@ function MutationFormFields({
             operation === 'asset_restore'
               ? 'Confirmed current location'
               : 'Destination location',
+          )}
+        {operation === 'asset_restore' &&
+          currentLocation?.id === values.location_id &&
+          values.location_id && (
+            <p className="text-sm text-slate-400">
+              Last recorded storage location. Confirm it or choose another
+              location.
+            </p>
           )}
         {!metadata && (
           <div className="space-y-2">
@@ -1260,7 +1352,16 @@ function MutationFormFields({
       )}
       {validReview && !completed && (
         <section aria-label="Review changes" className={panel}>
-          <h3 className="font-semibold">Review before saving</h3>
+          <h3 id={reviewContextId} className="font-semibold">
+            Review {labels[operation].toLowerCase()} for{' '}
+            {item?.name ?? asset?.name ?? values.name ?? 'this record'}
+          </h3>
+          {destructive && (
+            <p className="text-sm text-[var(--warning)]">
+              Warning: confirm this lifecycle change for the named record before
+              saving.
+            </p>
+          )}
           <ul className="mt-2 space-y-2 text-sm">
             {summary().map((line, index) => (
               <li className="break-words" key={index}>
@@ -1318,6 +1419,7 @@ function MutationFormFields({
         >
           {moving ? (
             <>
+              {previousReceipt && <p>Previous move receipt</p>}
               <p className="font-semibold">
                 {state.movement?.itemName ?? item?.name}: move completed.
               </p>
@@ -1338,6 +1440,11 @@ function MutationFormFields({
                     {state.movement.destination.after === 1 ? 'unit' : 'units'}.
                   </p>
                   <p>Later transactions may change current balances.</p>
+                  {state.movement.createdAt && (
+                    <p>
+                      <OperationalTimestamp value={state.movement.createdAt} />
+                    </p>
+                  )}
                 </>
               ) : (
                 <p>
@@ -1374,27 +1481,24 @@ function MutationFormFields({
               resetTask();
               return;
             }
-            setBaseline({
-              item: latestItem,
-              asset: latestAsset,
-              currentLocation: latestLocation,
-              balances: latestBalances ?? [],
-              locations: latestLocations,
-            });
-            setState(null);
-            setReceipt(null);
-            submitted.current = null;
-            setUncertain(false);
-            setRefreshRequested(false);
-            setReview(false);
-            setValues((v) => ({ ...v, quantity: '1', reason: '' }));
-            setInitialValues({ ...values, quantity: '1', reason: '' });
+            setClosed(true);
           }}
         >
-          New transaction
+          Done
         </Button>
       ) : completed ? (
         <div className="flex flex-wrap gap-3">
+          <Button
+            type="button"
+            className="hover:translate-y-0 active:scale-100"
+            onClick={() => {
+              if (!clearCompletionPointer()) return;
+              if (resetTask) resetTask();
+              else setClosed(true);
+            }}
+          >
+            Done
+          </Button>
           <Button
             type="button"
             disabled={pending}
@@ -1430,7 +1534,12 @@ function MutationFormFields({
               reviewing.
             </p>
           )}
-          <Button type="submit" disabled={pending || refreshRequested}>
+          <Button
+            type="submit"
+            aria-describedby={validReview ? reviewContextId : undefined}
+            className={destructive ? 'experience-danger-action' : undefined}
+            disabled={pending || refreshRequested}
+          >
             {pending
               ? 'Saving…'
               : uncertain

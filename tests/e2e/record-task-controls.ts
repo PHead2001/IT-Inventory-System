@@ -1,23 +1,48 @@
 import { expect, type Page } from '@playwright/test';
 
-/** A test must deliberately finish its retained receipt before new intent. */
+/** Verify the visible lifecycle state independently of technical record data. */
+export async function expectRecordStatus(
+  page: Page,
+  status: 'active' | 'archived' | 'retired',
+) {
+  const indicator = page.locator(
+    `.experience-record-status[data-state="${status}"]`,
+  );
+  await expect(indicator).toBeVisible();
+  await expect(indicator).toHaveText(
+    status.charAt(0).toUpperCase() + status.slice(1),
+  );
+}
+
+/** Inspect the current version through the same disclosure available to users. */
+export async function expectRecordVersion(page: Page, version: number) {
+  const details = page.locator('details').filter({
+    has: page.getByText('Technical record details', { exact: true }),
+  });
+  const summary = details.locator('summary');
+  await expect(summary).toBeVisible();
+  if ((await details.getAttribute('open')) === null) await summary.click();
+  await expect(
+    details.getByText(`Record version: ${version}`, { exact: true }),
+  ).toBeVisible();
+}
+
+/** Finish a committed operation before starting another transaction. */
 export async function beginNewRecordTransaction(
   page: Page,
   action: 'New transaction' | 'Move more',
 ) {
   const task = page.getByRole('region', { name: 'Record tasks' });
   await expect(
-    task.getByText(/^Completed transaction retained\./),
-  ).toBeVisible();
-  await expect(
     task.getByRole('button', { name: 'Close task', exact: true }),
-  ).toBeDisabled();
-  const next = task.getByRole('button', { name: action, exact: true });
+  ).toBeEnabled();
+  const next = task.getByRole('button', {
+    name: action === 'New transaction' ? 'Done' : action,
+    exact: true,
+  });
   await expect(next).toBeEnabled();
   await next.click();
-  await expect(task.getByText(/^Completed transaction retained\./)).toHaveCount(
-    0,
-  );
+  await expect(next).toHaveCount(0);
 }
 
 /** A resting pointer at the receipt's bottom edge must not move its hitbox. */
@@ -26,10 +51,14 @@ export async function expectStableReceiptAction(
   action: 'New transaction' | 'Move more',
 ) {
   const task = page.getByRole('region', { name: 'Record tasks' });
-  const retained = task.getByText(/^Completed transaction retained\./);
-  await expect(retained).toBeVisible();
-  const receipt = await retained.innerText();
-  const next = task.getByRole('button', { name: action, exact: true });
+  const receipt = task
+    .getByRole('status')
+    .filter({ hasText: /move completed\./ });
+  const receiptText = await receipt.textContent();
+  const next = task.getByRole('button', {
+    name: action === 'New transaction' ? 'Done' : action,
+    exact: true,
+  });
   await expect(next).toBeEnabled();
   await page.mouse.move(0, 0);
   await next.scrollIntoViewIfNeeded();
@@ -61,10 +90,10 @@ export async function expectStableReceiptAction(
     for (const key of ['x', 'y', 'width', 'height'] as const)
       expect(Math.abs(frame[key] - neutral![key])).toBeLessThan(0.001);
   }
-  await expect(retained).toHaveText(receipt);
+  await expect(receipt).toHaveText(receiptText!);
   await expect(
     task.getByRole('button', { name: 'Close task', exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
 }
 
 /** Open a task through its ordinary launcher; forms mount only on demand. */

@@ -4,6 +4,18 @@ import { countLabel } from '@/lib/count';
 export function siteCountCorrectionSummary(siteName: string | null) {
   return `Count corrected at ${siteName ?? 'recorded site'}`;
 }
+export function assignmentEndpointSummary(
+  assignment: NonNullable<HistoryEvent['assignment']>,
+) {
+  const same = Boolean(
+    (assignment.from.locationId &&
+      assignment.from.locationId === assignment.to.locationId) ||
+    (assignment.from.siteId && assignment.from.siteId === assignment.to.siteId),
+  );
+  return same
+    ? `At ${assignment.to.label ?? assignment.from.label ?? 'recorded location'}`
+    : `${assignment.from.label ?? 'No recorded source'} → ${assignment.to.label ?? 'No recorded destination'}`;
+}
 
 /** Amounts come only from immutable event lines/custody snapshots, never holdings. */
 export function historySummary(event: HistoryEvent): string {
@@ -20,12 +32,7 @@ export function historySummary(event: HistoryEvent): string {
           ? 'Amount not recorded · '
           : ''
         : countLabel(event.assignment.quantity, 'unit') + ' · ';
-    return (
-      amount +
-      (event.assignment.from.label ?? 'No recorded source') +
-      ' → ' +
-      (event.assignment.to.label ?? 'No recorded destination')
-    );
+    return amount + assignmentEndpointSummary(event.assignment);
   }
   if (event.eventType === 'created') return 'Record created';
   if (event.eventType === 'metadata_updated') return 'Record details updated';
@@ -54,11 +61,17 @@ export function historySummary(event: HistoryEvent): string {
   }
   if (event.kind === 'quantity' && event.eventType === 'adjusted')
     return 'Physical count corrected; recorded before/after quantities in details';
-  if (event.eventType === 'archived') return 'Definition archived';
+  if (event.eventType === 'archived') return 'Quantity item archived';
   if (event.eventType === 'restored') return 'Record restored';
   if (event.eventType === 'retired') return 'Asset retired';
   if (event.eventType === 'location_corrected')
     return 'Recorded location corrected';
+  if (
+    event.fromLocation &&
+    event.toLocation &&
+    event.fromLocation.id === event.toLocation.id
+  )
+    return `At ${event.toLocation.breadcrumb} (current location label)`;
   if (event.fromLocation || event.toLocation)
     return `${event.fromLocation?.breadcrumb ?? 'No recorded source'} → ${event.toLocation?.breadcrumb ?? 'No recorded destination'} (current location labels)`;
   if (event.metadataChanges.length || event.customMetadataChanged)

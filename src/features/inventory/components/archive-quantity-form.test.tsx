@@ -1,7 +1,10 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { ArchiveQuantityForm } from './archive-quantity-form';
+import {
+  ArchiveQuantityForm,
+  ArchiveQuantityPanel,
+} from './archive-quantity-form';
 
 const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
@@ -48,9 +51,41 @@ beforeEach(() => {
   });
 });
 
+it.each([undefined, 'Cable adapters'])(
+  'keeps the archive panel confirmation human-readable with name %s',
+  async (itemName) => {
+    const user = userEvent.setup();
+    render(<ArchiveQuantityPanel review={review} itemName={itemName} />);
+    const details = screen
+      .getByText('Archive quantity item and clear stock')
+      .closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    await user.type(
+      screen.getByLabelText('Reason (required)'),
+      'Obsolete stock',
+    );
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
+    await user.click(
+      screen.getByRole('button', { name: 'Review archive and clear stock' }),
+    );
+    const reviewPanel = screen.getByRole('region', { name: 'Review changes' });
+    expect(reviewPanel).toHaveTextContent(itemName ?? 'this quantity item');
+    expect(reviewPanel).not.toHaveTextContent(itemId);
+    expect(
+      screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+    ).toHaveAccessibleDescription(
+      'Confirm stock removal for ' + (itemName ?? 'this quantity item'),
+    );
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
 it('requires reviewed location counts, a reason and explicit stock-clear acknowledgement', async () => {
   const user = userEvent.setup();
-  render(<ArchiveQuantityForm latestReview={review} />);
+  render(
+    <ArchiveQuantityForm latestReview={review} itemName="Cable adapters" />,
+  );
   expect(screen.getByText('12 units to remove')).toBeVisible();
   expect(screen.getByText(/1A.*8 → 0 units/)).toBeVisible();
   expect(screen.getByText(/1B.*inactive location.*4 → 0 units/)).toBeVisible();
@@ -68,6 +103,9 @@ it('requires reviewed location counts, a reason and explicit stock-clear acknowl
   expect(
     screen.getByRole('region', { name: 'Review changes' }),
   ).toHaveTextContent('12 units from 2 locations');
+  expect(
+    screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+  ).toHaveAccessibleDescription('Confirm stock removal for Cable adapters');
   await user.click(
     screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
   );
@@ -82,6 +120,46 @@ it('requires reviewed location counts, a reason and explicit stock-clear acknowl
     },
   });
   expect(mocks.refresh).toHaveBeenCalled();
+});
+
+it('collects reason and acknowledgement together, clears corrected errors without another review and keeps focus', async () => {
+  const user = userEvent.setup();
+  render(<ArchiveQuantityForm latestReview={review} />);
+  await user.click(
+    screen.getByRole('button', { name: 'Review archive and clear stock' }),
+  );
+  const reason = screen.getByLabelText('Reason (required)');
+  expect(reason).toHaveFocus();
+  expect(screen.getByRole('link', { name: 'Reason' })).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Stock removal acknowledgement' }),
+  ).toBeVisible();
+  expect(screen.queryByRole('region', { name: 'Review changes' })).toBeNull();
+  await user.type(reason, 'Remove obsolete stock');
+  expect(screen.queryByRole('link', { name: 'Reason' })).toBeNull();
+  expect(reason).toHaveFocus();
+  await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('closes a known committed archive with Done without repeating the write', async () => {
+  const user = userEvent.setup();
+  render(<ArchiveQuantityForm latestReview={review} />);
+  await user.type(
+    screen.getByLabelText('Reason (required)'),
+    'Remove obsolete stock',
+  );
+  await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
+  await user.click(
+    screen.getByRole('button', { name: 'Review archive and clear stock' }),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Done.');
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
 });
 
 it('keeps the reviewed version and counts until the user explicitly accepts a concurrent update', async () => {

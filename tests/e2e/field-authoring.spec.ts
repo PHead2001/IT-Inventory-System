@@ -1,4 +1,4 @@
-import { openRecordTask } from './record-task-controls';
+import { expectRecordVersion, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -431,7 +431,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Settings saved.');
+  await expect(page.getByRole('status')).toContainText('Category added.');
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });
@@ -667,7 +667,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   );
   await capture(page, info, 'edit-zero-empty-selection-parent-timezone');
   await confirm(form);
-  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectRecordVersion(page, 2);
   await page.reload();
   await expect(metadataAnswer(page, 'Port count')).toHaveText('0');
   await expect(metadataAnswer(page, 'Cable length')).toHaveText('1.25');
@@ -840,7 +840,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
     .getByRole('checkbox', { name: 'Has USB-C? (required)', exact: true })
     .uncheck();
   await confirm(form);
-  await expect(page.getByText(/Version 3$/)).toBeVisible();
+  await expectRecordVersion(page, 3);
   await page.reload();
   const finalValues = await client
     .from('quantity_items')
@@ -988,7 +988,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
     .getByLabel('Setup note', { exact: true })
     .fill('Asset note\nSecond line');
   await confirm(form);
-  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectRecordVersion(page, 2);
   await page.reload();
   await expect(metadataAnswer(page, 'Setup note')).toHaveText(
     'Asset note\nSecond line',
@@ -1074,11 +1074,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
       .getByLabel('Manufacturer', { exact: true })
       .fill('Core edit while twelve fields hidden');
     await confirm(hiddenForm);
-    await expect(
-      page.getByText(
-        new RegExp('Version ' + (kind === 'quantity' ? '4' : '3') + '$'),
-      ),
-    ).toBeVisible();
+    await expectRecordVersion(page, kind === 'quantity' ? 4 : 3);
     await page.reload();
     await assertRetained();
   }

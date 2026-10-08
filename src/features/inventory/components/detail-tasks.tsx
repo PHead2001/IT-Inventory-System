@@ -82,12 +82,32 @@ export function DetailTasks(props: {
     add('custody:return', 'Return to storage');
     add('custody:transfer', 'Transfer between sites');
     add('custody:correct', 'Correct recorded site custody', 'secondary');
-    add('custody:write_off', 'Write off at site', 'consequential');
-    add('custody:retire', 'Retire asset at site', 'consequential');
+    add(
+      'custody:write_off',
+      'Write off at site',
+      'consequential',
+      'Record loss or write-off and close this asset’s active site custody. A reason is required.',
+    );
+    add(
+      'custody:retire',
+      'Retire asset at site',
+      'consequential',
+      'Record the end of this asset’s service and close its active site custody. A reason is required.',
+    );
   } else {
-    add('asset_move', 'Move asset');
+    add(
+      'asset_move',
+      'Move asset',
+      undefined,
+      'Physically relocate this asset to another storage location.',
+    );
     add('custody:assign', 'Assign asset to a site');
-    add('asset_correct_location', 'Correct recorded location', 'secondary');
+    add(
+      'asset_correct_location',
+      'Correct recorded location',
+      'secondary',
+      'Update the recorded location without physically moving equipment.',
+    );
     add('asset_retire', 'Retire asset', 'consequential');
   }
   return (
@@ -143,6 +163,7 @@ export function DetailTasks(props: {
         if (selected === 'archive')
           return (
             <ArchiveQuantityForm
+              itemName={entity.name}
               actorId={props.actorId}
               latestReview={props.archiveReview ?? lastArchiveReview!}
             />

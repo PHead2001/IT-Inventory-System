@@ -14,6 +14,12 @@ import {
   formatOperationalTimestamp,
   exportTimeZoneHref,
 } from '@/lib/operational-time';
+import {
+  subscribeRelativeClock,
+  relativeClockSnapshot,
+  relativeClockServerSnapshot,
+  relativeTimeLabel,
+} from '@/lib/relative-clock';
 
 const TimeZoneContext = createContext(initialDisplayTimeZone);
 export const useOperationalTimeZone = () => useContext(TimeZoneContext);
@@ -32,6 +38,59 @@ export function OperationalTimeProvider({ children }: { children: ReactNode }) {
   return <TimeZoneContext value={context}>{children}</TimeZoneContext>;
 }
 export function OperationalTimestamp({
+  value,
+  className,
+  relative = false,
+}: {
+  value: unknown;
+  className?: string;
+  relative?: boolean;
+}) {
+  return relative ? (
+    <RelativeTimestamp value={value} className={className} />
+  ) : (
+    <ExactTimestamp value={value} className={className} />
+  );
+}
+function RelativeTimestamp({
+  value,
+  className,
+}: {
+  value: unknown;
+  className?: string;
+}) {
+  const now = useSyncExternalStore(
+    subscribeRelativeClock,
+    relativeClockSnapshot,
+    relativeClockServerSnapshot,
+  );
+  const timestamp = formatOperationalTimestamp(
+    value,
+    useContext(TimeZoneContext),
+  );
+  if (!timestamp) return <span className={className}>Time unavailable</span>;
+  const label = relativeTimeLabel(timestamp.dateTime, now) ?? timestamp.text;
+  return (
+    <details className={className}>
+      <summary
+        className="min-h-11 cursor-pointer py-2 tabular-nums"
+        title={timestamp.text}
+      >
+        <time dateTime={timestamp.dateTime}>{label}</time>
+        <span className="sr-only">
+          {' '}
+          · {timestamp.text}. Open for the exact recorded instant.
+        </span>
+      </summary>
+      <p className="max-w-full break-words text-xs">{timestamp.text}</p>
+      <p className="max-w-full break-all text-xs">
+        Recorded instant:{' '}
+        <span className="experience-code">{timestamp.dateTime}</span>
+      </p>
+    </details>
+  );
+}
+function ExactTimestamp({
   value,
   className,
 }: {

@@ -106,8 +106,10 @@ const commandSchema = z.strictObject({
   operation: z.enum([
     'quantity_create_v2',
     'asset_create_v2',
+    'asset_create_v3',
     'quantity_site_open',
     'asset_site_open',
+    'asset_site_open_v3',
   ]),
   requestId: uuid,
   expectedActorId: uuid,
@@ -137,8 +139,12 @@ const envelopeSchema = z
     if (
       value.command &&
       (value.command.expectedActorId !== value.scope.actor ||
-        value.command.operation !==
-          `${value.scope.kind}_${value.scope.site ? 'site_open' : 'create_v2'}` ||
+        ![
+          `${value.scope.kind}_${value.scope.site ? 'site_open' : 'create_v2'}`,
+          ...(value.scope.kind === 'asset'
+            ? [value.scope.site ? 'asset_site_open_v3' : 'asset_create_v3']
+            : []),
+        ].includes(value.command.operation) ||
         (value.scope.site
           ? value.command.payload.site_id !== value.scope.site
           : Object.hasOwn(value.command.payload, 'site_id')))
@@ -150,7 +156,9 @@ const envelopeSchema = z
     if (value.command) {
       const { operation, payload } = value.command;
       const schema =
-        operation === 'quantity_site_open' || operation === 'asset_site_open'
+        operation === 'quantity_site_open' ||
+        operation === 'asset_site_open' ||
+        operation === 'asset_site_open_v3'
           ? custodySchemas[operation]
           : payloadSchemas[operation];
       if (!schema.safeParse(payload).success)

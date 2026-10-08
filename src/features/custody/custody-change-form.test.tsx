@@ -15,7 +15,7 @@ vi.mock('@/features/locations/location-picker', () => ({
   }) => (
     <button
       type="button"
-      onClick={() => onValueChange('00000000-0000-4000-8000-000000000003')}
+      onClick={() => onValueChange('00000000-0000-4000-8000-000000000002')}
     >
       {label}
     </button>
@@ -48,6 +48,113 @@ const otherSite = {
 };
 beforeEach(() => vi.mocked(submitCustody).mockReset());
 
+it.each(['transfer', 'assign', 'return'] as const)(
+  'captures disambiguated %s endpoints through review, commit and later catalog renames',
+  async (action) => {
+    const duplicateSite = { ...otherSite, name: site.name };
+    const left = {
+      ...location,
+      name: 'Drawer',
+      breadcrumb: 'IT Closet / Left Storage / Drawer',
+      code: 'ITC-D01',
+    };
+    const right = {
+      ...left,
+      id: id(3),
+      breadcrumb: 'IT Closet / Right Storage / Drawer',
+      code: 'ITC-D07',
+    };
+    const sourceLabel =
+      action === 'assign'
+        ? `${right.breadcrumb} (${right.code})`
+        : `${site.name} (${site.code})`;
+    const destinationLabel =
+      action === 'return'
+        ? `${left.breadcrumb} (${left.code})`
+        : `${duplicateSite.name} (${duplicateSite.code})`;
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: '2',
+      changed: true,
+      custody: {
+        eventId: id(10),
+        operation: action,
+        actorName: 'Staff',
+        createdAt: '2026-10-07T12:00:00Z',
+        quantity: null,
+        source: {
+          id: action === 'assign' ? right.id : site.id,
+          kind: action === 'assign' ? 'storage' : 'site',
+          name: 'Immutable recorded source',
+        },
+        destination: {
+          id: action === 'return' ? left.id : duplicateSite.id,
+          kind: action === 'return' ? 'storage' : 'site',
+          name: 'Immutable recorded destination',
+        },
+        reason: null,
+        reference: null,
+      },
+    });
+    const initial = {
+      kind: 'asset' as const,
+      action,
+      entityId: id(1),
+      entityName: 'Laptop',
+      version: '1',
+      locations: [left, right],
+      sites: [site, duplicateSite],
+      currentLocation: action === 'assign' ? right : null,
+      currentSite: action === 'assign' ? null : site,
+    };
+    const view = render(<CustodyChangeForm {...initial} />);
+    if (action === 'return')
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Return to storage' }),
+      );
+    else
+      fireEvent.change(screen.getByLabelText('Destination site'), {
+        target: { value: duplicateSite.id },
+      });
+    fireEvent.click(screen.getByRole('button', { name: /^Review / }));
+    const review = screen.getByRole('region', { name: 'Review changes' });
+    expect(review).toHaveTextContent(`${sourceLabel} → ${destinationLabel}`);
+    expect(submitCustody).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+    await screen.findByRole('button', { name: 'Done' });
+    view.rerender(
+      <CustodyChangeForm
+        {...initial}
+        version="2"
+        locations={[
+          { ...left, breadcrumb: 'Changed left' },
+          { ...right, breadcrumb: 'Changed right' },
+        ]}
+        sites={[
+          { ...site, name: 'Changed source' },
+          { ...duplicateSite, name: 'Changed destination' },
+        ]}
+      />,
+    );
+    const completion = screen.getByRole('region', {
+      name: 'Custody completion',
+    });
+    expect(completion).toHaveTextContent(
+      `Reviewed route: ${sourceLabel} → ${destinationLabel}`,
+    );
+    expect(completion).toHaveTextContent(
+      'Immutable recorded source → Immutable recorded destination',
+    );
+    expect(completion).not.toHaveTextContent('Changed source');
+    expect(completion).not.toHaveTextContent('Changed right');
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
+      payload: { expected_version: '1' },
+    });
+    expect(submitCustody).toHaveBeenCalledOnce();
+  },
+);
+
 it('explains absent sites and disables only the unavailable assignment', () => {
   render(
     <CustodyChangeForm
@@ -61,7 +168,7 @@ it('explains absent sites and disables only the unavailable assignment', () => {
     />,
   );
   expect(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   ).toBeDisabled();
   expect(screen.getByText(/No sites are configured/)).toBeVisible();
   expect(screen.queryByRole('link', { name: /site settings/i })).toBeNull();
@@ -99,7 +206,7 @@ it('offers existing site settings only to a maintainer and distinguishes inactiv
   expect(screen.queryByText(/No sites are configured/)).toBeNull();
   expect(screen.queryByRole('link', { name: 'Open site settings' })).toBeNull();
   expect(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   ).toBeDisabled();
 });
 
@@ -117,7 +224,7 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(screen.getByText(/No other active site/)).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Transfer between sites' }),
+    screen.getByRole('button', { name: 'Review transfer between sites' }),
   ).toBeDisabled();
   view.rerender(
     <CustodyChangeForm
@@ -132,10 +239,112 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(
     screen
-      .getAllByRole('button', { name: 'Return to storage' })
+      .getAllByRole('button', { name: 'Review return to storage' })
       .find((button) => button.getAttribute('type') === 'submit'),
   ).toBeEnabled();
   expect(screen.queryByText(/No active sites/)).toBeNull();
+});
+
+it('collects destination and overdraw together and clears only corrected issues without moving focus', () => {
+  render(
+    <CustodyChangeForm
+      kind="quantity"
+      action="issue"
+      entityId={id(1)}
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      storageBalances={[{ location, quantity: 3 }]}
+    />,
+  );
+  const amount = screen.getByLabelText('Units');
+  fireEvent.change(amount, { target: { value: '4' } });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review issue stock to a site' }),
+  );
+  expect(screen.getByRole('link', { name: 'Destination site' })).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Units' })).toBeVisible();
+  amount.focus();
+  fireEvent.change(amount, { target: { value: '2' } });
+  expect(amount).toHaveFocus();
+  expect(screen.queryByRole('link', { name: 'Units' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Destination site' })).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('invalidates custody review after an edit or an observed catalog change, even when that catalog returns', () => {
+  const props = {
+    kind: 'asset' as const,
+    action: 'assign' as const,
+    entityId: id(1),
+    entityName: 'Laptop',
+    version: '1',
+    locations: [location],
+    sites: [site],
+    currentLocation: location,
+  };
+  const view = render(<CustodyChangeForm {...props} />);
+  fireEvent.change(screen.getByLabelText('Destination site'), {
+    target: { value: site.id },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('Laptop');
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'T-2' } },
+  );
+  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /^Review assign/ }));
+  view.rerender(
+    <CustodyChangeForm {...props} sites={[{ ...site, active: false }]} />,
+  );
+  view.rerender(<CustodyChangeForm {...props} />);
+  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it('requires review for asset return and fences double confirmation before dispatch renders', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof submitCustody>>) => void;
+  vi.mocked(submitCustody).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(
+    <CustodyChangeForm
+      kind="asset"
+      action="return"
+      entityId={id(1)}
+      entityName="Laptop"
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      currentSite={site}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Return to storage' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Review return to storage' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('Laptop');
+  expect(submitCustody).not.toHaveBeenCalled();
+  const form = screen.getByRole('form', { name: 'Return to storage' });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(submitCustody).toHaveBeenCalledOnce();
+  finish({ ok: true, entityId: id(1), version: '2', changed: true });
+  await screen.findByRole('button', { name: 'Done' });
 });
 
 it('assigns an asset from its authoritative storage source without duplicating a current drawer', async () => {
@@ -160,8 +369,10 @@ it('assigns an asset from its authoritative storage source without duplicating a
     target: { value: site.id },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assign asset to a site' }),
   );
+  expect(submitCustody).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
     operation: 'asset_site_change',
@@ -219,8 +430,10 @@ it('transfers only the specified site-held quantity with stable version and no s
   });
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: '2' } });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Transfer between sites' }),
+    screen.getByRole('button', { name: 'Review transfer between sites' }),
   );
+  expect(submitCustody).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   const payload = (
     vi.mocked(submitCustody).mock.calls[0][0] as {
@@ -276,8 +489,9 @@ it.each([
       target: { value: site.id },
     });
     fireEvent.click(
-      screen.getByRole('button', { name: 'Assign asset to a site' }),
+      screen.getByRole('button', { name: 'Review assign asset to a site' }),
     );
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
     await screen.findByText(/result could not be confirmed/);
     const first = vi.mocked(submitCustody).mock.calls[0][0];
     expect(first).toMatchObject({
@@ -377,8 +591,9 @@ it('keeps a last-unit committed receipt independent of depleted live sources and
     target: { value: site.id },
   });
   fireEvent.click(
-    screen.getByRole('button', { name: 'Issue stock to a site' }),
+    screen.getByRole('button', { name: 'Review issue stock to a site' }),
   );
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm
@@ -461,6 +676,7 @@ it('preserves a last-unit return source name even when it leaves site holdings a
       .find((button) => button.getAttribute('type') === 'button')!,
   );
   fireEvent.submit(screen.getByRole('form', { name: 'Return to storage' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm {...props} version="2" sites={[]} siteHoldings={[]} />,
@@ -473,15 +689,38 @@ it('preserves a last-unit return source name even when it leaves site holdings a
       .nextElementSibling,
   ).toHaveTextContent('0 units');
 });
-it.each([true, false])(
-  'renders a correction acknowledgement without transfer language when receipt is unavailable (changed=%s)',
-  async (changed) => {
+it.each([
+  [true, false],
+  [false, false],
+  [true, true],
+])(
+  'keeps quantity corrections at the reviewed site through review and completion (changed=%s, receipt=%s)',
+  async (changed, receiptAvailable) => {
     vi.mocked(submitCustody).mockResolvedValue({
       ok: true,
       entityId: id(1),
       version: changed ? '2' : '1',
       changed,
       ...(changed ? { eventId: id(10), refreshFailed: true } : {}),
+      ...(receiptAvailable
+        ? {
+            custody: {
+              eventId: id(10),
+              operation: 'corrected',
+              actorName: 'Staff',
+              createdAt: '2026-10-07T12:00:00Z',
+              quantity: 5,
+              source: { id: site.id, kind: 'site' as const, name: site.name },
+              destination: {
+                id: site.id,
+                kind: 'site' as const,
+                name: site.name,
+              },
+              reason: 'Count verified',
+              reference: null,
+            },
+          }
+        : {}),
     });
     render(
       <CustodyChangeForm
@@ -520,22 +759,41 @@ it.each([true, false])(
     fireEvent.submit(
       screen.getByRole('form', { name: 'Correct recorded site holding' }),
     );
+    const review = screen.getByRole('region', { name: 'Review changes' });
+    expect(review).toHaveTextContent(`At ${site.name} (${site.code})`);
+    expect(review).not.toHaveTextContent('→');
+    expect(review).not.toHaveTextContent('No destination');
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
     await screen.findByRole('button', { name: 'Done' });
     const completion = screen.getByRole('region', {
       name: 'Custody completion',
     });
-    expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
-    expect(completion).toHaveTextContent(
-      `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
-    );
-    expect(completion).toHaveTextContent(
-      changed
-        ? 'The transaction is confirmed. The event receipt is not available yet'
-        : 'No balance change was needed.',
-    );
+    if (receiptAvailable) {
+      expect(completion).toHaveTextContent(
+        `Reviewed route: At ${site.name} (${site.code})`,
+      );
+    } else {
+      expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
+      expect(completion).toHaveTextContent(
+        `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
+      );
+      expect(completion).toHaveTextContent(
+        changed
+          ? 'The transaction is confirmed. The event receipt is not available yet'
+          : 'No balance change was needed.',
+      );
+    }
     expect(completion).not.toHaveTextContent('→');
     expect(completion).not.toHaveTextContent('No destination');
     expect(completion).not.toHaveTextContent('Signed adjustment');
     expect(submitCustody).toHaveBeenCalledOnce();
+    const command = vi.mocked(submitCustody).mock.calls[0][0];
+    expect(command).toMatchObject({
+      payload: {
+        source_site_id: site.id,
+        observed_quantity: changed ? 10 : 5,
+      },
+    });
+    expect(command).not.toHaveProperty('payload.destination_site_id');
   },
 );

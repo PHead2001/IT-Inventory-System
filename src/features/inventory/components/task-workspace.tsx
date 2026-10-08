@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -10,6 +11,7 @@ import {
   TaskStateContext,
   TaskResetContext,
   TaskDiscardContext,
+  TaskWarningContext,
   type TaskState,
 } from './task-state';
 import { Button } from '@/components/ui/button';
@@ -34,11 +36,13 @@ export function TaskWorkspace({
   children: (id: string) => ReactNode;
   context: ReactNode;
 }) {
+  const scope = useId();
   const [selected, setSelected] = useState<string | null>(null);
   const [requested, setRequested] = useState<string | null | undefined>(
     undefined,
   );
   const [state, setState] = useState(clean);
+  const [warning, setWarning] = useState('');
   const stateRef = useRef(clean);
   const discardTask = useRef<(() => boolean) | null>(null);
   const registerDiscard = useCallback((discard: (() => boolean) | null) => {
@@ -64,7 +68,7 @@ export function TaskWorkspace({
       !returnFocusRequested.current
     )
       return;
-    // A completed task disables its launcher until this clean commit.
+    // Return focus after the closed task's clean state commits.
     returnFocusRequested.current = false;
     const target = launcher.current;
     if (target?.isConnected && !target.disabled) target.focus();
@@ -81,12 +85,16 @@ export function TaskWorkspace({
     if (
       stateRef.current.pending ||
       stateRef.current.uncertain ||
-      (stateRef.current.completed &&
-        !(selected === 'metadata' && id === null)) ||
       id === selected
     )
       return;
-    if (state.dirty) setRequested(id);
+    if (
+      stateRef.current.completed &&
+      discardTask.current &&
+      !discardTask.current()
+    )
+      return;
+    if (state.dirty && !state.completed) setRequested(id);
     else {
       setActiveLabel(
         choices.find((choice) => choice.id === id)?.label ?? activeLabel,
@@ -106,6 +114,18 @@ export function TaskWorkspace({
         Tasks
       </h2>
       {context}
+      {warning && (
+        <div className="experience-feedback space-y-2 text-sm text-amber-200">
+          <p role="alert">{warning}</p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setWarning('')}
+          >
+            Dismiss warning
+          </Button>
+        </div>
+      )}
       {(['primary', 'secondary', 'consequential'] as const).map((group) => {
         const tasks = choices.filter(
           (choice) => (choice.group ?? 'primary') === group,
@@ -118,10 +138,15 @@ export function TaskWorkspace({
                 key={choice.id}
                 type="button"
                 variant="outline"
-                disabled={locked || state.completed}
+                disabled={locked}
                 aria-pressed={choice.id === selected}
+                aria-describedby={
+                  choice.description
+                    ? `${scope}-${choice.id}-description`
+                    : undefined
+                }
                 onClick={(event) => {
-                  if (stateRef.current.dirty)
+                  if (stateRef.current.dirty && !stateRef.current.completed)
                     requestedLauncher.current = event.currentTarget;
                   else launcher.current = event.currentTarget;
                   change(choice.id);
@@ -132,8 +157,23 @@ export function TaskWorkspace({
             ))}
           </div>
         );
+        const descriptions = tasks.map(
+          (task) =>
+            task.description && (
+              <p
+                id={`${scope}-${task.id}-description`}
+                className="mt-2 text-sm text-slate-400"
+                key={task.id}
+              >
+                {task.label}: {task.description}
+              </p>
+            ),
+        );
         return group === 'primary' ? (
-          <div key={group}>{controls}</div>
+          <div key={group}>
+            {controls}
+            {descriptions}
+          </div>
         ) : (
           <details key={group}>
             <summary className="min-h-11 cursor-pointer py-2 font-semibold">
@@ -142,14 +182,7 @@ export function TaskWorkspace({
                 : 'Lifecycle & consequential actions'}
             </summary>
             {controls}
-            {tasks.map(
-              (task) =>
-                task.description && (
-                  <p className="mt-2 text-sm text-slate-400" key={task.id}>
-                    {task.label}: {task.description}
-                  </p>
-                ),
-            )}
+            {descriptions}
           </details>
         );
       })}
@@ -162,13 +195,6 @@ export function TaskWorkspace({
               : 'Saving this task. Wait for its result before switching.'}
         </p>
       )}
-      {state.completed && (
-        <p className="text-sm text-cyan-200">
-          {selected === 'metadata'
-            ? 'Details saved. Choose Done or Close task to finish.'
-            : 'Completed transaction retained. Start a new transaction explicitly before switching tasks.'}
-        </p>
-      )}
       {requested !== undefined && (
         <div
           role="alertdialog"
@@ -179,7 +205,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             autoFocus
-            disabled={locked || (state.completed && selected !== 'metadata')}
+            disabled={locked}
             onClick={() => {
               setRequested(undefined);
               heading.current?.focus();
@@ -235,7 +261,7 @@ export function TaskWorkspace({
           <Button
             type="button"
             variant="outline"
-            disabled={locked || (state.completed && selected !== 'metadata')}
+            disabled={locked}
             onClick={() => change(null)}
           >
             Close task
@@ -252,7 +278,9 @@ export function TaskWorkspace({
           >
             <TaskDiscardContext.Provider value={registerDiscard}>
               <TaskStateContext.Provider value={report}>
-                {children(selected)}
+                <TaskWarningContext.Provider value={setWarning}>
+                  {children(selected)}
+                </TaskWarningContext.Provider>
               </TaskStateContext.Provider>
             </TaskDiscardContext.Provider>
           </TaskResetContext.Provider>

@@ -15,6 +15,7 @@ export default async function NewAssetPage({
   const query = await searchParams;
   const returnTo = query?.returnTo;
   const draft = typeof query?.draft === 'string' ? query.draft : undefined;
+  const instance = draft ?? crypto.randomUUID();
   const { member } = await requireMember();
   if (member.role !== 'staff')
     return (
@@ -47,7 +48,8 @@ export default async function NewAssetPage({
       </p>
       <div className={`${panel} max-w-5xl`}>
         <MetadataForm
-          key={`${member.user_id}:${draft ?? 'new'}`}
+          key={`${member.user_id}:asset:${instance}`}
+          creationInstanceId={instance}
           creationDraftId={draft}
           recoveryBackend={process.env.NEXT_PUBLIC_SUPABASE_URL}
           actorId={member.user_id}

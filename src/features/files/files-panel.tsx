@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { formatFileSize } from '@/lib/file-size';
 import { cleanupResultSchema, type CleanupResult } from './contract';
+import { validateSelectedFile } from './selection';
 
 const bucket = 'inventory-files';
 type Card = {
@@ -181,6 +182,42 @@ function BoundFilesPanel({
   const [historyRefresh, setHistoryRefresh] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
+  const selectedPreviewRef = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      if (selectedPreviewRef.current)
+        URL.revokeObjectURL(selectedPreviewRef.current);
+    },
+    [],
+  );
+  function handleSelectedFile(next: File | null) {
+    if (selectedPreviewRef.current)
+      URL.revokeObjectURL(selectedPreviewRef.current);
+    selectedPreviewRef.current = null;
+    setSelectedPreview(null);
+    setFile(null);
+    if (!next) return;
+    try {
+      validateSelectedFile(next, parentType);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Choose a supported file.',
+      );
+      return;
+    }
+    setMessage('');
+    setFile(next);
+    if (next.type.startsWith('image/')) {
+      try {
+        const url = URL.createObjectURL(next);
+        selectedPreviewRef.current = url;
+        setSelectedPreview(url);
+      } catch {
+        /* A local preview failure does not change upload eligibility. */
+      }
+    }
+  }
   const [replace, setReplace] = useState('');
   const replaceUnavailable = Boolean(
     replace &&
@@ -210,6 +247,17 @@ function BoundFilesPanel({
     }
   }, [removal]);
   const [message, setMessage] = useState('');
+  useEffect(() => {
+    function preventFileNavigation(event: DragEvent) {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    }
+    document.addEventListener('dragover', preventFileNavigation);
+    document.addEventListener('drop', preventFileNavigation);
+    return () => {
+      document.removeEventListener('dragover', preventFileNavigation);
+      document.removeEventListener('drop', preventFileNavigation);
+    };
+  }, []);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
@@ -411,7 +459,7 @@ function BoundFilesPanel({
   function beginPicker(target: string) {
     if (busy) return;
     // A new picker intent must not reuse bytes if the native picker is cancelled.
-    setFile(null);
+    handleSelectedFile(null);
     if (fileInput.current) fileInput.current.value = '';
     setReplace(target);
     fileInput.current?.click();
@@ -422,26 +470,7 @@ function BoundFilesPanel({
     setBusy(true);
     setMessage('');
     try {
-      if (file.size < 1 || file.size > 20971520)
-        throw new Error('Choose a file up to 20 MiB.');
-      if (
-        ![
-          'image/jpeg',
-          'image/png',
-          'image/webp',
-          ...(parentType === 'asset' ? ['application/pdf'] : []),
-        ].includes(file.type)
-      )
-        throw new Error(
-          parentType === 'quantity'
-            ? 'Choose a JPEG, PNG, or still WebP photo. HEIC needs conversion first.'
-            : 'Choose a JPEG, PNG, still WebP, or PDF file. HEIC needs conversion first.',
-        );
-      const safeName = file.name
-        .trim()
-        .replace(/[\x00-\x1f\x7f/\\]/g, '_')
-        .slice(0, 200);
-      if (!safeName) throw new Error('Choose a file with a name.');
+      const safeName = validateSelectedFile(file, parentType);
       const replacement = replace
         ? cards.find((card) => card.id === replace && card.state === 'ready')
         : null;
@@ -482,7 +511,7 @@ function BoundFilesPanel({
       if (uploaded.error) throw new Error('The file could not be uploaded.');
       // The immutable reservation now owns these bytes even if the next RPC
       // response is lost. The file picker must not offer a second upload.
-      setFile(null);
+      handleSelectedFile(null);
       if (fileInput.current) fileInput.current.value = '';
       const marked = await rpc('inventory_file_uploaded', {
         p_file_id: reservation.id,
@@ -731,26 +760,6 @@ function BoundFilesPanel({
           ? 'Recognition photo'
           : 'Photos and documents'}
       </h2>
-      {staff && (
-        <button
-          type="button"
-          disabled={busy || Boolean(removal)}
-          className="mt-3 min-h-11 rounded-lg bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
-          onClick={() =>
-            beginPicker(
-              parentType === 'quantity'
-                ? (cards.find((card) => card.state === 'ready')?.id ?? '')
-                : '',
-            )
-          }
-        >
-          {parentType === 'quantity'
-            ? cards.some((card) => card.state === 'ready')
-              ? 'Replace photo'
-              : 'Add photo'
-            : 'Add attachment'}
-        </button>
-      )}
       <p className="experience-muted mt-2 text-sm">
         {parentType === 'quantity'
           ? 'JPEG, PNG or still WebP · Up to 20 MiB. Photos are normalized before display.'
@@ -905,22 +914,104 @@ function BoundFilesPanel({
       )}
       {staff && (
         <div className="mt-4 space-y-3 border-t border-cyan-100/15 pt-4">
-          <label className="block text-sm font-medium" htmlFor="inventory-file">
-            Add{' '}
-            {parentType === 'quantity' ? 'recognition photo' : 'photo or PDF'}
-          </label>
-          <input
-            id="inventory-file"
-            ref={fileInput}
-            type="file"
-            className="block w-full min-h-11 text-sm"
-            accept={
-              parentType === 'quantity'
-                ? 'image/jpeg,image/png,image/webp'
-                : 'image/jpeg,image/png,image/webp,application/pdf'
-            }
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
+          <div
+            role="group"
+            aria-label="Choose an inventory file"
+            className="rounded-lg border-2 border-dashed border-cyan-100/30 bg-slate-950 p-4"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (busy || removal) return;
+              if (event.dataTransfer.files.length !== 1) {
+                handleSelectedFile(null);
+                if (fileInput.current) fileInput.current.value = '';
+                setMessage('Choose one file at a time.');
+                return;
+              }
+              if (parentType === 'quantity')
+                setReplace(
+                  cards.find((card) => card.state === 'ready')?.id ?? '',
+                );
+              handleSelectedFile(event.dataTransfer.files[0]);
+            }}
+          >
+            <label
+              className="block text-sm font-medium"
+              htmlFor="inventory-file"
+            >
+              Add{' '}
+              {parentType === 'quantity' ? 'recognition photo' : 'photo or PDF'}
+            </label>
+            <input
+              id="inventory-file"
+              ref={fileInput}
+              type="file"
+              className="sr-only"
+              tabIndex={-1}
+              disabled={busy || Boolean(removal)}
+              accept={
+                parentType === 'quantity'
+                  ? 'image/jpeg,image/png,image/webp'
+                  : 'image/jpeg,image/png,image/webp,application/pdf'
+              }
+              onChange={(event) =>
+                handleSelectedFile(event.target.files?.[0] ?? null)
+              }
+            />
+            <p className="my-2 text-xs text-slate-300">
+              Drop one file here, or browse your device. Selection is local.
+              Upload and review to attach it.
+            </p>
+            <button
+              type="button"
+              disabled={busy || Boolean(removal)}
+              className="min-h-11 rounded border border-cyan-400 px-4 py-2 text-cyan-200 disabled:opacity-50"
+              onClick={() =>
+                beginPicker(
+                  parentType === 'quantity'
+                    ? (cards.find((card) => card.state === 'ready')?.id ?? '')
+                    : replace,
+                )
+              }
+            >
+              Browse files
+            </button>
+            {file && (
+              <div className="mt-3 space-y-2">
+                <p className="break-all text-sm">
+                  Selected: {file.name} · {formatFileSize(file.size)}
+                </p>
+                {selectedPreview ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={selectedPreview}
+                      alt="Selected file preview"
+                      className="max-h-40 max-w-full rounded object-contain"
+                    />
+                  </>
+                ) : (
+                  <span className="inline-flex rounded border border-slate-600 px-3 py-2 text-xs">
+                    {file.type === 'application/pdf'
+                      ? 'PDF document · download after review'
+                      : 'Photo preview unavailable'}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={busy || Boolean(removal)}
+                  className="min-h-11 text-cyan-200 underline"
+                  onClick={() => {
+                    handleSelectedFile(null);
+                    if (fileInput.current) fileInput.current.value = '';
+                  }}
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+          </div>
           {(cards.some((card) => card.state === 'ready') ||
             replaceUnavailable) && (
             <label className="block text-sm">
@@ -1086,7 +1177,7 @@ function BoundFilesPanel({
               <button
                 type="button"
                 disabled={busy}
-                className="min-h-11 rounded-lg bg-red-800 px-4 font-semibold disabled:opacity-50"
+                className="experience-danger-action disabled:opacity-50"
                 onClick={() => void remove()}
               >
                 {removal.phase === 'unknown'

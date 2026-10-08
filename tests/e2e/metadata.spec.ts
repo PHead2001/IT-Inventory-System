@@ -1,4 +1,6 @@
-import { openRecordTask } from './record-task-controls';
+import { chooseLocation } from './location-picker';
+import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
+import { expectRecordVersion, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
@@ -234,9 +236,9 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await editForm.getByLabel(/Tracking note/).fill('world');
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
-  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectRecordVersion(page, 2);
   await expectStableMetadataDone(page);
-  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectRecordVersion(page, 2);
   await finishMetadata(page);
   await expect(
     page.getByRole('region', { name: 'Record tasks' }).getByRole('button', {
@@ -266,10 +268,10 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await otherEdit.getByLabel(/Tracking note/).fill('newer');
     await metadataReviewButton(otherEdit).click();
     await metadataSaveButton(otherEdit).click();
-    await expect(other.getByText(/Version 3$/)).toBeVisible();
+    await expectRecordVersion(other, 3);
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
-    await expect(page.getByText(/Version 4$/)).toBeVisible();
+    await expectRecordVersion(page, 4);
     await finishMetadata(page);
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('newer');
@@ -286,10 +288,10 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await otherEdit.getByLabel('Name', { exact: true }).fill(converged);
     await metadataReviewButton(otherEdit).click();
     await metadataSaveButton(otherEdit).click();
-    await expect(other.getByText(/Version 5$/)).toBeVisible();
+    await expectRecordVersion(other, 5);
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
-    await expect(page.getByText(/Version 6$/)).toBeVisible();
+    await expectRecordVersion(page, 6);
     await finishMetadata(page);
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
@@ -319,7 +321,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await editForm.getByLabel(/Tracking note/).fill('okay');
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
-  await expect(page.getByText(/Version 7$/)).toBeVisible();
+  await expectRecordVersion(page, 7);
   await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
@@ -330,7 +332,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     .getByRole('checkbox', { name: /existing custom values.*legacy values/ })
     .check();
   await metadataSaveButton(editForm).click();
-  await expect(page.getByText(/Version 8$/)).toBeVisible();
+  await expectRecordVersion(page, 8);
   await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(metadataReviewButton(editForm)).toBeEnabled();
@@ -339,7 +341,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
     .fill('After category ' + suffix);
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
-  await expect(page.getByText(/Version 9$/)).toBeVisible();
+  await expectRecordVersion(page, 9);
   await page.reload();
   await expect(
     page.getByRole('heading', {
@@ -350,6 +352,175 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Metadata edited', exact: true }),
+    page.getByRole('heading', { name: 'Details updated', exact: true }),
   ).toHaveCount(8);
+});
+
+test('creation clears every linked required-field error during correction and both search surfaces retain bounded readable UUID-looking answers', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  // The bounded projection orders field IDs, so make the first three explicit.
+  const previewIds = Array.from({ length: 4 }, () => randomUUID()).sort();
+  const fields = [
+    {
+      id: previewIds[0],
+      type: 'short_text',
+      label: 'Owner reference',
+      required: true,
+    },
+    {
+      id: previewIds[1],
+      type: 'integer',
+      label: 'Device count',
+      required: true,
+    },
+    { id: previewIds[3], type: 'date', label: 'Needed by', required: true },
+    {
+      id: previewIds[2],
+      type: 'long_text',
+      label: 'Long note',
+      required: false,
+    },
+  ];
+  const uuidLookingAnswer = '123e4567-e89b-42d3-a456-426614174000';
+  const longAnswer = 'Bounded note ' + 'x'.repeat(300);
+  const boundedAnswer = longAnswer.slice(0, 256) + '…';
+  const name = `Readable answers ${owned.suffix}`;
+  try {
+    await publishDefinition(owned.caller, owned.actorId, owned.categoryId, {
+      fields: fields.map((field) => ({
+        ...field,
+        applies_to: ['quantity'],
+        rules: {},
+        options: [],
+      })),
+      layout: [
+        {
+          id: randomUUID(),
+          label: 'Details',
+          controls: [
+            { id: randomUUID(), kind: 'builtin', builtin: 'name', width: 12 },
+            {
+              id: randomUUID(),
+              kind: 'builtin',
+              builtin: 'category_id',
+              width: 12,
+            },
+            {
+              id: randomUUID(),
+              kind: 'builtin',
+              builtin: 'asset_tag',
+              width: 12,
+              applies_to: ['asset'],
+            },
+            ...fields.map((field) => ({
+              id: randomUUID(),
+              kind: 'field',
+              field_id: field.id,
+              width: 12,
+            })),
+          ],
+        },
+      ],
+    });
+    await signIn(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/inventory/quantity/new');
+    const form = page.getByRole('form', {
+      name: 'Add quantity item',
+      exact: true,
+    });
+    await form
+      .getByLabel('Category', { exact: true })
+      .selectOption(owned.categoryId);
+    await form.getByLabel('Initial quantity', { exact: true }).fill('1');
+    await metadataReviewButton(form).click();
+    const summary = form.getByRole('alert');
+    for (const label of [
+      'Name',
+      'Owner reference',
+      'Device count',
+      'Needed by',
+      'Initial location',
+    ])
+      await expect(
+        summary.getByRole('link', { name: label, exact: true }),
+      ).toBeVisible();
+    for (const [label, value] of [
+      ['Name', name],
+      ['Owner reference', uuidLookingAnswer],
+      ['Device count', '7'],
+      ['Needed by', '2026-10-08'],
+    ]) {
+      await summary.getByRole('link', { name: label, exact: true }).click();
+      const field = form.getByLabel(
+        label === 'Name' ? label : label + ' (required)',
+        { exact: true },
+      );
+      await expect(field).toBeFocused();
+      await field.fill(value);
+      await expect(
+        summary.getByRole('link', { name: label, exact: true }),
+      ).toHaveCount(0);
+    }
+    await summary
+      .getByRole('link', { name: 'Initial location', exact: true })
+      .click();
+    await chooseLocation(form, 'Initial location', 'ITC-RED');
+    // No second Review click is needed to clear the old error summary.
+    await expect(summary).toHaveCount(0);
+    await expect(
+      form.getByRole('region', { name: 'Metadata review', exact: true }),
+    ).toHaveCount(0);
+    await form.getByLabel('Long note', { exact: true }).fill(longAnswer);
+    await metadataReviewButton(form).click();
+    await metadataSaveButton(form).click();
+    await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+    const id = new URL(page.url()).pathname.split('/').at(-1)!;
+    owned.quantities.add(id);
+    await page.goto('/inventory?q=' + encodeURIComponent(name));
+    const row = page
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('link', { name, exact: true }) });
+    await expect(row).toContainText('Owner reference: ' + uuidLookingAnswer);
+    await expect(row).toContainText('Device count: 7');
+    await expect(row).toContainText('Long note: ' + boundedAnswer);
+    await expect(
+      row.getByRole('link', { name: 'View all details', exact: true }),
+    ).toBeVisible();
+    await expect(row).not.toContainText(longAnswer);
+    await expect(row).not.toContainText('Needed by:');
+    for (const field of fields) await expect(row).not.toContainText(field.id);
+    await page.goto('/labels');
+    const search = page.getByRole('form', {
+      name: 'Search label records',
+      exact: true,
+    });
+    await search.getByRole('textbox').fill(name);
+    await search.getByRole('button', { name: 'Search', exact: true }).click();
+    const labels = page.getByRole('region', {
+      name: 'Search result records',
+      exact: true,
+    });
+    // Scope to the existing resultMain container through its real record link.
+    const result = labels
+      .getByRole('link', { name, exact: true })
+      .locator('..');
+    // User-facing label results must carry the same bounded human answers.
+    await expect(result).toHaveCount(1);
+    await expect(result).toContainText('Owner reference: ' + uuidLookingAnswer);
+    await expect(result).toContainText('Device count: 7');
+    await expect(result).toContainText('Long note: ' + boundedAnswer);
+    await expect(
+      result.getByRole('link', { name: 'View all details', exact: true }),
+    ).toBeVisible();
+    await expect(result).not.toContainText(longAnswer);
+    await expect(result).not.toContainText('Needed by:');
+    for (const field of fields)
+      await expect(result).not.toContainText(field.id);
+  } finally {
+    await owned.cleanup();
+  }
 });

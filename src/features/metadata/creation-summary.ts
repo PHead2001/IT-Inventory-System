@@ -17,10 +17,10 @@ export function normalizeCreationIntent(
 ) {
   const schema = siteOpening
     ? custodySchemas[
-        kind === 'quantity' ? 'quantity_site_open' : 'asset_site_open'
+        kind === 'quantity' ? 'quantity_site_open' : 'asset_site_open_v3'
       ]
     : payloadSchemas[
-        kind === 'quantity' ? 'quantity_create_v2' : 'asset_create_v2'
+        kind === 'quantity' ? 'quantity_create_v2' : 'asset_create_v3'
       ];
   const parsed = schema.safeParse(payload);
   if (!parsed.success) return null;
@@ -35,8 +35,6 @@ export function normalizeCreationIntent(
     'reference',
   ])
     if (Object.hasOwn(intent, key) && intent[key] === '') intent[key] = null;
-  if (typeof intent.asset_tag === 'string')
-    intent.asset_tag = intent.asset_tag.toLowerCase();
   return intent;
 }
 export type SummaryRow = { label: string; value: string; source?: string };

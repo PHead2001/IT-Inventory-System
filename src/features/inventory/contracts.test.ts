@@ -60,6 +60,11 @@ const payloads: Record<Operation, Record<string, unknown>> = {
     location_id: locationId,
     expected_published_revision_id: publishedId,
   },
+  asset_create_v3: {
+    ...metadata,
+    location_id: locationId,
+    expected_published_revision_id: publishedId,
+  },
   asset_move: { ...asset, location_id: destinationId },
   asset_correct_location: {
     ...asset,
@@ -68,6 +73,11 @@ const payloads: Record<Operation, Record<string, unknown>> = {
   },
   asset_update: { ...asset, ...metadata },
   asset_update_v2: {
+    ...asset,
+    ...metadata,
+    expected_published_revision_id: publishedId,
+  },
+  asset_update_v3: {
     ...asset,
     ...metadata,
     expected_published_revision_id: publishedId,

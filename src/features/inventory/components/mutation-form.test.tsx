@@ -74,6 +74,121 @@ async function chooseLocation(
   await user.click(screen.getByRole('option', { name: new RegExp(name) }));
 }
 describe('inventory operation forms', () => {
+  it('reports overdraw and missing destination together, then revalidates corrections without another review', async () => {
+    const user = userEvent.setup();
+    render(<MutationForm {...defaults} operation="quantity_move" />);
+    const amount = screen.getByLabelText('Quantity to move');
+    fireEvent.change(amount, { target: { value: '999' } });
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    expect(
+      screen.getByRole('link', { name: 'Destination location' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Quantity to move' }),
+    ).toBeVisible();
+    amount.focus();
+    fireEvent.change(amount, { target: { value: '2' } });
+    expect(amount).toHaveFocus();
+    expect(screen.queryByRole('link', { name: 'Quantity to move' })).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Destination location' }),
+    ).toBeVisible();
+    await chooseLocation(user, 'Destination location', '1B');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [true, true, '1A'],
+    [false, true, 'Select a location'],
+    [true, false, 'Select a location'],
+  ])(
+    'defaults Restore only to an eligible recorded storage location (active=%s eligible=%s)',
+    (active, eligible, expected) => {
+      const recorded = { ...location, active, can_hold_inventory: eligible };
+      render(
+        <MutationForm
+          categories={defaults.categories}
+          locations={[recorded, destination]}
+          operation="asset_restore"
+          asset={{
+            ...item,
+            status: 'retired',
+            assetTag: null,
+            serialNumber: null,
+          }}
+          currentLocation={recorded}
+        />,
+      );
+      expect(
+        screen.getByLabelText('Confirmed current location'),
+      ).toHaveTextContent(expected);
+      expect(mocks.submit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves site-held or missing Restore storage empty and uses a plain Reason error', async () => {
+    const user = userEvent.setup();
+    render(
+      <MutationForm
+        categories={defaults.categories}
+        locations={defaults.locations}
+        operation="asset_restore"
+        asset={{
+          ...item,
+          status: 'retired',
+          assetTag: null,
+          serialNumber: null,
+        }}
+      />,
+    );
+    expect(
+      screen.getByLabelText('Confirmed current location'),
+    ).toHaveTextContent('Select a location');
+    await user.click(
+      screen.getByRole('button', { name: 'Review restore asset' }),
+    );
+    expect(screen.getByText('Enter a value for Reason.')).toBeVisible();
+    expect(
+      screen.queryByText('Enter a value for Reason (required).'),
+    ).toBeNull();
+  });
+
+  it.each([0, 1, 2])(
+    'Receive defaults only for one eligible positive holding (%s holdings)',
+    (count) => {
+      render(
+        <MutationForm
+          {...defaults}
+          operation="quantity_receive"
+          balances={[
+            { location, quantity: count > 0 ? 1 : 0 },
+            ...(count === 2 ? [{ location: destination, quantity: 2 }] : []),
+          ]}
+        />,
+      );
+      expect(screen.getByLabelText('Receive at')).toHaveTextContent(
+        count === 1 ? '1A' : 'Select a location',
+      );
+    },
+  );
+
+  it('does not replace an edited Receive default when balances refresh', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <MutationForm {...defaults} operation="quantity_receive" />,
+    );
+    expect(screen.getByLabelText('Receive at')).toHaveTextContent('1A');
+    await chooseLocation(user, 'Receive at', '1B');
+    view.rerender(
+      <MutationForm
+        {...defaults}
+        balances={[{ location, quantity: 9 }]}
+        operation="quantity_receive"
+      />,
+    );
+    expect(screen.getByLabelText('Receive at')).toHaveTextContent('1B');
+  });
   it.each([1, 2])(
     'uses the correct unit for %s available stock without permitting overdraw',
     async (count) => {
@@ -421,6 +536,10 @@ describe('inventory operation forms', () => {
           'Reviewed reason',
         );
       await user.click(screen.getByRole('button', { name: /^Review / }));
+      if (operation === 'asset_retire')
+        expect(
+          screen.getByRole('button', { name: 'Confirm retire asset' }),
+        ).toHaveAccessibleDescription('Review retire asset for ' + item.name);
       await user.click(screen.getByRole('button', { name: /^Confirm / }));
       await screen.findByRole('alert');
       const first = mocks.submit.mock.calls[0][0];
@@ -455,9 +574,7 @@ describe('inventory operation forms', () => {
       );
       await screen.findByText('Saved successfully.');
       expect(mocks.submit.mock.calls[2][0]).toEqual(first);
-      expect(
-        screen.getByRole('button', { name: 'New transaction' }),
-      ).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Done' })).toBeVisible();
     },
   );
   it('surfaces stale conflicts and retains observed count on refresh', async () => {

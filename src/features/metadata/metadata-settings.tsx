@@ -587,6 +587,27 @@ export function MetadataSettings({
 }) {
   const router = useRouter();
   const reducedMotion = useEffectiveReducedMotion();
+  const pendingDesignerFocus = useRef<number | null>(null);
+  const focusIntent = useRef(0);
+  const cancelDesignerFocus = useCallback(() => {
+    focusIntent.current++;
+    if (pendingDesignerFocus.current !== null)
+      cancelAnimationFrame(pendingDesignerFocus.current);
+    pendingDesignerFocus.current = null;
+  }, []);
+  useEffect(() => cancelDesignerFocus, [cancelDesignerFocus]);
+  const scheduleDesignerFocus = useCallback(
+    (focus: () => void) => {
+      cancelDesignerFocus();
+      const intent = focusIntent.current;
+      pendingDesignerFocus.current = requestAnimationFrame(() => {
+        pendingDesignerFocus.current = null;
+        if (intent === focusIntent.current) focus();
+      });
+    },
+    [cancelDesignerFocus],
+  );
+
   const active = categories.filter((category) => category.active);
   const [categoryId] = useState(selectedCategoryId ?? active[0]?.id ?? '');
   const selected = forms[categoryId];
@@ -722,10 +743,10 @@ export function MetadataSettings({
   >('canvas');
   const restoreAdditionFocus = useCallback(() => {
     setMobilePanel('library');
-    requestAnimationFrame(() =>
+    scheduleDesignerFocus(() =>
       document.querySelector<HTMLElement>('[data-designer-add-field]')?.focus(),
     );
-  }, []);
+  }, [scheduleDesignerFocus]);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     null,
   );
@@ -1536,11 +1557,24 @@ export function MetadataSettings({
     setSelectedSectionId(section?.id ?? null);
     setSelectedFieldId(control?.field_id ?? null);
     setMobilePanel('inspector');
-    requestAnimationFrame(() => {
-      const element = document.querySelector<HTMLElement>(
+    scheduleDesignerFocus(() => {
+      const control = document.querySelector<HTMLElement>(
         `[data-control-id="${controlId}"]`,
       );
-      element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+      const canvas = control?.closest<HTMLElement>(
+        '[data-testid="designer-canvas"]',
+      );
+      // Responsive CSS decides which destination is visible; do not duplicate its breakpoint.
+      const element =
+        canvas && getComputedStyle(canvas).display === 'none'
+          ? document.querySelector<HTMLElement>(
+              '[data-designer-inspector-heading]',
+            )
+          : control;
+      element?.scrollIntoView?.({
+        block: 'nearest',
+        behavior: reducedMotion ? 'instant' : 'smooth',
+      });
       element?.focus();
     });
   };
@@ -1762,6 +1796,9 @@ export function MetadataSettings({
   return (
     <section
       className="min-w-0 space-y-3 rounded-lg border border-slate-700 p-3"
+      onPointerDownCapture={cancelDesignerFocus}
+      onKeyDownCapture={cancelDesignerFocus}
+      onFocusCapture={cancelDesignerFocus}
       aria-labelledby="metadata-settings-heading"
     >
       <h2 id="metadata-settings-heading" className="sr-only">
@@ -2526,7 +2563,7 @@ export function MetadataSettings({
                         setSelectedSectionId(id);
                         setSelectedControlId(null);
                         setSelectedFieldId(null);
-                        requestAnimationFrame(() =>
+                        scheduleDesignerFocus(() =>
                           document
                             .querySelector<HTMLElement>(
                               `[data-section-id="${id}"] input`,
@@ -2826,7 +2863,7 @@ export function MetadataSettings({
                                             </span>
                                             <span
                                               title="Form types using this field"
-                                              className="shrink-0 text-[10px] text-slate-400"
+                                              className="shrink-0 text-xs text-slate-400"
                                             >
                                               {kindLabel(
                                                 controlKinds(
@@ -2930,7 +2967,13 @@ export function MetadataSettings({
                     className={`${mobilePanel === 'inspector' ? '' : 'hidden'} min-w-0 space-y-3 min-[1152px]:block`}
                     aria-label="Designer inspector"
                   >
-                    <h3 className="font-semibold">Inspector</h3>
+                    <h3
+                      data-designer-inspector-heading
+                      tabIndex={-1}
+                      className="font-semibold"
+                    >
+                      Inspector
+                    </h3>
                     {selectedField ? (
                       <section
                         aria-label={`${fieldName(selectedField)} field settings`}
@@ -2943,6 +2986,7 @@ export function MetadataSettings({
                         <FieldSettings
                           key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
+                          autoFocus={false}
                           revisionOptionCount={definition.fields.reduce(
                             (total, field) => total + field.options.length,
                             0,

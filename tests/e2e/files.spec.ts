@@ -136,7 +136,18 @@ async function custodyForm(page: Page, title: string) {
     .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 }
 async function submitCustody(form: Locator, title: string) {
-  await form.getByRole('button', { name: title, exact: true }).click();
+  await form
+    .getByRole('button', { name: `Review ${title.toLowerCase()}`, exact: true })
+    .click();
+  await expect(
+    form.getByRole('region', { name: 'Review changes' }),
+  ).toBeVisible();
+  await form
+    .getByRole('button', {
+      name: `Confirm ${title.toLowerCase()}`,
+      exact: true,
+    })
+    .click();
   await expect(
     form.page().getByRole('region', { name: 'Custody completion' }),
   ).toContainText('Custody saved');
@@ -213,11 +224,52 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   const detailUrl = page.url();
   const files = page.getByRole('region', { name: 'Inventory files' });
   const cards = files.locator('ul').first();
-  await files.getByLabel('Add recognition photo').setInputFiles({
-    name: 'first.png',
+  const browse = files.getByRole('button', {
+    name: 'Browse files',
+    exact: true,
+  });
+  await expect(browse).toHaveCount(1);
+  const chooserEvent = page.waitForEvent('filechooser');
+  await browse.focus();
+  await expect(browse).toBeFocused();
+  await page.keyboard.press('Enter');
+  const chooser = await chooserEvent;
+  await chooser.setFiles({
+    name: 'browse.png',
     mimeType: 'image/png',
     buffer: equipmentPhoto(),
   });
+  await expect(
+    files.getByRole('img', { name: 'Selected file preview' }),
+  ).toBeVisible();
+  await expect(cards.getByRole('listitem')).toHaveCount(0);
+  const selectedUrl = await files
+    .getByRole('img', { name: 'Selected file preview' })
+    .getAttribute('src');
+  expect(selectedUrl).toMatch(/^blob:/);
+  // A real browser DataTransfer replaces the local selection; no direct upload API.
+  const dropped = await page.evaluateHandle(
+    (bytes) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(
+        new File([Uint8Array.from(bytes)], 'first.png', { type: 'image/png' }),
+      );
+      return transfer;
+    },
+    [...equipmentPhoto()],
+  );
+  const beforeDrop = page.url();
+  await page.locator('body').dispatchEvent('drop', { dataTransfer: dropped });
+  await expect(page).toHaveURL(beforeDrop);
+  await files
+    .getByRole('group', { name: 'Choose an inventory file' })
+    .dispatchEvent('drop', { dataTransfer: dropped });
+  await dropped.dispose();
+  await expect(files.getByText(/Selected: first.png/)).toBeVisible();
+  await expect(
+    files.getByRole('img', { name: 'Selected file preview' }),
+  ).not.toHaveAttribute('src', selectedUrl!);
+  await expect(cards.getByRole('listitem')).toHaveCount(0);
   let releaseValidation!: () => void;
   const validationGate = new Promise<void>((resolve) => {
     releaseValidation = resolve;
@@ -274,8 +326,10 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   const activityTimes = files.locator('ol time');
   await expect(activityTimes.first()).toBeVisible();
   for (const time of await activityTimes.all()) {
-    await expect(time).toContainText('America/Los_Angeles');
-    expect(displayedInstant((await time.textContent())!)).toBe(
+    await expect(await exactTime(time)).toContainText('America/Los_Angeles');
+    expect(
+      displayedInstant((await (await exactTime(time)).textContent())!),
+    ).toBe(
       Math.floor(Date.parse((await time.getAttribute('datetime'))!) / 1000) *
         1000,
     );
@@ -288,12 +342,14 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
   await expect(publishedTime).toContainText('America/Los_Angeles');
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(page).toHaveURL(/\/history\?/);
-  await expect(page.locator('time').first()).toContainText(
+  await expect(await exactTime(page.locator('time').first())).toContainText(
     'America/Los_Angeles',
   );
   for (const time of await page.locator('time').all()) {
-    await expect(time).toContainText('America/Los_Angeles');
-    expect(displayedInstant((await time.textContent())!)).toBe(
+    await expect(await exactTime(time)).toContainText('America/Los_Angeles');
+    expect(
+      displayedInstant((await (await exactTime(time)).textContent())!),
+    ).toBe(
       Math.floor(Date.parse((await time.getAttribute('datetime'))!) / 1000) *
         1000,
     );
@@ -475,6 +531,12 @@ test('asset PDF is structurally validated and downloads as an attachment', async
     mimeType: 'application/pdf',
     buffer: Buffer.from(bytes),
   });
+  await expect(files.getByText(/Selected: manual.pdf/)).toBeVisible();
+  await expect(files.locator('iframe, embed, object')).toHaveCount(0);
+  await expect(
+    files.getByRole('img', { name: 'Selected file preview' }),
+  ).toHaveCount(0);
+  await expect(cards.getByRole('listitem')).toHaveCount(0);
   const pdfValidation = page.waitForResponse(
     (response) => response.url().includes('/api/inventory-files/validate'),
     { timeout: 20_000 },
@@ -819,3 +881,23 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
     }
   }
 });
+
+async function exactTime(time: Locator) {
+  const summary = time.locator('xpath=parent::summary');
+  if (await summary.count()) {
+    const disclosure = summary.locator('xpath=parent::details');
+    await summary.focus();
+    if (
+      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
+    )
+      await summary.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+    const exact = disclosure.locator(':scope > p').first();
+    await expect(exact).toBeVisible();
+    await expect(disclosure).toContainText(
+      (await time.getAttribute('datetime'))!,
+    );
+    return exact;
+  }
+  return time;
+}

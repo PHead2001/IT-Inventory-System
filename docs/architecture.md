@@ -85,8 +85,10 @@ display values in the same transaction as the receipt. A retry with different
 display spelling is different intent. Existing lowercase rows retain their
 spelling unless an explicit metadata edit changes it; migrations do not infer
 original case or rewrite historical events. Legacy operations keep their
-lowercased receipt identity and original successful results. The v3 operations are additive; existing clients retain their original mutation
-commands and receipt behavior until they adopt the new operations. Authorization is checked before successful receipt replay.
+lowercased receipt identity and original successful results. Recovery accepts
+the original create/site-open command names alongside the new asset v3 names;
+an uncertain submitted command retains its original operation, payload, actor
+and request UUID. Authorization is checked before successful receipt replay.
 Permanent QR identity remains the asset UUID.
 
 `inventory_asset_tag_lookup(p_tag text)` supplies the existing scanner's exact
@@ -261,6 +263,8 @@ An acknowledged quantity move enters completion. Its receipt reads the exact com
 The verified move snapshot retains its location catalog alongside the item and balances. Pickers, destination eligibility, location names and review identity use that catalog after Move more, balance refresh or invalid-reference recovery, even before route data refreshes. A newly observed route catalog can replace it and invalidates an affected review; reverting route props cannot revive that confirmation.
 
 A bounded per-tab completion pointer stores only event/entity IDs, scoped by browser origin, backend URL, authenticated actor, item and operation. A hard reload verifies that exact history receipt before showing completion or permitting another move; it never reconstructs balances from saved input. Move more clears the pointer only after its fresh read succeeds. Unavailable/quota-exhausted storage retains in-memory success but explicitly limits reload recovery. Cleared browser data and closed-tab recovery are not guaranteed. This pointer does not persist pending or uncertain stock commands across page destruction.
+
+After an acknowledged move, Done and task switching attempt to remove only the matching completion pointer. Browser read/removal failures cannot veto closing that committed task or starting Move more after its successful fresh read. An inline warning survives task closure and explains that the completed receipt may reappear after reload. Newer, different-item and malformed pointers are left untouched. Pending and uncertain commands retain their switching barriers.
 
 Malformed completion references may be explicitly discarded after a fresh authorized balance read; this discards a browser reference to an acknowledged move and never undoes its history. Valid references whose history cannot currently be verified retain their read-retry barrier. After a lost response, authorization, actor or idempotency rejection before replay does not prove the command failed: the unresolved command stays frozen for the same identity to be retried.
 

@@ -1,6 +1,12 @@
-import { openRecordTask } from './record-task-controls';
+import { expectRecordVersion, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Page } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Page,
+  type Locator,
+  type Route,
+} from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
@@ -25,6 +31,296 @@ async function inventory(page: Page) {
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
+async function restoreCreationIfOffered(form: Locator) {
+  const restore = form.getByRole('button', {
+    name: 'Restore draft',
+    exact: true,
+  });
+  const name = form.getByLabel('Name', { exact: true });
+  await expect
+    .poll(async () => (await restore.isVisible()) || (await name.isEnabled()))
+    .toBe(true);
+  if (await restore.isVisible()) {
+    await expect(name).toHaveValue('');
+    await expect(name).toBeDisabled();
+    await restore.click();
+  }
+}
+/** Hold real canonical RSC navigation while ordinary controls remain interactive. */
+async function holdCreationBinding(page: Page) {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const requests: string[] = [];
+  const active = new Set<Promise<void>>();
+  const matches = (url: URL) =>
+    url.pathname === '/inventory/assets/new' && url.searchParams.has('draft');
+  const handler = async (route: Route) => {
+    const continuation = (async () => {
+      if (
+        route.request().method() === 'GET' &&
+        route.request().headers().rsc === '1'
+      ) {
+        requests.push(route.request().url());
+        await released;
+      }
+      await route.continue();
+    })();
+    active.add(continuation);
+    try {
+      await continuation;
+    } finally {
+      active.delete(continuation);
+    }
+  };
+  await page.route(matches, handler);
+  return {
+    requests,
+    release,
+    dispose: async () => {
+      release();
+      // Removing interception can release held requests itself. Drain their
+      // continuations first so each request is handled exactly once.
+      while (active.size) await Promise.all([...active]);
+      await page.unroute(matches, handler);
+    },
+  };
+}
+async function creationPosition(field: Locator) {
+  return field.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      x: bounds.x + window.scrollX,
+      y: bounds.y + window.scrollY,
+      width: bounds.width,
+      height: bounds.height,
+    };
+  });
+}
+function expectCreationPosition(
+  actual: Awaited<ReturnType<typeof creationPosition>>,
+  expected: Awaited<ReturnType<typeof creationPosition>>,
+) {
+  for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+    expect(
+      Math.abs(actual[dimension] - expected[dimension]),
+      `${dimension} must remain within one CSS pixel`,
+    ).toBeLessThanOrEqual(1);
+  }
+}
+async function creationEnvelopes(page: Page) {
+  return page.evaluate(() =>
+    Object.keys(sessionStorage)
+      .filter((key) => key.startsWith('inventory-creation-v1:'))
+      .map((key) => JSON.parse(sessionStorage.getItem(key)!)),
+  );
+}
+
+test('typing and selection survive delayed canonical creation navigation without moving the form or caret', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const binding = await holdCreationBinding(page);
+  try {
+    await page.goto('/inventory/assets/new');
+    await expect.poll(() => binding.requests.length).toBeGreaterThan(0);
+    const form = page.getByRole('form', {
+      name: 'Add individual asset',
+      exact: true,
+    });
+    const name = form.getByLabel('Name', { exact: true });
+    const review = metadataReviewButton(form);
+    await expect(name).toBeEnabled();
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
+    await expect(
+      form.getByRole('button', { name: 'Retry creation recovery' }),
+    ).toHaveCount(0);
+    expect(await creationEnvelopes(page)).toHaveLength(0);
+    await expect(name).toHaveValue('');
+    await name.pressSequentially('Typed before canonical acknowledgement');
+    await form.getByLabel('Serial number').fill('MixedCase-before-URL');
+    await chooseLocation(form, 'Current location', 'ITC-RED');
+    await name.focus();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    const original = await name.elementHandle();
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    const caret = await name.evaluate(
+      (element: HTMLInputElement) => element.selectionStart,
+    );
+    const scroll = await page.evaluate(() => window.scrollY);
+    const fieldPosition = await creationPosition(name);
+    const actionPosition = await creationPosition(review);
+    await expect(review).toBeDisabled();
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
+    await expect(
+      form.getByRole('button', { name: 'Retry creation recovery' }),
+    ).toHaveCount(0);
+    const draft = new URL(binding.requests[0]).searchParams.get('draft');
+    const stored = await creationEnvelopes(page);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      instance: draft,
+      status: 'editing',
+      command: null,
+      inputs: {
+        core: {
+          name: 'Typed before canonical acknowledgement',
+          serial_number: 'MixedCase-before-URL',
+        },
+      },
+    });
+    binding.release();
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get('draft') === draft,
+    );
+    await expect(review).toBeEnabled();
+    expect(
+      await original!.evaluate((element) => element === document.activeElement),
+    ).toBe(true);
+    await expect(name).toHaveValue('Typed before canonical acknowledgement');
+    await expect(form.getByLabel('Serial number')).toHaveValue(
+      'MixedCase-before-URL',
+    );
+    await expect(
+      form.getByLabel('Current location', { exact: true }),
+    ).toContainText('ITC-RED');
+    expect(
+      await name.evaluate(
+        (element: HTMLInputElement) => element.selectionStart,
+      ),
+    ).toBe(caret);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scroll);
+    expectCreationPosition(await creationPosition(name), fieldPosition);
+    expectCreationPosition(await creationPosition(review), actionPosition);
+    await expect(
+      form.getByRole('button', { name: 'Restore draft' }),
+    ).toHaveCount(0);
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Discard changes', exact: true })
+      .click();
+  } finally {
+    await binding.dispose();
+  }
+});
+
+test('a real creation binding deadline retains typed entries and layout, then Retry acknowledges the same draft', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const binding = await holdCreationBinding(page);
+  try {
+    await page.goto('/inventory/assets/new');
+    await expect.poll(() => binding.requests.length).toBeGreaterThan(0);
+    const form = page.getByRole('form', {
+      name: 'Add individual asset',
+      exact: true,
+    });
+    const name = form.getByLabel('Name', { exact: true });
+    const review = metadataReviewButton(form);
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
+    await expect(
+      form.getByRole('button', { name: 'Retry creation recovery' }),
+    ).toHaveCount(0);
+    await expect(name).toHaveValue('');
+    await name.pressSequentially('Retain typing through the real deadline');
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowRight');
+    const original = await name.elementHandle();
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    const caret = await name.evaluate(
+      (element: HTMLInputElement) => element.selectionStart,
+    );
+    const scroll = await page.evaluate(() => window.scrollY);
+    const fieldPosition = await creationPosition(name);
+    const actionPosition = await creationPosition(review);
+    const draft = new URL(binding.requests[0]).searchParams.get('draft');
+    const savedBefore = await creationEnvelopes(page);
+    await expect(form.getByRole('alert')).toContainText(
+      'creation URL has not opened',
+      { timeout: 15_000 },
+    );
+    await expect(
+      form.getByRole('button', { name: 'Retry creation recovery' }),
+    ).toBeVisible();
+    expect(
+      await original!.evaluate((element) => element === document.activeElement),
+    ).toBe(true);
+    expect(
+      await name.evaluate(
+        (element: HTMLInputElement) => element.selectionStart,
+      ),
+    ).toBe(caret);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scroll);
+    expectCreationPosition(await creationPosition(name), fieldPosition);
+    expectCreationPosition(await creationPosition(review), actionPosition);
+    await expect(review).toBeDisabled();
+    await name.press('End');
+    await name.pressSequentially(' — still editable');
+    await form.getByRole('button', { name: 'Retry creation recovery' }).click();
+    await expect(name).toHaveValue(
+      'Retain typing through the real deadline — still editable',
+    );
+    await name.focus();
+    await page.keyboard.press('Home');
+    const retryCaret = await name.evaluate(
+      (element: HTMLInputElement) => element.selectionStart,
+    );
+    const retryScroll = await page.evaluate(() => window.scrollY);
+    binding.release();
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get('draft') === draft,
+    );
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(name).toBeFocused();
+    expect(
+      await original!.evaluate((element) => element === document.activeElement),
+    ).toBe(true);
+    expect(
+      await name.evaluate(
+        (element: HTMLInputElement) => element.selectionStart,
+      ),
+    ).toBe(retryCaret);
+    expect(await page.evaluate(() => window.scrollY)).toBe(retryScroll);
+    expectCreationPosition(await creationPosition(name), fieldPosition);
+    expectCreationPosition(await creationPosition(review), actionPosition);
+    expect(
+      binding.requests.every(
+        (request) => new URL(request).searchParams.get('draft') === draft,
+      ),
+    ).toBe(true);
+    const savedAfter = await creationEnvelopes(page);
+    expect(savedBefore).toHaveLength(1);
+    expect(savedAfter).toHaveLength(1);
+    expect(savedAfter[0]).toMatchObject({
+      instance: draft,
+      status: 'editing',
+      command: null,
+      inputs: {
+        core: {
+          name: 'Retain typing through the real deadline — still editable',
+        },
+      },
+    });
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Discard changes', exact: true })
+      .click();
+  } finally {
+    await binding.dispose();
+  }
+});
+
 test('creation recovery retains serialized input across Back/Forward, internal navigation and reload; saved draft stays terminal', async ({
   page,
 }) => {
@@ -67,12 +363,15 @@ test('creation recovery retains serialized input across Back/Forward, internal n
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   await page.goForward();
+  await restoreCreationIfOffered(form);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await inventory(page);
   await page.goBack();
+  await restoreCreationIfOffered(form);
   await expect(form.getByLabel('Asset tag')).toHaveValue(tag);
   const warningsBefore = warnings.length;
   await page.reload();
+  await restoreCreationIfOffered(form);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await expect(form.getByLabel('Serial number')).toHaveValue(serial);
   await expect(form.getByLabel('Manufacturer')).toHaveValue(
@@ -122,7 +421,7 @@ test('creation recovery retains serialized input across Back/Forward, internal n
   await form
     .getByRole('button', { name: 'Confirm retire asset', exact: true })
     .click();
-  await expect(page.getByText(/Version 2$/)).toBeVisible();
+  await expectRecordVersion(page, 2);
 });
 test('quantity creation preserves stock input; explicit discard survives return and pristine forms do not warn', async ({
   page,
@@ -145,14 +444,31 @@ test('quantity creation preserves stock input; explicit discard survives return 
   await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
   await page.reload();
   expect(warnings).toEqual([]);
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(sessionStorage).filter((key) =>
+          key.startsWith('inventory-creation-v1:'),
+        ).length,
+    ),
+  ).toBe(0);
+  await metadataReviewButton(form).click();
+  await expect(
+    form.getByRole('link', { name: 'Name', exact: true }),
+  ).toBeVisible();
   const name = 'Checkpoint discarded quantity ' + crypto.randomUUID();
   await form.getByLabel('Name', { exact: true }).fill(name);
+  await expect(
+    form.getByRole('link', { name: 'Name', exact: true }),
+  ).toHaveCount(0);
+  await expect(form.getByLabel('Name', { exact: true })).toBeFocused();
   await form.getByLabel('Item code (SKU)').fill('RECOVERY-SKU');
   await form.getByLabel('Initial quantity').fill('3');
   await chooseLocation(form, 'Initial location', 'ITC-RED');
   const draftURL = page.url();
   await inventory(page);
   await page.goBack();
+  await restoreCreationIfOffered(form);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await expect(form.getByLabel('Item code (SKU)')).toHaveValue('RECOVERY-SKU');
   await expect(form.getByLabel('Initial quantity')).toHaveValue('3');
@@ -337,7 +653,7 @@ test('creation response lost after real commit reloads and resolves the original
         throw new Error('Original submitted creation command is missing.');
       return JSON.parse(sessionStorage.getItem(key)!).command;
     });
-    expect(original.operation).toBe('asset_create_v2');
+    expect(original.operation).toBe('asset_create_v3');
     expect(original.payload.name).toBe(name);
     await page.screenshot({
       path: info.outputPath('committed-response-lost.png'),
@@ -402,7 +718,7 @@ test('creation response lost after real commit reloads and resolves the original
       await retire
         .getByRole('button', { name: 'Confirm retire asset', exact: true })
         .click();
-      await expect(page.getByText(/Version 2$/)).toBeVisible();
+      await expectRecordVersion(page, 2);
       const cleaned = await localAssetSnapshot(name);
       expect(cleaned.assets[0].status).toBe('retired');
       await info.attach('lost-response-fixture-retired.json', {

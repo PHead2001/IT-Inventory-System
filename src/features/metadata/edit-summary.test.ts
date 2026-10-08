@@ -54,6 +54,49 @@ const definition: MetadataDefinition = {
   layout: [],
 };
 describe('metadata changed-value summary', () => {
+  it('treats a case-only asset tag correction as a real display edit', () => {
+    const shared = {
+      id: baseline.id,
+      name: baseline.name,
+      categoryId: baseline.categoryId,
+      categoryName: baseline.categoryName,
+      description: baseline.description,
+      manufacturer: baseline.manufacturer,
+      model: baseline.model,
+      version: baseline.version,
+    };
+    const asset = {
+      ...shared,
+      status: 'active' as const,
+      assetTag: '000Ab/C.02',
+      serialNumber: null,
+    };
+    const intent = normalizeEditIntent('asset', {
+      asset_id: id(1),
+      expected_version: 1,
+      category_id: id(2),
+      expected_published_revision_id: id(3),
+      name: baseline.name,
+      manufacturer: baseline.manufacturer,
+      asset_tag: '  000aB/C.02  ',
+      custom_patch: { set: {}, unset: [] },
+    })!;
+    expect(intent.asset_tag).toBe('000aB/C.02');
+    expect(
+      editSummary({
+        baseline: asset,
+        intent,
+        definition,
+        categories: [],
+        timeZone: { timeZone: 'UTC', fallback: false },
+      }),
+    ).toContainEqual({
+      key: 'asset_tag',
+      label: 'Asset tag',
+      before: '000Ab/C.02',
+      after: '000aB/C.02',
+    });
+  });
   it('shows only normalized changed core and custom values including No, zero and explicit clearing', () => {
     const intent = normalizeEditIntent('quantity', {
       item_id: id(1),

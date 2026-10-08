@@ -22,6 +22,7 @@ const event = z.object({
   kind: z.literal('quantity'),
   event_type: z.literal('moved'),
   entity_name: z.string().min(1),
+  created_at: z.iso.datetime({ offset: true }),
   lines: z.array(line).length(2),
 });
 type Client = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -34,7 +35,7 @@ export async function readMoveReceipt(
 ): Promise<MoveReceipt> {
   const { data, error } = await supabase
     .from('inventory_history_rows')
-    .select('id,entity_id,kind,event_type,entity_name,lines')
+    .select('id,entity_id,kind,event_type,entity_name,created_at,lines')
     .eq('id', eventId)
     .eq('entity_id', entityId)
     .eq('kind', 'quantity')
@@ -69,6 +70,7 @@ export async function readMoveReceipt(
   if (!sourceName || !destinationName)
     throw new Error('Move locations unavailable.');
   return {
+    createdAt: parsed.created_at,
     itemName: parsed.entity_name,
     quantity: destination.delta,
     source: {

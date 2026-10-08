@@ -412,7 +412,7 @@ it('does not present legacy category metadata events as asset movement', () => {
     />,
   );
   expect(
-    screen.getByRole('heading', { name: 'Metadata edited' }),
+    screen.getByRole('heading', { name: 'Details updated' }),
   ).toBeVisible();
   expect(screen.getByText('Old category → New category')).toBeVisible();
   expect(screen.queryByText('From:')).not.toBeInTheDocument();

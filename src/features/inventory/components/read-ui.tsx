@@ -1,4 +1,4 @@
-import { historySummary } from '../history-summary';
+import { historySummary, assignmentEndpointSummary } from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
@@ -312,8 +312,8 @@ const eventNames: Record<string, string> = {
   received: 'Stock received',
   moved: 'Physically moved',
   adjusted: 'Physical count corrected',
-  metadata_updated: 'Metadata edited',
-  archived: 'Definition archived',
+  metadata_updated: 'Details updated',
+  archived: 'Quantity item archived',
   restored: 'Restored',
   location_corrected: 'Recorded location corrected',
   retired: 'Asset retired',
@@ -348,6 +348,7 @@ export function HistoryList({
               {eventNames[event.eventType] ?? event.eventType}
             </h3>
             <OperationalTimestamp
+              relative
               className="text-sm text-slate-400"
               value={event.at}
             />
@@ -385,7 +386,7 @@ export function HistoryList({
                   {event.kind === 'quantity' &&
                   event.assignment.kind === 'corrected'
                     ? historySummary(event)
-                    : `${event.assignment.from.label ?? 'No recorded source'} → ${event.assignment.to.label ?? 'No recorded destination'}`}
+                    : assignmentEndpointSummary(event.assignment)}
                 </p>
                 {event.assignment.quantity !== null &&
                   !(
@@ -422,11 +423,17 @@ export function HistoryList({
               event.eventType !== 'metadata_updated' &&
               event.fromLocation && (
                 <p className="mt-2 text-sm">
-                  From: <LocationLink location={event.fromLocation} />
+                  {event.fromLocation.id === event.toLocation?.id
+                    ? 'At: '
+                    : 'From: '}
+                  <LocationLink location={event.fromLocation} />
+                  {event.fromLocation.id === event.toLocation?.id &&
+                    ' (current location label)'}
                 </p>
               )}
             {!event.assignment &&
               event.eventType !== 'metadata_updated' &&
+              event.toLocation?.id !== event.fromLocation?.id &&
               event.toLocation && (
                 <p className="mt-2 text-sm">
                   To: <LocationLink location={event.toLocation} />

@@ -87,7 +87,18 @@ async function createQuantity(
   return page.url().split('/').at(-1)!;
 }
 async function submitCustody(form: Locator, title: string) {
-  await form.getByRole('button', { name: title, exact: true }).click();
+  await form
+    .getByRole('button', { name: 'Review ' + title.toLowerCase(), exact: true })
+    .click();
+  await expect(
+    form.getByRole('region', { name: 'Review changes', exact: true }),
+  ).toBeVisible();
+  await form
+    .getByRole('button', {
+      name: 'Confirm ' + title.toLowerCase(),
+      exact: true,
+    })
+    .click();
   await expect(
     form.page().getByRole('region', { name: 'Custody completion' }),
   ).toContainText('Custody saved');
@@ -309,7 +320,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await assign
     .getByLabel('Destination site')
     .selectOption({ label: `${siteName} (${siteCode})` });
-  await assign.getByRole('button', { name: 'Assign asset to a site' }).click();
+  await submitCustody(assign, 'Assign asset to a site');
   await expect(
     page
       .locator('dt')
@@ -508,10 +519,12 @@ test('site movements distinguish available, assigned and recorded; dated activit
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
   await chooseLocation(overReturn, 'Return to storage', 'ITO-GENERAL');
   await overReturn.getByLabel('Units').fill('4');
-  await overReturn.getByRole('button', { name: 'Return to storage' }).click();
-  await expect(overReturn.getByRole('status')).toContainText(
-    'valid whole-unit quantity',
-  );
+  await overReturn
+    .getByRole('button', { name: 'Review return to storage' })
+    .click();
+  await expect(
+    overReturn.getByText(/This source has only 3 units available/),
+  ).toBeVisible();
   await page.goto('/settings/sites/' + aCode);
   const archiveSite = await custodyForm(page, `Manage Fictional site ${aCode}`);
   await archiveSite

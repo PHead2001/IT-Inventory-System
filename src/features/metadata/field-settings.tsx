@@ -34,6 +34,7 @@ const currencyNames = new Intl.DisplayNames(['en'], { type: 'currency' });
 export function FieldSettings({
   field,
   change,
+  autoFocus = true,
   published = false,
   basics,
   appearance,
@@ -45,6 +46,7 @@ export function FieldSettings({
   revisionOptionCount,
 }: {
   field: Field;
+  autoFocus?: boolean;
   change: (field: Field) => void;
   revisionOptionCount?: number;
   published?: boolean;
@@ -109,7 +111,7 @@ export function FieldSettings({
         <label className="block text-sm">
           Field name
           <input
-            autoFocus
+            autoFocus={autoFocus}
             maxLength={200}
             className={input}
             value={field.label}

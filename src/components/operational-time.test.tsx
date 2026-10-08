@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import * as time from '@/lib/operational-time';
@@ -11,6 +11,44 @@ import {
 } from './operational-time';
 afterEach(() => vi.restoreAllMocks());
 const at = '2026-10-03T05:23:06.123456Z';
+it('hydrates relative history without replacing the server UTC text until subscription', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-03T05:25:06Z'));
+  const view = <OperationalTimestamp value={at} relative />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(view);
+  expect(container.querySelector('time')).toHaveTextContent(
+    '3 Oct 2026, 05:23:06 UTC',
+  );
+  document.body.append(container);
+  const recoverable = vi.fn();
+  let root: ReturnType<typeof hydrateRoot>;
+  await act(async () => {
+    root = hydrateRoot(container, view, { onRecoverableError: recoverable });
+  });
+  expect(container.querySelector('time')).toHaveTextContent('1 min ago');
+  expect(recoverable).not.toHaveBeenCalled();
+  await act(async () => root!.unmount());
+  container.remove();
+  vi.useRealTimers();
+});
+it('discloses the exact timestamp, timezone and recorded precision through a focusable control', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-03T05:25:06Z'));
+  const { container, unmount } = render(
+    <OperationalTimestamp value={at} relative />,
+  );
+  const summary = container.querySelector('summary')!;
+  expect(summary).toHaveTextContent('1 min ago');
+  expect(summary).toHaveTextContent('3 Oct 2026, 05:23:06 UTC');
+  summary.focus();
+  expect(summary).toHaveFocus();
+  fireEvent.click(summary);
+  expect(screen.getByText(at)).toBeVisible();
+  expect(container.querySelector('time')).toHaveAttribute('datetime', at);
+  unmount();
+  vi.useRealTimers();
+});
 function Surface() {
   return (
     <OperationalTimeProvider>

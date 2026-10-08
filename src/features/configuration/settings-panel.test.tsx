@@ -81,6 +81,17 @@ beforeEach(() => {
   mocks.submit.mockReset();
   mocks.refresh.mockReset();
 });
+it('reports the committed category outcome instead of generic settings success', async () => {
+  mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+  fireEvent.change(screen.getByLabelText('New category name'), {
+    target: { value: 'Updated source' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  expect(await screen.findByText('Category name saved.')).toBeVisible();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+});
 
 it('focuses the category rename draft on open and restores its stable trigger on Cancel and Escape', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);
@@ -203,6 +214,31 @@ it('retains an invalid rename draft with a durable associated error and input fo
   expect(input).toHaveAccessibleDescription(/Enter/);
 });
 
+it.each(['create', 'rename'] as const)(
+  'rechecks native category %s validity on blur without another submit or value change',
+  (mode) => {
+    render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+    if (mode === 'rename')
+      fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+    const input = screen.getByLabelText(
+      mode === 'rename' ? 'New category name' : 'Display name',
+    ) as HTMLInputElement;
+    if (mode === 'create')
+      fireEvent.change(input, { target: { value: 'Adapters' } });
+    input.setCustomValidity('Choose an available name.');
+    fireEvent.submit(input.closest('form')!);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveFocus();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    input.setCustomValidity('');
+    fireEvent.blur(input);
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(input).not.toHaveAccessibleDescription(/Choose an available/);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
 it('keeps a submitted rename open through Escape and restores focus by identity after a successful rerender', async () => {
   let finish!: (value: unknown) => void;
   mocks.submit.mockImplementation(
@@ -324,7 +360,7 @@ it('requires a replacement for history-only references and explains tombstone re
     'Choose a replacement',
   );
   expect(
-    within(review).queryByRole('button', { name: 'Confirm removal' }),
+    within(review).queryByRole('button', { name: 'Remove category Source' }),
   ).toBeNull();
   fireEvent.change(within(row).getByLabelText('Replacement category'), {
     target: { value: target.id },
@@ -332,7 +368,7 @@ it('requires a replacement for history-only references and explains tombstone re
   fireEvent.click(within(row).getByRole('button', { name: 'Review impact' }));
   await waitFor(() =>
     expect(
-      within(row).getByRole('button', { name: 'Confirm removal' }),
+      within(row).getByRole('button', { name: 'Remove category Source' }),
     ).toBeInTheDocument(),
   );
   expect(mocks.review).toHaveBeenLastCalledWith(source.id, target.id);
@@ -395,7 +431,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
     'truly unreferenced category will be deleted',
   );
   const confirm = within(review).getByRole('button', {
-    name: 'Confirm removal',
+    name: 'Remove category Source',
   });
   await waitFor(() => expect(confirm).toBeEnabled());
   fireEvent.click(confirm);
@@ -432,6 +468,8 @@ it('keeps an authored form category for history and shows target metadata gaps b
   expect(review).toHaveTextContent('1 authored form revisions');
   expect(review).toHaveTextContent('2 records with retained custom values');
   expect(review).toHaveTextContent('1 quantity items');
-  expect(review).toHaveTextContent('legacy values');
+  expect(review).toHaveTextContent(
+    'previous answers stay available for review',
+  );
   expect(review).toHaveTextContent('retained for readable history');
 });

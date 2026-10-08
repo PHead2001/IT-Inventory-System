@@ -1,3 +1,4 @@
+import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
@@ -56,8 +57,14 @@ export default async function AssetPage({
             </p>
             <h1 className="experience-heading mt-2">{asset.name}</h1>
             <p className="experience-muted mt-2 text-sm capitalize">
-              {asset.status} · Version {asset.version}
+              <RecordStatus status={asset.status} />
             </p>
+            <details className="mt-2 text-xs text-slate-400">
+              <summary className="min-h-11 cursor-pointer py-2">
+                Technical record details
+              </summary>
+              <p>Record version: {asset.version}</p>
+            </details>
           </div>
           <div className={styles.detailActions}>
             <Link href={'/labels?asset=' + encodeURIComponent(asset.id)}>
@@ -68,11 +75,13 @@ export default async function AssetPage({
         <dl className={styles.facts}>
           <div className={styles.fact}>
             <dt>Asset tag</dt>
-            <dd>{asset.assetTag || 'Not set'}</dd>
+            <dd className="experience-code">{asset.assetTag || 'Not set'}</dd>
           </div>
           <div className={styles.fact}>
             <dt>Serial number</dt>
-            <dd>{asset.serialNumber || 'Not set'}</dd>
+            <dd className="experience-code">
+              {asset.serialNumber || 'Not set'}
+            </dd>
           </div>
           <div className={styles.fact}>
             <dt>
