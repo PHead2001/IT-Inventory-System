@@ -291,11 +291,11 @@ test('ordinary signed-in login visits return safely and explicit account switchi
   await signIn(page, fixtureEmails.staff);
   await expect(page).toHaveURL(/\/inventory$/);
   await page.goto('/login');
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/inventory$/);
   await page.goto('/login?next=' + encodeURIComponent('/locations/ITC'));
   await expect(page).toHaveURL(/\/locations\/ITC$/);
   await page.goto('/login?next=' + encodeURIComponent('https://evil.example'));
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/inventory$/);
   await page.goto('/login?switch=1');
   await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
   await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
