@@ -199,6 +199,9 @@ export async function withLocalPasswordPolicy(
   let stopped = false,
     renamed = false,
     replacement = null;
+  let runFailed = false;
+  let originalFailure;
+  let result;
   try {
     stopped = true;
     await api('POST', '/containers/' + original.Id + '/stop?t=10');
@@ -221,7 +224,10 @@ export async function withLocalPasswordPolicy(
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     assert.ok(healthy, 'Local Auth policy fixture readiness deadline reached');
-    return await run();
+    result = await run();
+  } catch (error) {
+    runFailed = true;
+    originalFailure = error;
   } finally {
     // Remove only our replacement; do not touch database/volumes or another stack.
     let restoreFailed = false;
@@ -272,6 +278,12 @@ export async function withLocalPasswordPolicy(
         );
         if (!current.State.Running)
           await api('POST', '/containers/' + original.Id + '/start');
+      } catch {
+        restoreFailed = true;
+      }
+      // A failed/lost start response must not suppress the final identity and
+      // configuration readback or replace an earlier run/setup failure.
+      try {
         const restored = await api(
           'GET',
           '/containers/' + original.Id + '/json',
@@ -287,9 +299,18 @@ export async function withLocalPasswordPolicy(
         restoreFailed = true;
       }
     }
-    if (restoreFailed)
-      throw new Error(
+    if (restoreFailed) {
+      const restorationError = new Error(
         'Local Auth fixture restoration needs attention; preserve the original password_policy_backup container',
       );
+      if (runFailed)
+        throw new AggregateError(
+          [originalFailure, restorationError],
+          'Local Auth policy run and fixture restoration failed',
+        );
+      throw restorationError;
+    }
   }
+  if (runFailed) throw originalFailure;
+  return result;
 }

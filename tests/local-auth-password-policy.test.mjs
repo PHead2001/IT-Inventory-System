@@ -177,3 +177,125 @@ for (const failAt of ['none', 'stop', 'rename', 'create', 'start', 'run'])
         ),
       );
   });
+
+function simultaneousFailure({
+  originalFailure,
+  setupFailure = false,
+  restoreFailure = true,
+}) {
+  const calls = [],
+    original = snapshot();
+  const api = async (method, path) => {
+    calls.push({ method, path });
+    if (path === '/containers/supabase_auth_it-inventory/json')
+      return snapshot();
+    if (path === '/containers/original-id/json')
+      return structuredClone(original);
+    if (path === '/containers/original-id/stop?t=10')
+      original.State.Running = false;
+    if (path.startsWith('/containers/original-id/rename?name=')) {
+      if (restoreFailure && path.endsWith('name=supabase_auth_it-inventory'))
+        throw new Error('PRIVATE_DOCKER_CONFIG_RESPONSE');
+      original.Name = '/' + path.split('name=')[1];
+    }
+    if (path.startsWith('/containers/create')) return { Id: 'replacement-id' };
+    if (path === '/containers/replacement-id/start' && setupFailure)
+      throw originalFailure;
+    if (path === '/containers/replacement-id/json')
+      return { State: { Running: true, Health: { Status: 'healthy' } } };
+    if (method === 'DELETE' && restoreFailure)
+      throw new Error('PRIVATE_DOCKER_CONFIG_RESPONSE');
+    if (path === '/containers/original-id/start') {
+      if (restoreFailure) throw new Error('PRIVATE_DOCKER_CONFIG_RESPONSE');
+      original.State.Running = true;
+    }
+    return null;
+  };
+  return {
+    calls,
+    run: () =>
+      withLocalPasswordPolicy(
+        async () => {
+          throw originalFailure;
+        },
+        { api },
+      ),
+  };
+}
+for (const setupFailure of [false, true])
+  for (const [label, originalFailure] of [
+    ['Error', new Error('Original policy failure')],
+    ['value', 'original-value'],
+    ['undefined', undefined],
+  ])
+    test(`retains original ${label} from ${setupFailure ? 'setup' : 'run'} with sanitized restoration failure and attempts remaining steps`, async () => {
+      const f = simultaneousFailure({ originalFailure, setupFailure });
+      const error = await f.run().catch((error) => error);
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.errors[0], originalFailure);
+      assert.equal(error.errors.length, 2);
+      assert.match(
+        error.errors[1].message,
+        /Local Auth fixture restoration needs attention/,
+      );
+      assert.doesNotMatch(
+        String(error) + String(error.errors[1]),
+        /PRIVATE_DOCKER_CONFIG_RESPONSE/,
+      );
+      assert.ok(f.calls.some((c) => c.method === 'DELETE'));
+      assert.ok(
+        f.calls.some(
+          (c) =>
+            c.path ===
+            '/containers/original-id/rename?name=supabase_auth_it-inventory',
+        ),
+      );
+      assert.ok(
+        f.calls.some((c) => c.path === '/containers/original-id/start'),
+      );
+      assert.equal(f.calls.at(-1).path, '/containers/original-id/json');
+    });
+test('rethrows even undefined unchanged when restoration succeeds', async () => {
+  const f = simultaneousFailure({
+    originalFailure: undefined,
+    restoreFailure: false,
+  });
+  let rejected = false;
+  await f.run().then(
+    () => assert.fail('Expected original rejection'),
+    (error) => {
+      rejected = true;
+      assert.equal(error, undefined);
+    },
+  );
+  assert.equal(rejected, true);
+});
+test('restoration-only failure remains sanitized while later restoration steps still run', async () => {
+  // The actual run succeeds while replacement deletion fails.
+  const calls = [],
+    original = snapshot();
+  const api = async (method, path) => {
+    calls.push({ method, path });
+    if (path === '/containers/supabase_auth_it-inventory/json')
+      return snapshot();
+    if (path === '/containers/original-id/json')
+      return structuredClone(original);
+    if (path.endsWith('/stop?t=10')) original.State.Running = false;
+    if (path.includes('/rename?name='))
+      original.Name = '/' + path.split('name=')[1];
+    if (path.startsWith('/containers/create')) return { Id: 'replacement-id' };
+    if (path === '/containers/replacement-id/json')
+      return { State: { Running: true, Health: { Status: 'healthy' } } };
+    if (method === 'DELETE') throw new Error('PRIVATE_DOCKER_CONFIG_RESPONSE');
+    if (path === '/containers/original-id/start') original.State.Running = true;
+    return null;
+  };
+  const error = await withLocalPasswordPolicy(async () => 'result', {
+    api,
+  }).catch((error) => error);
+  assert.ok(error instanceof Error);
+  assert.equal(error instanceof AggregateError, false);
+  assert.match(error.message, /Local Auth fixture restoration needs attention/);
+  assert.doesNotMatch(String(error), /PRIVATE_DOCKER_CONFIG_RESPONSE/);
+  assert.equal(calls.at(-1).path, '/containers/original-id/json');
+});
