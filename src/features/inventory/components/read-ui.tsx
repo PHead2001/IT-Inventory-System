@@ -100,6 +100,11 @@ export function InventoryRows({
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
         );
+        const recordHref = inventoryRecordHref(
+          row.kind,
+          row.id,
+          returnTo ? `${returnTo}#${inventoryRowAnchor(index)}` : undefined,
+        );
         return (
           <li
             id={returnTo ? inventoryRowAnchor(index) : undefined}
@@ -127,16 +132,7 @@ export function InventoryRows({
                   )}
                 </span>
                 <div className="min-w-0">
-                  <Link
-                    className={styles.name}
-                    href={inventoryRecordHref(
-                      row.kind,
-                      row.id,
-                      returnTo
-                        ? `${returnTo}#${inventoryRowAnchor(index)}`
-                        : undefined,
-                    )}
-                  >
+                  <Link className={styles.name} href={recordHref}>
                     {row.name}
                   </Link>
                   <p className={styles.meta}>
@@ -251,14 +247,7 @@ export function InventoryRows({
                       </span>
                     ))}
                   </span>
-                  <Link
-                    href={
-                      '/inventory/' +
-                      (row.kind === 'quantity' ? 'quantity' : 'assets') +
-                      '/' +
-                      row.id
-                    }
-                  >
+                  <Link href={recordHref}>
                     {row.customPreview.truncated
                       ? 'View all details'
                       : 'Full details'}
