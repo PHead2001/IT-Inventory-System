@@ -7,7 +7,7 @@ export const metadata = { title: 'Set password' };
 export default async function SetPasswordPage() {
   const supabase = await createSupabaseServerClient();
   const session = await readPasswordSession(supabase.auth);
-  if (!session)
+  if (!session || session.emailProof === 'unusable')
     return (
       <p role="alert">
         Unable to verify your session.{' '}
