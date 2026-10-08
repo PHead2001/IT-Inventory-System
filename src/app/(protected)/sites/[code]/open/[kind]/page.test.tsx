@@ -42,12 +42,24 @@ it.each([
     expect(
       screen.getByRole('form', { name: 'Opening holdings' }),
     ).toBeInTheDocument();
-    expect(opening.metadata.title).toEqual({
-      absolute: 'Record site holdings · IT Inventory',
+    const metadata = await opening.generateMetadata({
+      params: Promise.resolve({ code: 'PRIVATE-CODE', kind }),
     });
-    expect(opening.metadata.title).not.toEqual(ancestorMetadata.title);
-    expect(JSON.stringify(opening.metadata)).not.toMatch(
+    expect(metadata.title).toEqual({
+      absolute: `Record existing ${label} · IT Inventory`,
+    });
+    expect(metadata.title).not.toEqual(ancestorMetadata.title);
+    expect(JSON.stringify(metadata)).not.toMatch(
       /Private office name|PRIVATE-CODE/,
     );
   },
 );
+it('uses a generic private-safe title for an unsupported opening kind', async () => {
+  const metadata = await opening.generateMetadata({
+    params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'unsupported' }),
+  });
+  expect(metadata.title).toEqual({
+    absolute: 'Record existing equipment · IT Inventory',
+  });
+  expect(JSON.stringify(metadata)).not.toMatch(/PRIVATE-CODE|unsupported/);
+});
