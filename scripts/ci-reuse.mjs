@@ -195,12 +195,32 @@ function assertRepository(actual, repository, repositoryId) {
   );
 }
 
+function isCanonicalRunPath(path) {
+  if (path === workflowPath) return true;
+  if (typeof path !== 'string' || !path.startsWith(workflowPath + '@'))
+    return false;
+  // GitHub may qualify this path with a ref. It is only a bounded path hint;
+  // the observed source marker and independent workflow blob checks prove source.
+  const ref = path.slice(workflowPath.length + 1);
+  return (
+    ref.length <= 1024 &&
+    /^[A-Za-z0-9][A-Za-z0-9._/@-]*$/.test(ref) &&
+    !ref.includes('..') &&
+    !ref.includes('//') &&
+    !ref.endsWith('/') &&
+    !ref.endsWith('.') &&
+    ref
+      .split('/')
+      .every((part) => !part.startsWith('.') && !part.endsWith('.lock'))
+  );
+}
+
 function assertRun(run, context) {
   requireEvidence(
     positiveInteger(run.id) &&
       positiveInteger(run.run_attempt) &&
       run.workflow_id === context.workflowId &&
-      run.path === workflowPath &&
+      isCanonicalRunPath(run.path) &&
       run.event === 'pull_request' &&
       run.head_sha === context.sourceSha,
     'run-identity-mismatch',
@@ -267,7 +287,10 @@ function fullJobEvidence(jobs, run, sourceSha, now) {
   requireEvidence(
     positiveInteger(job.id) &&
       job.run_id === run.id &&
-      job.run_attempt === run.run_attempt &&
+      // The jobs request is scoped to the exact run/attempt URL. Some API
+      // payloads omit run_attempt; an explicitly returned value must agree.
+      (!Object.hasOwn(job, 'run_attempt') ||
+        job.run_attempt === run.run_attempt) &&
       job.head_sha === sourceSha &&
       job.status === 'completed' &&
       job.conclusion === 'success' &&

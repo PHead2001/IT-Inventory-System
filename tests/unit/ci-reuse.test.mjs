@@ -163,6 +163,60 @@ describe('verified main validation reuse', () => {
     expect((await f.evaluate()).reuse).toBe(true);
   });
 
+  it.each([
+    '.github/workflows/ci.yml',
+    '.github/workflows/ci.yml@refs/heads/main',
+    '.github/workflows/ci.yml@refs/pull/8/merge',
+    '.github/workflows/ci.yml@' + workflowSha,
+  ])(
+    'accepts API-shaped canonical run path %s without treating its qualifier as source proof',
+    async (path) => {
+      const f = fixture();
+      f.state.run.path = path;
+      delete f.state.jobs[0].run_attempt;
+      expect((await f.evaluate()).reuse).toBe(true);
+      expect(f.reader.pages).toHaveBeenCalledWith(
+        '/actions/runs/100/attempts/2/jobs',
+        'jobs',
+      );
+      expect(f.reader.get).toHaveBeenCalledWith(
+        '/contents/.github/workflows/ci.yml?ref=' + workflowSha,
+      );
+    },
+  );
+
+  it.each([
+    '.github/workflows/other.yml@refs/heads/main',
+    '.github/workflows/ci.yml@',
+    '.github/workflows/ci.yml@@refs/heads/main',
+    '.github/workflows/ci.yml@refs/heads/main\n',
+    '.github/workflows/ci.yml@refs/heads/main branch',
+    '.github/workflows/ci.yml@refs/heads/../main',
+    '.github/workflows/ci.yml@refs//heads/main',
+    '.github/workflows/ci.yml@refs/heads/main/',
+    '.github/workflows/ci.yml@refs/heads/main.',
+    '.github/workflows/ci.yml@refs/heads/.main',
+    '.github/workflows/ci.yml@refs/heads/main.lock',
+    '.github/workflows/ci.yml@refs/heads/main~1',
+    '.github/workflows/ci.yml@' + 'x'.repeat(1025),
+  ])(
+    'rejects a wrong canonical workflow or malformed qualifier %s',
+    async (path) => {
+      const f = fixture();
+      f.state.run.path = path;
+      expect((await f.evaluate()).reuse).toBe(false);
+    },
+  );
+
+  it.each([null, undefined, '2', 0, -1, 1, 2.5])(
+    'rejects present malformed or mismatched job attempt %s',
+    async (attempt) => {
+      const f = fixture();
+      f.state.jobs[0].run_attempt = attempt;
+      expect((await f.evaluate()).reuse).toBe(false);
+    },
+  );
+
   it('verifies a complete decision through the bounded HTTP reader', async () => {
     const f = fixture();
     const transport = vi.fn(async (url) => {
