@@ -6,6 +6,54 @@ import { SearchForm } from './search-form';
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
 
+it.each([
+  { href: '/api/exports/inventory?q=applied', download: undefined },
+  { href: '/saved-export.csv', download: '' },
+])(
+  'preserves pending search synchronization when downloading $href',
+  ({ href, download }) => {
+    vi.useFakeTimers();
+    navigation.replace.mockClear();
+    navigation.push.mockClear();
+    const props = { categories: [], locations: [], sites: [] };
+    const view = (params: Record<string, string | undefined>) => (
+      <>
+        <SearchForm {...props} params={params} />
+        <a
+          href={href}
+          download={download}
+          onClick={(event) => event.preventDefault()}
+        >
+          Export applied rows
+        </a>
+      </>
+    );
+    const { rerender, unmount } = render(view({ q: 'applied' }));
+    try {
+      const query = screen.getByRole('textbox', { name: 'Search inventory' });
+      fireEvent.change(query, { target: { value: 'pending draft' } });
+      act(() => vi.advanceTimersByTime(100));
+      const exportLink = screen.getByRole('link', {
+        name: 'Export applied rows',
+      });
+      fireEvent.click(exportLink);
+      expect(exportLink).toHaveAttribute('href', href);
+      // A prior request may finish while the download leaves this page mounted.
+      rerender(view({ q: 'earlier response' }));
+      expect(query).toHaveValue('pending draft');
+      act(() => vi.advanceTimersByTime(150));
+      expect(navigation.replace).toHaveBeenCalledExactlyOnceWith(
+        '/inventory?q=pending+draft',
+        { scroll: false },
+      );
+      expect(navigation.push).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it('cancels unsent typing when a chip, pagination or Clear filters commits another search', () => {
   vi.useFakeTimers();
   navigation.replace.mockClear();

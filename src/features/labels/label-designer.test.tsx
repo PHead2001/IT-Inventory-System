@@ -378,6 +378,70 @@ it('Clear cancels all pending additions without late-response resurrection', asy
   expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
   expect(screen.queryByText(/Tag or lifecycle/)).not.toBeInTheDocument();
 });
+it('distinguishes same-kind pending additions without internal IDs and removes only the chosen ordinal', async () => {
+  const secondId = '00000000-0000-4000-8000-000000000222';
+  mocks.query = 'asset=' + secondId;
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue([asset]);
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[
+        { kind: 'asset', key: assetId },
+        { kind: 'asset', key: secondId },
+      ]}
+    />,
+  );
+  const pending = await screen.findByRole('region', {
+    name: 'Pending linked additions',
+  });
+  expect(
+    within(pending).getByText('Pending individual asset 1', { exact: true }),
+  ).toBeVisible();
+  expect(
+    within(pending).getByText('Pending individual asset 2', { exact: true }),
+  ).toBeVisible();
+  expect(pending).not.toHaveTextContent(assetId);
+  expect(pending).not.toHaveTextContent(secondId);
+  for (const button of within(pending).getAllByRole('button')) {
+    expect(button).not.toHaveAccessibleName(
+      new RegExp(`${assetId}|${secondId}`),
+    );
+  }
+  await userEvent.setup().click(
+    within(pending).getByRole('button', {
+      name: 'Remove pending individual asset 2',
+    }),
+  );
+  expect(
+    within(pending).getByRole('button', {
+      name: 'Remove pending individual asset 1',
+    }),
+  ).toBeEnabled();
+  expect(
+    within(pending).queryByText('Pending individual asset 2'),
+  ).not.toBeInTheDocument();
+  expect(mocks.replace).toHaveBeenLastCalledWith('/labels', {
+    scroll: false,
+  });
+  await act(async () =>
+    finish([asset, { ...asset, key: secondId, name: 'Other laptop' }]),
+  );
+  await screen.findByText('1 distinct record · 1 label');
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.entries.map((row: { key: string }) => row.key)).toEqual([
+    assetId,
+  ]);
+});
 it('lets the user individually remove an unresolved linked record while preserving another pending addition and its late authorized result', async () => {
   mocks.query =
     'asset=' + assetId + '&quantity=' + quantityId + '&keep=filters';
@@ -401,10 +465,10 @@ it('lets the user individually remove an unresolved linked record while preservi
   );
   await screen.findByText('Adding linked records after restoring this queue…');
   expect(
-    screen.getByText('Pending individual asset', { exact: true }),
+    screen.getByText('Pending individual asset 1', { exact: true }),
   ).toBeVisible();
   expect(
-    screen.getByText('Pending quantity item', { exact: true }),
+    screen.getByText('Pending quantity item 2', { exact: true }),
   ).toBeVisible();
   expect(
     screen.queryByText('Pending individual asset: ' + assetId),
@@ -416,14 +480,14 @@ it('lets the user individually remove an unresolved linked record while preservi
   expect(printButton()).toBeDisabled();
   const user = userEvent.setup();
   await user.click(
-    screen.getByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.getByRole('button', { name: 'Remove pending individual asset 1' }),
   );
   expect(
-    screen.queryByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.queryByRole('button', { name: 'Remove pending individual asset 1' }),
   ).not.toBeInTheDocument();
   expect(
     screen.getByRole('button', {
-      name: 'Remove pending quantity ' + quantityId,
+      name: 'Remove pending quantity item 2',
     }),
   ).toBeEnabled();
   expect(mocks.replace).toHaveBeenLastCalledWith(
@@ -460,7 +524,7 @@ it('retains individually cancellable pending rows after a failed linked lookup',
   await screen.findByRole('button', { name: 'Retry linked additions' });
   const user = userEvent.setup();
   await user.click(
-    screen.getByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.getByRole('button', { name: 'Remove pending individual asset 1' }),
   );
   await user.click(
     screen.getByRole('button', { name: 'Retry linked additions' }),

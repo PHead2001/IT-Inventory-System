@@ -1630,19 +1630,22 @@ function LabelDesignerWorkspace({
                   Pending additions are not included in the label count or print
                   sheet.
                 </p>
-                {pendingIntentKeys.map((key) => {
+                {pendingIntentKeys.map((key, index) => {
                   const id = queueIdentity(key);
+                  const ordinal =
+                    addIntent.findIndex(
+                      (intent) => queueIdentity(intent) === id,
+                    ) + 1 || index + 1;
+                  const pendingName = `${recordKind(key.kind).toLowerCase()} ${ordinal}`;
                   return (
                     <div key={id} className={styles.queueEntry}>
                       <span className={styles.queueName}>
-                        Pending {recordKind(key.kind).toLowerCase()}
+                        Pending {pendingName}
                       </span>
                       <button
                         type="button"
                         disabled={busy || !hydrated}
-                        aria-label={
-                          'Remove pending ' + key.kind + ' ' + key.key
-                        }
+                        aria-label={'Remove pending ' + pendingName}
                         onClick={() => removeEntries(new Set([id]))}
                         className={styles.textButton}
                       >

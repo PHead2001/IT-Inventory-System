@@ -109,9 +109,10 @@ export function SettingsLocationTree({
             {row.hasChildren ? (
               <button
                 type="button"
+                tabIndex={-1}
                 onClick={() => {
                   toggle(row.location.id, !expanded.has(row.location.id));
-                  setFocused(row.location.id);
+                  focus(index);
                 }}
                 aria-label={`${expanded.has(row.location.id) ? 'Collapse' : 'Expand'} ${row.location.name}`}
                 className="min-h-11 min-w-11 text-cyan-300"

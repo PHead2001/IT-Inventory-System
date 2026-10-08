@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { expect, it } from 'vitest';
 import { SettingsLocationTree } from './settings-location-tree';
 
@@ -41,4 +42,33 @@ it('shares hierarchy order, supports keyboard collapse and full-path search with
     '/settings/locations/ITC-D07',
   );
   expect(screen.getByText('1 matching locations')).toBeVisible();
+});
+
+it('uses one tree Tab stop while arrow keys expose children and pointer collapse returns focus to its treeitem', async () => {
+  const user = userEvent.setup();
+  render(
+    <>
+      <SettingsLocationTree locations={[root, leaf]} />
+      <button>After locations</button>
+    </>,
+  );
+  const parent = screen.getAllByRole('treeitem')[0];
+  await user.tab();
+  expect(screen.getByRole('searchbox')).toHaveFocus();
+  await user.tab();
+  expect(parent).toHaveFocus();
+  await user.keyboard('{ArrowLeft}');
+  expect(parent).toHaveAttribute('aria-expanded', 'false');
+  await user.keyboard('{ArrowRight}{ArrowRight}');
+  expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveFocus();
+  await user.tab();
+  expect(screen.getByRole('button', { name: 'After locations' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Collapse IT Closet' }));
+  expect(parent).toHaveFocus();
+  expect(parent).toHaveAttribute('aria-expanded', 'false');
+  expect(
+    screen.queryByRole('treeitem', { name: /Drawer 7/ }),
+  ).not.toBeInTheDocument();
+  await user.tab();
+  expect(screen.getByRole('button', { name: 'After locations' })).toHaveFocus();
 });
