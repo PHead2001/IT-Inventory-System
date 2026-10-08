@@ -413,6 +413,47 @@ describe('auth boundaries', () => {
     ).toHaveProperty('error');
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
+  it.each(['stale', 'future', 'malformed', 'mixed password'])(
+    'rejects %s email AMR even when a nonempty current password is supplied',
+    async (proof) => {
+      const claims = (await mocks.getClaims()).data.claims;
+      const now = Math.floor(Date.now() / 1000);
+      mocks.getClaims.mockResolvedValue({
+        data: {
+          claims: {
+            ...claims,
+            amr: [
+              {
+                method: 'otp',
+                timestamp:
+                  proof === 'future'
+                    ? now + 1
+                    : proof === 'malformed'
+                      ? String(now)
+                      : now - 601,
+              },
+              ...(proof === 'mixed password'
+                ? [{ method: 'password', timestamp: now }]
+                : []),
+            ],
+          },
+        },
+        error: null,
+      });
+      expect(
+        await setPassword(
+          {},
+          form({
+            password: 'NewPassword123456',
+            confirmation: 'NewPassword123456',
+            current_password: 'WrongButNonempty123456',
+          }),
+        ),
+      ).toHaveProperty('error');
+      expect(mocks.updateUser).not.toHaveBeenCalled();
+      expect(mocks.signOut).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     'claims error',
     'identity mismatch',

@@ -121,7 +121,7 @@ export async function setPassword(
     };
   const supabase = await createSupabaseServerClient(true);
   const session = await readPasswordSession(supabase.auth);
-  if (!session)
+  if (!session || session.emailProof === 'unusable')
     return {
       error:
         'Unable to verify your session. Sign in again or request a new reset email.',
