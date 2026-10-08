@@ -169,6 +169,8 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   const locationCode = code('ITO-E2E');
+  const locationName = 'Fictional overflow cabinet ' + locationCode;
+  const renamedLocation = locationName + ' renamed';
   const siteCode = code('E2E-SITE');
   const siteName = 'Fictional field office ' + siteCode;
   // Future structure belongs to trusted loopback fixture/migration tooling.
@@ -189,7 +191,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     .from('locations')
     .insert({
       code: locationCode,
-      name: 'Fictional overflow cabinet',
+      name: locationName,
       parent_id: parent.data!.id,
       kind: 'storage_area',
       can_hold_inventory: true,
@@ -205,13 +207,11 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   const locationForm = page.locator('form');
   await expect(
     locationForm.getByRole('heading', {
-      name: 'Rename Fictional overflow cabinet',
+      name: 'Rename ' + locationName,
     }),
   ).toBeVisible();
   await expect(locationForm.getByLabel('Parent location')).toHaveCount(0);
-  await locationForm
-    .getByLabel('Name', { exact: true })
-    .fill('Fictional overflow cabinet renamed');
+  await locationForm.getByLabel('Name', { exact: true }).fill(renamedLocation);
   await locationForm.getByRole('button', { name: 'Save name' }).click();
   await expect(locationForm.getByRole('status')).toContainText(
     'Location renamed',
@@ -251,7 +251,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   });
   await expect(
     selectedLocation.getByRole('heading', {
-      name: 'Fictional overflow cabinet renamed',
+      name: renamedLocation,
       exact: true,
     }),
   ).toBeVisible();
@@ -453,10 +453,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
   await page
-    .getByRole('link', {
-      name: `Fictional overflow cabinet renamed (${locationCode})`,
-      exact: true,
-    })
+    .locator(`a[role="treeitem"][href="/settings/locations/${locationCode}"]`)
     .click();
   await expect(
     page.getByText('This location is read-only for your account.', {

@@ -2,6 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
 import type { Json } from '@/lib/supabase/database.types';
+import type { CustomAnswerPreview } from '@/features/inventory/contracts-ui';
 import {
   formEnvelope,
   type MetadataForm,
@@ -130,4 +131,49 @@ export async function describeSearchBatch(
   if (Object.values(result).some((value) => typeof value !== 'string'))
     throw new Error('Inventory metadata could not be loaded.');
   return result as Record<string, string>;
+}
+
+const utf8Bounded = (limit: number) =>
+  z.string().refine((value) => Buffer.byteLength(value, 'utf8') <= limit);
+const previewSchema = z.strictObject({
+  answers: z
+    .array(
+      z.strictObject({
+        label: utf8Bounded(160),
+        type: z.string(),
+        displayValue: utf8Bounded(256),
+        truncated: z.boolean(),
+      }),
+    )
+    .max(3),
+  truncated: z.boolean(),
+});
+export async function previewSearchBatch(
+  supabase: MemberClient,
+  keys: BatchKey[],
+): Promise<Record<string, CustomAnswerPreview>> {
+  if (!keys.length) return {};
+  const expected = new Set(
+    keys.map(({ kind, id }) => `${kind}:${canonicalId.parse(id)}`),
+  );
+  if (
+    keys.length > 25 ||
+    expected.size !== keys.length ||
+    Buffer.byteLength(JSON.stringify(keys), 'utf8') > 4096
+  )
+    throw new Error('Inventory search page is too large.');
+  const { data, error } = await supabase.rpc('metadata_preview_batch', {
+    p_keys: keys as Json,
+  });
+  if (error || !data || Buffer.byteLength(JSON.stringify(data), 'utf8') > 49152)
+    throw new Error('Inventory metadata could not be loaded.');
+  const result = z.record(z.string(), previewSchema).parse(data);
+  if (
+    Object.keys(result).length !== expected.size ||
+    Object.keys(result).some((key) => !expected.has(key))
+  )
+    throw new Error(
+      'Inventory metadata response did not match the requested records.',
+    );
+  return result;
 }

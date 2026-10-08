@@ -58,6 +58,29 @@ beforeEach(() => {
   });
 });
 describe('custody action actor consistency', () => {
+  it('explains an authoritative sibling-name conflict without implying a committed rename', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: 'P1007', message: 'location_name_conflict' },
+    });
+    expect(
+      await submitCustody({
+        operation: 'location_rename',
+        requestId,
+        payload: {
+          location_id: other,
+          expected_version: '1',
+          name: 'Duplicate shelf',
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      code: 'P1007',
+      message:
+        'Another active location with the same parent already uses that name. Choose a different name.',
+    });
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
   it('rejects a different staff actor before membership reads or RPC', async () => {
     expect(
       await submitCustody({ ...command, expectedActorId: other }),

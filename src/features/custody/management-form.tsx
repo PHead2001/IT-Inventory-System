@@ -1023,7 +1023,15 @@ export function LocationManagementForm({
       <div className="flex flex-wrap gap-3">
         <Button
           type="submit"
-          disabled={pending || actorBlocked || (stale && !uncertain)}
+          disabled={actorBlocked || (stale && !uncertain)}
+          aria-disabled={pending || undefined}
+          aria-busy={pending || undefined}
+          className="aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:transform-none"
+          onClick={(event) => {
+            // A pending native-disabled submit loses keyboard focus in Chrome.
+            // Keep its focus while both this guard and onSubmit reject repeats.
+            if (pending) event.preventDefault();
+          }}
         >
           {pending ? 'Saving…' : uncertain ? 'Retry submission' : 'Save name'}
         </Button>

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { LocationManagementForm, SiteManagementForm } from './management-form';
 import { submitCustody } from './actions';
@@ -956,3 +962,82 @@ it('allows revised intent after a first known permission denial without an uncer
       .requestId,
   );
 });
+
+it.each(['success', 'known error'])(
+  'keeps keyboard rename submit focus through pending %s and rejects repeated activation',
+  async (outcome) => {
+    const user = userEvent.setup();
+    let finish!: (value: Awaited<ReturnType<typeof submitCustody>>) => void;
+    vi.mocked(submitCustody).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<LocationManagementForm location={area} actorId={id(8)} />);
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Keyboard label');
+    const save = screen.getByRole('button', { name: 'Save name' });
+    save.focus();
+    await user.keyboard('{Enter}');
+    expect(save).not.toBeDisabled();
+    expect(save).toHaveAttribute('aria-disabled', 'true');
+    expect(save).toHaveAttribute('aria-busy', 'true');
+    expect(save).toHaveFocus();
+    await user.keyboard('{Enter}{Enter}');
+    fireEvent.submit(save.closest('form')!);
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      finish(
+        outcome === 'success'
+          ? { ok: true, entityId: area.id, version: '2', changed: true }
+          : { ok: false, code: 'P1007', message: 'Choose another name.' },
+      ),
+    );
+    await screen.findByText(
+      outcome === 'success'
+        ? 'Location renamed. Structure, inventory and history remain intact.'
+        : 'Choose another name.',
+    );
+    expect(save).toHaveFocus();
+    expect(save).not.toHaveAttribute('aria-disabled', 'true');
+    expect(save).not.toHaveAttribute('aria-busy', 'true');
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['Tab', 'click'])(
+  'leaves newer %s focus alone when keyboard rename completes',
+  async (intent) => {
+    const user = userEvent.setup();
+    let finish!: (value: Awaited<ReturnType<typeof submitCustody>>) => void;
+    vi.mocked(submitCustody).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <>
+        <LocationManagementForm location={area} actorId={id(8)} />
+        <button>Another task</button>
+      </>,
+    );
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Keyboard label');
+    const save = screen.getByRole('button', { name: 'Save name' });
+    save.focus();
+    await user.keyboard('{Enter}');
+    const other = screen.getByRole('button', { name: 'Another task' });
+    if (intent === 'Tab') await user.tab();
+    else await user.click(other);
+    expect(other).toHaveFocus();
+    await act(async () =>
+      finish({ ok: true, entityId: area.id, version: '2', changed: true }),
+    );
+    await screen.findByText(
+      'Location renamed. Structure, inventory and history remain intact.',
+    );
+    expect(other).toHaveFocus();
+  },
+);

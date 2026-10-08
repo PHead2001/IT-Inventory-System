@@ -1,11 +1,15 @@
 import { historySummary } from '../history-summary';
+import { RecordStatus } from '@/components/record-status';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
 import Link from 'next/link';
 import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { countLabel } from '@/lib/count';
-import { pageInventoryCounts } from '../scope-presentation';
+import {
+  pageInventoryCounts,
+  pageDistinctQuantityProducts,
+} from '../scope-presentation';
 import { inventoryRecordHref, inventoryRowAnchor } from '../create-return';
 import styles from './inventory-visual.module.css';
 import { InventoryListThumbnail } from '@/features/files/list-thumbnail';
@@ -21,7 +25,7 @@ export const field = 'experience-field min-h-11 w-full px-3 py-2 text-sm';
 export function LocationCode({ code }: { code: string }) {
   return (
     <span
-      className="block max-w-full overflow-x-auto whitespace-nowrap text-xs text-slate-400"
+      className="experience-code block max-w-full overflow-x-auto whitespace-nowrap text-xs text-slate-400"
       role={code.length > 24 ? 'region' : undefined}
       tabIndex={code.length > 24 ? 0 : undefined}
       aria-label={code.length > 24 ? `Full location code: ${code}` : undefined}
@@ -43,6 +47,12 @@ export function InventoryCount({
           On this page: {pageInventoryCounts(result.rows)}
         </p>
       )}
+      {pageDistinctQuantityProducts(result.rows) > 0 && (
+        <p className="mt-1 text-xs">
+          Distinct quantity products on this page:{' '}
+          {pageDistinctQuantityProducts(result.rows)} (overlaps the row counts).
+        </p>
+      )}
     </div>
   );
 }
@@ -58,7 +68,9 @@ export function LocationLink({ location }: { location: LocationRef }) {
         {location.code.length <= 24 && (
           <>
             {' '}
-            <span className="whitespace-nowrap text-xs">({location.code})</span>
+            <span className="experience-code whitespace-nowrap text-xs">
+              ({location.code})
+            </span>
           </>
         )}
       </Link>
@@ -88,6 +100,11 @@ export function InventoryRows({
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
         );
+        const recordHref = inventoryRecordHref(
+          row.kind,
+          row.id,
+          returnTo ? `${returnTo}#${inventoryRowAnchor(index)}` : undefined,
+        );
         return (
           <li
             id={returnTo ? inventoryRowAnchor(index) : undefined}
@@ -115,16 +132,7 @@ export function InventoryRows({
                   )}
                 </span>
                 <div className="min-w-0">
-                  <Link
-                    className={styles.name}
-                    href={inventoryRecordHref(
-                      row.kind,
-                      row.id,
-                      returnTo
-                        ? `${returnTo}#${inventoryRowAnchor(index)}`
-                        : undefined,
-                    )}
-                  >
+                  <Link className={styles.name} href={recordHref}>
                     {row.name}
                   </Link>
                   <p className={styles.meta}>
@@ -132,7 +140,7 @@ export function InventoryRows({
                     {row.kind === 'quantity'
                       ? 'Quantity item'
                       : 'Individual asset'}{' '}
-                    · <span className={styles.status}>{row.status}</span>
+                    · <RecordStatus status={row.status} />
                   </p>
                   {row.kind === 'quantity' && row.itemCode && (
                     <p className={styles.meta}>
@@ -151,7 +159,11 @@ export function InventoryRows({
                         : 'Unlocated stock'
                     : 'Asset tag'}
                 </span>
-                <strong>
+                <strong
+                  className={
+                    row.kind === 'asset' ? 'experience-code' : undefined
+                  }
+                >
                   {row.kind === 'quantity'
                     ? countLabel(row.quantity ?? 0, 'unit')
                     : row.assetTag || 'Untagged'}
@@ -225,18 +237,20 @@ export function InventoryRows({
                     {row.reorderThreshold}
                   </span>
                 )}
-              {row.customSummary && (
+              {row.customPreview && row.customPreview.answers.length > 0 && (
                 <span className="min-w-0 basis-full">
-                  <span className={styles.summary}>{row.customSummary}</span>
-                  <Link
-                    href={
-                      '/inventory/' +
-                      (row.kind === 'quantity' ? 'quantity' : 'assets') +
-                      '/' +
-                      row.id
-                    }
-                  >
-                    Full details
+                  <span className={styles.summary}>
+                    {row.customPreview.answers.map((answer, index) => (
+                      <span key={index} className="block">
+                        {answer.label}: {answer.displayValue}
+                        {answer.truncated ? '…' : ''}
+                      </span>
+                    ))}
+                  </span>
+                  <Link href={recordHref}>
+                    {row.customPreview.truncated
+                      ? 'View all details'
+                      : 'Full details'}
                   </Link>
                 </span>
               )}

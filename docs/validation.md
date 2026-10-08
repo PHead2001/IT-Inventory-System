@@ -161,6 +161,68 @@ name-only controls, stable QR/location identity, blocked archive, and discoverab
 empty-site archive/restore. Generated database types must be regenerated from the
 applied migration and checked through the existing database gate.
 
+## Inventory display and bounded read proof
+
+The authoritative database coverage for these contracts lives in
+`supabase/tests/audit_three_contracts.test.sql` and
+`tests/integration/audit-three-contracts.ts`. The SQL suite checks public
+signatures, execution privileges, continued denial of application structure
+mutations, the generated tag key and collision-free canonical reference data.
+The integration suite exercises real PostgreSQL calls with member credentials
+and independent connections. It observes an actual lock wait before committing
+the winning transaction for differently cased tag creation and active sibling
+rename races.
+
+Tag coverage includes trimmed display round trips, case-only version/history
+changes, exact uncertain retries, changed-intent rejection, retired uniqueness,
+authorization before replay and transaction rollback when history insertion
+fails. Legacy create/site-open receipts keep their normalized identity; an old
+create receipt also replays its original result after a later v3 display
+correction. Search, label resolution and export retain display spelling and
+permanent asset UUID identity. Exact lookup covers database-normalized Unicode
+and literal percent, underscore and backslash characters. Scanner component
+coverage retains ordinary QR, location-prefix, asset-tag-prefix and ambiguous
+bare-identifier behavior; resolver tests alone do not prove camera decoding or
+rendered print output.
+
+Preview coverage verifies active-member authorization, unique bounded request
+keys, human field types, recorded choice paths, literal user UUID preservation,
+answer limits, UTF-8 and JSON-escape truncation, and continued provenance in the
+legacy description API. Entry-count coverage distinguishes positive quantity
+holdings from stock units, excludes site/retired inventory, returns known zero
+and omits unknown or aggregate codes. Server tests preserve decimal-string
+precision, keep missing/error counts unknown and reject mismatched response
+identities. Location coverage includes same-parent race rejection, root scope,
+different-parent reuse, inactive duplicates and corrective activation.
+
+Run the canonical database gate in its defined order: clean local reset, pgTAP,
+then fixture-producing integration suites, followed by generated type comparison.
+`scripts/db.mjs` registers the display/read integration suite with the existing
+database suites. The older pgTAP assertions depend on pristine reference data;
+running them after integration fixtures have published forms or created records
+is not an equivalent gate. For a focused rerun requiring that baseline, reset
+the disposable local database and run pgTAP before creating fixtures. Preserve
+the repository's local-target and Storage-version checks.
+
+The integration suite executes the location migration's actual lock and
+preflight SQL, extracted from the checked-in migration with explicit statement
+boundaries. It proves ordinary collision-free success, then temporarily removes
+the sibling guard and index inside a rollback-isolated trusted local transaction
+to arrange an existing active sibling collision. Preflight must refuse with
+`P1012` and the colliding codes, leaving names, codes, versions and history
+unchanged. A final rollback restores the original rows, history, index definition
+and enabled trigger. No deliberately colliding data or guard removal is committed.
+
+This bounded prerequisite regression does not replay the complete forward
+migration. Claiming preservation across a full upgrade requires separate
+disposable evidence: prepare existing lowercase assets, events and receipts,
+apply the migrations and compare retained identities, spellings, history and
+receipts. If that fixture includes an active sibling collision, correct it with
+an explicit authorized rename before retrying. This must not use hosted
+destructive setup. Browser acceptance still needs populated result
+summaries, selected-location count reconciliation and actual label/print/export
+flows through the authorized application.
+
 ## Private-safe titles and missing-resource proof
 
 F307 checks branded route-kind titles without private record names or UUIDs.

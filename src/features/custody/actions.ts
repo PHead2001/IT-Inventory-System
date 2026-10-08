@@ -66,6 +66,13 @@ export async function submitCustody(input: unknown): Promise<CustodyState> {
           'Use Archive site or Restore site to change site availability and record a reason.',
       };
     if (error) {
+      if (operation === 'location_rename' && error.code === 'P1007')
+        return {
+          ok: false,
+          code: 'P1007',
+          message:
+            'Another active location with the same parent already uses that name. Choose a different name.',
+        };
       if (operation === 'site_create' && error.code === 'P1007')
         return {
           ok: false,

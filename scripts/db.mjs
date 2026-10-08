@@ -80,6 +80,10 @@ const test = () => {
     localTestEnv(status),
   );
   node(
+    ['--import', 'tsx', 'tests/integration/audit-three-contracts.ts'],
+    localTestEnv(status),
+  );
+  node(
     ['--import', 'tsx', 'tests/integration/custody.ts'],
     localTestEnv(status),
   );

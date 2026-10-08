@@ -378,6 +378,70 @@ it('Clear cancels all pending additions without late-response resurrection', asy
   expect(mocks.replace).toHaveBeenCalledWith('/labels', { scroll: false });
   expect(screen.queryByText(/Tag or lifecycle/)).not.toBeInTheDocument();
 });
+it('distinguishes same-kind pending additions without internal IDs and removes only the chosen ordinal', async () => {
+  const secondId = '00000000-0000-4000-8000-000000000222';
+  mocks.query = 'asset=' + secondId;
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue([asset]);
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      addIntent={[
+        { kind: 'asset', key: assetId },
+        { kind: 'asset', key: secondId },
+      ]}
+    />,
+  );
+  const pending = await screen.findByRole('region', {
+    name: 'Pending linked additions',
+  });
+  expect(
+    within(pending).getByText('Pending individual asset 1', { exact: true }),
+  ).toBeVisible();
+  expect(
+    within(pending).getByText('Pending individual asset 2', { exact: true }),
+  ).toBeVisible();
+  expect(pending).not.toHaveTextContent(assetId);
+  expect(pending).not.toHaveTextContent(secondId);
+  for (const button of within(pending).getAllByRole('button')) {
+    expect(button).not.toHaveAccessibleName(
+      new RegExp(`${assetId}|${secondId}`),
+    );
+  }
+  await userEvent.setup().click(
+    within(pending).getByRole('button', {
+      name: 'Remove pending individual asset 2',
+    }),
+  );
+  expect(
+    within(pending).getByRole('button', {
+      name: 'Remove pending individual asset 1',
+    }),
+  ).toBeEnabled();
+  expect(
+    within(pending).queryByText('Pending individual asset 2'),
+  ).not.toBeInTheDocument();
+  expect(mocks.replace).toHaveBeenLastCalledWith('/labels', {
+    scroll: false,
+  });
+  await act(async () =>
+    finish([asset, { ...asset, key: secondId, name: 'Other laptop' }]),
+  );
+  await screen.findByText('1 distinct record · 1 label');
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.entries.map((row: { key: string }) => row.key)).toEqual([
+    assetId,
+  ]);
+});
 it('lets the user individually remove an unresolved linked record while preserving another pending addition and its late authorized result', async () => {
   mocks.query =
     'asset=' + assetId + '&quantity=' + quantityId + '&keep=filters';
@@ -400,18 +464,30 @@ it('lets the user individually remove an unresolved linked record while preservi
     />,
   );
   await screen.findByText('Adding linked records after restoring this queue…');
+  expect(
+    screen.getByText('Pending individual asset 1', { exact: true }),
+  ).toBeVisible();
+  expect(
+    screen.getByText('Pending quantity item 2', { exact: true }),
+  ).toBeVisible();
+  expect(
+    screen.queryByText('Pending individual asset: ' + assetId),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('Pending quantity item: ' + quantityId),
+  ).not.toBeInTheDocument();
   expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
   expect(printButton()).toBeDisabled();
   const user = userEvent.setup();
   await user.click(
-    screen.getByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.getByRole('button', { name: 'Remove pending individual asset 1' }),
   );
   expect(
-    screen.queryByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.queryByRole('button', { name: 'Remove pending individual asset 1' }),
   ).not.toBeInTheDocument();
   expect(
     screen.getByRole('button', {
-      name: 'Remove pending quantity ' + quantityId,
+      name: 'Remove pending quantity item 2',
     }),
   ).toBeEnabled();
   expect(mocks.replace).toHaveBeenLastCalledWith(
@@ -448,7 +524,7 @@ it('retains individually cancellable pending rows after a failed linked lookup',
   await screen.findByRole('button', { name: 'Retry linked additions' });
   const user = userEvent.setup();
   await user.click(
-    screen.getByRole('button', { name: 'Remove pending asset ' + assetId }),
+    screen.getByRole('button', { name: 'Remove pending individual asset 1' }),
   );
   await user.click(
     screen.getByRole('button', { name: 'Retry linked additions' }),
@@ -1327,10 +1403,167 @@ it('shows a quantity Item code in search results without replacing its UUID rout
   });
   render(<LabelDesigner {...props} />);
   expect(await screen.findByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(screen.queryByText('ID ' + quantityId)).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('checkbox', {
+      name: 'Select Adapters, Quantity item, Shelf 1A',
+    }),
+  ).not.toHaveAccessibleName(new RegExp(quantityId));
   expect(screen.getByRole('link', { name: 'Adapters' })).toHaveAttribute(
     'href',
     '/inventory/quantity/' + quantityId,
   );
+});
+
+it('shows field-aware label-search answers including intentional UUID text without changing selection or printed identity', async () => {
+  const result = labelResults([quantity]);
+  mocks.searchLabelRecords.mockResolvedValue({
+    ...result,
+    rows: result.rows.map((row) => ({
+      ...row,
+      customSummary: '[revision internal-field-id] must not render',
+      customPreview: {
+        answers: [
+          {
+            label: 'Description',
+            type: 'text',
+            displayValue: 'Braided cable',
+            truncated: false,
+          },
+          {
+            label: 'Department',
+            type: 'select_tree',
+            displayValue: 'Facilities / East',
+            truncated: false,
+          },
+          {
+            label: 'External reference',
+            type: 'text',
+            displayValue: quantityId,
+            truncated: false,
+          },
+        ],
+        truncated: false,
+      },
+    })),
+  });
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  render(<LabelDesigner {...props} initial={[]} />);
+  const results = await screen.findByRole('region', {
+    name: 'Search result records',
+  });
+  expect(await within(results).findByText('Braided cable')).toBeVisible();
+  expect(within(results).getByText('Description:')).toBeVisible();
+  expect(within(results).getByText('Department:')).toBeVisible();
+  expect(within(results).getByText('Facilities / East')).toBeVisible();
+  expect(within(results).getByText('External reference:')).toBeVisible();
+  expect(within(results).getByText(quantityId, { exact: true })).toBeVisible();
+  expect(
+    within(results).queryByText(/revision internal-field-id/),
+  ).not.toBeInTheDocument();
+  const details = within(results).getByRole('link', {
+    name: 'Full details',
+  });
+  expect(details).toHaveAttribute('href', '/inventory/quantity/' + quantityId);
+  expect(details.closest('label,button')).toBeNull();
+  selectRecord(quantity);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  await screen.findByText('1 distinct record · 1 label');
+  expect(mocks.getQueueRecords).toHaveBeenLastCalledWith([
+    { kind: 'quantity', key: quantityId },
+  ]);
+  const stored = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(
+    stored.entries.map((entry: { kind: string; key: string }) => ({
+      kind: entry.kind,
+      key: entry.key,
+    })),
+  ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  expect(
+    screen.getByRole('region', { name: 'Label queue' }),
+  ).not.toHaveTextContent('Braided cable');
+  await waitFor(() =>
+    expect(document.querySelector('.label-card')).toHaveTextContent(
+      quantity.name + ' / ' + quantityId,
+    ),
+  );
+});
+
+it('marks bounded truncated answers and links to the complete asset details', async () => {
+  const result = labelResults([asset]);
+  mocks.searchLabelRecords.mockResolvedValue({
+    ...result,
+    rows: result.rows.map((row) => ({
+      ...row,
+      customPreview: {
+        answers: [
+          {
+            label: 'Notes',
+            type: 'text',
+            displayValue: 'Long answer preview',
+            truncated: true,
+          },
+          {
+            label: 'Count',
+            type: 'number',
+            displayValue: '12',
+            truncated: false,
+          },
+          {
+            label: 'Enabled',
+            type: 'boolean',
+            displayValue: 'Yes',
+            truncated: false,
+          },
+        ],
+        truncated: true,
+      },
+    })),
+  });
+  render(<LabelDesigner {...props} />);
+  const results = await screen.findByRole('region', {
+    name: 'Search result records',
+  });
+  expect(
+    await within(results).findByText('Long answer preview…'),
+  ).toBeVisible();
+  expect(within(results).getByText('12', { exact: true })).toBeVisible();
+  expect(within(results).getByText('Yes', { exact: true })).toBeVisible();
+  expect(results.querySelectorAll('dt')).toHaveLength(3);
+  expect(
+    within(results).getByRole('link', {
+      name: 'View all details',
+    }),
+  ).toHaveAttribute('href', '/inventory/assets/' + assetId);
+  expect(
+    within(results).queryByRole('link', { name: 'Full details' }),
+  ).not.toBeInTheDocument();
+});
+
+it('omits empty custom previews while retaining the ordinary record detail link', async () => {
+  const result = labelResults([quantity]);
+  mocks.searchLabelRecords.mockResolvedValue({
+    ...result,
+    rows: result.rows.map((row) => ({
+      ...row,
+      customPreview: { answers: [], truncated: false },
+    })),
+  });
+  render(<LabelDesigner {...props} />);
+  const results = await screen.findByRole('region', {
+    name: 'Search result records',
+  });
+  expect(
+    await within(results).findByRole('link', { name: quantity.name }),
+  ).toHaveAttribute('href', '/inventory/quantity/' + quantityId);
+  expect(results.querySelector('dl')).toBeNull();
+  expect(
+    within(results).queryByRole('link', { name: 'Full details' }),
+  ).not.toBeInTheDocument();
 });
 
 it('keeps printing disabled until the sheet font is ready', async () => {
@@ -1975,7 +2208,7 @@ function labelResults(
 function selectRecord(row: LiveLabel) {
   fireEvent.click(
     screen.getByRole('checkbox', {
-      name: `Select ${row.name} (${row.kind} ${row.key})`,
+      name: `Select ${row.name}, ${row.kind === 'quantity' ? 'Quantity item' : 'Individual asset'}, ${row.holdingContext}`,
     }),
   );
 }
@@ -2034,11 +2267,11 @@ it('retains explicit selections across pages with named added, present and unava
   expect(screen.getByText('2 selected records')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   await screen.findByRole('checkbox', {
-    name: `Select Laptop (asset ${assetId})`,
+    name: /Select Laptop, Individual asset,/,
   });
   expect(
     screen.getByRole('checkbox', {
-      name: `Select Adapters (quantity ${quantityId})`,
+      name: /Select Adapters, Quantity item,/,
     }),
   ).toBeChecked();
   selectRecord(asset);

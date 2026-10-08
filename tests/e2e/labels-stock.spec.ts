@@ -1,6 +1,12 @@
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Page,
+  type Route,
+  type TestInfo,
+} from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
 import {
@@ -78,7 +84,7 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
 });
 test('an individual pending linked quantity can be removed while an unrelated delayed location addition completes once', async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(90_000);
   await signIn(page);
   await page.goto('/inventory/quantity/new');
@@ -94,13 +100,10 @@ test('an individual pending linked quantity can be removed while an unrelated de
   const responseBarrier = new Promise<void>((resolve) => {
     release = resolve;
   });
-  let acknowledge!: () => void;
-  let rejectAcknowledgment!: (error: unknown) => void;
-  const authorized = new Promise<void>((resolve, reject) => {
-    acknowledge = resolve;
-    rejectAcknowledgment = reject;
-  });
-  await page.route('**/labels**', async (route) => {
+  let intercepted = false;
+  let authorized = false;
+  let authorizationFailure: unknown;
+  const delayLinkedAddition = async (route: Route) => {
     if (
       route.request().method() !== 'POST' ||
       !route.request().postData()?.includes('ITC-RED')
@@ -108,22 +111,43 @@ test('an individual pending linked quantity can be removed while an unrelated de
       await route.continue();
       return;
     }
+    intercepted = true;
     try {
-      const response = await route.fetch();
+      const response = await route.fetch({ timeout: 15_000 });
       expect(response.ok()).toBe(true);
-      acknowledge();
+      authorized = true;
       await responseBarrier;
       await route.fulfill({ response });
     } catch (error) {
-      rejectAcknowledgment(error);
-      throw error;
+      authorizationFailure = error;
+      await route.abort().catch(() => undefined);
     }
-  });
+  };
+  await page.route('**/labels**', delayLinkedAddition);
+  let failed = false;
   try {
     await page.goto(
       '/labels?quantity=' + quantityId + '&location=ITC-RED&keep=state#sheet',
     );
-    await authorized;
+    await expect
+      .poll(() => intercepted, {
+        message: 'The linked location addition must reach its delayed POST',
+        timeout: 10_000,
+      })
+      .toBe(true);
+    await expect
+      .poll(
+        () => {
+          if (authorizationFailure) throw authorizationFailure;
+          return authorized;
+        },
+        {
+          message:
+            'The delayed linked addition must receive an authorized server response',
+          timeout: 20_000,
+        },
+      )
+      .toBe(true);
     const pending = page.getByRole('region', {
       name: 'Pending linked additions',
     });
@@ -133,17 +157,18 @@ test('an individual pending linked quantity can be removed while an unrelated de
     await expect(
       page.getByRole('button', { name: /Print selected labels/ }),
     ).toBeDisabled();
-    await pending
-      .getByRole('button', { name: 'Remove pending quantity ' + quantityId })
-      .click();
-    await expect(
-      pending.getByRole('button', {
-        name: 'Remove pending quantity ' + quantityId,
-      }),
-    ).toHaveCount(0);
-    await expect(
-      pending.getByRole('button', { name: 'Remove pending location ITC-RED' }),
-    ).toBeVisible();
+    const pendingQuantity = pending.getByRole('button', {
+      name: /^Remove pending quantity item \d+$/,
+    });
+    const pendingLocation = pending.getByRole('button', {
+      name: /^Remove pending location \d+$/,
+    });
+    await expect(pendingQuantity).toHaveCount(1);
+    await expect(pendingLocation).toHaveCount(1);
+    await pendingQuantity.click();
+    await expect(pendingQuantity).toHaveCount(0);
+    await expect(pendingLocation).toHaveCount(1);
+    await expect(pendingLocation).toBeVisible();
     await expect(page).toHaveURL(
       /\/labels\?location=ITC-RED&keep=state#sheet$/,
     );
@@ -156,26 +181,49 @@ test('an individual pending linked quantity can be removed while an unrelated de
     await page.reload();
     await expect(queue).toContainText('1 distinct record · 1 label');
     await expect(queue).not.toContainText(name);
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
     release();
-    await page.unroute('**/labels**');
-    await page.goto(detailUrl);
-    await openRecordTask(page, 'Archive quantity definition and clear stock');
-    const archive = await openRecordTask(
-      page,
-      'Archive quantity definition and clear stock',
-    );
-    await archive
-      .getByLabel('Reason (required)')
-      .fill('Checkpoint pending label fixture cleanup');
-    await archive.getByRole('checkbox', { name: /I understand/ }).check();
-    await archive
-      .getByRole('button', { name: 'Review archive and clear stock' })
-      .click();
-    await archive
-      .getByRole('button', { name: 'Confirm archive and clear stock' })
-      .click();
-    await expect(page.getByText(/Archived · Version 2/)).toBeVisible();
+    try {
+      if (!page.isClosed()) {
+        await page.unroute('**/labels**', delayLinkedAddition);
+        await page.goto(detailUrl);
+        await openRecordTask(
+          page,
+          'Archive quantity definition and clear stock',
+        );
+        const archive = await openRecordTask(
+          page,
+          'Archive quantity definition and clear stock',
+        );
+        await archive
+          .getByLabel('Reason (required)')
+          .fill('Checkpoint pending label fixture cleanup');
+        await archive.getByRole('checkbox', { name: /I understand/ }).check();
+        await archive
+          .getByRole('button', { name: 'Review archive and clear stock' })
+          .click();
+        await archive
+          .getByRole('button', { name: 'Confirm archive and clear stock' })
+          .click();
+        await expect(page.getByText(/Archived · Version 2/)).toBeVisible();
+      } else {
+        testInfo.annotations.push({
+          type: 'cleanup',
+          description:
+            'Owned quantity fixture cleanup could not run because the page was closed.',
+        });
+      }
+    } catch (error) {
+      if (!failed) throw error;
+      testInfo.annotations.push({
+        type: 'cleanup',
+        description:
+          'Owned quantity fixture cleanup failed after the original test failure.',
+      });
+    }
   }
 });
 
@@ -906,13 +954,13 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(page.getByRole('link', { name: assetName })).toBeVisible();
   await results
     .getByRole('checkbox', {
-      name: `Select ${quantityName} (quantity ${quantityId})`,
+      name: new RegExp(`^Select ${quantityName}, Quantity item,`),
       exact: true,
     })
     .check();
   await results
     .getByRole('checkbox', {
-      name: `Select ${assetName} (asset ${assetId})`,
+      name: new RegExp(`^Select ${assetName}, Individual asset,`),
       exact: true,
     })
     .check();

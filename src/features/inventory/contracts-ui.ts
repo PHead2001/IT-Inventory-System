@@ -70,6 +70,16 @@ export type InventoryResult = {
   reorderThreshold: number | null;
   stockState: StockState | null;
   customSummary?: string;
+  customPreview?: CustomAnswerPreview;
+};
+export type CustomAnswerPreview = {
+  answers: {
+    label: string;
+    type: string;
+    displayValue: string;
+    truncated: boolean;
+  }[];
+  truncated: boolean;
 };
 export type PageResult<T> = {
   rows: T[];

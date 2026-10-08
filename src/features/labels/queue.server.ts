@@ -2,6 +2,8 @@
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
 import { readFilters } from '@/features/inventory/read-model';
+import type { CustomAnswerPreview } from '@/features/inventory/contracts-ui';
+import { previewSearchBatch } from '@/features/metadata/queries.server';
 import {
   assetLabelPath,
   locationLabelPath,
@@ -30,7 +32,7 @@ const candidate = z.object({
   holding_context: z.string(),
 });
 const searchResult = z.object({
-  rows: z.array(candidate),
+  rows: z.array(candidate).max(25),
   total: z.number().int().nonnegative(),
 });
 const liveRow = z.object({
@@ -69,6 +71,7 @@ export type LabelCandidate = {
   manufacturer: string | null;
   model: string | null;
   holdingContext: string;
+  customPreview?: CustomAnswerPreview;
 };
 export type LiveLabel = LabelRecord & {
   context: string;
@@ -105,6 +108,15 @@ export async function searchLabelRecords(input: LabelSearchFilters): Promise<{
   if (error || data === null)
     throw new Error('Label search could not be loaded.');
   const result = searchResult.parse(data);
+  const uniqueKeys = [
+    ...new Map(
+      result.rows.map((row) => [
+        `${row.kind}:${row.entity_id}`,
+        { kind: row.kind, id: row.entity_id },
+      ]),
+    ).values(),
+  ];
+  const previews = await previewSearchBatch(supabase, uniqueKeys);
   return {
     rows: result.rows.map((row) => ({
       kind: row.kind,
@@ -118,6 +130,7 @@ export async function searchLabelRecords(input: LabelSearchFilters): Promise<{
       manufacturer: row.manufacturer,
       model: row.model,
       holdingContext: row.holding_context,
+      customPreview: previews[`${row.kind}:${row.entity_id}`],
     })),
     total: result.total,
     page: filter.page,
