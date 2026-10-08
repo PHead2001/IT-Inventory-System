@@ -13,6 +13,8 @@ export async function withDisposablePasswordAccount(
   });
   if (created.error || !created.data.user)
     throw new Error('Disposable password account could not be created');
+  let operationFailed = false;
+  let originalFailure: unknown;
   try {
     const membership = await client.from('app_members').insert({
       user_id: created.data.user.id,
@@ -23,6 +25,9 @@ export async function withDisposablePasswordAccount(
     if (membership.error)
       throw new Error('Disposable password membership could not be created');
     await run();
+  } catch (error) {
+    operationFailed = true;
+    originalFailure = error;
   } finally {
     const failed: string[] = [];
     const attempt = async (name: string, cleanup: () => Promise<void>) => {
@@ -62,8 +67,15 @@ export async function withDisposablePasswordAccount(
         );
     });
     if (failed.length)
-      throw new Error(
+      throw new AggregateError(
+        [
+          ...(operationFailed ? [originalFailure] : []),
+          ...failed.map(
+            (name) => new Error('Disposable password cleanup failed: ' + name),
+          ),
+        ],
         'Disposable password cleanup failed: ' + failed.join(', '),
       );
   }
+  if (operationFailed) throw originalFailure;
 }

@@ -8,6 +8,8 @@ import {
 } from '@/features/room/spaces';
 import { SpacesWorkspace } from '@/features/room/spaces-workspace';
 
+export const metadata = { title: 'Spaces & maps' };
+
 export default async function RoomPage({
   searchParams,
 }: {
