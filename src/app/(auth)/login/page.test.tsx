@@ -24,9 +24,11 @@ beforeEach(() => {
 it.each([
   ['/locations/ITC', '/locations/ITC'],
   ['/dashboard', '/dashboard'],
-  ['https://evil.test', '/dashboard'],
-  ['/login', '/dashboard'],
-  [undefined, '/dashboard'],
+  ['https://evil.test', '/inventory'],
+  ['//evil.test', '/inventory'],
+  ['/login', '/inventory'],
+  ['/dashboard?next=https://evil.test', '/inventory'],
+  [undefined, '/inventory'],
 ])('redirects members safely from %s', async (next, expected) => {
   mocks.session.mockResolvedValue('member');
   await expect(
@@ -59,6 +61,35 @@ it('supports deliberate account switching without a redirect loop', async () => 
   render(await LoginPage({ searchParams: Promise.resolve({ switch: '1' }) }));
   expect(screen.getByRole('form', { name: 'Sign in' })).toBeInTheDocument();
 });
+it.each(['anonymous', 'member'] as const)(
+  '%s login and explicit account switching preserve only safe destinations for the sign-in action',
+  async (session) => {
+    mocks.session.mockResolvedValue(session);
+    for (const [next, expected] of [
+      [undefined, ''],
+      ['https://evil.test', ''],
+      ['//evil.test', ''],
+      ['/dashboard?next=https://evil.test', ''],
+      ['/dashboard', '/dashboard'],
+      ['/locations/ITC', '/locations/ITC'],
+    ] as const) {
+      const { unmount } = render(
+        await LoginPage({
+          searchParams: Promise.resolve({
+            next,
+            ...(session === 'member' ? { switch: '1' } : {}),
+          }),
+        }),
+      );
+      expect(
+        screen
+          .getByRole('form', { name: 'Sign in' })
+          .querySelector('input[name="next"]'),
+      ).toHaveValue(expected);
+      unmount();
+    }
+  },
+);
 it('fails closed with a retry path when the session check is unavailable', async () => {
   mocks.session.mockResolvedValue('unavailable');
   render(await LoginPage({ searchParams: Promise.resolve({}) }));

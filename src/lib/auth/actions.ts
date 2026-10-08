@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getAppOrigin } from './origin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { isActiveMember } from './membership';
-import { validReturnPath } from '@/features/scan/targets';
+import { loginDestination } from '@/features/scan/targets';
 import { createAuthDiagnostic, observeAuthStage } from './diagnostic.server';
 import { readPasswordSession } from './password-session.server';
 import {
@@ -61,7 +61,7 @@ export async function login(
           .maybeSingle(),
     );
     if (memberError || !isActiveMember(member)) redirect('/access-denied');
-    redirect(validReturnPath(form.get('next')) ?? '/inventory');
+    redirect(loginDestination(form.get('next')));
   });
 }
 export async function logout() {
