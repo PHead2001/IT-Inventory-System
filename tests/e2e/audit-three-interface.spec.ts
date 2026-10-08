@@ -11,6 +11,7 @@ import {
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { cleanupInterfaceFixture } from '../helpers/interface-fixture-cleanup';
 
 async function command(
   caller: SupabaseClient,
@@ -69,44 +70,50 @@ const test = base.extend<{
       itemId = item.entity_id;
       await provideRecord({ id: itemId, categoryId, name });
     } finally {
-      try {
-        if (itemId) {
-          const current = await caller
-            .from('quantity_items')
-            .select('version,archived')
-            .eq('id', itemId)
-            .single();
-          expect(current.error).toBeNull();
-          if (!current.data!.archived)
-            await command(caller, 'quantity_archive_and_clear', {
-              item_id: itemId,
-              expected_version: current.data!.version,
-              confirm_clear_stock: true,
-              reason: 'Owned Audit three interface fixture cleanup',
+      await cleanupInterfaceFixture({
+        record: async () => {
+          if (itemId) {
+            const current = await caller
+              .from('quantity_items')
+              .select('version,archived')
+              .eq('id', itemId)
+              .single();
+            expect(current.error).toBeNull();
+            if (!current.data!.archived)
+              await command(caller, 'quantity_archive_and_clear', {
+                item_id: itemId,
+                expected_version: current.data!.version,
+                confirm_clear_stock: true,
+                reason: 'Owned Audit three interface fixture cleanup',
+              });
+          }
+        },
+        category: async () => {
+          if (categoryId) {
+            const replacement = await caller
+              .from('categories')
+              .select('id')
+              .eq('code', 'CABLES')
+              .eq('active', true)
+              .single();
+            expect(replacement.error).toBeNull();
+            const review = await caller.rpc('category_removal_review', {
+              p_category_id: categoryId,
+              p_replacement_id: replacement.data!.id,
             });
-        }
-        if (categoryId) {
-          const replacement = await caller
-            .from('categories')
-            .select('id')
-            .eq('code', 'CABLES')
-            .eq('active', true)
-            .single();
-          expect(replacement.error).toBeNull();
-          const review = await caller.rpc('category_removal_review', {
-            p_category_id: categoryId,
-            p_replacement_id: replacement.data!.id,
-          });
-          expect(review.error).toBeNull();
-          await command(caller, 'category_remove', {
-            category_id: categoryId,
-            replacement_id: replacement.data!.id,
-            review_token: (review.data as { token: string }).token,
-          });
-        }
-      } finally {
-        await caller.auth.signOut({ scope: 'local' });
-      }
+            expect(review.error).toBeNull();
+            await command(caller, 'category_remove', {
+              category_id: categoryId,
+              replacement_id: replacement.data!.id,
+              review_token: (review.data as { token: string }).token,
+            });
+          }
+        },
+        signOut: async () => {
+          const result = await caller.auth.signOut({ scope: 'local' });
+          expect(result.error).toBeNull();
+        },
+      });
     }
   },
 });
@@ -161,10 +168,17 @@ test('local UI and code fonts load on an existing location label', async ({
   expect(fonts.code.replaceAll('"', '')).toContain(fonts.mono);
   expect(fonts.loaded).toContain(fonts.ui);
   expect(fonts.loaded).toContain(fonts.mono);
-  expect(fonts.resources.some((url) => /inter.*\.woff2/.test(url))).toBe(true);
-  expect(fonts.resources.some((url) => /jetbrains.*\.woff2/.test(url))).toBe(
-    true,
-  );
+  expect(
+    new Set(
+      fonts.resources.filter((resource) => {
+        const url = new URL(resource);
+        return (
+          url.origin === new URL(page.url()).origin &&
+          /^\/_next\/static\/media\/[^/]+\.woff2$/.test(url.pathname)
+        );
+      }),
+    ).size,
+  ).toBeGreaterThanOrEqual(2);
 });
 
 // Synthetic navigation-boundary fixture: the record remains real and intact.
@@ -285,6 +299,7 @@ test('missing resources keep direct transport status and private-safe identity w
     await expect(
       page.getByRole('heading', { name: heading, exact: true }),
     ).toBeVisible();
+    await expect(page.getByRole('main')).toHaveCount(1);
     await expect(page).toHaveTitle(/IT Inventory/);
     await expect(page.locator('head title')).not.toContainText(
       path.split('/').at(-1)!,
