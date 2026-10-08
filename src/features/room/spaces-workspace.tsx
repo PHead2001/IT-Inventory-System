@@ -26,6 +26,7 @@ import { inventoryDescendantCodes } from '../locations/hierarchy';
 import { buildRoomBindings } from './bindings';
 import { LocationBrowser } from './location-browser';
 import { parseRoomLocation } from './navigation';
+import { useRoomOccupancy } from './use-room-occupancy';
 import { cameraViewKey, type CameraView } from './scene/camera-view';
 import {
   parseRoomContentsResponse,
@@ -128,6 +129,7 @@ export function SpacesWorkspace({
     error?: string;
   } | null>(null);
   const [visible, setVisible] = useState(true);
+  const [showCounts, setShowCounts] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [notice, setNotice] = useState(initialNotice);
   const [focusTick, setFocusTick] = useState(0);
@@ -169,6 +171,28 @@ export function SpacesWorkspace({
         : null,
     [userId, selection.space.id, room],
   );
+  const occupancy = useRoomOccupancy(
+    showCounts && visible && Boolean(room),
+    userId,
+    selection.space.id,
+    attemptKey,
+  );
+  // Mutations live on other routes. Refresh on return (including retained pages)
+  // and tab focus; never persist private counts or imply realtime updates.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'hidden')
+        setRetryTick((tick) => tick + 1);
+    };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
   const initialView = viewKey ? (cameraViews.get(viewKey) ?? null) : null;
   const bindings = useMemo(() => (room ? buildRoomBindings(room) : []), [room]);
   const scoped = useMemo(
@@ -433,6 +457,7 @@ export function SpacesWorkspace({
             onClick={() => {
               if (visible) setFocusOnRestore(false);
               setVisible((value) => !value);
+              setRetryTick((tick) => tick + 1);
             }}
           >
             {visible ? 'Hide room' : 'Show room'}
@@ -450,6 +475,23 @@ export function SpacesWorkspace({
           Search inventory
         </Link>
       </div>
+      {showCounts && room && visible && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <p role="status">
+            {occupancy.status === 'loading'
+              ? 'Refreshing item counts…'
+              : occupancy.status === 'error'
+                ? 'Item counts unavailable. Refresh to try again.'
+                : 'Counts are a snapshot of active items: one per positive-stock quantity item and active individual asset at each leaf location.'}
+          </p>
+          <button
+            className={styles.commandButton}
+            onClick={() => setRetryTick((tick) => tick + 1)}
+          >
+            Refresh inventory
+          </button>
+        </div>
+      )}
       <div className={styles.columns}>
         <div className={styles.mainColumn}>
           {room && visible ? (
@@ -494,6 +536,12 @@ export function SpacesWorkspace({
                   <RoomScene
                     key={selection.space.id}
                     room={room}
+                    showCounts={showCounts}
+                    onCountsChange={(show) => {
+                      setShowCounts(show);
+                      setRetryTick((tick) => tick + 1);
+                    }}
+                    locationEntryCounts={occupancy.counts}
                     locationNames={Object.fromEntries(
                       locations.map((location) => [
                         location.code,

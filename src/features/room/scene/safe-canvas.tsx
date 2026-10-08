@@ -5,6 +5,7 @@ import {
   Group,
   Mesh,
   BoxGeometry,
+  PlaneGeometry,
   MeshStandardMaterial,
   MeshBasicMaterial,
   AmbientLight,
@@ -18,6 +19,7 @@ extend({
   Group,
   Mesh,
   BoxGeometry,
+  PlaneGeometry,
   MeshStandardMaterial,
   MeshBasicMaterial,
   AmbientLight,
@@ -151,7 +153,7 @@ export function SafeCanvas({
           display: 'block',
           width: '100%',
           height: '100%',
-          touchAction: 'none',
+          touchAction: 'auto',
         }}
       >
         {fallback}

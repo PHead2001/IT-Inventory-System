@@ -37,15 +37,18 @@ function anchoredLabelUsable(host: HTMLElement, code: string) {
 
 /** Scene-facing picking stays separate from the screen-space DOM tooltip. */
 export function VisibleHoverTracker({
-  showAllLabels,
   retainDuringLabelHandoff,
   onHit,
   onCanvasLeave,
+  active = false,
+  suspended = false,
 }: {
   showAllLabels: boolean;
   retainDuringLabelHandoff: boolean;
   onHit: (hit: VisibleHover | null) => void;
   onCanvasLeave: () => void;
+  active?: boolean;
+  suspended?: boolean;
 }) {
   const { camera, gl, scene, invalidate } = useThree();
   const raycaster = useRef(new Raycaster());
@@ -60,6 +63,23 @@ export function VisibleHoverTracker({
     if (!pointer.current.known) return;
     if (!pointer.current.inside && !retainDuringLabelHandoff) return;
     const canvas = gl.domElement;
+    const top = document.elementFromPoint(
+      pointer.current.clientX,
+      pointer.current.clientY,
+    );
+    const hoverButton = top?.closest('[data-hover-tooltip="true"]');
+    const ownHover =
+      !!hoverButton &&
+      !!canvas.parentElement?.parentElement?.contains(hoverButton);
+    if (
+      suspended ||
+      (top !== canvas && !(retainDuringLabelHandoff && ownHover))
+    ) {
+      canvas.style.cursor = suspended ? 'grabbing' : active ? 'grab' : 'auto';
+      canvas.dataset.hoverVisibleCode = '';
+      onHit(null);
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const x = pointer.current.clientX - rect.left;
@@ -75,6 +95,7 @@ export function VisibleHoverTracker({
       raycaster.current.intersectObjects(scene.children, true),
     );
     canvas.dataset.hoverVisibleCode = target?.code ?? '';
+    canvas.style.cursor = target ? 'pointer' : active ? 'grab' : 'auto';
     onHit(
       target
         ? {
@@ -84,15 +105,15 @@ export function VisibleHoverTracker({
             width: rect.width,
             height: rect.height,
             needsTooltip:
-              !showAllLabels ||
               !canvas.parentElement ||
               !anchoredLabelUsable(canvas.parentElement, target.code),
           }
         : null,
     );
-  }, [camera, gl, scene, onHit, retainDuringLabelHandoff, showAllLabels]);
+  }, [camera, gl, scene, onHit, retainDuringLabelHandoff, active, suspended]);
   useEffect(() => {
     const canvas = gl.domElement;
+    const previousCursor = canvas.style.cursor;
     const move = (event: PointerEvent) => {
       if (event.pointerType === 'touch') return;
       pointer.current = {
@@ -106,6 +127,7 @@ export function VisibleHoverTracker({
     };
     const leave = () => {
       pointer.current.inside = false;
+      canvas.style.cursor = active ? 'grab' : 'auto';
       onCanvasLeave();
     };
     canvas.addEventListener('pointerenter', move);
@@ -116,8 +138,9 @@ export function VisibleHoverTracker({
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerleave', leave);
       delete canvas.dataset.hoverVisibleCode;
+      canvas.style.cursor = previousCursor;
     };
-  }, [gl, invalidate, onCanvasLeave, sample]);
+  }, [gl, invalidate, onCanvasLeave, sample, active]);
   // OrbitControls and the focus rig invalidate demand frames even if the pointer
   // stays motionless. Recheck the visible surface after each camera update.
   useFrame(sample);

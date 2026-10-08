@@ -11,6 +11,9 @@ const roomReferences: object[] = [];
 vi.mock('next/dynamic', () => ({
   default: () =>
     function Scene(props: {
+      showCounts?: boolean;
+      onCountsChange?: (show: boolean) => void;
+      locationEntryCounts?: Record<string, string>;
       selectedCode: string | null;
       onSelect: (code: string) => void;
       focusRequest: { requestId: number };
@@ -27,11 +30,15 @@ vi.mock('next/dynamic', () => ({
       return (
         <div
           data-testid="scene-selection"
+          data-counts={JSON.stringify(props.locationEntryCounts ?? null)}
           data-code={props.selectedCode ?? ''}
           data-focus={props.focusRequest.requestId}
           data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
+          <button onClick={() => props.onCountsChange?.(!props.showCounts)}>
+            Toggle item counts
+          </button>
           <button onClick={() => props.onSelect('ITC-B')}>
             Choose B in scene
           </button>
@@ -740,4 +747,53 @@ it('explains a transport failure and retries the same selection', async () => {
   await user.click(screen.getByRole('button', { name: 'Retry contents' }));
   await screen.findByText('Recovered stock');
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it('loads counts only when enabled and refreshes counts and contents together on return', async () => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn().mockImplementation((url: string) => {
+    if (url.startsWith('/api/room/occupancy?'))
+      return Promise.resolve({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          identity: {
+            userId: 'test-user',
+            environment: window.location.origin,
+            spaceId: 'it-closet',
+            filter: 'type=all;status=active',
+          },
+          counts: { 'ITC-D01': '3' },
+        }),
+      });
+    return Promise.resolve(response('Cable', 'ITC-D01'));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <SpacesWorkspace
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-D01"
+    />,
+  );
+  await screen.findByText('Cable');
+  expect(
+    fetcher.mock.calls.filter(([url]) => String(url).includes('/occupancy?')),
+  ).toHaveLength(0);
+  await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
+  await waitFor(() =>
+    expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+      'data-counts',
+      '{"ITC-D01":"3"}',
+    ),
+  );
+  const before = fetcher.mock.calls.length;
+  act(() => {
+    window.dispatchEvent(new Event('pageshow'));
+  });
+  await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 2));
+  await screen.findByText(/Counts are a snapshot/);
+  await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
+  await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
 });

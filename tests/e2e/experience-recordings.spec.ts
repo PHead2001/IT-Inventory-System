@@ -127,9 +127,15 @@ test('records modeled space selection, manual camera control, and label print pr
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
   const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  const moreControls = viewer.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+  });
   const before = await viewer.getAttribute('data-camera-view');
-  await toolbar.getByRole('button', { name: 'Pan right' }).click();
+  await moreControls.getByRole('button', { name: 'Pan right' }).click();
   await expect
     .poll(() => viewer.getAttribute('data-camera-view'))
     .not.toBe(before);

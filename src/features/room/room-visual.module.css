@@ -21,7 +21,7 @@
 .spaceLabel {
   margin-right: 3px;
   color: #a8c5d7;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -97,7 +97,7 @@
 }
 .viewerHeading span {
   color: #9cafc4;
-  font-size: 11px;
+  font-size: 13px;
 }
 .fallback,
 .unmodeled {
@@ -130,7 +130,7 @@
 }
 .panelEyebrow {
   color: #50def2;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -208,36 +208,33 @@
   position: relative;
   display: grid;
   gap: 11px;
+  container-type: inline-size;
 }
 .cameraToolbar {
-  position: absolute;
-  z-index: 20;
-  top: 16px;
-  left: 16px;
-  right: 16px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 7px;
-  width: fit-content;
-  max-width: calc(100% - 32px);
-  padding: 8px;
-  border: 1px solid #96bcd17a;
-  border-radius: 12px;
-  background: #071827ed;
-  box-shadow:
-    0 16px 30px #02081099,
-    inset 0 1px #dcf7ff16;
-  backdrop-filter: blur(12px);
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
 }
-.cameraToolbar button {
+.cameraToolbar .iconButton {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.cameraToolbar button,
+.moreMenu button {
   min-height: 44px;
   color: #eefaff;
   border-color: #638ca0a8;
   background: #153348;
-  font-size: 12px;
+  font-size: 13px;
 }
-.cameraToolbar button:hover {
+.cameraToolbar button:hover,
+.moreMenu button:hover {
   border-color: #50def2;
   background: #204a5e;
 }
@@ -245,47 +242,111 @@
   color: #a1b5c3;
   opacity: 0.62;
 }
-.cameraToolbar button[aria-pressed='true'] {
+.cameraToolbar button[aria-pressed='true'],
+.moreMenu button[aria-pressed='true'] {
   color: #06131d;
   background: #7ee5f1;
   border-color: #7ee5f1;
 }
 .controlGroup {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid #638ca078;
-  border-radius: 9px;
-}
-.moreControls {
-  position: relative;
-}
-.moreSummary {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 1px solid #638ca0a8;
-  border-radius: 8px;
-  background: #153348;
-  color: #eefaff;
-  cursor: pointer;
-  font-size: 12px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .moreMenu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  left: 0;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 5px;
-  width: 220px;
-  padding: 8px;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-height: min(65vh, 560px);
+  overflow: auto;
+  padding: 10px;
   border: 1px solid #96bcd17a;
   border-radius: 10px;
   background: #071827;
-  box-shadow: 0 14px 30px #020810a8;
+  scrollbar-color: #638ca0 #071827;
+}
+.secondaryControls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.controlsHelp {
+  display: grid;
+  gap: 8px;
+  color: #c8dbe8;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.labelAnchor,
+.hoverAnchor {
+  position: relative;
+  pointer-events: none;
+}
+.hoverAnchor {
+  position: absolute;
+  z-index: 10;
+}
+.labelLeader {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 1px;
+  background: #67e8f9a6;
+  transform-origin: left center;
+  pointer-events: none;
+}
+.locationLabel,
+.decorativeLabel {
+  visibility: hidden;
+  position: relative;
+  display: block;
+  padding: 5px 8px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #020617ed;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 18px;
+}
+.locationLabel {
+  max-width: min(240px, calc(100vw - 80px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  min-height: 44px;
+  min-width: 44px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.locationLabel[aria-pressed='true'] {
+  border-color: #22d3ee;
+  background: #083344f0;
+  color: #cffafe;
+}
+.locationLabel:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 2px;
+}
+.decorativeLabel {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.countBadge {
+  color: #a5f3fc;
+  font-variant-numeric: tabular-nums;
+}
+.activationOverflow {
+  display: none;
+}
+@container (max-width: 319px) {
+  .cameraToolbar .activationPrimary {
+    display: none;
+  }
+  .activationOverflow {
+    display: inline-flex;
+  }
 }
 .canvasFrame {
   position: relative;
@@ -301,7 +362,7 @@
 }
 .sceneNote {
   color: #9cafc4;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 @media (max-width: 1100px) {
@@ -310,14 +371,6 @@
   }
 }
 @media (max-width: 720px) {
-  .cameraToolbar {
-    position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
-    width: 100%;
-    max-width: none;
-  }
   .canvasFrame {
     height: 410px;
   }

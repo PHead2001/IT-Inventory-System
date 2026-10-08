@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { attachMapInput } from './map-input';
 import { OrthographicCamera, Vector3 } from 'three';
 import RoomScene, {
   finishFocusAnimation,
@@ -8,7 +9,7 @@ import RoomScene, {
 } from './room-scene';
 
 vi.mock('./safe-canvas', () => ({
-  SafeCanvas: () => <div data-testid="mock-canvas" />,
+  SafeCanvas: () => <canvas data-testid="mock-canvas" />,
 }));
 
 function sceneProps(overrides: Partial<RoomSceneProps> = {}): RoomSceneProps {
@@ -65,6 +66,7 @@ describe('room scene controls', () => {
   it('offers both modes and persists Free Orbit for a new scene mount', async () => {
     const user = userEvent.setup();
     const view = render(<RoomScene {...sceneProps()} />);
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
     const free = screen.getByRole('button', { name: 'Free Orbit' });
     expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute(
       'aria-pressed',
@@ -75,6 +77,7 @@ describe('room scene controls', () => {
     expect(window.localStorage.getItem('room-orbit-mode')).toBe('free');
     view.unmount();
     render(<RoomScene {...sceneProps()} />);
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
     expect(screen.getByRole('button', { name: 'Free Orbit' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -92,7 +95,7 @@ describe('room scene controls', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByText('Pan and rotate'));
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
     expect(screen.getByRole('button', { name: 'Tilt up' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Tilt down' })).toBeEnabled();
     view.rerender(<RoomScene {...sceneProps()} />);
@@ -116,6 +119,61 @@ describe('room scene controls', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Selected location: Shelf 1A (ITC-S1A)',
     );
+  });
+
+  it('requires explicit activation and disarms through Done, Escape and focus leaving the map', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <RoomScene {...sceneProps()} />
+        <button>Outside the map</button>
+      </>,
+    );
+    const activate = () =>
+      screen.getByRole('button', { name: 'Interact with map' });
+    expect(activate()).toHaveAttribute('aria-pressed', 'false');
+    await user.click(activate());
+    await user.click(
+      screen.getByRole('button', { name: 'Done interacting with map' }),
+    );
+    expect(activate()).toHaveAttribute('aria-pressed', 'false');
+    await user.click(activate());
+    await user.keyboard('{Escape}');
+    expect(activate()).toHaveAttribute('aria-pressed', 'false');
+    await user.click(activate());
+    const canvas = screen.getByTestId('mock-canvas') as HTMLCanvasElement;
+    const cleanup = attachMapInput(canvas, true, {
+      current: { suppressSelection: false },
+    });
+    await user.click(canvas);
+    expect(canvas).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Done interacting with map' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    cleanup();
+    await user.click(screen.getByRole('button', { name: 'Outside the map' }));
+    expect(activate()).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('keeps instructions short and restores focus after complete controls help', async () => {
+    const user = userEvent.setup();
+    render(<RoomScene {...sceneProps()} />);
+    const more = screen.getByRole('button', { name: 'More map controls' });
+    await user.click(more);
+    await user.click(screen.getByRole('button', { name: /^Controls$/ }));
+    expect(
+      screen.getByText(/Item counts are active inventory entries/),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Show item counts' }),
+    ).toHaveAttribute('aria-pressed', 'false');
+    await user.click(screen.getByRole('button', { name: 'Show item counts' }));
+    expect(
+      screen.getByRole('button', { name: 'Show item counts' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('{Escape}');
+    expect(more).toHaveFocus();
+    expect(more).toHaveAttribute('aria-expanded', 'false');
   });
 });
 
