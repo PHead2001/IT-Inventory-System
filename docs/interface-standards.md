@@ -154,6 +154,9 @@ Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 ## 10. Empty, loading and error states
 
 Route titles describe the task or resource type, never a private record name. Root
+metadata supplies the IT Inventory suffix. `/room` uses Spaces & maps and
+`/auth/confirm` uses Confirm email link without selected space names, location
+codes or confirmation tokens. Root
 and inventory not-found views provide Overview and inventory-search recovery without
 assuming deletion or revealing authorization state. Site-opening forms override
 the site-details ancestor with the private-safe Record existing quantity item or
