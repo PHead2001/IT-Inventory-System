@@ -55,6 +55,71 @@ it('identifies one local unit separately from overall available and assigned sto
     ).searchParams.get('returnTo'),
   ).toBe('/inventory?q=Cable&status=all&page=2#inventory-row-1');
 });
+
+it.each([
+  { kind: 'quantity' as const, truncated: false },
+  { kind: 'quantity' as const, truncated: true },
+  { kind: 'asset' as const, truncated: false },
+  { kind: 'asset' as const, truncated: true },
+])(
+  'preserves filtered result scope and each row anchor on $kind custom details with truncated=$truncated',
+  ({ kind, truncated }) => {
+    const returnTo = '/inventory?q=Cable&status=all&page=3';
+    const rows = [0, 1].map((index) => ({
+      kind,
+      id: `record-${index}`,
+      name: 'Cable',
+      categoryName: 'Equipment',
+      status: 'active',
+      location: { ...location, id: `location-${index}` },
+      quantity: kind === 'quantity' ? 2 : null,
+      assetTag: null,
+      serialNumber: null,
+      recordedTotal: null,
+      reorderThreshold: null,
+      stockState: null,
+      customPreview: {
+        answers: [
+          {
+            label: 'Owner',
+            type: 'text' as const,
+            displayValue: 'IT',
+            truncated: false,
+          },
+        ],
+        truncated,
+      },
+    }));
+    const { rerender } = render(
+      <InventoryRows rows={rows} returnTo={returnTo} />,
+    );
+    const label = truncated ? 'View all details' : 'Full details';
+    const pathname = `/inventory/${kind === 'quantity' ? 'quantity' : 'assets'}/record`;
+    screen.getAllByRole('listitem').forEach((row, index) => {
+      const details = within(row).getByRole('link', { name: label });
+      const primary = within(row).getByRole('link', { name: 'Cable' });
+      const url = new URL(
+        details.getAttribute('href')!,
+        'https://inventory.test',
+      );
+      expect(url.pathname).toBe(`${pathname}-${index}`);
+      expect(url.searchParams.get('returnTo')).toBe(
+        `${returnTo}#inventory-row-${index + 1}`,
+      );
+      expect(details.getAttribute('href')).toBe(primary.getAttribute('href'));
+      expect(row).toHaveAttribute('id', `inventory-row-${index + 1}`);
+    });
+    rerender(<InventoryRows rows={rows} />);
+    screen.getAllByRole('listitem').forEach((row, index) => {
+      expect(within(row).getByRole('link', { name: label })).toHaveAttribute(
+        'href',
+        `${pathname}-${index}`,
+      );
+      expect(row).not.toHaveAttribute('id');
+    });
+  },
+);
+
 it('omits empty pagination and does not repeat the result count in nonempty pagination', () => {
   const { rerender } = render(
     <Pagination
