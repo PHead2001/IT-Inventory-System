@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { attachMapInput } from './map-input';
 import { OrthographicCamera, Vector3 } from 'three';
@@ -154,6 +154,64 @@ describe('room scene controls', () => {
     await user.click(screen.getByRole('button', { name: 'Outside the map' }));
     expect(activate()).toHaveAttribute('aria-pressed', 'false');
   });
+
+  it.each(['activation', 'Pan left', 'Controls'])(
+    'releases map interaction with one Escape from the overflow %s control without losing selection',
+    async (control) => {
+      const user = userEvent.setup();
+      const props = sceneProps({ selectedCode: 'ITC-S1A' });
+      render(<RoomScene {...props} />);
+      const more = screen.getByRole('button', { name: 'More map controls' });
+      await user.click(more);
+      const panel = screen.getByRole('region', { name: 'More map controls' });
+      // Narrow layouts put activation in the overflow. Use that real button
+      // rather than the primary toolbar's copy, regardless of jsdom layout.
+      await user.click(
+        within(panel).getByRole('button', { name: 'Interact with map' }),
+      );
+      expect(
+        within(panel).getByRole('button', {
+          name: 'Done interacting with map',
+        }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      if (control !== 'activation') {
+        await user.click(within(panel).getByRole('button', { name: control }));
+      }
+
+      await user.keyboard('{Escape}');
+
+      expect(more).toHaveFocus();
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect(
+        screen.queryByRole('region', { name: 'More map controls' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Interact with map' }),
+      ).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Selected location: ITC-S1A',
+      );
+      expect(props.onSelect).not.toHaveBeenCalled();
+
+      // Escape leaves ordinary controls usable and resets help disclosure.
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('button', { name: 'Controls' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      const reopened = screen.getByRole('region', {
+        name: 'More map controls',
+      });
+      await user.click(
+        within(reopened).getByRole('button', { name: 'Interact with map' }),
+      );
+      expect(
+        within(reopened).getByRole('button', {
+          name: 'Done interacting with map',
+        }),
+      ).toHaveAttribute('aria-pressed', 'true');
+    },
+  );
 
   it('keeps instructions short and restores focus after complete controls help', async () => {
     const user = userEvent.setup();

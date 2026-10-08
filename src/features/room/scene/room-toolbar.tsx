@@ -167,6 +167,7 @@ export function RoomToolbar({
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               event.stopPropagation();
+              onActiveChange(false);
               close();
             }
           }}
