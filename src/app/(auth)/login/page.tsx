@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { AuthForm } from '@/components/auth/auth-form';
-import { validReturnPath } from '@/features/scan/targets';
+import { loginDestination, validReturnPath } from '@/features/scan/targets';
 import { redirect } from 'next/navigation';
 import { readLoginSession } from '@/lib/auth/login-session.server';
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export default async function LoginPage({
   const next = validReturnPath(params.next);
   const session = await readLoginSession();
   if (params.switch !== '1') {
-    if (session === 'member') redirect(next ?? '/dashboard');
+    if (session === 'member') redirect(loginDestination(params.next));
     if (session === 'denied') redirect('/access-denied');
     if (session === 'unavailable')
       return (

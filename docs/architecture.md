@@ -29,7 +29,11 @@ History lists summarize quantities from immutable event deltas or custody snapsh
 ### Login and password sessions
 
 An ordinary signed-in visit to `/login` verifies the current Auth user and active
-application membership, then opens the validated internal return path or Overview.
+application membership, then opens the validated internal return path or Inventory.
+Fresh password sign-in and an existing member session use the same landing rule,
+so a session becoming visible while sign-in navigation is pending cannot change
+the destination. Only an explicit validated `/dashboard` return opens Overview;
+missing or unsafe return targets fall back to Inventory.
 Inactive and nonmember accounts go to Access is not enabled. Auth or membership
 transport failures show a recoverable error. Explicit `/login?switch=1` permits a
 different account's credentials to be entered; it grants no access or password-change
