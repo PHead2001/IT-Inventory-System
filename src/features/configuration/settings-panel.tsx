@@ -255,6 +255,7 @@ export function SettingsPanel({
                 </div>
                 {canManage && editing === category.id && (
                   <form
+                    {...renameValidation.formProps}
                     className="mt-4 space-y-3"
                     noValidate
                     onKeyDown={(event) => {
@@ -468,6 +469,7 @@ export function SettingsPanel({
           </ul>
           {canManage && (
             <form
+              {...createValidation.formProps}
               className="experience-surface max-w-3xl space-y-3 p-4"
               noValidate
               onSubmit={(event) => {

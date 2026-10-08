@@ -174,6 +174,33 @@ it('keeps site creation errors associated and focuses Name before submission', (
   expect(name).toHaveAccessibleDescription(/Enter/);
 });
 
+it.each(['site', 'location'] as const)(
+  'rechecks native %s management validity on blur without another submit or value change',
+  (kind) => {
+    render(
+      kind === 'site' ? (
+        <SiteManagementForm />
+      ) : (
+        <LocationManagementForm location={area} />
+      ),
+    );
+    const name = screen.getByLabelText('Name') as HTMLInputElement;
+    if (kind === 'site')
+      fireEvent.change(name, { target: { value: 'Fictional property' } });
+    name.setCustomValidity('Choose an available name.');
+    fireEvent.submit(name.closest('form')!);
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    expect(submitCustody).not.toHaveBeenCalled();
+    name.setCustomValidity('');
+    fireEvent.blur(name);
+    expect(name).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(name).not.toHaveAccessibleDescription(/Choose an available/);
+    expect(submitCustody).not.toHaveBeenCalled();
+  },
+);
+
 it('retains code guidance and optional Notes while correcting invalid site format', async () => {
   const user = userEvent.setup();
   vi.mocked(submitCustody).mockResolvedValue({

@@ -646,6 +646,7 @@ export function SiteManagementForm({
     );
   return (
     <form
+      {...validation.formProps}
       className={panel + ' max-w-4xl space-y-4'}
       noValidate
       onSubmit={(event) => {
@@ -937,6 +938,7 @@ export function LocationManagementForm({
   }
   return (
     <form
+      {...validation.formProps}
       className={panel + ' max-w-4xl space-y-4'}
       noValidate
       onSubmit={(event) => {

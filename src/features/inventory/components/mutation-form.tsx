@@ -25,7 +25,12 @@ import type {
   LocationRef,
   QuantityItem,
 } from '../contracts-ui';
-import { useReportTaskState, useTaskReset, useTaskDiscard } from './task-state';
+import {
+  useReportTaskState,
+  useTaskReset,
+  useTaskDiscard,
+  useTaskWarning,
+} from './task-state';
 import { field, panel } from './read-ui';
 import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
 import { OperationalTimestamp } from '@/components/operational-time';
@@ -260,6 +265,7 @@ function MutationFormFields({
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
   const resetTask = useTaskReset();
+  const reportTaskWarning = useTaskWarning();
   const router = useRouter();
   // The editable values and their optimistic-concurrency baseline travel together.
   const [baseline, setBaseline] = useState(() => ({
@@ -356,10 +362,11 @@ function MutationFormFields({
       }
       return true;
     } catch {
-      setCompletedError(
-        'The move is saved. Its receipt could not be closed in browser storage. Try Done again.',
-      );
-      return false;
+      const warning =
+        'The move is saved. Browser storage could not clear its receipt, so this completed move may appear again after a reload.';
+      if (reportTaskWarning) reportTaskWarning(warning);
+      else setStorageWarning(warning);
+      return true;
     }
   };
   useTaskDiscard(() => {
@@ -1076,7 +1083,17 @@ function MutationFormFields({
       }
     });
   };
-  if (closed) return <p role="status">Done.</p>;
+  if (closed)
+    return (
+      <div className="space-y-2">
+        <p role="status">Done.</p>
+        {storageWarning && (
+          <p role="alert" className="text-sm text-amber-200">
+            {storageWarning}
+          </p>
+        )}
+      </div>
+    );
   const destructive = ['asset_retire', 'quantity_archive'].includes(operation);
   const reviewContextId = operation + '-review-context';
   return (

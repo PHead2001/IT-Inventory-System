@@ -214,6 +214,31 @@ it('retains an invalid rename draft with a durable associated error and input fo
   expect(input).toHaveAccessibleDescription(/Enter/);
 });
 
+it.each(['create', 'rename'] as const)(
+  'rechecks native category %s validity on blur without another submit or value change',
+  (mode) => {
+    render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+    if (mode === 'rename')
+      fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+    const input = screen.getByLabelText(
+      mode === 'rename' ? 'New category name' : 'Display name',
+    ) as HTMLInputElement;
+    if (mode === 'create')
+      fireEvent.change(input, { target: { value: 'Adapters' } });
+    input.setCustomValidity('Choose an available name.');
+    fireEvent.submit(input.closest('form')!);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveFocus();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    input.setCustomValidity('');
+    fireEvent.blur(input);
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(input).not.toHaveAccessibleDescription(/Choose an available/);
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
 it('keeps a submitted rename open through Escape and restores focus by identity after a successful rerender', async () => {
   let finish!: (value: unknown) => void;
   mocks.submit.mockImplementation(
