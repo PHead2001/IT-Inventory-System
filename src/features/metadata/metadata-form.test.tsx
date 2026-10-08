@@ -444,7 +444,10 @@ describe('published metadata form', () => {
       />,
     );
     expect(screen.getByLabelText('Name')).toBeEnabled();
-    expect(screen.getByText('Checking creation recovery…')).toBeInTheDocument();
+    expect(screen.queryByText('Checking creation recovery…')).toBeNull();
+    expect(
+      screen.queryByRole('status', { name: 'Creation recovery status' }),
+    ).toBeNull();
     expect(replace).toHaveBeenCalledTimes(1);
     expect(sessionStorage.length).toBe(0);
     expect(

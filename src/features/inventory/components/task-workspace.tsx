@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -34,6 +35,7 @@ export function TaskWorkspace({
   children: (id: string) => ReactNode;
   context: ReactNode;
 }) {
+  const scope = useId();
   const [selected, setSelected] = useState<string | null>(null);
   const [requested, setRequested] = useState<string | null | undefined>(
     undefined,
@@ -124,6 +126,11 @@ export function TaskWorkspace({
                 variant="outline"
                 disabled={locked}
                 aria-pressed={choice.id === selected}
+                aria-describedby={
+                  choice.description
+                    ? `${scope}-${choice.id}-description`
+                    : undefined
+                }
                 onClick={(event) => {
                   if (stateRef.current.dirty && !stateRef.current.completed)
                     requestedLauncher.current = event.currentTarget;
@@ -136,8 +143,23 @@ export function TaskWorkspace({
             ))}
           </div>
         );
+        const descriptions = tasks.map(
+          (task) =>
+            task.description && (
+              <p
+                id={`${scope}-${task.id}-description`}
+                className="mt-2 text-sm text-slate-400"
+                key={task.id}
+              >
+                {task.label}: {task.description}
+              </p>
+            ),
+        );
         return group === 'primary' ? (
-          <div key={group}>{controls}</div>
+          <div key={group}>
+            {controls}
+            {descriptions}
+          </div>
         ) : (
           <details key={group}>
             <summary className="min-h-11 cursor-pointer py-2 font-semibold">
@@ -146,14 +168,7 @@ export function TaskWorkspace({
                 : 'Lifecycle & consequential actions'}
             </summary>
             {controls}
-            {tasks.map(
-              (task) =>
-                task.description && (
-                  <p className="mt-2 text-sm text-slate-400" key={task.id}>
-                    {task.label}: {task.description}
-                  </p>
-                ),
-            )}
+            {descriptions}
           </details>
         );
       })}

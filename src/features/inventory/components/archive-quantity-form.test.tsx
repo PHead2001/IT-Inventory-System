@@ -1,7 +1,10 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { ArchiveQuantityForm } from './archive-quantity-form';
+import {
+  ArchiveQuantityForm,
+  ArchiveQuantityPanel,
+} from './archive-quantity-form';
 
 const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
@@ -47,6 +50,36 @@ beforeEach(() => {
     changed: true,
   });
 });
+
+it.each([undefined, 'Cable adapters'])(
+  'keeps the archive panel confirmation human-readable with name %s',
+  async (itemName) => {
+    const user = userEvent.setup();
+    render(<ArchiveQuantityPanel review={review} itemName={itemName} />);
+    const details = screen
+      .getByText('Archive quantity item and clear stock')
+      .closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    await user.type(
+      screen.getByLabelText('Reason (required)'),
+      'Obsolete stock',
+    );
+    await user.click(screen.getByRole('checkbox', { name: /I understand/ }));
+    await user.click(
+      screen.getByRole('button', { name: 'Review archive and clear stock' }),
+    );
+    const reviewPanel = screen.getByRole('region', { name: 'Review changes' });
+    expect(reviewPanel).toHaveTextContent(itemName ?? 'this quantity item');
+    expect(reviewPanel).not.toHaveTextContent(itemId);
+    expect(
+      screen.getByRole('button', { name: 'Confirm archive and clear stock' }),
+    ).toHaveAccessibleDescription(
+      'Confirm stock removal for ' + (itemName ?? 'this quantity item'),
+    );
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
 
 it('requires reviewed location counts, a reason and explicit stock-clear acknowledgement', async () => {
   const user = userEvent.setup();

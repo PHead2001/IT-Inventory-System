@@ -34,6 +34,32 @@ const props = {
   sites: [],
   forms: {},
 };
+it('explains physical asset movement on the primary launcher before a task is chosen', () => {
+  render(
+    <DetailTasks
+      {...props}
+      item={undefined}
+      asset={{
+        ...item,
+        name: 'Laptop',
+        status: 'active',
+        assetTag: 'LAP-01',
+        serialNumber: null,
+      }}
+    />,
+  );
+  const move = screen.getByRole('button', { name: 'Move asset' });
+  expect(
+    screen.getByText(
+      'Move asset: Physically relocate this asset to another storage location.',
+    ),
+  ).toBeVisible();
+  expect(move).toHaveAccessibleDescription(
+    'Move asset: Physically relocate this asset to another storage location.',
+  );
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(move).toHaveAttribute('aria-pressed', 'false');
+});
 it('retains the last available archive review after restore and a subsequent lifecycle refresh', () => {
   const view = render(<DetailTasks {...props} archiveReview={null} />);
   expect(screen.queryByRole('button', { name: 'Edit details' })).toBeNull();

@@ -2240,14 +2240,7 @@ export function MetadataForm({
       noValidate
     >
       {recoveryEnabled && (
-        <div
-          role={!recoveryReady && !bindingError ? 'status' : undefined}
-          className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-sm"
-          aria-label={!recoveryReady ? 'Creation recovery status' : undefined}
-        >
-          {!recoveryReady && !recoveryBlocked && !bindingFailed && (
-            <p>Checking creation recovery…</p>
-          )}
+        <div className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-sm">
           {bindingFailed && !recoveryReady && !recoveryBlocked && (
             <>
               <p role="alert" className="text-amber-100">

@@ -52,6 +52,10 @@ const titles: Record<string, string> = {
   write_off: 'Write off at site',
   retire: 'Retire asset at site',
 };
+const storageLabel = (location: LocationRef | undefined, fallback: string) =>
+  location ? `${location.breadcrumb} (${location.code})` : fallback;
+const siteLabel = (site: Site | undefined, fallback: string) =>
+  site ? `${site.name} (${site.code})` : fallback;
 
 export function CustodyChangeForm(latest: Props) {
   const [iteration, setIteration] = useState(0);
@@ -289,18 +293,28 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         key: reviewKey,
         name: latest.entityName,
         source: fromStorage
-          ? (locations.find((row) => row.id === values.source_location_id)
-              ?.name ?? 'Recorded storage source')
+          ? storageLabel(
+              locations.find((row) => row.id === values.source_location_id),
+              'Recorded storage source',
+            )
           : fromSite
-            ? (sites.find((row) => row.id === values.source_site_id)?.name ??
-              'Recorded source site')
+            ? siteLabel(
+                sites.find((row) => row.id === values.source_site_id),
+                'Recorded source site',
+              )
             : 'Opening / no source',
         destination: toStorage
-          ? (locations.find((row) => row.id === values.destination_location_id)
-              ?.name ?? 'Recorded storage destination')
+          ? storageLabel(
+              locations.find(
+                (row) => row.id === values.destination_location_id,
+              ),
+              'Recorded storage destination',
+            )
           : requiresDestination
-            ? (sites.find((row) => row.id === values.destination_site_id)
-                ?.name ?? 'Recorded destination site')
+            ? siteLabel(
+                sites.find((row) => row.id === values.destination_site_id),
+                'Recorded destination site',
+              )
             : 'No destination',
         quantity: correction ? values.observed_quantity : values.quantity,
         reference: values.reference.trim(),
@@ -371,10 +385,20 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         aria-label="Custody completion"
       >
         {state.custody ? (
-          <CustodyReceiptView
-            receipt={state.custody}
-            reviewedName={reviewed?.name}
-          />
+          <>
+            <CustodyReceiptView
+              receipt={state.custody}
+              reviewedName={reviewed?.name}
+            />
+            {reviewed && (
+              <p className="break-words text-sm">
+                Reviewed route: {reviewed.source} → {reviewed.destination}{' '}
+                <span className="text-slate-400">
+                  (endpoints reviewed for this operation)
+                </span>
+              </p>
+            )}
+          </>
         ) : (
           <>
             <h3 className="text-lg font-semibold">Custody saved</h3>

@@ -246,8 +246,7 @@ export function ArchiveQuantityForm({
       {reviewing && (
         <section aria-label="Review changes" className={panel}>
           <h3 id="archive-clear-review-context" className="font-semibold">
-            Confirm stock removal for{' '}
-            {itemName ?? `quantity item ${baseline.item_id}`}
+            Confirm stock removal for {itemName?.trim() || 'this quantity item'}
           </h3>
           <p className="text-sm text-[var(--warning)]">
             Warning: this removes every recorded balance. Restore will not
@@ -309,8 +308,10 @@ export function ArchiveQuantityForm({
 
 export function ArchiveQuantityPanel({
   review,
+  itemName,
 }: {
   review: QuantityArchiveReview;
+  itemName?: string;
 }) {
   const [opened, setOpened] = useState(false);
   return (
@@ -324,7 +325,9 @@ export function ArchiveQuantityPanel({
         Archive quantity item and clear stock
       </summary>
       <div className="mt-4">
-        {opened && <ArchiveQuantityForm latestReview={review} />}
+        {opened && (
+          <ArchiveQuantityForm latestReview={review} itemName={itemName} />
+        )}
       </div>
     </details>
   );

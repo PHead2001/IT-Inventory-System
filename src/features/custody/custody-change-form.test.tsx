@@ -48,6 +48,113 @@ const otherSite = {
 };
 beforeEach(() => vi.mocked(submitCustody).mockReset());
 
+it.each(['transfer', 'assign', 'return'] as const)(
+  'captures disambiguated %s endpoints through review, commit and later catalog renames',
+  async (action) => {
+    const duplicateSite = { ...otherSite, name: site.name };
+    const left = {
+      ...location,
+      name: 'Drawer',
+      breadcrumb: 'IT Closet / Left Storage / Drawer',
+      code: 'ITC-D01',
+    };
+    const right = {
+      ...left,
+      id: id(3),
+      breadcrumb: 'IT Closet / Right Storage / Drawer',
+      code: 'ITC-D07',
+    };
+    const sourceLabel =
+      action === 'assign'
+        ? `${right.breadcrumb} (${right.code})`
+        : `${site.name} (${site.code})`;
+    const destinationLabel =
+      action === 'return'
+        ? `${left.breadcrumb} (${left.code})`
+        : `${duplicateSite.name} (${duplicateSite.code})`;
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: '2',
+      changed: true,
+      custody: {
+        eventId: id(10),
+        operation: action,
+        actorName: 'Staff',
+        createdAt: '2026-10-07T12:00:00Z',
+        quantity: null,
+        source: {
+          id: action === 'assign' ? right.id : site.id,
+          kind: action === 'assign' ? 'storage' : 'site',
+          name: 'Immutable recorded source',
+        },
+        destination: {
+          id: action === 'return' ? left.id : duplicateSite.id,
+          kind: action === 'return' ? 'storage' : 'site',
+          name: 'Immutable recorded destination',
+        },
+        reason: null,
+        reference: null,
+      },
+    });
+    const initial = {
+      kind: 'asset' as const,
+      action,
+      entityId: id(1),
+      entityName: 'Laptop',
+      version: '1',
+      locations: [left, right],
+      sites: [site, duplicateSite],
+      currentLocation: action === 'assign' ? right : null,
+      currentSite: action === 'assign' ? null : site,
+    };
+    const view = render(<CustodyChangeForm {...initial} />);
+    if (action === 'return')
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Return to storage' }),
+      );
+    else
+      fireEvent.change(screen.getByLabelText('Destination site'), {
+        target: { value: duplicateSite.id },
+      });
+    fireEvent.click(screen.getByRole('button', { name: /^Review / }));
+    const review = screen.getByRole('region', { name: 'Review changes' });
+    expect(review).toHaveTextContent(`${sourceLabel} → ${destinationLabel}`);
+    expect(submitCustody).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+    await screen.findByRole('button', { name: 'Done' });
+    view.rerender(
+      <CustodyChangeForm
+        {...initial}
+        version="2"
+        locations={[
+          { ...left, breadcrumb: 'Changed left' },
+          { ...right, breadcrumb: 'Changed right' },
+        ]}
+        sites={[
+          { ...site, name: 'Changed source' },
+          { ...duplicateSite, name: 'Changed destination' },
+        ]}
+      />,
+    );
+    const completion = screen.getByRole('region', {
+      name: 'Custody completion',
+    });
+    expect(completion).toHaveTextContent(
+      `Reviewed route: ${sourceLabel} → ${destinationLabel}`,
+    );
+    expect(completion).toHaveTextContent(
+      'Immutable recorded source → Immutable recorded destination',
+    );
+    expect(completion).not.toHaveTextContent('Changed source');
+    expect(completion).not.toHaveTextContent('Changed right');
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
+      payload: { expected_version: '1' },
+    });
+    expect(submitCustody).toHaveBeenCalledOnce();
+  },
+);
+
 it('explains absent sites and disables only the unavailable assignment', () => {
   render(
     <CustodyChangeForm
