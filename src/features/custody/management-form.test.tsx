@@ -196,7 +196,7 @@ it('retains code guidance and optional Notes while correcting invalid site forma
     /Suggested from the name.*Use the required format/,
   );
   expect(screen.getByLabelText('Name')).toHaveValue('Fictional property');
-  expect(screen.getByLabelText('Notes')).not.toBeRequired();
+  expect(screen.getByLabelText('Notes (optional)')).not.toBeRequired();
   await user.click(code);
   await user.keyboard('{Control>}a{/Control}');
   await user.type(code, 'VALID-CODE', { skipClick: true });
@@ -584,7 +584,7 @@ it('refreshes an untouched site baseline and values together', async () => {
     />,
   );
   expect(screen.getByLabelText('Name')).toHaveValue('Latest');
-  expect(screen.getByLabelText('Notes')).toHaveValue('Latest notes');
+  expect(screen.getByLabelText('Notes (optional)')).toHaveValue('Latest notes');
   fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
@@ -610,7 +610,7 @@ it('establishes the saved baseline immediately and allows another edit before or
       site={{ ...site, name: 'Saved label', version: '2' }}
     />,
   );
-  fireEvent.change(screen.getByLabelText('Notes'), {
+  fireEvent.change(screen.getByLabelText('Notes (optional)'), {
     target: { value: 'Second edit' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save site' }));
@@ -767,7 +767,7 @@ it('retains site settings drafts through changed props and blocks a stale metada
   );
   expect(submitCustody).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-  expect(screen.getByLabelText('Notes')).toHaveValue(
+  expect(screen.getByLabelText('Notes (optional)')).toHaveValue(
     'Independent latest notes',
   );
 });

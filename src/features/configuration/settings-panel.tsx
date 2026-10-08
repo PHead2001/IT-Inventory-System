@@ -16,7 +16,6 @@ import {
   barcodeTypeHelp,
 } from '@/features/labels/setting-options';
 import {
-  RequiredFieldsNote,
   RequiredMark,
   useFormValidation,
   ValidationSummary,
@@ -286,7 +285,6 @@ export function SettingsPanel({
                       );
                     }}
                   >
-                    <RequiredFieldsNote />
                     <label
                       className="block text-sm"
                       htmlFor={'rename-' + category.id}
@@ -488,7 +486,6 @@ export function SettingsPanel({
               }}
             >
               <h3 className="font-semibold">Add category</h3>
-              <RequiredFieldsNote />
               <label className="block text-sm" htmlFor="category-name">
                 Display name
                 <RequiredMark />

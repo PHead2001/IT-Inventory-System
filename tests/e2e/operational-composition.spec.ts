@@ -223,7 +223,7 @@ async function launch(page: Page, label: string, group?: string) {
 }
 async function retire(page: Page, url: string) {
   await page.goto(url);
-  await launch(page, 'Retire asset', 'Lifecycle & consequential actions');
+  await launch(page, 'Retire asset', 'Retire or archive');
   const form = page.getByRole('form', { name: 'Retire asset', exact: true });
   await form
     .getByLabel('Reason (required)')
@@ -566,11 +566,7 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
     page.getByRole('button', { name: /Print selected labels/ }),
   ).toBeEnabled();
   await other.goto(url);
-  await launch(
-    other,
-    'Restore individual asset',
-    'Lifecycle & consequential actions',
-  );
+  await launch(other, 'Restore individual asset', 'Retire or archive');
   const restore = other.getByRole('form', {
     name: 'Restore asset',
     exact: true,

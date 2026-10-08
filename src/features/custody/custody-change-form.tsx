@@ -17,7 +17,6 @@ import {
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
 import {
-  RequiredFieldsNote,
   RequiredMark,
   useFormValidation,
   ValidationSummary,
@@ -520,7 +519,6 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           Retire ends tracking of an individual asset.
         </p>
       )}
-      <RequiredFieldsNote />
       {actorMismatch && (
         <p role="alert">
           Return to the original signed-in account to continue or resolve this
