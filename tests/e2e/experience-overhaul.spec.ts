@@ -830,6 +830,14 @@ test('Spaces selection updates the heading immediately, rejects stale contents a
   }
 });
 
+async function mapOverflow(viewer: Locator) {
+  const more = viewer
+    .getByRole('toolbar', { name: 'Room camera controls' })
+    .getByRole('button', { name: 'More map controls', exact: true });
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+  return viewer.getByRole('region', { name: 'More map controls', exact: true });
+}
+
 test('a user camera pan is restored after leaving and returning to the modeled space', async ({
   page,
 }) => {
@@ -840,9 +848,16 @@ test('a user camera pan is restored after leaving and returning to the modeled s
   await expect(viewer.locator('canvas')).toBeVisible();
   const original = await readyCameraSnapshot(viewer);
   const initialTarget = JSON.stringify(original.target);
-  await viewer.getByRole('button', { name: 'Free Orbit' }).click();
-  await viewer.getByText('Pan and rotate').click();
-  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Free Orbit', exact: true })
+    .click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan left', exact: true })
+    .click();
   const movement: { snapshot: CameraSnapshot | null } = { snapshot: null };
   await expect
     .poll(async () => {
@@ -878,9 +893,11 @@ test('Back into a selected modeled space focuses from its saved camera baseline'
   await page.goto('/room?location=ITC-S1A');
   const viewer = page.getByTestId('room-viewer');
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.locator('summary').click();
-  await toolbar.getByRole('button', { name: 'Pan right' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan right' })
+    .click();
   const displaced = await readyCameraSnapshot(viewer);
   await page.getByLabel('Space', { exact: true }).selectOption('it-office');
   await expect(viewer).toHaveCount(0);
@@ -905,8 +922,11 @@ test('local and OS reduced motion settle room focus without disabling manual cam
   ).toBeEnabled();
   const view = async () => JSON.stringify(await readyCameraSnapshot(viewer));
   await readyCameraSnapshot(viewer);
-  await viewer.getByText('Pan and rotate').click();
-  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan left', exact: true })
+    .click();
   const panned = await view();
   const initialFocusCount = Number(
     await viewer.getAttribute('data-focus-count'),
@@ -919,7 +939,11 @@ test('local and OS reduced motion settle room focus without disabling manual cam
     .toBeGreaterThan(initialFocusCount);
   await expect.poll(view).not.toBe(panned);
   const settled = await view();
-  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan left', exact: true })
+    .click();
   const secondPan = await view();
   expect(secondPan).not.toBe(settled);
   await viewer.getByRole('button', { name: 'Center selected' }).click();
@@ -927,12 +951,16 @@ test('local and OS reduced motion settle room focus without disabling manual cam
 
   await setLocalReducedMotion(page, false);
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
-  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan left', exact: true })
+    .click();
   const fullPan = await view();
   await viewer.evaluate((element) => {
     const before = Number(element.dataset.focusCount);
-    const button = Array.from(element.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent?.trim() === 'Center selected',
+    const button = element.querySelector<HTMLButtonElement>(
+      'button[aria-label="Center selected"]',
     );
     if (!button) throw new Error('Center selected control unavailable');
     let started: number | null = null;
@@ -973,11 +1001,19 @@ test('local and OS reduced motion settle room focus without disabling manual cam
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
-  await viewer.getByRole('button', { name: 'Pan left' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Pan left', exact: true })
+    .click();
   const osPan = await view();
   await viewer.getByRole('button', { name: 'Center selected' }).click();
   await expect.poll(view).not.toBe(osPan);
-  await viewer.getByRole('button', { name: 'Free Orbit' }).click();
+  await (
+    await mapOverflow(viewer)
+  )
+    .getByRole('button', { name: 'Free Orbit', exact: true })
+    .click();
   const beforeZoom = (await readyCameraSnapshot(viewer)).zoom;
   await viewer.getByRole('button', { name: 'Zoom in' }).click();
   const manualView = await readyCameraSnapshot(viewer);

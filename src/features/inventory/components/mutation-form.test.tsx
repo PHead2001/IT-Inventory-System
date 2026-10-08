@@ -770,7 +770,7 @@ it('automatically warns about duplicate serials before saving without blocking c
     />,
   );
   await user.type(screen.getByLabelText('Name'), 'New switch');
-  await user.type(screen.getByLabelText('Serial number'), '001-A');
+  await user.type(screen.getByLabelText('Serial number (optional)'), '001-A');
   await chooseLocation(user, 'Destination location', '1A');
   await user.click(
     screen.getByRole('button', { name: 'Review add individual asset' }),

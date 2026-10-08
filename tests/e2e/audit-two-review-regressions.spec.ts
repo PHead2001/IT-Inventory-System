@@ -149,7 +149,7 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
       drafts.add(new URL(page.url()).searchParams.get('siteDraft')!);
       await expect(form.getByLabel('Name', { exact: true })).toHaveValue('');
       await expect(
-        form.getByRole('textbox', { name: 'Notes', exact: true }),
+        form.getByRole('textbox', { name: 'Notes (optional)', exact: true }),
       ).toHaveValue('');
       await expect(form.getByRole('alert')).toHaveCount(0);
       await page
@@ -175,7 +175,9 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
     const notes = 'Original dirty draft retained after pristine visits';
     await form.getByLabel('Name', { exact: true }).fill(site.name);
     await form.getByLabel('Permanent code', { exact: true }).fill(site.code);
-    await form.getByRole('textbox', { name: 'Notes', exact: true }).fill(notes);
+    await form
+      .getByRole('textbox', { name: 'Notes (optional)', exact: true })
+      .fill(notes);
     await page.reload();
     await expect(page).toHaveURL(originalDraft);
     await expect(form.getByLabel('Name', { exact: true })).toHaveValue(
@@ -185,7 +187,7 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
       form.getByLabel('Permanent code', { exact: true }),
     ).toHaveValue(site.code);
     await expect(
-      form.getByRole('textbox', { name: 'Notes', exact: true }),
+      form.getByRole('textbox', { name: 'Notes (optional)', exact: true }),
     ).toHaveValue(notes);
     await expect(form.getByRole('alert')).toHaveCount(0);
     expect(await readSite(client, site)).toBeNull();

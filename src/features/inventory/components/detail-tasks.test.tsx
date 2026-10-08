@@ -77,7 +77,7 @@ it('retains the last available archive review after restore and a subsequent lif
       archiveReview={review}
     />,
   );
-  fireEvent.click(screen.getByText('Lifecycle & consequential actions'));
+  fireEvent.click(screen.getByText('Retire or archive'));
   fireEvent.click(
     screen.getByRole('button', {
       name: 'Archive quantity item and clear stock',

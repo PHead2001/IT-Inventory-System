@@ -5,7 +5,6 @@ import { countLabel } from '@/lib/count';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  RequiredFieldsNote,
   RequiredMark,
   useFormValidation,
   ValidationSummary,
@@ -1122,7 +1121,6 @@ function MutationFormFields({
         className="space-y-4"
         hidden={completed}
       >
-        <RequiredFieldsNote />
         {metadata && (
           <>
             {input('name', 'Name', { required: true, max: 200 })}
@@ -1151,8 +1149,8 @@ function MutationFormFields({
               </select>
               {validation.error(operation + '-category')}
             </div>
-            {input('manufacturer', 'Manufacturer', { max: 200 })}
-            {input('model', 'Model', { max: 200 })}
+            {input('manufacturer', 'Manufacturer (optional)', { max: 200 })}
+            {input('model', 'Model (optional)', { max: 200 })}
             {!serialized && (
               <div>
                 {input('reorder_threshold', 'Reorder threshold (optional)', {
@@ -1166,7 +1164,9 @@ function MutationFormFields({
               </div>
             )}
             <div className="space-y-2">
-              <label htmlFor={operation + '-description'}>Description</label>
+              <label htmlFor={operation + '-description'}>
+                Description (optional)
+              </label>
               <textarea
                 className={field}
                 id={operation + '-description'}
@@ -1180,8 +1180,10 @@ function MutationFormFields({
             </div>
             {serialized && (
               <>
-                {input('asset_tag', 'Asset tag', { max: 100 })}
-                {input('serial_number', 'Serial number', { max: 200 })}
+                {input('asset_tag', 'Asset tag (optional)', { max: 100 })}
+                {input('serial_number', 'Serial number (optional)', {
+                  max: 200,
+                })}
                 <Button
                   type="button"
                   variant="outline"

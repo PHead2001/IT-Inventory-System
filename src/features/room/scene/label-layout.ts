@@ -1,6 +1,8 @@
 export type LabelRect = {
   id: string;
   selected: boolean;
+  priority?: number;
+  locationCode?: string;
   left: number;
   top: number;
   width: number;
@@ -12,7 +14,12 @@ export type LabelPlacement = {
   dx: number;
   dy: number;
 };
-type Area = { left: number; top: number; right: number; bottom: number };
+export type LabelArea = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
 
 const MAX_SHIFT = 56;
 const STEP = 8;
@@ -29,7 +36,7 @@ offsets.sort(
     a[0] - b[0],
 );
 
-function overlaps(a: Area, b: Area) {
+function overlaps(a: LabelArea, b: LabelArea) {
   return (
     a.left < b.right + GAP &&
     a.right + GAP > b.left &&
@@ -41,17 +48,22 @@ function overlaps(a: Area, b: Area) {
 /** Deterministic screen-space placement; scene geometry and focus points never move. */
 export function layoutLabels(
   labels: LabelRect[],
-  viewport: Area,
+  viewport: LabelArea,
+  reserved: LabelArea[] = [],
 ): LabelPlacement[] {
   const ordered = [...labels].sort(
     (a, b) =>
-      Number(b.selected) - Number(a.selected) ||
+      (b.priority ?? Number(b.selected) * 3) -
+        (a.priority ?? Number(a.selected) * 3) ||
       a.top - b.top ||
       a.left - b.left ||
       a.id.localeCompare(b.id),
   );
-  const occupied: Area[] = [];
+  const occupied = [...reserved];
+  const placedCodes = new Set<string>();
   return ordered.map((label) => {
+    if (label.locationCode && placedCodes.has(label.locationCode))
+      return { id: label.id, visible: false, dx: 0, dy: 0 };
     for (const [dx, dy] of offsets) {
       const candidate = {
         left: label.left + dx,
@@ -68,6 +80,7 @@ export function layoutLabels(
       )
         continue;
       occupied.push(candidate);
+      if (label.locationCode) placedCodes.add(label.locationCode);
       return { id: label.id, visible: true, dx, dy };
     }
     return { id: label.id, visible: false, dx: 0, dy: 0 };

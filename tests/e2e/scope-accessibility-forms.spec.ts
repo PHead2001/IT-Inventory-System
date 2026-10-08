@@ -212,7 +212,7 @@ test('creation and receive keep associated errors, entered values and correction
       .click();
     await associatedError(siteForm.getByLabel('Name', { exact: true }));
     await expect(
-      siteForm.getByLabel('Notes', { exact: true }),
+      siteForm.getByLabel('Notes (optional)', { exact: true }),
     ).not.toHaveAttribute('required', '');
     await noOverflow(page);
     await page.setViewportSize({ width: 1180, height: 757 });

@@ -67,4 +67,43 @@ describe('scene label placement', () => {
     );
     expect(placements.find((item) => item.id === 'low')?.visible).toBe(false);
   });
+
+  it('prioritizes selection then hover, deduplicates location text and avoids reserved panels', () => {
+    const input = [
+      { ...label('decoration', 30, 30), priority: 0 },
+      { ...label('normal', 30, 30), priority: 1, locationCode: 'ITC-D01' },
+      { ...label('hover', 30, 30), priority: 2, locationCode: 'ITC-D01' },
+      { ...label('selected', 30, 30), priority: 3, locationCode: 'ITC-D02' },
+    ];
+    const reserved = [{ left: 0, top: 0, right: 70, bottom: 25 }];
+    const placements = layoutLabels(input, viewport, reserved);
+    expect(placements.map((item) => item.id)).toEqual([
+      'selected',
+      'hover',
+      'normal',
+      'decoration',
+    ]);
+    expect(placements.find((item) => item.id === 'normal')?.visible).toBe(
+      false,
+    );
+    const areas = placements
+      .filter((item) => item.visible)
+      .map((item) => {
+        const source = input.find((row) => row.id === item.id)!;
+        return {
+          left: source.left + item.dx,
+          top: source.top + item.dy,
+          right: source.left + item.dx + source.width,
+          bottom: source.top + item.dy + source.height,
+        };
+      });
+    for (const [index, area] of areas.entries())
+      for (const other of [...reserved, ...areas.slice(index + 1)])
+        expect(
+          area.left >= other.right + 3 ||
+            area.right + 3 <= other.left ||
+            area.top >= other.bottom + 3 ||
+            area.bottom + 3 <= other.top,
+        ).toBe(true);
+  });
 });

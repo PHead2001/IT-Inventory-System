@@ -10,7 +10,6 @@ import { suggestSiteCode } from './site-code';
 import type { ManagedLocation, Site, SiteHolding } from './queries.server';
 import type { CustodyOperation, CustodyState } from './contracts';
 import {
-  RequiredFieldsNote,
   RequiredMark,
   useFormValidation,
   ValidationSummary,
@@ -663,7 +662,6 @@ export function SiteManagementForm({
       <h2 className="break-words text-lg font-semibold">
         {baseline ? `Manage ${baseline.name}` : 'Add property/site'}
       </h2>
-      <RequiredFieldsNote />
       {recoveryError && <p role="alert">{recoveryError}</p>}
       {recoveryError && (
         <Button
@@ -724,10 +722,9 @@ export function SiteManagementForm({
         </div>
       )}
       <label className="block space-y-2">
-        Notes
+        Notes (optional)
         <textarea
           id={scope + '-notes'}
-          aria-describedby={scope + '-notes-guidance'}
           className={field}
           disabled={disabled || !!lifecycle}
           value={values.notes}
@@ -735,9 +732,6 @@ export function SiteManagementForm({
           onChange={(e) => update('notes', e.target.value)}
         />
       </label>
-      <p id={scope + '-notes-guidance'} className="text-sm text-slate-400">
-        Notes are optional.
-      </p>
       {stale && !uncertain && (
         <p role="alert">
           Site settings changed elsewhere. Your entries are retained. Cancel to
@@ -882,6 +876,7 @@ export function SiteManagementForm({
         {baseline && (
           <Button
             type="button"
+            variant="outline"
             disabled={disabled}
             onClick={() => {
               const current =
@@ -976,7 +971,6 @@ export function LocationManagementForm({
       <h2 className="break-words text-lg font-semibold">
         Rename {baseline.name}
       </h2>
-      <RequiredFieldsNote />
       <p className="text-sm text-slate-300">
         Storage structure is maintained with reviewed room code. This action
         changes only the display name. Permanent code: {baseline.code}.
@@ -1039,6 +1033,7 @@ export function LocationManagementForm({
         </Button>
         <Button
           type="button"
+          variant="outline"
           disabled={pending || uncertain}
           onClick={() => {
             const current = stale ? location : baseline;
