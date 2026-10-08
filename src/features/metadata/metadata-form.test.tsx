@@ -863,6 +863,9 @@ describe('published metadata form', () => {
     );
     const original = vi.mocked(submitInventory).mock.calls[0][0];
     const raw = sessionStorage.getItem(sessionStorage.key(0)!);
+    const pendingUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(pendingUnload);
+    expect(pendingUnload.defaultPrevented).toBe(true);
     const failure = vi
       .spyOn(Storage.prototype, 'setItem')
       .mockImplementation(() => {
@@ -876,7 +879,12 @@ describe('published metadata form', () => {
     expect(
       screen.getByRole('button', { name: 'Retry same save' }),
     ).toBeInTheDocument();
+    const unresolvedUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unresolvedUnload);
+    expect(unresolvedUnload.defaultPrevented).toBe(true);
     failure.mockRestore();
+    const navigationUnload = new Event('beforeunload', { cancelable: true });
+    push.mockImplementationOnce(() => window.dispatchEvent(navigationUnload));
     vi.mocked(submitInventory).mockResolvedValueOnce({
       ok: true,
       entityId: item.id,
@@ -888,6 +896,7 @@ describe('published metadata form', () => {
       expect(push).toHaveBeenCalledWith(`/inventory/quantity/${item.id}`),
     );
     expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(original);
+    expect(navigationUnload.defaultPrevented).toBe(false);
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
     expect(unload.defaultPrevented).toBe(false);
@@ -3033,8 +3042,19 @@ describe('existing edit recovery and review', () => {
       expect(screen.getByLabelText('Name')).toHaveValue('Unsure saved entry');
       expect(screen.getByLabelText('Name')).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      const uncertainUnload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(uncertainUnload);
+      expect(uncertainUnload.defaultPrevented).toBe(true);
+      const acknowledgedUnload = new Event('beforeunload', {
+        cancelable: true,
+      });
+      vi.mocked(refreshMetadataRecord).mockImplementationOnce(async () => {
+        window.dispatchEvent(acknowledgedUnload);
+        return { ok: true, record: item, form: form(), draftForm: form() };
+      });
       fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
       await screen.findByText('Details saved.');
+      expect(acknowledgedUnload.defaultPrevented).toBe(false);
       expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(submitted);
       const raw = sessionStorage.getItem(sessionStorage.key(0)!)!;
       expect(JSON.parse(raw)).toMatchObject({
@@ -3044,6 +3064,82 @@ describe('existing edit recovery and review', () => {
         completedRequestId: submitted.requestId,
       });
       expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
+    },
+  );
+  it.each(['Edit details', 'Review updated fields'])(
+    'starts a new protected edit after recovered save through %s',
+    async (reopen) => {
+      const saved = {
+        ...item,
+        name: 'Saved recovered edit',
+        version: 2,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const originalForms = { [categoryId]: form() };
+      const first = render(<MetadataForm {...props} forms={originalForms} />);
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: saved.name },
+      });
+      fireEvent.click(screen.getByRole('checkbox'));
+      first.unmount();
+      const view = render(<MetadataForm {...props} forms={originalForms} />);
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: true,
+        entityId: item.id,
+        version: '2',
+        changed: true,
+      });
+      vi.mocked(refreshMetadataRecord).mockResolvedValue({
+        ok: true,
+        record: saved,
+        form: form(),
+        draftForm: form(),
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await screen.findByText('Details saved.');
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      const completed = JSON.parse(sessionStorage.getItem(key)!);
+      expect(completed.status).toBe('saved');
+      const updated = { ...form(secondRevision), published_number: '2' };
+      view.rerender(
+        <MetadataForm
+          {...props}
+          item={saved}
+          forms={{ [categoryId]: updated }}
+        />,
+      );
+      await screen.findByRole('button', { name: 'Review updated fields' });
+      fireEvent.click(screen.getByRole('button', { name: reopen }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'New unsaved edit' },
+      });
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(true);
+      const editing = JSON.parse(sessionStorage.getItem(key)!);
+      expect(editing).toMatchObject({
+        status: 'editing',
+        completedRequestId: null,
+        baseline: { id: item.id, version: 2 },
+        inputs: { core: { name: 'New unsaved edit' } },
+      });
+      expect(editing.instance).not.toBe(completed.instance);
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
+        payload: {
+          expected_version: 2,
+          expected_published_revision_id: secondRevision,
+          name: 'New unsaved edit',
+        },
+      });
     },
   );
   it('keeps Stay entries and explicit workspace discard clears only the owning edit draft', async () => {
