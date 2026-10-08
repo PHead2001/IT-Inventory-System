@@ -134,7 +134,8 @@ test('typing and selection survive delayed canonical creation navigation without
     const name = form.getByLabel('Name', { exact: true });
     const review = metadataReviewButton(form);
     await expect(name).toBeEnabled();
-    await expect(form.getByText('Checking creation recovery…')).toBeVisible();
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
     await expect(
       form.getByRole('button', { name: 'Retry creation recovery' }),
     ).toHaveCount(0);
@@ -156,6 +157,8 @@ test('typing and selection survive delayed canonical creation navigation without
     const fieldPosition = await creationPosition(name);
     const actionPosition = await creationPosition(review);
     await expect(review).toBeDisabled();
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
     await expect(
       form.getByRole('button', { name: 'Retry creation recovery' }),
     ).toHaveCount(0);
@@ -224,6 +227,8 @@ test('a real creation binding deadline retains typed entries and layout, then Re
     });
     const name = form.getByLabel('Name', { exact: true });
     const review = metadataReviewButton(form);
+    await expect(form.getByText('Checking creation recovery…')).toHaveCount(0);
+    await expect(form.getByRole('alert')).toHaveCount(0);
     await expect(
       form.getByRole('button', { name: 'Retry creation recovery' }),
     ).toHaveCount(0);
