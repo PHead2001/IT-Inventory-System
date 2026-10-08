@@ -65,6 +65,24 @@ const inactive: LocationRef = {
 const locations = [drawer10, right, inactive, root, drawer7, left];
 
 describe('location picker model', () => {
+  it('counts only eligible descendants within source and destination scope', () => {
+    const destination = pickerTree(locations, 'destination', {
+      excludeIds: ['10'],
+    });
+    expect(
+      destination.find((row) => row.location.id === 'root')?.destinationCount,
+    ).toBe(1);
+    expect(
+      destination.find((row) => row.location.id === 'right')?.destinationCount,
+    ).toBe(1);
+    const source = pickerTree(locations, 'source', { sourceIds: ['inactive'] });
+    expect(
+      source.find((row) => row.location.id === 'root')?.destinationCount,
+    ).toBe(1);
+    expect(
+      source.find((row) => row.location.id === 'inactive')?.destinationCount,
+    ).toBe(0);
+  });
   it('rejects a destination under an inactive ancestor while retaining it as an evacuation source', () => {
     const office = {
       ...root,

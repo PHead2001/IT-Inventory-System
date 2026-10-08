@@ -92,6 +92,8 @@ export type PickerTreeRow = {
   hasChildren: boolean;
   selectable: boolean;
   parentId: string | null;
+  /** Eligible descendants within this picker scope, never a stock count. */
+  destinationCount: number;
 };
 
 export function pickerTree(
@@ -145,6 +147,11 @@ export function pickerTree(
         hasChildren: Boolean(children.get(location.id)),
         selectable: eligible.has(location.id),
         parentId,
+        destinationCount: ordered.filter(
+          (candidate) =>
+            eligible.has(candidate.id) &&
+            locationAncestorIds(candidate, ordered).includes(location.id),
+        ).length,
       };
     });
 }

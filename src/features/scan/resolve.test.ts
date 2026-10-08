@@ -5,6 +5,8 @@ const db = vi.hoisted(() => ({
   quantity: vi.fn(),
   itemCode: vi.fn(),
   origin: vi.fn(),
+  predicate: vi.fn(),
+  tagLookup: vi.fn(),
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/features/labels/origin.server', () => ({
@@ -13,18 +15,26 @@ vi.mock('@/features/labels/origin.server', () => ({
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
     supabase: {
-      rpc: (_name: string, args: { p_code: string }) =>
-        db.itemCode(args.p_code),
+      rpc: (name: string, args: { p_code?: string; p_tag?: string }) => {
+        if (name === 'inventory_asset_tag_lookup') {
+          db.tagLookup(args.p_tag);
+          return db.asset(args.p_tag);
+        }
+        return db.itemCode(args.p_code);
+      },
       from: (table: string) => ({
         select: () => ({
-          eq: (_field: string, value: string) => ({
-            maybeSingle: () =>
-              table === 'inventory_locations'
-                ? db.location(value)
-                : table === 'quantity_items'
-                  ? db.quantity(value)
-                  : db.asset(value),
-          }),
+          eq: (field: string, value: string) => {
+            db.predicate(table, field, value);
+            return {
+              maybeSingle: () =>
+                table === 'inventory_locations'
+                  ? db.location(value)
+                  : table === 'quantity_items'
+                    ? db.quantity(value)
+                    : db.asset(value),
+            };
+          },
         }),
       }),
     },
@@ -40,7 +50,30 @@ beforeEach(() => {
     origin: 'https://inventory.example.test',
     preview: false,
   });
+  db.predicate.mockReset();
+  db.tagLookup.mockReset();
 });
+it('looks up differently cased tags by the generated unique key and preserves display spelling', async () => {
+  db.asset.mockResolvedValue({
+    data: {
+      id: '7b84a7cf-197b-45b1-8016-87482d124cb4',
+      name: 'Laptop',
+      asset_tag: '000Ab/C.02',
+      status: 'active',
+    },
+    error: null,
+  });
+  const result = await resolveScan('000aB/c.02');
+  expect(db.tagLookup).toHaveBeenCalledExactlyOnceWith('000aB/c.02');
+  expect(result.matches[0].label).toContain('000Ab/C.02');
+});
+it.each(['İΣ-Ab', '00%_\\Ab'])(
+  'passes the exact parsed AST spelling %s to the authoritative lookup',
+  async (tag) => {
+    await resolveScan('AST:' + tag);
+    expect(db.tagLookup).toHaveBeenCalledExactlyOnceWith(tag);
+  },
+);
 it('keeps stable URL resolution tied to live records after rename and move', async () => {
   db.location.mockResolvedValue({
     data: { code: 'ITC', name: 'Renamed storage room', active: true },

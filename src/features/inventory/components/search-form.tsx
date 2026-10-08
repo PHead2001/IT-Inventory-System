@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,7 @@ import type { CategoryRef, LocationRef } from '../contracts-ui';
 import type { Site } from '@/features/custody/queries.server';
 import { field } from './read-ui';
 import { readFilters } from '../read-model';
+import { inventoryFilterParams } from '../scope-presentation';
 
 type FilterKey =
   'q' | 'type' | 'status' | 'category' | 'location' | 'site' | 'lowStock';
@@ -49,6 +51,110 @@ export function SearchForm({
     }
   }, [diagnosticsEnabled]);
   const filters = readFilters(params);
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const appliedSignature = inventoryFilterParams(params).toString();
+  const [draft, setDraft] = useState(params);
+  const [syncedSignature, setSyncedSignature] = useState(appliedSignature);
+  const [unsentEdits, setUnsentEdits] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const composing = useRef(false);
+  // A committed navigation (including Back/Forward) restores all controls together.
+  if (syncedSignature !== appliedSignature) {
+    setSyncedSignature(appliedSignature);
+    // An earlier response must not erase typing made after its request.
+    if (!unsentEdits) setDraft(params);
+  }
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  function cancelDebounce() {
+    if (debounce.current !== null) clearTimeout(debounce.current);
+    debounce.current = null;
+  }
+  useEffect(() => {
+    function restoreHistory() {
+      cancelDebounce();
+      composing.current = false;
+      setUnsentEdits(false);
+      setDraft(Object.fromEntries(new URLSearchParams(window.location.search)));
+    }
+    window.addEventListener('popstate', restoreHistory);
+    return () => {
+      cancelDebounce();
+      window.removeEventListener('popstate', restoreHistory);
+    };
+  }, []);
+  useEffect(() => {
+    function deliberateLink(event: MouseEvent) {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        event.defaultPrevented
+      )
+        return;
+      const anchor =
+        event.target instanceof Element
+          ? event.target.closest('a[href]')
+          : null;
+      if (
+        !(anchor instanceof HTMLAnchorElement) ||
+        anchor.download ||
+        (anchor.target && anchor.target !== '_self')
+      )
+        return;
+      const target = new URL(anchor.href, window.location.href);
+      if (
+        target.origin !== window.location.origin ||
+        (target.hash &&
+          target.pathname === window.location.pathname &&
+          target.search === window.location.search)
+      )
+        return;
+      cancelDebounce();
+      composing.current = false;
+      setUnsentEdits(false);
+      if (target.pathname === action) {
+        const next = Object.fromEntries(target.searchParams);
+        draftRef.current = next;
+        setDraft(next);
+      }
+    }
+    // Includes pagination and Clear filters links rendered alongside this island.
+    document.addEventListener('click', deliberateLink, true);
+    return () => document.removeEventListener('click', deliberateLink, true);
+  }, [action]);
+  function navigate(
+    next: Record<string, string | undefined>,
+    deliberate: boolean,
+  ) {
+    cancelDebounce();
+    setUnsentEdits(false);
+    const query = inventoryFilterParams(next).toString();
+    const href = action + (query ? '?' + query : '');
+    startTransition(() => {
+      if (deliberate) router.push(href, { scroll: false });
+      else router.replace(href, { scroll: false });
+    });
+  }
+  function change(key: FilterKey, value: string, deliberate = true) {
+    const next = { ...draftRef.current, [key]: value, page: undefined };
+    draftRef.current = next;
+    setDraft(next);
+    setUnsentEdits(true);
+    cancelDebounce();
+    if (deliberate) navigate(next, true);
+    else if (!composing.current)
+      debounce.current = setTimeout(
+        () => navigate(draftRef.current, false),
+        250,
+      );
+  }
+  const draftFilters = readFilters(draft);
   const [expanded, setExpanded] = useState(() =>
     Boolean(
       filters.category || filters.location || filters.site || filters.lowStock,
@@ -75,11 +181,11 @@ export function SearchForm({
           : key === 'status'
             ? `Status: ${value === 'all' ? 'All' : 'Archived / retired'}`
             : key === 'category'
-              ? `Category: ${categories.find((item) => item.id === value)?.name ?? value}`
+              ? `Category: ${categories.find((item) => item.id === value)?.name ?? 'Unavailable category'}`
               : key === 'location'
                 ? `Location: ${locations.find((item) => item.code === value || item.id === value)?.name ?? value}`
                 : key === 'site'
-                  ? `Site: ${sites.find((item) => item.id === value)?.name ?? value}`
+                  ? `Site: ${sites.find((item) => item.id === value)?.name ?? 'Unavailable site'}`
                   : 'Needs restocking';
     const next = new URLSearchParams();
     Object.entries(params).forEach(([name, entry]) => {
@@ -90,7 +196,14 @@ export function SearchForm({
 
   return (
     <div className="experience-inventory-search experience-surface mb-3 px-4 py-2 sm:mb-4 sm:p-4">
-      <form action={action} aria-label="Search inventory">
+      <form
+        action={action}
+        aria-label="Search inventory"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!composing.current) navigate(draftRef.current, true);
+        }}
+      >
         <div className="experience-search-top">
           <div className="min-w-0 flex-1">
             <label
@@ -102,7 +215,16 @@ export function SearchForm({
             <Input
               id="inventory-query"
               name="q"
-              defaultValue={filters.query}
+              value={draft.q ?? ''}
+              onChange={(event) => change('q', event.target.value, false)}
+              onCompositionStart={() => {
+                composing.current = true;
+                cancelDebounce();
+              }}
+              onCompositionEnd={(event) => {
+                composing.current = false;
+                change('q', event.currentTarget.value, false);
+              }}
               maxLength={200}
               placeholder="Name, model, serial, category or location"
             />
@@ -115,7 +237,8 @@ export function SearchForm({
               className={field}
               id="inventory-type"
               name="type"
-              defaultValue={filters.type === 'all' ? '' : filters.type}
+              value={draftFilters.type === 'all' ? '' : draftFilters.type}
+              onChange={(event) => change('type', event.target.value)}
             >
               <option value="">All types</option>
               <option value="quantity">Quantity items</option>
@@ -130,7 +253,8 @@ export function SearchForm({
               className={field}
               id="inventory-status"
               name="status"
-              defaultValue={filters.status}
+              value={draftFilters.status}
+              onChange={(event) => change('status', event.target.value)}
             >
               <option value="active">Active</option>
               <option value="historical">Archived / retired</option>
@@ -169,7 +293,8 @@ export function SearchForm({
                 className={field}
                 id="inventory-category"
                 name="category"
-                defaultValue={filters.category ?? ''}
+                value={draftFilters.category ?? ''}
+                onChange={(event) => change('category', event.target.value)}
               >
                 <option value="">All categories</option>
                 {categories.map((category) => (
@@ -180,13 +305,13 @@ export function SearchForm({
               </select>
             </div>
             <LocationPicker
-              key={filters.location ?? ''}
               id="inventory-location"
               label="Location"
               locations={locations}
               mode="browse"
               name="location"
-              defaultValue={filters.location ?? ''}
+              value={draftFilters.location ?? ''}
+              onValueChange={(value) => change('location', value)}
               allowAll
             />
             <div>
@@ -197,7 +322,8 @@ export function SearchForm({
                 className={field}
                 id="inventory-site"
                 name="site"
-                defaultValue={filters.site ?? ''}
+                value={draftFilters.site ?? ''}
+                onChange={(event) => change('site', event.target.value)}
               >
                 <option value="">All sites and storage</option>
                 {sites.map((site) => (
@@ -212,13 +338,25 @@ export function SearchForm({
                 type="checkbox"
                 name="lowStock"
                 value="true"
-                defaultChecked={filters.lowStock}
+                checked={draftFilters.lowStock}
+                onChange={(event) =>
+                  change('lowStock', event.target.checked ? 'true' : '')
+                }
               />
               Needs restocking only (available in storage)
             </label>
           </div>
         </motion.div>
       </form>
+      <p
+        role="status"
+        aria-live="polite"
+        className="mt-2 text-xs text-slate-300"
+      >
+        {pending || unsentEdits
+          ? 'Updating results. Displayed rows, active filters and CSV still use the previous applied search.'
+          : 'Results and CSV use the applied search.'}
+      </p>
       {chips.length > 0 && (
         <nav
           aria-label="Active inventory filters"
@@ -231,6 +369,23 @@ export function SearchForm({
             <Link
               key={chip.key}
               href={chip.href}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                const next = Object.fromEntries(
+                  new URL(chip.href, window.location.href).searchParams,
+                );
+                draftRef.current = next;
+                setDraft(next);
+                navigate(next, true);
+              }}
               className="experience-filter-chip"
               aria-label={`Remove ${chip.label} filter`}
             >

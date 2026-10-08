@@ -1262,7 +1262,7 @@ function LabelDesignerWorkspace({
                       <input
                         type="checkbox"
                         disabled={busy}
-                        aria-label={`Select ${record.name} (${record.kind} ${record.key})`}
+                        aria-label={`Select ${record.name}, ${recordKind(record.kind)}, ${record.holdingContext}`}
                         checked={selected.some(
                           (row) => queueIdentity(row) === queueIdentity(record),
                         )}
@@ -1315,7 +1315,38 @@ function LabelDesignerWorkspace({
                           .join(' · ')}
                       </p>
                     )}
-                    <p className={styles.resultId}>ID {record.key}</p>
+                    {record.customPreview &&
+                      record.customPreview.answers.length > 0 && (
+                        <div className={styles.resultMeta}>
+                          <dl>
+                            {record.customPreview.answers.map(
+                              (answer, index) => (
+                                <div key={index}>
+                                  <dt className="inline font-medium">
+                                    {answer.label}:{' '}
+                                  </dt>
+                                  <dd className="inline">
+                                    {answer.displayValue}
+                                    {answer.truncated ? '…' : ''}
+                                  </dd>
+                                </div>
+                              ),
+                            )}
+                          </dl>
+                          <Link
+                            href={
+                              record.kind === 'quantity'
+                                ? '/inventory/quantity/' + record.key
+                                : '/inventory/assets/' + record.key
+                            }
+                            className={styles.resultLink}
+                          >
+                            {record.customPreview.truncated
+                              ? 'View all details'
+                              : 'Full details'}
+                          </Link>
+                        </div>
+                      )}
                   </div>
                   <button
                     type="button"
@@ -1604,7 +1635,7 @@ function LabelDesignerWorkspace({
                   return (
                     <div key={id} className={styles.queueEntry}>
                       <span className={styles.queueName}>
-                        Pending {recordKind(key.kind).toLowerCase()}: {key.key}
+                        Pending {recordKind(key.kind).toLowerCase()}
                       </span>
                       <button
                         type="button"

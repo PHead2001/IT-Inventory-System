@@ -24,6 +24,12 @@ const itemCodeRow = z.object({
   archived: z.boolean(),
   item_code: z.string().nullable(),
 });
+const assetTagRow = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  status: z.enum(['active', 'retired']),
+  asset_tag: z.string().nullable(),
+});
 
 async function lookupItemCode(value: string): Promise<ScanResolution> {
   const normalized = normalizeItemCode(value);
@@ -123,13 +129,13 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
   }
   if (target.kind === 'tag' || target.kind === 'bare') {
     const tag = target.kind === 'tag' ? target.tag : target.identifier;
-    // Existing asset tags are stored as lowercase trimmed text. Do not strip punctuation.
-    const { data, error } = await supabase
-      .from('serialized_assets')
-      .select('id,name,status,asset_tag')
-      .eq('asset_tag', tag.toLowerCase())
-      .maybeSingle();
+    // Preserve parsed spelling until PostgreSQL applies its own lower rule.
+    const { data: raw, error } = await supabase.rpc(
+      'inventory_asset_tag_lookup',
+      { p_tag: tag },
+    );
     if (error) throw new Error('Asset tag lookup failed.');
+    const data = assetTagRow.nullable().parse(raw);
     if (
       data &&
       !matches.some((match) => match.path === '/inventory/assets/' + data.id)

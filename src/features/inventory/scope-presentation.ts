@@ -34,20 +34,31 @@ export function pageInventoryCounts(rows: InventoryResult[]) {
   const quantities = rows.filter((row) => row.kind === 'quantity');
   const holdings = quantities.filter((row) => row.location || row.site).length;
   const unlocated = quantities.length - holdings;
-  const items = new Set(quantities.map((row) => `${row.kind}:${row.id}`)).size;
-  const assets = new Set(
-    rows
-      .filter((row) => row.kind === 'asset')
-      .map((row) => `${row.kind}:${row.id}`),
-  ).size;
+  const assets = rows.filter((row) => row.kind === 'asset').length;
   return [
-    holdings ? countLabel(holdings, 'quantity holding') : '',
-    items ? countLabel(items, 'quantity item') : '',
-    unlocated ? countLabel(unlocated, 'unlocated definition') : '',
-    assets ? countLabel(assets, 'serialized asset') : '',
+    holdings
+      ? countLabel(
+          holdings,
+          'quantity row with stock',
+          'quantity rows with stock',
+        )
+      : '',
+    unlocated
+      ? countLabel(
+          unlocated,
+          'quantity row without stock',
+          'quantity rows without stock',
+        )
+      : '',
+    assets ? countLabel(assets, 'individual asset row') : '',
   ]
     .filter(Boolean)
     .join(' · ');
+}
+export function pageDistinctQuantityProducts(rows: InventoryResult[]) {
+  return new Set(
+    rows.filter((row) => row.kind === 'quantity').map((row) => row.id),
+  ).size;
 }
 export function hasInventoryConstraints(
   input: Record<string, string | undefined>,

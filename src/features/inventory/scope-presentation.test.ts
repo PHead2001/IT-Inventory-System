@@ -55,6 +55,30 @@ it('does not mix assets, unlocated definitions, holdings, or their different sto
       { ...row, kind: 'asset', location: null },
     ]),
   ).toBe(
-    '2 quantity holdings · 1 quantity item · 1 unlocated definition · 1 serialized asset',
+    '2 quantity rows with stock · 1 quantity row without stock · 1 individual asset row',
+  );
+});
+
+it('includes assigned rows in the partition and counts asset rows without overlapping product definitions', () => {
+  const row = {
+    kind: 'quantity',
+    id: 'cable',
+    quantity: 3,
+    location: { id: 'shelf' },
+  } as InventoryResult;
+  expect(
+    pageInventoryCounts([
+      row,
+      {
+        ...row,
+        location: null,
+        site: { id: 'site', code: 'HQ', name: 'Headquarters' },
+      },
+      { ...row, id: 'empty', location: null, quantity: 0 },
+      { ...row, id: 'asset', kind: 'asset', quantity: null },
+      { ...row, id: 'asset', kind: 'asset', quantity: null },
+    ]),
+  ).toBe(
+    '2 quantity rows with stock · 1 quantity row without stock · 2 individual asset rows',
   );
 });

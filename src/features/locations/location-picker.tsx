@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RequiredMark } from '@/components/forms/validation';
+import { pickerPosition } from './picker-position';
 import type { LocationRef } from '../inventory/contracts-ui';
 import {
   locationAncestorIds,
@@ -76,7 +77,12 @@ export function LocationPicker({
     }
   }
   const visibleOpen = open && !disabled;
-  const [panelPosition, setPanelPosition] = useState({ left: 16, top: 16 });
+  const [panelPosition, setPanelPosition] = useState({
+    left: 16,
+    top: 16,
+    width: 320,
+    height: 416,
+  });
   const [mobileViewport, setMobileViewport] = useState<{
     top: number;
     height: number;
@@ -223,15 +229,13 @@ export function LocationPicker({
     function place() {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(384, window.innerWidth - 32);
-      const height = Math.min(416, window.innerHeight * 0.65);
-      setPanelPosition({
-        left: Math.max(16, Math.min(rect.left, window.innerWidth - width - 16)),
-        top: Math.max(
-          16,
-          Math.min(rect.bottom + 4, window.innerHeight - height - 16),
+      setPanelPosition(
+        pickerPosition(
+          rect,
+          rootRef.current?.getBoundingClientRect().top ?? rect.top,
+          { width: window.innerWidth, height: window.innerHeight },
         ),
-      });
+      );
     }
     place();
     window.addEventListener('resize', place);
@@ -465,8 +469,13 @@ export function LocationPicker({
         <span className="min-w-0">
           <span className="block font-medium">
             {selected?.name ??
-              (selectedValue ||
-                (allowAll ? 'All locations' : 'Select a location'))}
+              (selectedValue
+                ? mode === 'browse'
+                  ? selectedValue
+                  : 'Unavailable location'
+                : allowAll
+                  ? 'All locations'
+                  : 'Select a location')}
           </span>
           {unavailable && (
             <span className="block text-xs text-amber-200">Unavailable</span>
@@ -488,6 +497,8 @@ export function LocationPicker({
             {
               '--picker-left': panelPosition.left + 'px',
               '--picker-top': panelPosition.top + 'px',
+              '--picker-width': panelPosition.width + 'px',
+              '--picker-height': panelPosition.height + 'px',
               '--picker-mobile-top': mobileViewport
                 ? mobileViewport.top + 'px'
                 : '0.75rem',
@@ -496,7 +507,7 @@ export function LocationPicker({
                 : 'calc(100dvh - 1.5rem)',
             } as React.CSSProperties
           }
-          className="fixed inset-x-3 top-[var(--picker-mobile-top)] z-50 flex h-[var(--picker-mobile-height)] min-h-0 flex-col rounded-lg border border-slate-600 bg-slate-950 p-3 shadow-2xl sm:inset-auto sm:left-[var(--picker-left)] sm:top-[var(--picker-top)] sm:h-auto sm:max-h-[min(26rem,65dvh)] sm:w-[min(24rem,calc(100vw-2rem))]"
+          className="fixed inset-x-3 top-[var(--picker-mobile-top)] z-50 flex h-[var(--picker-mobile-height)] min-h-0 flex-col rounded-lg border border-slate-600 bg-slate-950 p-3 shadow-2xl sm:inset-auto sm:left-[var(--picker-left)] sm:top-[var(--picker-top)] sm:h-[var(--picker-height)] sm:w-[var(--picker-width)]"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-sm font-semibold">Choose location</span>
@@ -545,6 +556,10 @@ export function LocationPicker({
             role={searching ? 'listbox' : 'tree'}
             aria-label={label}
             className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded border border-slate-800"
+            style={{
+              scrollbarColor: 'var(--color-slate-600) var(--color-slate-950)',
+              scrollbarWidth: 'auto',
+            }}
           >
             {loading && (
               <p role="status" className="p-3 text-sm text-slate-300">
@@ -596,7 +611,7 @@ export function LocationPicker({
                         </span>
                       </span>
                       {location && (
-                        <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-400">
+                        <span className="experience-code shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-400">
                           {location.code}
                         </span>
                       )}
@@ -705,14 +720,15 @@ export function LocationPicker({
                         {selectedRow ? ' ✓' : ''}
                         {isGroup && (
                           <span className="ml-2 text-xs font-normal text-slate-400">
-                            {isNavigation
-                              ? 'Group · navigate'
-                              : 'Group · selectable'}
+                            {row?.destinationCount}{' '}
+                            {mode === 'browse'
+                              ? 'nested locations'
+                              : 'eligible locations'}
                           </span>
                         )}
                       </span>
                       {location && (
-                        <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-400">
+                        <span className="experience-code shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-400">
                           {location.code}
                         </span>
                       )}

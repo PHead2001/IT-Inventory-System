@@ -94,9 +94,7 @@ export default async function InventoryPage({
   const createQuery = new URLSearchParams({ returnTo }).toString();
   return (
     <>
-      <p className="experience-eyebrow">
-        Logical storage and site custody · Inventory
-      </p>
+      <p className="experience-eyebrow">Find equipment and stock</p>
       <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>
       {params.scopeAdjusted === 'true' && (
         <p role="status" className="mt-2 text-sm text-amber-100">
@@ -110,7 +108,6 @@ export default async function InventoryPage({
       {member.role === 'staff' && <AddItemLauncher query={createQuery} />}
       <div className="mt-2 sm:mt-4">
         <SearchForm
-          key={exportParams.toString()}
           params={params}
           categories={categories}
           locations={locations}

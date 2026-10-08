@@ -906,13 +906,13 @@ test('mixed queue retains copies across navigation, decodes quantity QR, and pri
   await expect(page.getByRole('link', { name: assetName })).toBeVisible();
   await results
     .getByRole('checkbox', {
-      name: `Select ${quantityName} (quantity ${quantityId})`,
+      name: new RegExp(`^Select ${quantityName}, Quantity item,`),
       exact: true,
     })
     .check();
   await results
     .getByRole('checkbox', {
-      name: `Select ${assetName} (asset ${assetId})`,
+      name: new RegExp(`^Select ${assetName}, Individual asset,`),
       exact: true,
     })
     .check();

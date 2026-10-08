@@ -474,7 +474,7 @@ describe('LocationPicker', () => {
       expect(branch).toHaveAccessibleName(/navigation group/);
       expect(branch).not.toHaveAccessibleName(/selectable/);
       expect(branch).not.toHaveAttribute('aria-selected');
-      expect(branch).toHaveTextContent('Group · navigate');
+      expect(branch).toHaveTextContent('eligible locations');
       await user.click(branch);
       expect(changed).not.toHaveBeenCalled();
       await user.click(screen.getByRole('treeitem', { name: /Drawer 7/ }));
@@ -491,13 +491,26 @@ describe('LocationPicker', () => {
       'getBoundingClientRect',
     ).mockReturnValue({
       left: 990,
+      top: 696,
       bottom: 740,
+      width: 240,
     } as DOMRect);
+    vi.spyOn(
+      screen.getByLabelText('Location').parentElement!,
+      'getBoundingClientRect',
+    ).mockReturnValue({ top: 670 } as DOMRect);
     await user.click(screen.getByLabelText('Location'));
     const panel = screen.getByRole('tree').parentElement!;
     await waitFor(() => {
-      expect(panel.style.getPropertyValue('--picker-left')).toBe('624px');
-      expect(panel.style.getPropertyValue('--picker-top')).toBe('336px');
+      const left = parseFloat(panel.style.getPropertyValue('--picker-left'));
+      const top = parseFloat(panel.style.getPropertyValue('--picker-top'));
+      const width = parseFloat(panel.style.getPropertyValue('--picker-width'));
+      const height = parseFloat(
+        panel.style.getPropertyValue('--picker-height'),
+      );
+      expect(width).toBe(240);
+      expect(left + width).toBeLessThanOrEqual(window.innerWidth - 16);
+      expect(top + height).toBeLessThan(670);
     });
   });
   it('closes immediately when disabled and does not revive a previous popup', async () => {

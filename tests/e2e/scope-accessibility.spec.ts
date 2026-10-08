@@ -346,7 +346,13 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await page.goto('/inventory?q=' + encodeURIComponent(setup.splitName));
     await expect(page.getByText('2 matching rows')).toBeVisible();
     await expect(
-      page.getByText('On this page: 2 quantity holdings · 1 quantity item'),
+      page.getByText('On this page: 2 quantity rows with stock'),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        'Distinct quantity products on this page: 1 (overlaps the row counts).',
+        { exact: true },
+      ),
     ).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await assertFits(page);
@@ -584,12 +590,14 @@ test('Office codes, compact duplicate child links and empty destination remain a
   const longCode = 'ITO-' + suffix + '-' + 'L'.repeat(63);
   const shortCode = 'ITO-SCOPE-' + suffix.slice(0, 8);
   const name = 'Fictional duplicate storage ' + suffix.slice(0, 8);
+  const displayName = (code: string) =>
+    `${name} ${code === longCode ? 'long code' : 'short code'}`;
   const created = await admin
     .from('locations')
     .insert(
       [longCode, shortCode].map((code) => ({
         code,
-        name,
+        name: displayName(code),
         parent_id: parent.data!.id,
         kind: 'storage_area',
         can_hold_inventory: true,
@@ -603,17 +611,17 @@ test('Office codes, compact duplicate child links and empty destination remain a
     await page.goto('/locations/ITO');
     for (const code of [longCode, shortCode]) {
       const child = page.getByRole('link', {
-        name: `IT Office / ${name} (${code})`,
+        name: `IT Office / ${displayName(code)} (${code})`,
         exact: true,
       });
-      await expect(child).toHaveText(name);
+      await expect(child).toHaveText(displayName(code));
       await expect(child).not.toContainText('IT Office /');
     }
     await expect(page.getByRole('link', { name: /in room/ })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await page
       .getByRole('link', {
-        name: `IT Office / ${name} (${longCode})`,
+        name: `IT Office / ${displayName(longCode)} (${longCode})`,
         exact: true,
       })
       .click();
@@ -651,13 +659,13 @@ test('Office codes, compact duplicate child links and empty destination remain a
       .fill(name);
     await expect(
       browser.getByRole('button', {
-        name: `IT Office / ${name} ${longCode}`,
+        name: `IT Office / ${displayName(longCode)} ${longCode}`,
         exact: true,
       }),
     ).toBeVisible();
     await expect(
       browser.getByRole('button', {
-        name: `IT Office / ${name} ${shortCode}`,
+        name: `IT Office / ${displayName(shortCode)} ${shortCode}`,
         exact: true,
       }),
     ).toBeVisible();

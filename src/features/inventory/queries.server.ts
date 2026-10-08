@@ -25,7 +25,7 @@ import {
 } from './read-model';
 import {
   describeValues,
-  describeSearchBatch,
+  previewSearchBatch,
 } from '@/features/metadata/queries.server';
 import { containingSpace } from '@/features/room/spaces';
 
@@ -208,11 +208,11 @@ async function readInventory(
       ]),
     ).values(),
   ];
-  const summaries = await describeSearchBatch(supabase, uniqueKeys);
+  const previews = await previewSearchBatch(supabase, uniqueKeys);
   return {
     rows: result.rows.map((r) => ({
       ...mapSearch(r, locations),
-      customSummary: summaries[`${r.kind}:${r.entity_id}`],
+      customPreview: previews[`${r.kind}:${r.entity_id}`],
     })),
     total: result.total,
     page: filter.page,

@@ -1307,6 +1307,7 @@ export type Database = {
       serialized_assets: {
         Row: {
           asset_tag: string | null
+          asset_tag_normalized: string | null
           category_id: string
           created_at: string
           custom_values: Json
@@ -1326,6 +1327,7 @@ export type Database = {
         }
         Insert: {
           asset_tag?: string | null
+          asset_tag_normalized?: string | null
           category_id: string
           created_at?: string
           custom_values?: Json
@@ -1345,6 +1347,7 @@ export type Database = {
         }
         Update: {
           asset_tag?: string | null
+          asset_tag_normalized?: string | null
           category_id?: string
           created_at?: string
           custom_values?: Json
@@ -1791,6 +1794,10 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      asset_create_v3: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       asset_move: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
@@ -1811,11 +1818,19 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      asset_site_open_v3: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
       asset_update: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
       asset_update_v2: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: Json
+      }
+      asset_update_v3: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
@@ -1835,6 +1850,7 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      inventory_asset_tag_lookup: { Args: { p_tag: string }; Returns: Json }
       inventory_export_snapshot:
         | {
             Args: {
@@ -2091,6 +2107,13 @@ export type Database = {
         }
         Returns: Json
       }
+      inventory_location_entry_counts: {
+        Args: { p_location_codes: string[] }
+        Returns: {
+          entry_count: string
+          location_code: string
+        }[]
+      }
       inventory_normalize_item_code: {
         Args: { p_value: string }
         Returns: string
@@ -2195,6 +2218,7 @@ export type Database = {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json
       }
+      metadata_preview_batch: { Args: { p_keys: Json }; Returns: Json }
       metadata_publish: {
         Args: { p_payload: Json; p_request_id: string }
         Returns: Json

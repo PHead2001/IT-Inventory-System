@@ -105,7 +105,7 @@ it('labels holding and distinct definition counts as page-local, with full match
   );
   expect(screen.getByText('52 matching rows')).toBeVisible();
   expect(
-    screen.getByText(/On this page: 2 quantity holdings · 1 quantity item/),
+    screen.getByText(/On this page: 2 quantity rows with stock/),
   ).toBeVisible();
 });
 it('exposes stable location links on search results with independent conventional and room destinations', () => {
@@ -240,18 +240,38 @@ it('keeps separate holding quantities and provides a detail path for long custom
         ownedQuantity: '5',
         reorderThreshold: null,
         stockState: 'disabled' as const,
-        customSummary: longSummary,
+        customSummary: 'Internal revision decoration must not render',
+        customPreview: {
+          answers: [
+            {
+              label: 'Description',
+              type: 'text',
+              displayValue: longSummary,
+              truncated: true,
+            },
+          ],
+          truncated: true,
+        },
       }))}
     />,
   );
   expect(screen.getByText('2 units')).toBeVisible();
   expect(screen.getByText('3 units')).toBeVisible();
-  expect(screen.getAllByRole('link', { name: 'Full details' })).toHaveLength(2);
   expect(
-    screen.getAllByRole('link', { name: 'Full details' })[0],
+    screen.queryByText(/Internal revision decoration/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole('link', { name: 'View all details' }),
+  ).toHaveLength(2);
+  expect(
+    screen.getAllByRole('link', { name: 'View all details' })[0],
   ).toHaveAttribute('href', '/inventory/quantity/item');
   expect(
-    screen.getAllByText((_, element) => element?.textContent === longSummary),
+    screen.getAllByText(
+      (_, element) =>
+        element?.textContent === 'Description: ' + longSummary + '…' &&
+        element.children.length === 0,
+    ),
   ).toHaveLength(2);
 });
 it('shows record corrections as human readable history distinct from movement', () => {

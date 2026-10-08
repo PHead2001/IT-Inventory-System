@@ -60,6 +60,76 @@ same already-issued recovery JWT while rejecting a second email-token exchange.
 Hosted policy verification
 and activation remain separate owner prerequisites in [deployment](deployment.md).
 
+### Inventory display and bounded read contracts
+
+Asset tags separate display spelling from lookup identity. The current
+`asset_create_v3`, `asset_update_v3` and `asset_site_open_v3` mutations preserve
+the exact entered case, punctuation and leading zeros after the existing outer
+whitespace normalization; blank tags become null. `serialized_assets.asset_tag`
+holds that display value. Its generated `asset_tag_normalized` column uses
+PostgreSQL `lower(btrim(asset_tag))` and is unique across active and retired
+assets. The lowercase normalization described in the legacy Inventory Core
+contract below continues to apply to the original asset create/update RPCs,
+their v2 versions and `asset_site_open`.
+
+The v3 receipt payload includes exact trimmed display spelling. A case-only
+edit checks the expected version, advances it once and records the old and new
+display values in the same transaction as the receipt. A retry with different
+display spelling is different intent. Existing lowercase rows retain their
+spelling unless an explicit metadata edit changes it; migrations do not infer
+original case or rewrite historical events. Legacy operations keep their
+lowercased receipt identity and original successful results. The v3 operations are additive; existing clients retain their original mutation
+commands and receipt behavior until they adopt the new operations. Authorization is checked before successful receipt replay.
+Permanent QR identity remains the asset UUID.
+
+`inventory_asset_tag_lookup(p_tag text)` supplies the existing scanner's exact
+tag-resolution path. It applies the same database `lower`/`btrim` rule to the
+input and compares it with the unique normalized key; `%`, `_` and backslash
+are literal characters. Scan parsing preserves tag spelling until that call.
+The caller must be an active member, reads retain RLS, and the request is bounded
+to 1,024 UTF-8 bytes and 100 characters after trimming. The returned record
+retains display spelling and status, including retirement. Existing location,
+asset-UUID and quantity-UUID resolution and namespace ambiguity remain intact.
+
+`metadata_preview_batch(p_keys jsonb)` is a caller-authorized, typed projection
+for ordinary result summaries. It accepts at most 25 unique `{kind, id}` keys
+and a 4,096-byte UTF-8 request. Each record returns at most three answers with
+`label`, `type`, `displayValue` and `truncated`, plus a record-level `truncated`
+flag. Labels and display values are bounded to 160 and 256 UTF-8 bytes,
+respectively; JSON escaping also consumes that budget, and the complete
+response is bounded to 49,152 bytes. Choices use their immutable validated
+revision paths; multi-select previews resolve at most three selected paths.
+The projection omits internal provenance decoration while preserving literal
+UUIDs and other identifiers deliberately stored as user answers. Full answers
+remain on record details. The provenance-rich `metadata_describe_batch` API is
+unchanged for existing technical consumers.
+
+`inventory_location_entry_counts(p_location_codes text[])` reads one authorized
+snapshot for at most 100 unique codes and a 16,384-byte UTF-8 request. It returns
+only requested active, inventory-capable leaf destinations. One entry means one
+positive holding of a nonarchived quantity item or one active individual asset;
+stock units are never added to asset counts. Site holdings, zero balances,
+archived definitions and retired assets are excluded. These are the same active
+contents filters used by the selected-location view. Counts are decimal strings
+so PostgreSQL bigint precision survives JSON and application transport. Known
+zero is returned explicitly; unknown or ineligible codes are omitted. Loading,
+errors and omitted codes must remain unknown. There are no aggregate-parent
+totals or implied claims about physically empty storage.
+
+Active location names are unique within their parent under
+`lower(btrim(name))`; null parents share one root scope. Different parents may
+use the same name. A partial unique index and authoritative checks after the
+placement lock protect rename, trusted structure creation/update, activation
+and reparenting. Application structure-editing privileges remain revoked.
+Inactive duplicate names may remain, but activation must use a distinct name.
+The migration audits existing active sibling collisions before installing
+enforcement and fails with the colliding codes if any remain. It does not
+rename, deactivate, delete or move data. Before retrying, an authorized
+configuration maintainer must correct the reported names through the existing
+name-only rename workflow with current versions. That explicit correction
+retains codes, UUIDs, inventory relationships and historical names; migration
+execution is not authorization for automatic data repair.
+
 Next.js App Router serves the operational dashboard. Request-scoped Supabase clients use the signed-in user's credentials. PostgreSQL owns logical data; Git owns geometry. The scene emits location codes and receives selection/focus state; it never owns persistence. Conventional workflows remain independent of 3D.
 
 ## Reference model

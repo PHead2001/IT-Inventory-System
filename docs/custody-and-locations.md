@@ -16,6 +16,40 @@ read-first membership check; no first-user, email, or fixture promotion occurs.
 
 ## Current state and accounting
 
+### Browsing inventory and location settings
+
+Inventory's primary count is matching server rows across all pages. The current
+page breakdown partitions those rows into quantity holdings (storage or assigned
+site), quantity definitions without stock, and individual assets. Distinct quantity
+products on the page are an overlapping statistic and are never added to the row
+breakdown. Quantities, availability, assignments and recorded totals keep their
+separate units. CSV and applied filter chips use the committed server search scope.
+
+Text search applies after 250 ms, replacing the evolving URL. Explicit Search and
+select-filter choices push a navigable history entry and reset pagination. Composition
+does not dispatch intermediate input. Next.js App Router arbitrates navigation
+responses; the stable search island retains newer unsent text across an earlier
+response, and Back/Forward restores controls from the URL. During navigation, the
+status announces that displayed rows and CSV retain their prior applied scope.
+No additional full-catalog client read is used. Custom answer previews are bounded
+typed display values, with a detail link for the full record.
+
+The shared picker uses the existing authorized hierarchy and eligibility rules;
+its group counts describe nested/eligible locations, never inventory. Desktop panels
+match the trigger width, clamp to the viewport, and flip above the label when needed.
+Phones retain the established sheet. Settings reuses picker sorting and full-path
+search for an indented tree with Arrow/Home/End navigation and links to existing
+location details. Permanent codes remain visible. Rename keeps its existing
+configuration-maintainer gate; there are no structure, reparent or sort controls.
+
+Active siblings must have distinct display names under `lower(btrim(name))`:
+leading/trailing spaces and case do not distinguish names. Root locations share
+the same null-parent scope; matching names under different parents remain valid.
+Authoritative uniqueness protects concurrent renames without changing UUIDs,
+permanent codes or historical labels. Migration preflight reports any existing
+collision by code and stops; a maintainer must explicitly correct the names.
+Inactive duplicates may remain, but activation requires a distinct sibling name.
+
 `stock_balances` contains stored quantities only. `site_quantity_holdings`
 contains assigned quantities only. A serialized asset has one active custody:
 exactly one `location_id` or `site_id`; retired assets have no site custody and
