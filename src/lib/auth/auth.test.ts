@@ -169,6 +169,30 @@ describe('auth boundaries', () => {
     expect(mocks.getUser).not.toHaveBeenCalled();
     expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
   });
+  it.each([
+    [undefined, '/inventory'],
+    ['https://evil.test', '/inventory'],
+    ['//evil.test', '/inventory'],
+    ['/login', '/inventory'],
+    ['/dashboard?next=https://evil.test', '/inventory'],
+    ['/dashboard', '/dashboard'],
+    ['/locations/ITC', '/locations/ITC'],
+  ])(
+    'new sign-in uses the same safe landing contract from %s',
+    async (next, expected) => {
+      await expect(
+        login(
+          {},
+          form({
+            email: 'staff@example.test',
+            password: 'Password123456',
+            ...(next ? { next } : {}),
+          }),
+        ),
+      ).rejects.toThrow('REDIRECT:' + expected);
+      expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
+    },
+  );
   it('opens Overview after login only after checking active membership', async () => {
     await expect(
       login(

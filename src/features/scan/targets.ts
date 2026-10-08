@@ -38,6 +38,11 @@ export function validReturnPath(value: unknown): string | null {
   return typeof value === 'string' ? (targetPath(value)?.path ?? null) : null;
 }
 
+/** Both fresh sign-in and an existing session use the same safe landing route. */
+export function loginDestination(value: unknown): string {
+  return validReturnPath(value) ?? '/inventory';
+}
+
 export function parseScan(value: string, origin: string): ScanTarget | null {
   if (typeof value !== 'string' || value.length > 1024) return null;
   value = value.trim();
