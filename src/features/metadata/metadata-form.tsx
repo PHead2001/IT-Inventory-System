@@ -373,6 +373,30 @@ export function MetadataForm({
     openingReason,
     openingReference,
   };
+  const beginAnotherEdit = () => {
+    const active = editRecovery.current;
+    if (editRecoveryEnabled && active?.status === 'saved' && baseline) {
+      const next: EditEnvelope = {
+        ...active,
+        instance: crypto.randomUUID(),
+        sequence: 0,
+        status: 'editing',
+        baseline: editBaseline(baseline),
+        inputs: currentInputs,
+        command: null,
+        completedRequestId: null,
+      };
+      editPrevious.current = active;
+      editDurable.current = false;
+      editRecovery.current = next;
+      inputsSnapshot.current = currentInputs;
+    }
+    setState(null);
+    setReview(false);
+    setEditIntent(null);
+    recoveredEditing.current = false;
+    setRecoveredRecord(false);
+  };
   const persistEdit = (
     patch: Partial<CreationInputs> = {},
     record = baseline,
@@ -1429,13 +1453,24 @@ export function MetadataForm({
       !(dirty || uncertain || pending)
     )
       return;
+    // A persisted acknowledgement can precede this effect's cleanup when a
+    // transition starts navigation. Read its current envelope at event time.
+    const hasDurableTerminal = () =>
+      (recoveryEnabled &&
+        (recovery.current?.status === 'saved' ||
+          recovery.current?.status === 'discarded')) ||
+      (editRecoveryEnabled &&
+        (editRecovery.current?.status === 'saved' ||
+          editRecovery.current?.status === 'discarded'));
     const warn = (event: BeforeUnloadEvent) => {
+      if (hasDurableTerminal()) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     const guard = (event: MouseEvent) => {
       if (
+        hasDurableTerminal() ||
         !editRecoveryEnabled ||
         !recoveryError ||
         event.defaultPrevented ||
@@ -1482,6 +1517,7 @@ export function MetadataForm({
     preview,
     terminalDraft,
     state,
+    recoveryEnabled,
     editRecoveryEnabled,
     recoveryError,
   ]);
@@ -2246,6 +2282,7 @@ export function MetadataForm({
             className="ml-2"
             disabled={pending || uncertain}
             onClick={() => {
+              if (editRecovery.current?.status === 'saved') beginAnotherEdit();
               persistInputs({
                 priorForms: publishedSnapshots({
                   ...priorForms,
@@ -2783,30 +2820,7 @@ export function MetadataForm({
               type="button"
               variant="outline"
               disabled={pending || refreshNeeded}
-              onClick={() => {
-                const active = editRecovery.current;
-                if (editRecoveryEnabled && active && baseline) {
-                  const next: EditEnvelope = {
-                    ...active,
-                    instance: crypto.randomUUID(),
-                    sequence: 0,
-                    status: 'editing',
-                    baseline: editBaseline(baseline),
-                    inputs: currentInputs,
-                    command: null,
-                    completedRequestId: null,
-                  };
-                  editPrevious.current = active;
-                  editDurable.current = false;
-                  editRecovery.current = next;
-                  inputsSnapshot.current = currentInputs;
-                }
-                setState(null);
-                setReview(false);
-                setEditIntent(null);
-                recoveredEditing.current = false;
-                setRecoveredRecord(false);
-              }}
+              onClick={beginAnotherEdit}
             >
               Edit details
             </Button>
