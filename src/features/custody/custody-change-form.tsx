@@ -146,6 +146,11 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   );
   const quantity = kind === 'quantity';
   const correction = action === 'correct';
+  const reviewedRoute = reviewed
+    ? quantity && correction
+      ? `At ${reviewed.source}`
+      : `${reviewed.source} → ${reviewed.destination}`
+    : '';
   const requiresReason =
     correction || action === 'write_off' || action === 'retire';
   const positiveSites = new Set(
@@ -310,12 +315,17 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               ),
               'Recorded storage destination',
             )
-          : requiresDestination
+          : quantity && correction
             ? siteLabel(
-                sites.find((row) => row.id === values.destination_site_id),
-                'Recorded destination site',
+                sites.find((row) => row.id === values.source_site_id),
+                'Recorded source site',
               )
-            : 'No destination',
+            : requiresDestination
+              ? siteLabel(
+                  sites.find((row) => row.id === values.destination_site_id),
+                  'Recorded destination site',
+                )
+              : 'No destination',
         quantity: correction ? values.observed_quantity : values.quantity,
         reference: values.reference.trim(),
       });
@@ -392,7 +402,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
             />
             {reviewed && (
               <p className="break-words text-sm">
-                Reviewed route: {reviewed.source} → {reviewed.destination}{' '}
+                Reviewed route: {reviewedRoute}{' '}
                 <span className="text-slate-400">
                   (endpoints reviewed for this operation)
                 </span>
@@ -728,9 +738,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
             {reviewed.name ?? 'This record'} ·{' '}
             {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
           </p>
-          <p>
-            {reviewed.source} → {reviewed.destination}
-          </p>
+          <p>{reviewedRoute}</p>
           {reviewed.reference && (
             <p>Ticket number reference: {reviewed.reference}</p>
           )}

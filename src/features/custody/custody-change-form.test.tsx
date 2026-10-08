@@ -650,15 +650,38 @@ it('preserves a last-unit return source name even when it leaves site holdings a
       .nextElementSibling,
   ).toHaveTextContent('0 units');
 });
-it.each([true, false])(
-  'renders a correction acknowledgement without transfer language when receipt is unavailable (changed=%s)',
-  async (changed) => {
+it.each([
+  [true, false],
+  [false, false],
+  [true, true],
+])(
+  'keeps quantity corrections at the reviewed site through review and completion (changed=%s, receipt=%s)',
+  async (changed, receiptAvailable) => {
     vi.mocked(submitCustody).mockResolvedValue({
       ok: true,
       entityId: id(1),
       version: changed ? '2' : '1',
       changed,
       ...(changed ? { eventId: id(10), refreshFailed: true } : {}),
+      ...(receiptAvailable
+        ? {
+            custody: {
+              eventId: id(10),
+              operation: 'corrected',
+              actorName: 'Staff',
+              createdAt: '2026-10-07T12:00:00Z',
+              quantity: 5,
+              source: { id: site.id, kind: 'site' as const, name: site.name },
+              destination: {
+                id: site.id,
+                kind: 'site' as const,
+                name: site.name,
+              },
+              reason: 'Count verified',
+              reference: null,
+            },
+          }
+        : {}),
     });
     render(
       <CustodyChangeForm
@@ -697,23 +720,41 @@ it.each([true, false])(
     fireEvent.submit(
       screen.getByRole('form', { name: 'Correct recorded site holding' }),
     );
+    const review = screen.getByRole('region', { name: 'Review changes' });
+    expect(review).toHaveTextContent(`At ${site.name} (${site.code})`);
+    expect(review).not.toHaveTextContent('→');
+    expect(review).not.toHaveTextContent('No destination');
     fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
     await screen.findByRole('button', { name: 'Done' });
     const completion = screen.getByRole('region', {
       name: 'Custody completion',
     });
-    expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
-    expect(completion).toHaveTextContent(
-      `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
-    );
-    expect(completion).toHaveTextContent(
-      changed
-        ? 'The transaction is confirmed. The event receipt is not available yet'
-        : 'No balance change was needed.',
-    );
+    if (receiptAvailable) {
+      expect(completion).toHaveTextContent(
+        `Reviewed route: At ${site.name} (${site.code})`,
+      );
+    } else {
+      expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
+      expect(completion).toHaveTextContent(
+        `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
+      );
+      expect(completion).toHaveTextContent(
+        changed
+          ? 'The transaction is confirmed. The event receipt is not available yet'
+          : 'No balance change was needed.',
+      );
+    }
     expect(completion).not.toHaveTextContent('→');
     expect(completion).not.toHaveTextContent('No destination');
     expect(completion).not.toHaveTextContent('Signed adjustment');
     expect(submitCustody).toHaveBeenCalledOnce();
+    const command = vi.mocked(submitCustody).mock.calls[0][0];
+    expect(command).toMatchObject({
+      payload: {
+        source_site_id: site.id,
+        observed_quantity: changed ? 10 : 5,
+      },
+    });
+    expect(command).not.toHaveProperty('payload.destination_site_id');
   },
 );
