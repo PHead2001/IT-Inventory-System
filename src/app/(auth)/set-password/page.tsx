@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { AuthForm } from '@/components/auth/auth-form';
 import { readPasswordSession } from '@/lib/auth/password-session.server';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Set password' };
 export default async function SetPasswordPage() {
@@ -9,11 +10,20 @@ export default async function SetPasswordPage() {
   const session = await readPasswordSession(supabase.auth);
   if (!session || session.emailProof === 'unusable')
     return (
-      <p role="alert">
-        Unable to verify your session.{' '}
-        <Link href="/login?switch=1">Sign in again</Link> or{' '}
-        <Link href="/forgot-password">request a new reset email</Link>.
-      </p>
+      <div role="alert">
+        <p>Unable to verify your session.</p>
+        <nav
+          aria-label="Password recovery"
+          className="mt-5 flex flex-wrap gap-3"
+        >
+          <Button asChild variant="outline">
+            <Link href="/login?switch=1">Sign in again</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/forgot-password">Request a new reset email</Link>
+          </Button>
+        </nav>
+      </div>
     );
   return (
     <>

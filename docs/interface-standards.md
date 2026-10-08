@@ -148,7 +148,12 @@ Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 
 Route titles describe the task or resource type, never a private record name. Root
 and inventory not-found views provide Overview and inventory-search recovery without
-assuming deletion or revealing authorization state. In installed Next.js 16.3.6,
+assuming deletion or revealing authorization state. Site-opening forms override
+the site-details ancestor with the private-safe Record site holdings task title.
+Anonymous Overview recovery preserves only the exact `/dashboard` login return;
+it does not allow arbitrary path prefixes or expand printed-label destinations.
+Failed password-session recovery offers separate touch-sized sign-in/reset controls.
+In installed Next.js 16.3.6,
 an unstreamed not-found response can return HTTP 404; a response already committed
 by streaming can retain HTTP 200 with the not-found UI. A rendered 404 screen alone
 does not prove transport status. Preserve existing loading boundaries and verify

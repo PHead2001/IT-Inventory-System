@@ -74,6 +74,36 @@ test('anonymous navigation cannot browse the application', async ({ page }) => {
     page.getByRole('heading', { name: 'Welcome back' }),
   ).toBeVisible();
 });
+test('unverified password sessions offer touch-sized phone recovery controls', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/set-password');
+  const recovery = page.getByRole('navigation', { name: 'Password recovery' });
+  for (const name of ['Sign in again', 'Request a new reset email']) {
+    const link = recovery.getByRole('link', { name, exact: true });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+  }
+  await recovery
+    .getByRole('link', { name: 'Sign in again', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/login\?switch=1$/);
+});
+test('anonymous public 404 Overview recovery preserves its destination through sign-in', async ({
+  page,
+}) => {
+  await page.goto('/audit3-missing-' + crypto.randomUUID());
+  await page.getByRole('link', { name: 'Open Overview', exact: true }).click();
+  await expect(page).toHaveURL(/\/login\?next=%2Fdashboard$/);
+  await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
+  await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+});
 for (const role of ['staff', 'viewer'] as const)
   test(
     role + ' can read the inventory workspace and sign out',

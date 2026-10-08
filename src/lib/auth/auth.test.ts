@@ -169,6 +169,30 @@ describe('auth boundaries', () => {
     expect(mocks.getUser).not.toHaveBeenCalled();
     expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
   });
+  it('opens Overview after login only after checking active membership', async () => {
+    await expect(
+      login(
+        {},
+        form({
+          email: 'staff@example.test',
+          password: 'Password123456',
+          next: '/dashboard',
+        }),
+      ),
+    ).rejects.toThrow('REDIRECT:/dashboard');
+    expect(mocks.eq).toHaveBeenCalledWith('user_id', 'user');
+    mocks.member.mockResolvedValue({ data: null, error: null });
+    await expect(
+      login(
+        {},
+        form({
+          email: 'staff@example.test',
+          password: 'Password123456',
+          next: '/dashboard',
+        }),
+      ),
+    ).rejects.toThrow('REDIRECT:/access-denied');
+  });
   it('emits only fixed login spans and preserves the authorized redirect when enabled', async () => {
     vi.stubEnv('AUTH_DIAGNOSTICS', '1');
     vi.stubEnv('VERCEL_ENV', 'preview');
