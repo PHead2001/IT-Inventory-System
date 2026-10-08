@@ -11,6 +11,7 @@ import {
   TaskStateContext,
   TaskResetContext,
   TaskDiscardContext,
+  TaskWarningContext,
   type TaskState,
 } from './task-state';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ export function TaskWorkspace({
     undefined,
   );
   const [state, setState] = useState(clean);
+  const [warning, setWarning] = useState('');
   const stateRef = useRef(clean);
   const discardTask = useRef<(() => boolean) | null>(null);
   const registerDiscard = useCallback((discard: (() => boolean) | null) => {
@@ -112,6 +114,18 @@ export function TaskWorkspace({
         Tasks
       </h2>
       {context}
+      {warning && (
+        <div className="experience-feedback space-y-2 text-sm text-amber-200">
+          <p role="alert">{warning}</p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setWarning('')}
+          >
+            Dismiss warning
+          </Button>
+        </div>
+      )}
       {(['primary', 'secondary', 'consequential'] as const).map((group) => {
         const tasks = choices.filter(
           (choice) => (choice.group ?? 'primary') === group,
@@ -264,7 +278,9 @@ export function TaskWorkspace({
           >
             <TaskDiscardContext.Provider value={registerDiscard}>
               <TaskStateContext.Provider value={report}>
-                {children(selected)}
+                <TaskWarningContext.Provider value={setWarning}>
+                  {children(selected)}
+                </TaskWarningContext.Provider>
               </TaskStateContext.Provider>
             </TaskDiscardContext.Provider>
           </TaskResetContext.Provider>
