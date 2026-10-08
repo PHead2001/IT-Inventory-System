@@ -18,7 +18,7 @@ The quality bar is that a new user's first reaction is "this is well made." That
 
 ## 2. Typography
 
-- ⚑ **Families:** one sans family for all UI text, and one monospace family for codes (SKU, asset tag, serial, location code). Default proposal: Inter (variable) and JetBrains Mono, loaded with `next/font` in the root layout and exposed as CSS variables. Remove the starter `font-family: Arial, Helvetica, sans-serif` body rule in `src/app/globals.css`.
+- ⚑ **Families:** owner-selected Inter variable for UI and JetBrains Mono for codes (SKU, asset tag, serial, location code), self-hosted through `next/font/local`. The Latin Inter subset and one normal Mono weight live under `public/fonts` with pinned sources and original OFL licenses. Non-Latin characters use system fallback. Root CSS variables are `--font-ui` and `--font-code`; use `experience-code` or `font-mono` at the surrounding size. Builds do not fetch fonts from external services.
 - **Scale:** use only these sizes. Add a step here before using a new one.
 
 | Role                  | Size / line height | Notes                                                 |
@@ -145,6 +145,24 @@ Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 ---
 
 ## 10. Empty, loading and error states
+
+Route titles describe the task or resource type, never a private record name. Root
+metadata supplies the IT Inventory suffix. `/room` uses Spaces & maps and
+`/auth/confirm` uses Confirm email link without selected space names, location
+codes or confirmation tokens. Root
+and inventory not-found views provide Overview and inventory-search recovery without
+assuming deletion or revealing authorization state. Site-opening forms override
+the site-details ancestor with the private-safe Record existing quantity item or
+Record existing individual asset task title, matching the opening workflow.
+Anonymous Overview recovery preserves only the exact `/dashboard` login return;
+it does not allow arbitrary path prefixes or expand printed-label destinations.
+Failed password-session recovery offers separate touch-sized sign-in/reset controls.
+In installed Next.js 16.3.6,
+an unstreamed not-found response can return HTTP 404; a response already committed
+by streaming can retain HTTP 200 with the not-found UI. A rendered 404 screen alone
+does not prove transport status. Preserve existing loading boundaries and verify
+both direct HTTP and client navigation on the deployed candidate. See the
+[Next.js not-found contract](https://nextjs.org/docs/app/api-reference/file-conventions/not-found).
 
 - **Empty** (nothing exists yet): say so and offer the create action.
 - **Filtered-empty** (filters exclude everything): name the active filters and offer "Clear filters".

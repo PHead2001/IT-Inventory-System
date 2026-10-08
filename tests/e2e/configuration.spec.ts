@@ -142,6 +142,8 @@ test('phone Settings reviews referenced removal and shares label defaults with n
     ).toHaveValue('code128');
     await noHorizontalOverflow(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(page).toHaveURL(/\/login(?:\?|$)/);
+    await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
     await signIn(page, 'viewer');
     await page.goto('/settings/categories');
     await expect(page.getByText(renamed)).toBeVisible();

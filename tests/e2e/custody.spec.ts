@@ -425,6 +425,8 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     path: testInfo.outputPath('mobile-label-search.png'),
   });
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
   await signIn(page, 'viewer');
   await page.goto('/sites/' + siteCode);
   await expect(
@@ -730,6 +732,8 @@ test('opening holdings and write-off retain history without inventing a closet i
   ).toContainText('0');
   await noHorizontalOverflow(page);
   await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
   await signIn(page, 'viewer');
   await page.goto('/sites/' + siteCode);
   await expect(

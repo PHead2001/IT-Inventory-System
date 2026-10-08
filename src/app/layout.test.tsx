@@ -1,5 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+vi.mock('next/font/local', () => ({
+  default: () => ({ variable: 'local-font' }),
+}));
 import RootLayout from './layout';
 
 it('serves reduced-motion CSS state before client preferences can hydrate', () => {
@@ -8,5 +11,5 @@ it('serves reduced-motion CSS state before client preferences can hydrate', () =
       <p>Workspace</p>
     </RootLayout>,
   );
-  expect(markup).toContain('<html lang="en" data-motion="reduced">');
+  expect(markup).toMatch(/<html[^>]*data-motion="reduced"/);
 });

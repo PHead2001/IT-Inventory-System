@@ -827,6 +827,29 @@ it('automatically validates the initial queue and prints only after final revali
   );
 });
 
+it('revokes same-generation readiness when a card becomes unmeasured and restores it only after remeasurement', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const sheet = document.querySelector('.label-print-root')!;
+  const generation = sheet.getAttribute('data-sheet-generation');
+  const card = sheet.querySelector('.label-card')!;
+  act(() => {
+    card.setAttribute('data-text-measured', 'false');
+    card.setAttribute('data-code-ready', 'false');
+  });
+  await waitFor(() => expect(printButton()).toBeDisabled());
+  expect(
+    screen.getByText('Preparing codes and layout — printing paused'),
+  ).toBeVisible();
+  expect(window.print).not.toHaveBeenCalled();
+  act(() => {
+    card.setAttribute('data-text-measured', 'true');
+    card.setAttribute('data-code-ready', 'true');
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(sheet.getAttribute('data-sheet-generation')).toBe(generation);
+});
+
 it('updates stock and custody context without regenerating permanent print content', async () => {
   render(<LabelDesigner {...props} />);
   await waitFor(() => expect(printButton()).toBeEnabled());

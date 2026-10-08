@@ -160,3 +160,24 @@ The custody browser suite uses loopback-only trusted storage fixtures and checks
 name-only controls, stable QR/location identity, blocked archive, and discoverable
 empty-site archive/restore. Generated database types must be regenerated from the
 applied migration and checked through the existing database gate.
+
+## Private-safe titles and missing-resource proof
+
+F307 checks branded route-kind titles without private record names or UUIDs.
+Keep real direct missing-resource document requests (including their HTTP 404
+status), anonymous access checks, and client navigation evidence distinct.
+The interface E2E uses a clearly synthetic navigation-boundary fixture: a real
+owned inventory NextLink receives the server's real missing-record RSC response
+through a scoped non-prefetch request rewrite. It requires unavailable content,
+private-safe metadata, no document fallback, and recovery through an ordinary
+NextLink; it records the RSC status and observed title separately. This is not
+proof that an existing record was deleted or became inaccessible.
+
+With installed Next.js 16.3.6, that client arrival can retain the successful
+static quantity layout title, `Quantity item · IT Inventory`, while page-data
+`notFound()` renders the unavailable boundary. Metadata fallback collection
+uses an error convention when metadata resolution itself fails; a static
+`not-found.tsx` metadata export does not promise its custom title for every
+client boundary arrival. Preserve generic private-safe route titles and the
+separate document/RSC transport assertions rather than adding duplicate data
+queries or client title overrides solely for this distinction.

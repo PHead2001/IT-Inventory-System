@@ -5,6 +5,7 @@ import {
   parseScan,
   quantityLabelPath,
   validReturnPath,
+  loginDestination,
 } from './targets';
 const origin = 'https://inventory.example.test';
 const id = '7b84a7cf-197b-45b1-8016-87482d124cb4';
@@ -89,5 +90,38 @@ describe('label destinations', () => {
     expect(
       validReturnPath('https://inventory.example.test/locations/ITC'),
     ).toBeNull();
+  });
+  it('allows the exact Overview login return without turning it into a label target', () => {
+    expect(validReturnPath('/dashboard')).toBe('/dashboard');
+    expect(parseScan('/dashboard', origin)).toBeNull();
+  });
+  it.each([
+    [undefined, '/inventory'],
+    [null, '/inventory'],
+    ['', '/inventory'],
+    ['https://evil.test', '/inventory'],
+    ['//evil.test', '/inventory'],
+    ['/dashboard?next=https://evil.test', '/inventory'],
+    ['/login', '/inventory'],
+    ['/dashboard', '/dashboard'],
+    ['/locations/ITC', '/locations/ITC'],
+  ])('uses one safe login landing for %s', (next, expected) => {
+    expect(loginDestination(next)).toBe(expected);
+  });
+  it.each([
+    '/dashboard/',
+    '/dashboard/settings',
+    '/dashboard?next=https://evil.test',
+    '/dashboard#https://evil.test',
+    '/dashboard.evil.test',
+    '//dashboard',
+    'https://inventory.example.test/dashboard',
+    '/%64ashboard',
+    '/dashboard%2f',
+    '/dashboard\\evil.test',
+    ' /dashboard',
+    ['/dashboard'],
+  ])('rejects noncanonical Overview return %s', (value) => {
+    expect(validReturnPath(value)).toBeNull();
   });
 });

@@ -280,9 +280,28 @@ function LabelCard({
     let current = true;
     const box = textBox.current;
     if (!box) return;
+    const fonts = document.fonts;
+    let waitingForFonts: Promise<FontFaceSet> | null = null;
     const measure = () => {
       if (!current) return;
-      if (document.fonts && document.fonts.status !== 'loaded') {
+      if (fonts && fonts.status !== 'loaded') {
+        setMeasuredGeneration(null);
+        // FontFaceSet.ready belongs to one loading cycle. A later load must
+        // subscribe to its new promise even when the clamped box does not resize.
+        const ready = fonts.ready;
+        if (waitingForFonts !== ready) {
+          waitingForFonts = ready;
+          void ready.then(() => {
+            if (!current || waitingForFonts !== ready) return;
+            waitingForFonts = null;
+            measure();
+          });
+        }
+        return;
+      }
+      // Unauthorized print media hides the sheet. Zero geometry proves neither
+      // fit nor overflow and must not change the current compact sizing choice.
+      if (box.clientWidth <= 0 || box.clientHeight <= 0) {
         setMeasuredGeneration(null);
         return;
       }
@@ -308,10 +327,21 @@ function LabelCard({
         ? null
         : new ResizeObserver(measure);
     observer?.observe(box);
-    void document.fonts?.ready.then(measure);
+    const printMedia = window.matchMedia?.('print');
+    printMedia?.addEventListener('change', measure);
+    window.addEventListener('afterprint', measure);
+    fonts?.addEventListener?.('loading', measure);
+    fonts?.addEventListener?.('loadingdone', measure);
+    fonts?.addEventListener?.('loadingerror', measure);
+    void fonts?.ready.then(measure);
     return () => {
       current = false;
       observer?.disconnect();
+      printMedia?.removeEventListener('change', measure);
+      window.removeEventListener('afterprint', measure);
+      fonts?.removeEventListener?.('loading', measure);
+      fonts?.removeEventListener?.('loadingdone', measure);
+      fonts?.removeEventListener?.('loadingerror', measure);
     };
   }, [
     record.name,

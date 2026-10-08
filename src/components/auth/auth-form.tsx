@@ -4,17 +4,20 @@ import { login, recover, confirmAuth, setPassword } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AuthState } from '@/lib/auth/schemas';
+import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 const actions = { login, recover, confirm: confirmAuth, password: setPassword };
 export function AuthForm({
   mode,
   tokenHash,
   tokenType,
   next,
+  emailedCompletion = false,
 }: {
   mode: keyof typeof actions;
   tokenHash?: string;
   tokenType?: string;
   next?: string;
+  emailedCompletion?: boolean;
 }) {
   const [state, action, pending] = useActionState<AuthState, FormData>(
     actions[mode],
@@ -26,6 +29,15 @@ export function AuthForm({
     confirm: 'Continue securely',
     password: 'Set password',
   }[mode];
+  if (state.passwordUpdated)
+    return (
+      <div className="space-y-5">
+        <p role="alert" className="experience-feedback" data-tone="error">
+          {state.error}
+        </p>
+        <QueueLogoutForm />
+      </div>
+    );
   return (
     <form action={action} className="space-y-5 text-sm" aria-label={label}>
       {mode === 'login' && next && (
@@ -41,6 +53,19 @@ export function AuthForm({
             autoComplete="email"
             required
             maxLength={254}
+          />
+        </div>
+      )}
+      {mode === 'password' && !emailedCompletion && (
+        <div className="space-y-2">
+          <label htmlFor="current-password">Current password</label>
+          <Input
+            id="current-password"
+            name="current_password"
+            type="password"
+            autoComplete="current-password"
+            required
+            maxLength={128}
           />
         </div>
       )}
@@ -63,7 +88,7 @@ export function AuthForm({
       )}
       {mode === 'password' && (
         <>
-          <p id="password-help" className="text-sm text-[#9cafc4]">
+          <p id="password-help" className="experience-muted text-sm">
             Use at least 12 characters.
           </p>
           <div className="space-y-2">

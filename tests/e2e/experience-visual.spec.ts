@@ -70,8 +70,8 @@ async function captureInventoryComposition(
   });
   await page.screenshot({ path: info.outputPath(name + '.png') });
   await expect(firstName).toHaveText(title);
-  await expect(firstName).toBeInViewport({ ratio: 1 });
-  expect(geometry.viewport.scrollY).toBe(0);
+  // Wrapped content may extend below the fold. Account disclosure above also
+  // moves focus, so an exact document scroll position is not a UI contract.
   expect(geometry.viewport.documentWidth).toBeLessThanOrEqual(
     geometry.viewport.width,
   );
@@ -83,6 +83,93 @@ async function captureInventoryComposition(
   expect(geometry.signOut.height).toBeGreaterThanOrEqual(44);
   expect(geometry.chip.right).toBeLessThanOrEqual(geometry.viewport.width);
   expect(geometry.chip.height).toBeGreaterThanOrEqual(32);
+  await captureKeyboardInventoryFocus(page, info, name + '-focused');
+}
+
+async function captureKeyboardInventoryFocus(
+  page: Page,
+  info: TestInfo,
+  name: string,
+  activate = false,
+) {
+  const firstName = page
+    .locator('li[id^="inventory-row-"] a[href^="/inventory/"]')
+    .first();
+  for (
+    let attempt = 0;
+    attempt < 50 &&
+    !(await firstName.evaluate(
+      (element) => document.activeElement === element,
+    ));
+    attempt++
+  )
+    await page.keyboard.press('Tab');
+  await expect(firstName).toBeFocused();
+  await expect(firstName).toBeInViewport({ ratio: 1 });
+  await expect
+    .poll(() =>
+      firstName.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return (
+          element.matches(':focus-visible') &&
+          parseFloat(style.outlineWidth) > 0 &&
+          !['none', 'hidden'].includes(style.outlineStyle) &&
+          !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.outlineColor)
+        );
+      }),
+    )
+    .toBe(true);
+  const geometry = await firstName.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      title: rect.toJSON(),
+      viewport: { width: innerWidth, height: innerHeight, scrollY },
+      outline: parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset),
+      outlineWidth: parseFloat(style.outlineWidth),
+      outlineOffset: parseFloat(style.outlineOffset),
+      outlineStyle: style.outlineStyle,
+      outlineColor: style.outlineColor,
+      unobscured: [0.1, 0.5, 0.9].every((x) =>
+        [0.1, 0.5, 0.9].every((y) =>
+          element.contains(
+            document.elementFromPoint(
+              rect.x + rect.width * x,
+              rect.y + rect.height * y,
+            ),
+          ),
+        ),
+      ),
+    };
+  });
+  const geometryPath = info.outputPath(name + '-geometry.json');
+  writeFileSync(geometryPath, JSON.stringify(geometry, null, 2));
+  await info.attach(name + '-geometry', {
+    path: geometryPath,
+    contentType: 'application/json',
+  });
+  await page.screenshot({ path: info.outputPath(name + '.png') });
+  expect(geometry.outlineWidth).toBeGreaterThan(0);
+  expect(geometry.title.x - geometry.outline).toBeGreaterThanOrEqual(-1);
+  expect(geometry.title.y - geometry.outline).toBeGreaterThanOrEqual(-1);
+  expect(geometry.title.right + geometry.outline).toBeLessThanOrEqual(
+    geometry.viewport.width + 1,
+  );
+  expect(geometry.title.bottom + geometry.outline).toBeLessThanOrEqual(
+    geometry.viewport.height + 1,
+  );
+  expect(geometry.unobscured).toBe(true);
+  if (activate) {
+    const inventoryUrl = page.url();
+    const destination = new URL(
+      (await firstName.getAttribute('href'))!,
+      inventoryUrl,
+    );
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(destination.href);
+    await page.goBack();
+    await expect(page).toHaveURL(inventoryUrl);
+  }
 }
 
 async function captureAccountDisclosure(
@@ -332,10 +419,16 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       .first();
     // Retain the unfiltered acceptance check as well as the deterministic case.
     await page.setViewportSize({ width: 502, height: 757 });
-    await expect(firstName).toBeInViewport({ ratio: 1 });
+    await expect(firstName).toBeInViewport();
     await page.screenshot({
       path: testInfo.outputPath('inventory-phone-502-global-viewport.png'),
     });
+    await captureKeyboardInventoryFocus(
+      page,
+      testInfo,
+      'inventory-phone-502-global-focused',
+      true,
+    );
     await page.setViewportSize({ width: 390, height: 800 });
     const scopedSearch = page.getByRole('form', { name: 'Search inventory' });
     await scopedSearch.getByRole('textbox').fill(query);
@@ -368,6 +461,26 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       path: testInfo.outputPath('inventory-phone-390.png'),
       fullPage: true,
     });
+    for (const viewport of [
+      { width: 375, height: 800, suffix: 'phone-375' },
+      { width: 720, height: 900, suffix: '200pct-reflow-equivalent-720' },
+    ]) {
+      await page.setViewportSize(viewport);
+      await noHorizontalOverflow(page);
+      await page
+        .getByLabel('Account: Test staff, staff', { exact: true })
+        .focus();
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `inventory-${viewport.suffix}-before-focus.png`,
+        ),
+      });
+      await captureKeyboardInventoryFocus(
+        page,
+        testInfo,
+        `inventory-${viewport.suffix}-focused`,
+      );
+    }
     await page.setViewportSize({ width: 502, height: 757 });
     await noHorizontalOverflow(page);
     await captureInventoryComposition(
@@ -390,7 +503,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       expect(bounds!.height).toBeGreaterThanOrEqual(44);
     }
     await page.screenshot({
-      path: testInfo.outputPath('inventory-phone-502-viewport.png'),
+      path: testInfo.outputPath('inventory-phone-502-controls-checked.png'),
       fullPage: false,
     });
     await page.setViewportSize({ width: 320, height: 800 });

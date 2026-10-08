@@ -10,6 +10,21 @@ import { getPublishedForms } from '@/features/metadata/queries.server';
 import { MetadataForm } from '@/features/metadata/metadata-form';
 import { panel } from '@/features/inventory/components/read-ui';
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string; kind: string }>;
+}) {
+  const { kind } = await params;
+  const title =
+    kind === 'quantity'
+      ? 'Record existing quantity item'
+      : kind === 'asset'
+        ? 'Record existing individual asset'
+        : 'Record existing equipment';
+  return { title: { absolute: `${title} · IT Inventory` } };
+}
+
 export default async function SiteOpeningPage({
   params,
   searchParams,

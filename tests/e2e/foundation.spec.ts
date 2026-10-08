@@ -1,6 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { withDisposablePasswordAccount } from './disposable-password-account';
+// Auth proof must never retain entered passwords or token-bearing URLs.
+test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 const fixtureEmails = fixture.emails,
   fixturePassword = fixture.password;
 const localClient = (key: string) => {
@@ -71,6 +74,36 @@ test('anonymous navigation cannot browse the application', async ({ page }) => {
     page.getByRole('heading', { name: 'Welcome back' }),
   ).toBeVisible();
 });
+test('unverified password sessions offer touch-sized phone recovery controls', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/set-password');
+  const recovery = page.getByRole('navigation', { name: 'Password recovery' });
+  for (const name of ['Sign in again', 'Request a new reset email']) {
+    const link = recovery.getByRole('link', { name, exact: true });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+  }
+  await recovery
+    .getByRole('link', { name: 'Sign in again', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/login\?switch=1$/);
+});
+test('anonymous public 404 Overview recovery preserves its destination through sign-in', async ({
+  page,
+}) => {
+  await page.goto('/audit3-missing-' + crypto.randomUUID());
+  await page.getByRole('link', { name: 'Open Overview', exact: true }).click();
+  await expect(page).toHaveURL(/\/login\?next=%2Fdashboard$/);
+  await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
+  await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+});
 for (const role of ['staff', 'viewer'] as const)
   test(
     role + ' can read the inventory workspace and sign out',
@@ -101,6 +134,8 @@ for (const role of ['inactive', 'nonmember'] as const)
     await expect(
       page.getByRole('heading', { name: 'Access is not enabled' }),
     ).toBeVisible();
+    await page.goto('/login');
+    await expect(page).toHaveURL(/\/access-denied$/);
   });
 test('existing session loses access immediately after membership deactivation', async ({
   page,
@@ -193,6 +228,10 @@ for (const destination of ['default', 'preview'] as const)
         .getByLabel('Confirm password', { exact: true })
         .fill(fixturePassword);
       await page.getByRole('button', { name: 'Set password' }).click();
+      await expect(page).toHaveURL(origin + '/login?password=updated');
+      await page.getByLabel('Email', { exact: true }).fill(email);
+      await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
       await expect(page).toHaveURL(origin + '/access-denied');
     },
   );
@@ -235,16 +274,85 @@ test('recovery email returns to the requesting deployment and changes the passwo
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByLabel('Confirm password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Set password' }).click();
-  await expect(
-    page.getByRole('heading', { name: 'Inventory', exact: true }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(
+    process.env.APP_ORIGIN + '/login?password=updated',
+  );
   await page.getByLabel('Email', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
+});
+
+test('ordinary signed-in login visits return safely and explicit account switching remains usable', async ({
+  page,
+}) => {
+  await signIn(page, fixtureEmails.staff);
+  await expect(page).toHaveURL(/\/inventory$/);
+  await page.goto('/login');
+  await expect(page).toHaveURL(/\/inventory$/);
+  await page.goto('/login?next=' + encodeURIComponent('/locations/ITC'));
+  await expect(page).toHaveURL(/\/locations\/ITC$/);
+  await page.goto('/login?next=' + encodeURIComponent('https://evil.example'));
+  await expect(page).toHaveURL(/\/inventory$/);
+  await page.goto('/login?switch=1');
+  await page.getByLabel('Email', { exact: true }).fill(fixtureEmails.viewer);
+  await page.getByLabel('Password', { exact: true }).fill(fixturePassword);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(/\/inventory$/);
+});
+
+test('ordinary password changes require the current password and end the local session', async ({
+  page,
+}) => {
+  const email = 'change-' + crypto.randomUUID() + '@example.test';
+  const client = admin();
+  await withDisposablePasswordAccount(
+    client,
+    { email, password: fixturePassword },
+    async () => {
+      try {
+        await page.goto('/dashboard');
+        if (new URL(page.url()).pathname !== '/login') {
+          await page
+            .getByRole('button', { name: 'Sign out', exact: true })
+            .click();
+          await expect(page).toHaveURL(/\/login(?:\?|$)/);
+        }
+      } finally {
+        await page.context().clearCookies();
+      }
+    },
+    async () => {
+      await signIn(page, email);
+      await expect(page).toHaveURL(/\/inventory$/);
+      await page.goto('/set-password?recovery=true');
+      await expect(page.getByLabel('Current password')).toBeVisible();
+      await page.getByLabel('Current password').fill('IncorrectPassword123456');
+      await page
+        .getByLabel('Password', { exact: true })
+        .fill(fixturePassword + '-new');
+      await page.getByLabel('Confirm password').fill(fixturePassword + '-new');
+      await page.getByRole('button', { name: 'Set password' }).click();
+      await expect(
+        page.getByRole('form', { name: 'Set password' }).getByRole('alert'),
+      ).toContainText('Unable to update');
+      await page.getByLabel('Current password').fill(fixturePassword);
+      await page
+        .getByLabel('Password', { exact: true })
+        .fill(fixturePassword + '-new');
+      await page.getByLabel('Confirm password').fill(fixturePassword + '-new');
+      await page.getByRole('button', { name: 'Set password' }).click();
+      await expect(page).toHaveURL(/\/login\?password=updated$/);
+      await page.getByLabel('Email', { exact: true }).fill(email);
+      await page
+        .getByLabel('Password', { exact: true })
+        .fill(fixturePassword + '-new');
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page).toHaveURL(/\/inventory$/);
+    },
+  );
 });
 
 test('recovery exchanges token once and keeps a fixed destination', async ({

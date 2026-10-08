@@ -1,5 +1,5 @@
-import { expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 const qrMocks = vi.hoisted(() => ({
   render: vi.fn(async () => 'data:image/png;base64,iVBORw0KGgo='),
 }));
@@ -7,6 +7,144 @@ vi.mock('qrcode', () => ({
   default: { toDataURL: qrMocks.render },
 }));
 import { LabelSheet, barcodePayload } from './label-sheet';
+
+// JSDOM has no layout. These tests supply a visible box; hidden-box cases
+// explicitly change these metrics rather than treating zero as fitted text.
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1);
+});
+afterEach(() => vi.restoreAllMocks());
+
+it('recovers the same label generation after a second font loading cycle', async () => {
+  const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+  const fonts = Object.assign(new EventTarget(), {
+    status: 'loaded',
+    ready: Promise.resolve(),
+  });
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: fonts,
+  });
+  const records = [
+    {
+      kind: 'quantity' as const,
+      key: 'late-font',
+      name: 'Late font label',
+      path: '/inventory/quantity/late-font',
+    },
+  ];
+  const view = render(
+    <LabelSheet
+      records={records}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="90x50"
+      page="letter"
+      format="qr"
+      generation="late-font"
+    />,
+  );
+  try {
+    const card = document.querySelector('.label-card')!;
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-code-ready', 'true'),
+    );
+    const qr = screen.getByRole('img');
+    let finish!: () => void;
+    fonts.status = 'loading';
+    fonts.ready = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    act(() => fonts.dispatchEvent(new Event('loading')));
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-text-measured', 'false'),
+    );
+    expect(card).toHaveAttribute('data-code-ready', 'false');
+    fonts.status = 'loaded';
+    act(() => {
+      finish();
+      fonts.dispatchEvent(new Event('loadingdone'));
+    });
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-code-ready', 'true'),
+    );
+    expect(card).toHaveAttribute('data-sheet-generation', 'late-font');
+    expect(screen.getByRole('img')).toBe(qr);
+  } finally {
+    view.unmount();
+    if (originalFonts) Object.defineProperty(document, 'fonts', originalFonts);
+    else Reflect.deleteProperty(document, 'fonts');
+  }
+});
+
+it('does not fit hidden zero-size boxes and remeasures when the same card becomes visible', async () => {
+  let resize!: ResizeObserverCallback;
+  const originalObserver = globalThis.ResizeObserver;
+  const disconnect = vi.fn();
+  class LayoutObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resize = callback;
+    }
+    observe() {}
+    unobserve() {}
+    disconnect = disconnect;
+  }
+  globalThis.ResizeObserver =
+    LayoutObserver as unknown as typeof ResizeObserver;
+  let hidden = false;
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+    () => (hidden ? 0 : 1),
+  );
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
+    () => (hidden ? 0 : 1),
+  );
+  const records = [
+    {
+      kind: 'quantity' as const,
+      key: 'hidden-label',
+      name: 'Hidden label',
+      path: '/inventory/quantity/hidden-label',
+    },
+  ];
+  const view = render(
+    <LabelSheet
+      records={records}
+      origin="https://inventory.example.test"
+      preview={false}
+      size="90x50"
+      page="letter"
+      format="qr"
+      generation="hidden-label"
+    />,
+  );
+  try {
+    const card = document.querySelector('.label-card')!;
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-code-ready', 'true'),
+    );
+    const qr = screen.getByRole('img');
+    hidden = true;
+    act(() => resize([], {} as ResizeObserver));
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-text-measured', 'false'),
+    );
+    expect(card).toHaveAttribute('data-code-ready', 'false');
+    expect(screen.getByText('Hidden label')).toHaveClass('text-[9pt]');
+    hidden = false;
+    act(() => resize([], {} as ResizeObserver));
+    await waitFor(() =>
+      expect(card).toHaveAttribute('data-code-ready', 'true'),
+    );
+    expect(card).toHaveAttribute('data-sheet-generation', 'hidden-label');
+    expect(screen.getByRole('img')).toBe(qr);
+    expect(screen.getByText('Hidden label')).toHaveClass('text-[9pt]');
+  } finally {
+    view.unmount();
+    expect(disconnect).toHaveBeenCalled();
+    globalThis.ResizeObserver = originalObserver;
+  }
+});
 
 it.each(['size', 'text'] as const)(
   'retries normal text sizing after %s changes while retaining its QR',
@@ -473,7 +611,7 @@ it('reports measured text overflow and denies code readiness for a physically un
   Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
     configurable: true,
     get() {
-      return this.hasAttribute('data-fit-text') ? 10 : 0;
+      return this.hasAttribute('data-fit-text') ? 10 : 1;
     },
   });
   try {

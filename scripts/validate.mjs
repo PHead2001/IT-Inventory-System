@@ -9,6 +9,7 @@ try {
     'test:staging-user-sync',
     'test:staging-file-keys',
     'test:local-storage',
+    'test:auth:policy:contract',
     'test:performance:contract',
     'test:export:memory',
     'test:file:inspection',

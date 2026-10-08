@@ -1,3 +1,4 @@
+export const metadata = { title: { absolute: 'Settings · IT Inventory' } };
 import { SettingsNavigation } from './settings-navigation';
 
 export default function SettingsLayout({
