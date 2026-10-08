@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { AuthForm } from '@/components/auth/auth-form';
 import { confirmationSchema } from '@/lib/auth/schemas';
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Confirm email link' };
 export default async function ConfirmPage({
   searchParams,
 }: {
