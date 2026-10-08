@@ -32,7 +32,10 @@ export default async function LoginPage({
             Try again
           </Link>
           <Link
-            href="/login?switch=1"
+            href={
+              '/login?switch=1' +
+              (next ? '&next=' + encodeURIComponent(next) : '')
+            }
             className="ml-5 inline-flex min-h-11 items-center underline"
           >
             Use another account
@@ -51,7 +54,7 @@ export default async function LoginPage({
       </p>
       {params.password === 'updated' && (
         <p role="status" className="mb-5">
-          Your password was updated. Sign in with your new password.
+          Sign in with your current password.
         </p>
       )}
       {params.switch === '1' && (

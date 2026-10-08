@@ -45,3 +45,30 @@ it('fails closed with a retry path when the session check is unavailable', async
   expect(screen.getByRole('alert')).toHaveTextContent('Please try again');
   expect(screen.queryByRole('form')).not.toBeInTheDocument();
 });
+it('does not present a forged password query as proof of a password change', async () => {
+  render(
+    await LoginPage({
+      searchParams: Promise.resolve({ password: 'updated' }),
+    }),
+  );
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Sign in with your current password.',
+  );
+  expect(screen.getByRole('status')).not.toHaveTextContent(
+    /updated|new password/i,
+  );
+});
+it.each([
+  ['/locations/ITC', '/login?switch=1&next=%2Flocations%2FITC'],
+  ['https://evil.example', '/login?switch=1'],
+  ['//evil.example', '/login?switch=1'],
+])(
+  'keeps only validated return paths while switching accounts: %s',
+  async (next, href) => {
+    mocks.session.mockResolvedValue('unavailable');
+    render(await LoginPage({ searchParams: Promise.resolve({ next }) }));
+    expect(
+      screen.getByRole('link', { name: 'Use another account' }),
+    ).toHaveAttribute('href', href);
+  },
+);
