@@ -267,10 +267,33 @@ test('complete environment projection validates every row and pagination before 
   }
 });
 
-test('complete environment projection preserves globals, duplicate IDs/keys and scopes for canonical refusals', async () => {
+test('complete environment projection refuses duplicate IDs before filtering in either ownership order', async () => {
+  for (const branches of [
+    ['feature', 'other'],
+    [null, 'other'],
+    ['other', 'another'],
+    ['feature', 'feature'],
+  ]) {
+    const pair = branches.map((gitBranch, i) => ({
+      ...ownedEnv(),
+      id: 'conflicting-provider-id',
+      key: i === 0 ? 'INVENTORY_FILE_KEYS_JSON' : 'UNRELATED_SETTING',
+      gitBranch,
+    }));
+    for (const rows of [pair, [...pair].reverse()]) {
+      const { vercel } = fileProviders({
+        pins: {},
+        request: async () => ({ envs: [...unrelatedEnvs(110), ...rows] }),
+      });
+      await assert.rejects(vercel.envs('feature'), { code: 'FILE_ENV_BOUNDS' });
+    }
+  }
+});
+
+test('complete environment projection preserves globals, duplicate keys and scopes for canonical refusals', async () => {
   for (const [rows, code] of [
     [[{ ...ownedEnv(), gitBranch: null }], 'FILE_ENV_OWNERSHIP'],
-    [[ownedEnv(), ownedEnv()], 'FILE_ENV_AMBIGUOUS'],
+    [[ownedEnv(), { ...ownedEnv(), id: 'another-env' }], 'FILE_ENV_AMBIGUOUS'],
     [
       [{ ...ownedEnv(), customEnvironmentIds: ['custom'] }],
       'FILE_ENV_OWNERSHIP',
@@ -342,12 +365,13 @@ test('backend guard accepts a complete 512-row response, while wider overrides/d
   assert.match((await f.check()).fingerprint, /^[a-f0-9]{64}$/);
   for (const conflict of [
     { ...f.state.rows[0], id: 'global', gitBranch: null },
-    { ...f.state.rows[0] },
+    { ...f.state.rows[0], id: 'duplicate-url' },
     { ...f.state.rows[0], id: 'custom', customEnvironmentIds: ['custom'] },
   ]) {
     const other = backendFixture();
     other.state.rows.push(...unrelatedEnvs(110), conflict);
     other.state.values.global = `https://${PARENT_REF}.supabase.co`;
+    other.state.values['duplicate-url'] = `https://${child}.supabase.co`;
     await assert.rejects(other.check(), { code: 'FILE_BACKEND_DENIED' });
   }
   const bounded = backendFixture();

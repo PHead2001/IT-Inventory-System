@@ -141,8 +141,10 @@ export function fileProviders({
       )
     )
       refuse('FILE_ENV_BOUNDS');
+    if (new Set(listing.envs.map((row) => row.id)).size !== listing.envs.length)
+      refuse('FILE_ENV_BOUNDS');
     // Validate the complete response before removing only proven other branches.
-    // Wider values, duplicate records and every target/custom scope stay visible
+    // Wider values, duplicate keys and every target/custom scope stay visible
     // to the existing ownership/backend guards and their 100-row scoped bound.
     return {
       ...listing,
