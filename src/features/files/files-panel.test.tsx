@@ -83,6 +83,67 @@ it('uses one local browse/drop path, revokes image previews, and never embeds or
   revoke.mockRestore();
 });
 
+it('rejects a multi-file replacement intent without leaving earlier staged bytes uploadable', async () => {
+  const create = vi
+    .spyOn(URL, 'createObjectURL')
+    .mockReturnValue('blob:earlier-selection');
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const { unmount } = render(
+    <FilesPanel
+      parentType="asset"
+      parentId="00000000-0000-4000-8000-000000000001"
+      active
+      staff
+      actorId="staff"
+    />,
+  );
+  await screen.findByText('Uploaded · review required');
+  const input = screen.getByLabelText('Add photo or PDF');
+  const earlier = new File(['earlier'], 'earlier.png', { type: 'image/png' });
+  fireEvent.change(input, { target: { files: [earlier] } });
+  expect(
+    screen.getByRole('button', { name: 'Upload and review' }),
+  ).toBeEnabled();
+  // Model the native input's staged path as well as React's selected bytes.
+  Object.defineProperty(input, 'value', {
+    configurable: true,
+    writable: true,
+    value: 'C:\\fakepath\\earlier.png',
+  });
+  expect(
+    fireEvent.drop(
+      screen.getByRole('group', { name: 'Choose an inventory file' }),
+      {
+        dataTransfer: {
+          files: [
+            earlier,
+            new File(['later'], 'later.png', { type: 'image/png' }),
+          ],
+          types: ['Files'],
+        },
+      },
+    ),
+  ).toBe(false);
+  expect(screen.getByText('Choose one file at a time.')).toBeVisible();
+  expect(screen.queryByText(/Selected: earlier.png/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('img', { name: 'Selected file preview' }),
+  ).not.toBeInTheDocument();
+  expect(input).toHaveValue('');
+  expect(revoke).toHaveBeenCalledWith('blob:earlier-selection');
+  const upload = screen.getByRole('button', { name: 'Upload and review' });
+  expect(upload).toBeDisabled();
+  fireEvent.click(upload);
+  expect(mocks.reserve).not.toHaveBeenCalled();
+  expect(mocks.upload).not.toHaveBeenCalled();
+  fireEvent.change(input, { target: { files: [earlier] } });
+  expect(upload).toBeEnabled();
+  expect(screen.getByText(/Selected: earlier.png/)).toBeVisible();
+  unmount();
+  create.mockRestore();
+  revoke.mockRestore();
+});
+
 const id = '00000000-0000-4000-8000-000000000001';
 const pending = {
   id,

@@ -924,6 +924,8 @@ function BoundFilesPanel({
               event.stopPropagation();
               if (busy || removal) return;
               if (event.dataTransfer.files.length !== 1) {
+                handleSelectedFile(null);
+                if (fileInput.current) fileInput.current.value = '';
                 setMessage('Choose one file at a time.');
                 return;
               }
