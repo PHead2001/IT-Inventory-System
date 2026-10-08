@@ -10,9 +10,11 @@ import {
 import type { RoomDefinition } from '../schema';
 import { toScenePosition } from '../coordinates';
 import { buildRoomBindings } from '../bindings';
+import { useScenePalette } from './scene-palette';
 
 /** A reusable baked alpha footprint: no shadow camera, light map or extra passes. */
 export function SceneDepth({ room }: { room: RoomDefinition }) {
+  const palette = useScenePalette();
   const texture = useMemo(() => {
     const size = 32;
     const pixels = new Uint8Array(size * size * 4);
@@ -78,7 +80,7 @@ export function SceneDepth({ room }: { room: RoomDefinition }) {
         );
       })}
       <lineSegments geometry={grid} raycast={() => {}}>
-        <lineBasicMaterial color="#355168" transparent opacity={0.45} />
+        <lineBasicMaterial color={palette.grid} transparent opacity={0.45} />
       </lineSegments>
     </group>
   );

@@ -12,6 +12,7 @@ const paletteTokens = {
   edge: '--room-edge',
   background: '--room-canvas-background',
   fillLight: '--room-fill-light',
+  grid: '--room-grid',
 } as const;
 type ScenePalette = { [Key in keyof typeof paletteTokens]: Color };
 const PaletteContext = createContext<ScenePalette | null>(null);

@@ -1,13 +1,25 @@
 import { readFileSync } from 'node:fs';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useEffect, useImperativeHandle, useMemo, type Ref } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  type Ref,
+  type ReactNode,
+} from 'react';
 import {
   Color,
   MeshStandardMaterial,
+  LineBasicMaterial,
+  type LineBasicMaterialParameters,
+  type BufferGeometry,
   type MeshStandardMaterialParameters,
 } from 'three';
 import { SelectionMaterial } from './selection-material';
+import { SceneDepth } from './scene-depth';
+import type { RoomDefinition } from '../schema';
 import {
   readScenePalette,
   ScenePaletteProvider,
@@ -17,6 +29,8 @@ import {
 const state = vi.hoisted(() => ({
   frame: null as (() => void) | null,
   material: null as MeshStandardMaterial | null,
+  gridMaterial: null as LineBasicMaterial | null,
+  gridGeometry: null as BufferGeometry | null,
   three: vi.fn(),
   reduced: false,
   edge: vi.fn(),
@@ -51,6 +65,26 @@ function MaterialProbe({
   }, [material]);
   return null;
 }
+function GridMaterialProbe(props: LineBasicMaterialParameters) {
+  const material = useMemo(() => new LineBasicMaterial(props), [props]);
+  useEffect(() => {
+    state.gridMaterial = material;
+    return () => material.dispose();
+  }, [material]);
+  return null;
+}
+function GridGeometryProbe({
+  geometry,
+  children,
+}: {
+  geometry: BufferGeometry;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    state.gridGeometry = geometry;
+  }, [geometry]);
+  return children;
+}
 vi.mock('react/jsx-runtime', async () => {
   const actual =
     await vi.importActual<typeof import('react/jsx-runtime')>(
@@ -60,6 +94,9 @@ vi.mock('react/jsx-runtime', async () => {
     ...actual,
     jsx: (...args: Parameters<typeof actual.jsx>) => {
       if (args[0] === 'meshStandardMaterial') args[0] = MaterialProbe;
+      if (args[0] === 'lineBasicMaterial') args[0] = GridMaterialProbe;
+      if (args[0] === 'lineSegments') args[0] = GridGeometryProbe;
+      if (args[0] === 'group') args[0] = Fragment;
       return actual.jsx(...args);
     },
   };
@@ -72,6 +109,9 @@ vi.mock('react/jsx-dev-runtime', async () => {
     ...actual,
     jsxDEV: (...args: Parameters<typeof actual.jsxDEV>) => {
       if (args[0] === 'meshStandardMaterial') args[0] = MaterialProbe;
+      if (args[0] === 'lineBasicMaterial') args[0] = GridMaterialProbe;
+      if (args[0] === 'lineSegments') args[0] = GridGeometryProbe;
+      if (args[0] === 'group') args[0] = Fragment;
       return actual.jsxDEV(...args);
     },
   };
@@ -97,6 +137,9 @@ beforeEach(() => {
   state.three.mockReturnValue({ gl: { domElement: canvas }, invalidate });
   state.reduced = false;
   state.material = null;
+  state.gridMaterial = null;
+  state.gridGeometry = null;
+  state.frame = null;
   now = 100;
   vi.spyOn(performance, 'now').mockImplementation(() => now);
 });
@@ -124,6 +167,36 @@ function frame(time: number) {
 }
 
 describe('shared room graphics palette', () => {
+  it('passes a grid token override into a real line material without changing grid geometry, opacity or scheduling', () => {
+    canvas.style.setProperty('--room-grid', 'rgb(230, 120, 15)');
+    const room = {
+      dimensions: [48, 36, 96],
+      nodes: [],
+      roomId: 'test-room',
+      locationCode: 'TEST',
+      camera: { target: [0, 0, 0] },
+    } as unknown as RoomDefinition;
+    const reads = vi.spyOn(window, 'getComputedStyle');
+    const view = render(
+      <ScenePaletteProvider>
+        <SceneDepth room={room} />
+      </ScenePaletteProvider>,
+    );
+    expect(
+      state.gridMaterial?.color.equals(new Color('rgb(230, 120, 15)')),
+    ).toBe(true);
+    expect(state.gridMaterial?.opacity).toBe(0.45);
+    expect(state.gridMaterial?.transparent).toBe(true);
+    expect(state.gridGeometry?.getAttribute('position').count).toBe(10);
+    expect(state.gridGeometry?.getAttribute('position').getY(0)).toBeCloseTo(
+      0.015,
+    );
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(reads).toHaveBeenCalledTimes(1);
+    const dispose = vi.spyOn(state.gridGeometry!, 'dispose');
+    view.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
   it('passes overridden semantic tokens into a real Three material and edges while retaining physical material color', () => {
     const reads = vi.spyOn(window, 'getComputedStyle');
     const view = render(scene());
