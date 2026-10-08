@@ -103,13 +103,15 @@ export function SearchForm({
           : null;
       if (
         !(anchor instanceof HTMLAnchorElement) ||
-        anchor.download ||
+        anchor.hasAttribute('download') ||
         (anchor.target && anchor.target !== '_self')
       )
         return;
       const target = new URL(anchor.href, window.location.href);
       if (
         target.origin !== window.location.origin ||
+        target.pathname === '/api' ||
+        target.pathname.startsWith('/api/') ||
         (target.hash &&
           target.pathname === window.location.pathname &&
           target.search === window.location.search)
