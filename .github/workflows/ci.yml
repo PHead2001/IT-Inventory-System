@@ -11,53 +11,127 @@ concurrency:
 env:
   TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
-  required:
-    runs-on: [self-hosted, it-inventory-heavy]
-    timeout-minutes: 30
+  reuse_evidence:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, it-inventory-light]
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.evidence.outputs.reuse }}
+      evidence: ${{ steps.evidence.outputs.evidence }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        id: checkout
         with:
           ref: ${{ env.TESTED_SHA }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - id: evidence
+        run: node scripts/ci-reuse.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+  required:
+    needs: [reuse_evidence]
+    if: ${{ always() && !cancelled() }}
+    runs-on:
+      - self-hosted
+      - ${{ needs.reuse_evidence.result == 'success' && needs.reuse_evidence.outputs.reuse == 'true' && 'it-inventory-light' || 'it-inventory-heavy' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Checkout tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          ref: ${{ env.TESTED_SHA }}
+          persist-credentials: false
+      - name: Set up pinned Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         id: node_setup
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
-      - id: npm_setup
+      - name: Reverify matching PR validation
+        id: recheck
+        if: needs.reuse_evidence.outputs.reuse == 'true'
+        run: node scripts/ci-reuse.mjs --reverify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_EVIDENCE: ${{ needs.reuse_evidence.outputs.evidence }}
+      - name: Set up pinned npm
+        id: npm_setup
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: |
           if ! runner_npm_version="$(npm --version)" || [ "$runner_npm_version" != "11.11.0" ]; then
             npm install --global npm@11.11.0
           fi
-      - id: install
+      - name: Install locked dependencies
+        id: install
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm ci --prefer-offline
-      - id: revision
+      - name: Verify tested revision
+        id: revision
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
-      - id: app
+      - name: Inspect workflow source for future reuse
+        id: workflow_source_inspection
+        if: needs.reuse_evidence.outputs.reuse != 'true'
+        continue-on-error: true
+        run: node scripts/ci-reuse.mjs --workflow-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify executed workflow ${{ github.workflow_sha }}
+        id: workflow_source
+        if: needs.reuse_evidence.outputs.reuse != 'true' && steps.workflow_source_inspection.outcome == 'success' && steps.workflow_source_inspection.outputs.verified == 'true'
+        run: echo 'Executed workflow source verified.'
+      - name: Validate application
+        id: app
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run validate:app
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:1
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: offline-build-placeholder
           APP_ORIGIN: http://localhost:3000
           APP_ENV: ci
-      - id: db_start
+      - name: Start disposable database
+        id: db_start
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:start
-      - id: db_reset
+      - name: Reset disposable database
+        id: db_reset
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:reset
-      - id: db_tests
+      - name: Validate database
+        id: db_tests
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run test:db
-      - id: db_types
+      - name: Verify database types
+        id: db_types
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run db:types:check
-      - id: browser_install
+      - name: Prepare browser
+        id: browser_install
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: node scripts/install-ci-browser.mjs
-      - id: e2e
+      - name: Validate browser workflows
+        id: e2e
+        if: needs.reuse_evidence.outputs.reuse != 'true'
         run: npm run test:e2e
-      - id: db_stop
-        if: always()
+      - name: Stop disposable database
+        id: db_stop
+        if: ${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}
         run: npm run db:stop
       - name: Require every foundation gate
-        if: always()
+        id: full_completion
+        if: ${{ always() && needs.reuse_evidence.outputs.reuse != 'true' }}
         run: node scripts/ci-gates.mjs
         env:
           FOUNDATION_CHECKOUT: ${{ steps.checkout.outcome }}
@@ -73,6 +147,16 @@ jobs:
           FOUNDATION_BROWSER_INSTALL: ${{ steps.browser_install.outcome }}
           FOUNDATION_E2E: ${{ steps.e2e.outcome }}
           FOUNDATION_DB_STOP: ${{ steps.db_stop.outcome }}
+      - name: Require validation decision
+        if: always()
+        run: node scripts/ci-required.mjs
+        env:
+          EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}
+          REUSE: ${{ needs.reuse_evidence.outputs.reuse }}
+          CHECKOUT_RESULT: ${{ steps.checkout.outcome }}
+          NODE_RESULT: ${{ steps.node_setup.outcome }}
+          FULL_RESULT: ${{ steps.full_completion.outcome }}
+          RECHECK_RESULT: ${{ steps.recheck.outcome }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         id: failure_artifact
         if: failure() || cancelled()

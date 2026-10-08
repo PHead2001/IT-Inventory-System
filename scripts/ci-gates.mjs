@@ -17,6 +17,26 @@ export const foundationGates = Object.freeze([
   'db_stop',
 ]);
 
+// Actions exposes names, not YAML step IDs. These names are the evidence contract.
+export const foundationStepNames = Object.freeze({
+  checkout: 'Checkout tested revision',
+  node_setup: 'Set up pinned Node',
+  npm_setup: 'Set up pinned npm',
+  install: 'Install locked dependencies',
+  revision: 'Verify tested revision',
+  app: 'Validate application',
+  db_start: 'Start disposable database',
+  db_reset: 'Reset disposable database',
+  db_tests: 'Validate database',
+  db_types: 'Verify database types',
+  browser_install: 'Prepare browser',
+  e2e: 'Validate browser workflows',
+  db_stop: 'Stop disposable database',
+});
+export const fullCompletionStepName = 'Require every foundation gate';
+export const requiredDecisionStepName = 'Require validation decision';
+export const workflowSourceStepPrefix = 'Verify executed workflow ';
+
 export function assertFoundationGates(outcomes) {
   const unsuccessful = foundationGates.filter(
     (gate) => outcomes[gate] !== 'success',

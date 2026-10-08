@@ -12,6 +12,18 @@ describe('required foundation completion', () => {
     expect(() => assertFoundationGates(successful())).not.toThrow();
   });
 
+  it('preserves complete full validation when optional workflow inspection fails', () => {
+    expect(() =>
+      assertFoundationGates({
+        ...successful(),
+        workflow_source_inspection: 'failure',
+        workflow_source: 'skipped',
+      }),
+    ).not.toThrow();
+    expect(foundationGates).not.toContain('workflow_source_inspection');
+    expect(foundationGates).not.toContain('workflow_source');
+  });
+
   it.each(foundationGates)(
     'rejects missing, failed, skipped or cancelled %s',
     (gate) => {
