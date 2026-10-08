@@ -119,7 +119,38 @@ export function fileProviders({
       },
     );
   const projectPath = encodeURIComponent(pins.projectId);
-  const envs = () => api(`/v10/projects/${projectPath}/env?decrypt=false`);
+  const envs = async (branch) => {
+    const nonempty = (value) =>
+      typeof value === 'string' && value.length > 0 && value.trim() === value;
+    const object = (value) =>
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!nonempty(branch)) refuse('FILE_ENV_BOUNDS');
+    const listing = await api(`/v10/projects/${projectPath}/env?decrypt=false`);
+    if (
+      !object(listing) ||
+      !Array.isArray(listing.envs) ||
+      listing.envs.length > 512 ||
+      (listing.pagination != null &&
+        (!object(listing.pagination) || listing.pagination.next != null)) ||
+      listing.envs.some(
+        (row) =>
+          !object(row) ||
+          !nonempty(row.key) ||
+          !nonempty(row.id) ||
+          (row.gitBranch != null && !nonempty(row.gitBranch)),
+      )
+    )
+      refuse('FILE_ENV_BOUNDS');
+    // Validate the complete response before removing only proven other branches.
+    // Wider values, duplicate records and every target/custom scope stay visible
+    // to the existing ownership/backend guards and their 100-row scoped bound.
+    return {
+      ...listing,
+      envs: listing.envs.filter(
+        (row) => row.gitBranch == null || row.gitBranch === branch,
+      ),
+    };
+  };
   const hydrate = async (id) => {
     if (typeof id !== 'string' || !id) refuse('FILE_DEPLOYMENT_DENIED');
     const row = await api(`/v13/deployments/${encodeURIComponent(id)}`);
@@ -157,7 +188,7 @@ export function fileProviders({
           .map((key) => key.api_key),
       );
       if (!publicKeys.size) refuse('FILE_PUBLIC_KEYS_DENIED');
-      const listing = await envs();
+      const listing = await envs(branch);
       if (
         !Array.isArray(listing?.envs) ||
         listing.envs.length > 100 ||

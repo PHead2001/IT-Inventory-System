@@ -189,6 +189,178 @@ const ownedEnv = (comment = marker) => ({
   updatedAt: 20,
 });
 
+const unrelatedEnvs = (count) =>
+  Array.from({ length: count }, (_, i) => ({
+    id: `other_${i}`,
+    key: 'UNRELATED_SETTING',
+    gitBranch: `other/branch-${i}`,
+    target: ['preview'],
+  }));
+
+test('complete environment projection allows over 100 unrelated branch rows and preserves applicable records/metadata', async () => {
+  const global = { ...ownedEnv(), id: 'global', gitBranch: null };
+  const exact = {
+    ...ownedEnv(),
+    target: ['production'],
+    customEnvironmentIds: ['custom'],
+  };
+  const metadata = { next: null };
+  const response = {
+    envs: [...unrelatedEnvs(110), global, exact],
+    pagination: metadata,
+    hiddenProductionEnvCount: 8,
+  };
+  const calls = [];
+  const { vercel } = fileProviders({
+    pins: { projectId: 'prj_test', teamId: 'team_test' },
+    request: async (...args) => {
+      calls.push(args);
+      return response;
+    },
+  });
+  const projected = await vercel.envs('feature');
+  assert.deepEqual(projected.envs, [global, exact]);
+  assert.equal(projected.envs[0], global);
+  assert.equal(projected.envs[1], exact);
+  assert.equal(projected.pagination, metadata);
+  assert.equal(projected.hiddenProductionEnvCount, 8);
+  assert.equal(response.envs.length, 112);
+  assert.equal(
+    calls[0][0],
+    'https://api.vercel.com/v10/projects/prj_test/env?decrypt=false&teamId=team_test',
+  );
+  assert.equal(calls[0][1].method, 'GET');
+});
+
+test('complete environment projection validates every row and pagination before discarding other branches', async () => {
+  for (const bad of [
+    null,
+    [],
+    {},
+    { ...unrelatedEnvs(1)[0], id: '' },
+    { ...unrelatedEnvs(1)[0], key: '' },
+    ...['', ' ', ' other', 7, false, [], {}].map((gitBranch) => ({
+      ...unrelatedEnvs(1)[0],
+      gitBranch,
+    })),
+  ]) {
+    const { vercel } = fileProviders({
+      pins: {},
+      request: async () => ({ envs: [ownedEnv(), bad] }),
+    });
+    await assert.rejects(vercel.envs('feature'), { code: 'FILE_ENV_BOUNDS' });
+  }
+  for (const response of [
+    null,
+    [],
+    {},
+    { envs: [], pagination: [] },
+    { envs: [], pagination: { next: 123 } },
+    { envs: [], pagination: { next: '' } },
+    { envs: unrelatedEnvs(513) },
+  ]) {
+    const { vercel } = fileProviders({
+      pins: {},
+      request: async () => response,
+    });
+    await assert.rejects(vercel.envs('feature'), { code: 'FILE_ENV_BOUNDS' });
+  }
+});
+
+test('complete environment projection preserves globals, duplicate IDs/keys and scopes for canonical refusals', async () => {
+  for (const [rows, code] of [
+    [[{ ...ownedEnv(), gitBranch: null }], 'FILE_ENV_OWNERSHIP'],
+    [[ownedEnv(), ownedEnv()], 'FILE_ENV_AMBIGUOUS'],
+    [
+      [{ ...ownedEnv(), customEnvironmentIds: ['custom'] }],
+      'FILE_ENV_OWNERSHIP',
+    ],
+    [
+      [{ ...ownedEnv(), target: ['preview', 'production'] }],
+      'FILE_ENV_OWNERSHIP',
+    ],
+    [
+      Array.from({ length: 101 }, (_, i) => ({
+        id: `global_${i}`,
+        key: 'UNRELATED',
+        gitBranch: null,
+      })),
+      'FILE_ENV_BOUNDS',
+    ],
+  ]) {
+    const { vercel } = fileProviders({
+      pins: {},
+      request: async () => ({ envs: [...unrelatedEnvs(110), ...rows] }),
+    });
+    const projected = await vercel.envs('feature');
+    assert.throws(() => selectFileEnv(projected, 'feature'), { code });
+  }
+});
+
+test('complete environment projection is branch-explicit, fresh on each read, and does not project other provider reads', async () => {
+  let calls = 0;
+  const responses = [
+    {
+      envs: [
+        { ...ownedEnv(), gitBranch: 'feature' },
+        { ...ownedEnv(), id: 'next', gitBranch: 'next' },
+      ],
+    },
+    { envs: [{ ...ownedEnv(), id: 'changed', gitBranch: 'next' }] },
+  ];
+  const project = { id: 'prj_test', envs: unrelatedEnvs(110) };
+  const { vercel } = fileProviders({
+    pins: { projectId: 'prj_test', teamId: 'team_test' },
+    request: async (url) =>
+      url.includes('/env?') ? responses[calls++] : project,
+  });
+  for (const branch of [undefined, '', ' ', null, 7])
+    await assert.rejects(vercel.envs(branch), { code: 'FILE_ENV_BOUNDS' });
+  assert.equal(calls, 0);
+  assert.equal((await vercel.envs('feature')).envs[0].id, 'env_test');
+  assert.equal((await vercel.envs('next')).envs[0].id, 'changed');
+  assert.equal(calls, 2);
+  assert.equal(await vercel.project(), project);
+});
+
+test('canonical file guards pass the current PR branch to every environment read', async () => {
+  const f = fixture(),
+    branches = [],
+    envs = f.options.vercel.envs;
+  f.options.vercel.envs = async (branch) => {
+    branches.push(branch);
+    return envs();
+  };
+  await provisionPreviewFiles(f.options);
+  assert.ok(branches.length >= 5);
+  assert.ok(branches.every((branch) => branch === 'feature'));
+});
+
+test('backend guard accepts a complete 512-row response, while wider overrides/duplicates/scopes still refuse', async () => {
+  const f = backendFixture();
+  f.state.rows.push(...unrelatedEnvs(510));
+  assert.match((await f.check()).fingerprint, /^[a-f0-9]{64}$/);
+  for (const conflict of [
+    { ...f.state.rows[0], id: 'global', gitBranch: null },
+    { ...f.state.rows[0] },
+    { ...f.state.rows[0], id: 'custom', customEnvironmentIds: ['custom'] },
+  ]) {
+    const other = backendFixture();
+    other.state.rows.push(...unrelatedEnvs(110), conflict);
+    other.state.values.global = `https://${PARENT_REF}.supabase.co`;
+    await assert.rejects(other.check(), { code: 'FILE_BACKEND_DENIED' });
+  }
+  const bounded = backendFixture();
+  bounded.state.rows.push(
+    ...Array.from({ length: 99 }, (_, i) => ({
+      id: `global_${i}`,
+      key: 'UNRELATED',
+      gitBranch: null,
+    })),
+  );
+  await assert.rejects(bounded.check(), { code: 'FILE_ENV_BOUNDS' });
+});
+
 function backendFixture() {
   const state = {
     rows: [
