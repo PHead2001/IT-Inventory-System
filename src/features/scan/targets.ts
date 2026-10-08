@@ -1,4 +1,4 @@
-/** The only destinations a printed label or login return may open. */
+/** Canonical printed-label destinations; login returns additionally allow exact Overview. */
 export const LOCATION_CODE = /^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$/;
 export const ASSET_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,6 +34,7 @@ export function targetPath(
 }
 
 export function validReturnPath(value: unknown): string | null {
+  if (value === '/dashboard') return value;
   return typeof value === 'string' ? (targetPath(value)?.path ?? null) : null;
 }
 
