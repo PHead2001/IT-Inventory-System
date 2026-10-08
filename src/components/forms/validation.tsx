@@ -100,7 +100,7 @@ export function useFormValidation(additionalIssues?: () => FieldIssue[]) {
   const validate = (form: HTMLFormElement, additional?: FieldIssue[]) => {
     activeForm.current = form;
     const ordered = collect(form, additional ?? additionalIssues?.() ?? []);
-    setAttempted((previous) => previous || ordered.length > 0);
+    setAttempted(true);
     setIssues(ordered);
     if (ordered[0]) focusField(ordered[0].id);
     return ordered.length === 0;
