@@ -154,3 +154,59 @@ it('rejects a leftover Auth user even when the deletion request reported success
   });
   await expect(f.run(async () => {})).rejects.toThrow('Auth absence');
 });
+it.each(['assertion', 'setup throw', 'setup error result'])(
+  'retains the %s failure alongside sanitized cleanup failures and attempts every step',
+  async (failure) => {
+    const f = fixture(),
+      original = new Error('Original owned password test failure');
+    if (failure === 'setup throw')
+      f.membershipInsert.mockRejectedValue(original);
+    if (failure === 'setup error result')
+      f.membershipInsert.mockResolvedValue({
+        error: { message: 'PRIVATE_SETUP_RESPONSE' },
+      });
+    f.signOut.mockRejectedValue(new Error('PRIVATE_CLEANUP_RESPONSE'));
+    f.deleteUser.mockImplementation(async () => {
+      f.calls.push('delete Auth');
+      return { error: { message: 'PRIVATE_CLEANUP_RESPONSE' } };
+    });
+    const work = vi.fn(async () => {
+      if (failure === 'assertion') throw original;
+    });
+    const error = await f.run(work).catch((error) => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    if (failure === 'setup error result')
+      expect(error.errors[0].message).toBe(
+        'Disposable password membership could not be created',
+      );
+    else expect(error.errors[0]).toBe(original);
+    expect(error.errors).toHaveLength(3);
+    expect(error.errors.slice(1).map((entry: Error) => entry.message)).toEqual([
+      'Disposable password cleanup failed: session sign-out',
+      'Disposable password cleanup failed: Auth removal',
+    ]);
+    expect(f.membershipDelete).toHaveBeenCalledWith('user_id', 'owned-user');
+    expect(f.deleteUser).toHaveBeenCalledWith('owned-user');
+    expect(f.membershipRead).toHaveBeenCalledOnce();
+    expect(f.getUserById).toHaveBeenCalledWith('owned-user');
+    expect(String(error)).not.toMatch(
+      /PRIVATE_|owned-user|owned@example.test|test-only/,
+    );
+    expect(error.errors.slice(1).map(String).join(' ')).not.toMatch(
+      /PRIVATE_|owned-user|owned@example.test|test-only/,
+    );
+    if (failure !== 'assertion') expect(work).not.toHaveBeenCalled();
+  },
+);
+it('preserves even an undefined thrown test failure when cleanup also fails', async () => {
+  const f = fixture();
+  f.signOut.mockRejectedValue(new Error('PRIVATE_CLEANUP_RESPONSE'));
+  const error = await f
+    .run(async () => {
+      throw undefined;
+    })
+    .catch((error) => error);
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(error.errors[0]).toBeUndefined();
+  expect(error.errors).toHaveLength(2);
+});
