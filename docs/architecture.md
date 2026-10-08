@@ -44,8 +44,11 @@ identity and verified current-session JWT claims: matching subject, valid sessio
 UUID, unexpired token and an `otp`, `magiclink` or `recovery` AMR timestamp no more
 than ten minutes old. The pinned GoTrue provider represents invitation and recovery
 with emailed AMR; this is not proof of a specific email template. Query flags and
-client state cannot grant the exception. Expired proof requires current credentials
-or a new reset email; an unavailable verification never mutates the password.
+client state cannot grant the exception. Stale, future or malformed emailed proof
+rejects the entire password action even if current credentials are supplied: the
+provider would otherwise exempt that session from checking them. Sign in again to
+obtain an ordinary password session or request a new reset email. Mixed stale-email
+and password AMR also fails closed; unavailable verification never mutates the password.
 
 After a successful password update, the action signs out the local session and
 requires normal sign-in. If sign-out fails after the update commits, the UI states

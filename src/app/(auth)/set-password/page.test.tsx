@@ -44,3 +44,16 @@ it('shows recoverable verification failure without a password form', async () =>
     '/login?switch=1',
   );
 });
+
+it('rejects unusable emailed sessions without offering the current-password form', async () => {
+  mocks.session.mockResolvedValue({
+    emailedCompletion: false,
+    emailProof: 'unusable',
+  });
+  render(await SetPasswordPage());
+  expect(screen.getByRole('alert')).toHaveTextContent('Sign in again');
+  expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('link', { name: 'request a new reset email' }),
+  ).toHaveAttribute('href', '/forgot-password');
+});
