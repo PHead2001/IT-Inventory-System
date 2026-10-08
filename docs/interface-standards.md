@@ -156,7 +156,8 @@ Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 Route titles describe the task or resource type, never a private record name. Root
 and inventory not-found views provide Overview and inventory-search recovery without
 assuming deletion or revealing authorization state. Site-opening forms override
-the site-details ancestor with the private-safe Record site holdings task title.
+the site-details ancestor with the private-safe Record existing quantity item or
+Record existing individual asset task title, matching the opening workflow.
 Anonymous Overview recovery preserves only the exact `/dashboard` login return;
 it does not allow arbitrary path prefixes or expand printed-label destinations.
 Failed password-session recovery offers separate touch-sized sign-in/reset controls.
