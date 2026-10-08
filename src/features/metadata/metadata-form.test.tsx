@@ -1808,7 +1808,9 @@ describe('published metadata form', () => {
       }),
     );
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Changed again'),
+      expect(
+        screen.getByText('Changed again; review your save.'),
+      ).toHaveAttribute('role', 'alert'),
     );
     expect(submitInventory).toHaveBeenCalledTimes(2);
     expect(refreshMetadataRecord).toHaveBeenCalledOnce();
