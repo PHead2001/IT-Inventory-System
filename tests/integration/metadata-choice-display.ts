@@ -36,7 +36,11 @@ export async function verifyChoiceRevisionDisplay(owner: Client) {
   try {
     await owner.query(
       'insert into public.categories(id,code,name) values($1,$2,$3)',
-      [category, `PARITY-${category}`, 'Choice path parity'],
+      [
+        category,
+        `PARITY-${category.replaceAll('-', '').toUpperCase()}`,
+        'Choice path parity',
+      ],
     );
     await owner.query(
       "insert into public.metadata_fields(id,category_id,field_type) values($1,$2,'hierarchical_select')",
