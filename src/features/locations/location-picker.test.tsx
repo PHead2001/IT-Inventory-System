@@ -154,8 +154,42 @@ describe('LocationPicker', () => {
     await user.click(screen.getByRole('treeitem', { name: /^IT Closet/ }));
     expect(document.querySelector('input[name="location"]')).toHaveValue('ITC');
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('treeitem', { name: /All locations/ }));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    const noFilter = screen.getByRole('treeitem', {
+      name: 'All locations, no location filter',
+    });
+    await user.keyboard('{Home}');
+    expect(search).toHaveAttribute('aria-activedescendant', noFilter.id);
+    await user.keyboard('{Enter}');
     expect(document.querySelector('input[name="location"]')).toHaveValue('');
+  });
+  it('keeps a custom optional-source label distinct from the default no-location-filter choice', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="destination"
+        label="Preferred storage source"
+        locations={[root, drawer]}
+        allowAll
+        emptyLabel="Choose for each item"
+        value={drawer.id}
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Preferred storage source'));
+    expect(
+      screen.queryByRole('treeitem', {
+        name: 'All locations, no location filter',
+      }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole('treeitem', {
+        name: 'Choose for each item',
+      }),
+    );
+    expect(changed).toHaveBeenCalledWith('');
+    expect(screen.getByLabelText('Preferred storage source')).toHaveFocus();
   });
   it('does not select hidden results or submit the form while loading or failed', async () => {
     const user = userEvent.setup();

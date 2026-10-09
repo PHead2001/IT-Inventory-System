@@ -397,6 +397,10 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let signalIntercepted!: () => void;
+    const intercepted = new Promise<void>((resolve) => {
+      signalIntercepted = resolve;
+    });
     let delayed = false;
     await page.route('**/scan?mode=assign*', async (route) => {
       if (
@@ -405,12 +409,14 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         route.request().headers()['next-action']
       ) {
         delayed = true;
+        signalIntercepted();
         await held;
       }
       await route.continue();
     });
     await page.getByLabel('Scan, paste, or search inventory').fill(path);
     await page.getByLabel('Scan, paste, or search inventory').press('Enter');
+    await intercepted; // Prove the real read is held before cancelling it.
     await expect(
       page.getByText('Inspecting equipment…', { exact: true }),
     ).toBeVisible();
@@ -425,7 +431,9 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       page.getByLabel('Scan, paste, or search inventory'),
     ).toBeFocused();
     release();
-    await page.unroute('**/scan?mode=assign*');
+    // Drain the resumed handler before removal: default unroute can mark the
+    // still-running route handled before its continuation completes.
+    await page.unrouteAll({ behavior: 'wait' });
     await expect(
       page.getByRole('region', { name: 'Review assignment' }),
     ).toHaveCount(0);

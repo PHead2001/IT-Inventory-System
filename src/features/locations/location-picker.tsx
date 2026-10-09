@@ -57,6 +57,10 @@ export function LocationPicker({
   description,
   className = '',
 }: LocationPickerProps) {
+  const emptyAccessibleLabel =
+    emptyLabel === 'All locations'
+      ? 'All locations, no location filter'
+      : emptyLabel;
   const generatedId = useId();
   const controlId = id ?? generatedId;
   const searchId = controlId + '-search';
@@ -592,7 +596,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${location.breadcrumb}, ${location.code}`
-                          : emptyLabel
+                          : emptyAccessibleLabel
                       }
                       id={listId + '-' + index}
                       aria-selected={selectedValue === optionValue}
@@ -609,7 +613,10 @@ export function LocationPicker({
                           {selectedValue === optionValue ? ' ✓' : ''}
                         </span>
                         <span className="block break-words text-xs text-slate-400">
-                          {location?.breadcrumb ?? emptyLabel}
+                          {location?.breadcrumb ??
+                            (emptyLabel === 'All locations'
+                              ? 'No location filter'
+                              : emptyLabel)}
                         </span>
                       </span>
                       {location && (
@@ -670,7 +677,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}`
-                          : emptyLabel
+                          : emptyAccessibleLabel
                       }
                       tabIndex={
                         effectiveActiveTreeId === rowId ||
