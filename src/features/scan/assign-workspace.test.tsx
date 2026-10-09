@@ -124,6 +124,47 @@ async function inspect() {
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   await screen.findByRole('region', { name: 'Review assignment' });
 }
+it('keeps one original request and one confirmed checklist entry for two Confirm attempts before the server settles', async () => {
+  const committed = await mocks.submit();
+  mocks.submit.mockClear();
+  let finish!: (value: typeof committed) => void;
+  mocks.submit.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const confirm = screen.getByRole('button', { name: 'Confirm assign' });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+  const original = mocks.submit.mock.calls[0][0];
+  const pending = readBatch(scope).value!.entries;
+  expect(pending).toHaveLength(1);
+  expect(pending[0].requestId).toBe(original.requestId);
+  expect(pending[0].status).not.toBe('success');
+  expect(
+    screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+  ).not.toBeInTheDocument();
+  await act(async () => finish(committed));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+  const entries = readBatch(scope).value!.entries;
+  expect(entries).toHaveLength(1);
+  expect(entries[0]).toMatchObject({
+    requestId: original.requestId,
+    status: 'success',
+    eventId: id(8),
+  });
+  expect(
+    screen.getAllByRole('link', {
+      name: 'View committed history for Adapters',
+    }),
+  ).toHaveLength(1);
+});
 it('inspects keyboard input without mutation, confirms once, keeps context and accepts a deliberate fresh repeat', async () => {
   render(<AssignmentWorkspace {...props} />);
   fireEvent.change(
