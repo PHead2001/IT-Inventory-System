@@ -8,6 +8,7 @@ import type {
 } from '../contracts-ui';
 import type { QuantityArchiveReview } from '../queries.server';
 import type { Site, SiteHolding } from '@/features/custody/queries.server';
+import type { AssetReturnSuggestion } from '@/features/custody/return-suggestion';
 import type { MetadataForm as Form } from '@/features/metadata/contracts';
 import { MetadataForm } from '@/features/metadata/metadata-form';
 import { CustodyChangeForm } from '@/features/custody/custody-change-form';
@@ -29,6 +30,8 @@ export function DetailTasks(props: {
   sites: Site[];
   forms: Record<string, Form>;
   archiveReview?: QuantityArchiveReview | null;
+  returnSuggestion?: AssetReturnSuggestion;
+  returnSuggestionError?: boolean;
 }) {
   const [lastArchiveReview, setLastArchiveReview] = useState(
     props.archiveReview,
@@ -188,6 +191,8 @@ export function DetailTasks(props: {
               siteHoldings={siteHoldings}
               currentLocation={props.currentLocation}
               currentSite={props.currentSite}
+              returnSuggestion={props.returnSuggestion}
+              returnSuggestionError={props.returnSuggestionError}
             />
           );
         return (

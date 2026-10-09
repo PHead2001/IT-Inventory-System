@@ -12,12 +12,14 @@ import type { LocationRef, QuantityItem } from '../contracts-ui';
 const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   duplicates: vi.fn(),
+  loadMove: vi.fn(),
   refresh: vi.fn(),
   push: vi.fn(),
 }));
 vi.mock('../actions', () => ({
   submitInventory: mocks.submit,
   findDuplicateSerials: mocks.duplicates,
+  loadMoveSnapshot: mocks.loadMove,
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: mocks.push }),
@@ -74,6 +76,146 @@ async function chooseLocation(
   await user.click(screen.getByRole('option', { name: new RegExp(name) }));
 }
 describe('inventory operation forms', () => {
+  it('shows every Move source balance before selection and retains the source on refresh', async () => {
+    const user = userEvent.setup();
+    mocks.submit.mockResolvedValue({
+      ok: false,
+      kind: 'domain',
+      code: 'stale_version',
+      message: 'Record changed',
+    });
+    const actorId = '00000000-0000-4000-8000-000000000099';
+    const view = render(
+      <MutationForm
+        {...defaults}
+        actorId={actorId}
+        operation="quantity_move"
+        balances={[
+          { location, quantity: 8 },
+          { location: destination, quantity: 13 },
+        ]}
+      />,
+    );
+    await user.click(
+      await screen.findByLabelText('Source location', { exact: true }),
+    );
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'ITC',
+    );
+    expect(
+      screen.getByRole('option', { name: /1A.*8 units available/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('option', { name: /1B.*13 units available/ }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole('option', { name: /1B.*13 units available/ }),
+    );
+    await chooseLocation(user, 'Destination location', '1A');
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm move stock' }),
+    );
+    await screen.findByText('Record changed');
+    expect(mocks.submit.mock.calls[0][0].payload.expected_version).toBe(2);
+    view.rerender(
+      <MutationForm
+        {...defaults}
+        actorId={actorId}
+        item={{ ...item, version: 3 }}
+        operation="quantity_move"
+        balances={[
+          { location, quantity: 5 },
+          { location: destination, quantity: 16 },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByLabelText('Source location', { exact: true }),
+    ).toHaveTextContent('1B');
+    await user.click(screen.getByLabelText('Source location', { exact: true }));
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'ITC',
+    );
+    expect(
+      screen.getByRole('option', { name: /1A.*5 units available/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('option', { name: /1B.*16 units available/ }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('option', { name: /13 units available/ }),
+    ).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(
+      screen.getByText(/Recorded source availability: 16 units/),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    expect(
+      screen.queryByRole('button', { name: 'Confirm move stock' }),
+    ).not.toBeInTheDocument();
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    mocks.loadMove.mockResolvedValue({
+      item: { ...item, version: 3 },
+      locations: defaults.locations,
+      balances: [
+        { location, quantity: 5 },
+        { location: destination, quantity: 16 },
+      ],
+    });
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh latest record' }),
+    );
+    await waitFor(() => expect(mocks.loadMove).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm move stock' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    expect(mocks.submit.mock.calls[1][0].payload).toMatchObject({
+      expected_version: 3,
+      source_location_id: destination.id,
+    });
+  });
+  it('marks a chosen Move source unavailable when its latest holding becomes zero without choosing another source', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <MutationForm {...defaults} operation="quantity_move" />,
+    );
+    view.rerender(
+      <MutationForm
+        {...defaults}
+        operation="quantity_move"
+        balances={[
+          { location, quantity: 0 },
+          { location: destination, quantity: 5 },
+        ]}
+      />,
+    );
+    expect(
+      screen.getByLabelText('Source location', { exact: true }),
+    ).toHaveTextContent('1A');
+    expect(
+      screen.getByText(/Recorded source availability: unavailable/),
+    ).toBeVisible();
+    await user.click(screen.getByLabelText('Source location', { exact: true }));
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'ITC',
+    );
+    expect(screen.queryByRole('option', { name: /1A/ })).toBeNull();
+    expect(
+      screen.getByRole('option', { name: /1B.*5 units available/ }),
+    ).toBeVisible();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+    expect(
+      screen.queryByRole('button', { name: 'Confirm move stock' }),
+    ).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it('reports overdraw and missing destination together, then revalidates corrections without another review', async () => {
     const user = userEvent.setup();
     render(<MutationForm {...defaults} operation="quantity_move" />);
@@ -170,6 +312,27 @@ describe('inventory operation forms', () => {
       expect(screen.getByLabelText('Receive at')).toHaveTextContent(
         count === 1 ? '1A' : 'Select a location',
       );
+    },
+  );
+
+  it.each([
+    { ...destination, active: false },
+    { ...destination, can_hold_inventory: false },
+  ])(
+    'Receive excludes an ineligible positive holding when choosing its sole eligible default',
+    (ineligible) => {
+      render(
+        <MutationForm
+          {...defaults}
+          operation="quantity_receive"
+          locations={[location, ineligible]}
+          balances={[
+            { location, quantity: 8 },
+            { location: ineligible, quantity: 13 },
+          ]}
+        />,
+      );
+      expect(screen.getByLabelText('Receive at')).toHaveTextContent('1A');
     },
   );
 
