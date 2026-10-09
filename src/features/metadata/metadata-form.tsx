@@ -1326,7 +1326,96 @@ export function MetadataForm({
       return false;
     return !!fieldValueError(field, value) || !!answerErrors[field.id];
   });
-  const dirty =
+  const payload = (
+    values = core,
+    answers = custom,
+    dirtyIds = touched,
+    record = baseline,
+    selectedForm = form,
+  ) => {
+    if (!definition || !selectedForm || invalidItemCode) return null;
+    const result: Record<string, unknown> = {
+      name: values.name,
+      description: values.description || null,
+      category_id: values.category_id,
+      manufacturer: values.manufacturer || null,
+      model: values.model || null,
+      expected_published_revision_id: selectedForm.published_revision_id,
+      custom_patch: buildCustomPatch(
+        selectedForm.published_definition,
+        kind,
+        answers,
+        creating
+          ? dirtyIds
+          : dirtyIds.filter(
+              (id) =>
+                !sameAnswer(answers, initialCustom(record?.customValues), id),
+            ),
+        creating,
+      ),
+    };
+    if (kind === 'quantity') {
+      result.item_code = normalizeItemCode(values.item_code);
+      if (
+        creating ||
+        values.reorder_threshold !==
+          initialCore(record, categories).reorder_threshold
+      )
+        result.reorder_threshold =
+          values.reorder_threshold === ''
+            ? null
+            : Number(values.reorder_threshold);
+      if (creating && !openingSite) {
+        result.initial_quantity = Number(values.initial_quantity);
+        result.initial_location_id =
+          Number(values.initial_quantity) > 0
+            ? values.initial_location_id
+            : null;
+      } else if (!creating) {
+        result.item_id = record?.id;
+        result.expected_version = record?.version;
+      }
+    } else {
+      result.asset_tag = values.asset_tag || null;
+      result.serial_number = values.serial_number || null;
+      if (creating && !openingSite) result.location_id = values.location_id;
+      else if (!creating) {
+        result.asset_id = record?.id;
+        result.expected_version = record?.version;
+      }
+    }
+    if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
+    if (creating && openingSite) {
+      result.site_id = openingSite.id;
+      result.reason = openingReason.trim() || null;
+      result.reference = openingReference.trim() || null;
+      if (kind === 'quantity') result.quantity = Number(openingQuantity);
+    }
+    return result;
+  };
+  const currentEditPayload = !creating && !uncertain ? payload() : null;
+  const normalizedEdit =
+    currentEditPayload && normalizeEditIntent(kind, currentEditPayload);
+  const noChanges = Boolean(
+    !creating &&
+    !uncertain &&
+    !invalidAnswers &&
+    !Object.keys(dateTimes).some((id) => !!answerErrors[id]) &&
+    !itemStale &&
+    !schemaStale &&
+    !recordBlocked &&
+    baseline &&
+    definition &&
+    normalizedEdit &&
+    editSummary({
+      baseline,
+      intent: normalizedEdit,
+      definition,
+      categories,
+      timeZone,
+    }).length === 0,
+  );
+  const rawDirty =
     (recoveryEnabled && Object.keys(dateTimes).length > 0) ||
     (editRecoveryEnabled &&
       Object.keys(dateTimes).some((id) => !!answerErrors[id])) ||
@@ -1341,6 +1430,9 @@ export function MetadataForm({
         : baseline?.customValues?.[id]?.value;
       return JSON.stringify(custom[id]) !== JSON.stringify(original);
     });
+  // Match the empty normalized review across task switching, link/unload guards
+  // and Close. Invalid raw inputs and stale contexts still require protection.
+  const dirty = rawDirty && !noChanges;
   const cancelPath = creating
     ? inventoryReturnPath(
         returnTo,
@@ -1506,7 +1598,7 @@ export function MetadataForm({
   };
   const cancel = () => {
     if (taskCompleted || pending || uncertain || dispatched.current) return;
-    if (dirty && !noChanges && !refreshNeeded) setDiscardOpen(true);
+    if (dirty && !refreshNeeded) setDiscardOpen(true);
     else discard();
   };
   useEffect(() => {
@@ -1595,73 +1687,6 @@ export function MetadataForm({
       navigationAnchor.current.focus();
       navigationAnchor.current = null;
     } else cancelRef.current?.focus();
-  };
-  const payload = (
-    values = core,
-    answers = custom,
-    dirtyIds = touched,
-    record = baseline,
-    selectedForm = form,
-  ) => {
-    if (!definition || !selectedForm || invalidItemCode) return null;
-    const result: Record<string, unknown> = {
-      name: values.name,
-      description: values.description || null,
-      category_id: values.category_id,
-      manufacturer: values.manufacturer || null,
-      model: values.model || null,
-      expected_published_revision_id: selectedForm.published_revision_id,
-      custom_patch: buildCustomPatch(
-        selectedForm.published_definition,
-        kind,
-        answers,
-        creating
-          ? dirtyIds
-          : dirtyIds.filter(
-              (id) =>
-                !sameAnswer(answers, initialCustom(record?.customValues), id),
-            ),
-        creating,
-      ),
-    };
-    if (kind === 'quantity') {
-      result.item_code = normalizeItemCode(values.item_code);
-      if (
-        creating ||
-        values.reorder_threshold !==
-          initialCore(record, categories).reorder_threshold
-      )
-        result.reorder_threshold =
-          values.reorder_threshold === ''
-            ? null
-            : Number(values.reorder_threshold);
-      if (creating && !openingSite) {
-        result.initial_quantity = Number(values.initial_quantity);
-        result.initial_location_id =
-          Number(values.initial_quantity) > 0
-            ? values.initial_location_id
-            : null;
-      } else if (!creating) {
-        result.item_id = record?.id;
-        result.expected_version = record?.version;
-      }
-    } else {
-      result.asset_tag = values.asset_tag || null;
-      result.serial_number = values.serial_number || null;
-      if (creating && !openingSite) result.location_id = values.location_id;
-      else if (!creating) {
-        result.asset_id = record?.id;
-        result.expected_version = record?.version;
-      }
-    }
-    if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
-    if (creating && openingSite) {
-      result.site_id = openingSite.id;
-      result.reason = openingReason.trim() || null;
-      result.reference = openingReference.trim() || null;
-      if (kind === 'quantity') result.quantity = Number(openingQuantity);
-    }
-    return result;
   };
   const reloadSaved = async () => {
     if (!baseline || mountedActor.current !== formActor) return;
@@ -1753,26 +1778,6 @@ export function MetadataForm({
     return [];
   }
   const validation = useFormValidation(collectValidationIssues);
-  const currentEditPayload = !creating && !uncertain ? payload() : null;
-  const normalizedEdit =
-    currentEditPayload && normalizeEditIntent(kind, currentEditPayload);
-  const noChanges = Boolean(
-    !creating &&
-    !uncertain &&
-    !itemStale &&
-    !schemaStale &&
-    !recordBlocked &&
-    baseline &&
-    definition &&
-    normalizedEdit &&
-    editSummary({
-      baseline,
-      intent: normalizedEdit,
-      definition,
-      categories,
-      timeZone,
-    }).length === 0,
-  );
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (taskCompleted || noChanges) return;

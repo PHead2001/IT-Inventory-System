@@ -57,6 +57,11 @@ Edit details shows Nothing to save and Close for an empty normalized diff, with
 no confirmation or request. Acknowledged server no-ops show Nothing changed and
 Close and complete the ordinary recovery receipt. An uncertain save retains
 Retry same save for its exact original command regardless of a later empty diff.
+Task switching, navigation and unload protection use the same meaningful edit
+state, so equivalent text, numeric or datetime representations and reverted
+edits do not produce unsaved-entry prompts. Invalid raw datetime drafts remain
+protected. Pending and uncertain requests retain their independent guards and
+exact retry identity, including when refreshed values match the submitted intent.
 If an acknowledged no-op needs a record-read retry or its completion marker
 cannot be stored, its status still says Nothing changed. Receipt-storage failure
 retains the exact original command for acknowledgement recovery.
