@@ -367,3 +367,7 @@ Inventory CSV appends readable Type label, Status label and Custody label column
 low-stock CSV appends Type label and Status label. Both retain existing machine column positions and values. Clipboard support details
 carry original event/operation IDs and ISO precision without rendering them in
 ordinary receipt/history text; local timestamp displays keep the recorded `dateTime`.
+
+## Shared screen palette and interactive transitions
+
+The dark screen palette is centralized in semantic custom properties in `globals.css`, including workspace, Labels, Scan, form-designer, inventory-row and closet-preview colors. Minimal interactive defaults scope the transition property list without supplying a duration. Existing animated controls opt into the shared feedback duration/easing; route and panel motion remain a separate implementation. UI scene colors keep the existing single-capture `readScenePalette` contract and its Three-compatible formats. Physical room data, geometry and material defaults are unchanged. Print/PDF/export ink remains independent of screen theme. See [interface standards](interface-standards.md) for the exact foundation scope and exceptions. Dark/Light/System persistence, prepaint handling and live scene retheme are not implemented by this foundation.
