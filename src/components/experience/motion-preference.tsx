@@ -109,11 +109,11 @@ export function MotionToggle() {
     <div className="space-y-2">
       <button
         type="button"
-        role="switch"
+        role={ready ? 'switch' : undefined}
         onClick={toggle}
         disabled={!ready}
         className="experience-motion-toggle"
-        aria-checked={local}
+        aria-checked={ready ? local : undefined}
         aria-label="Reduce motion in this browser"
         aria-describedby={descriptionId}
       >

@@ -124,7 +124,7 @@ Rules:
 
 - Transition only the properties that change. No `transition: all`.
 - Settings exposes **Reduce motion in this browser** as a labeled switch. Its checked state is the saved browser choice; adjacent help explains effective motion and any OS requirement. Turning it off cannot override system reduced motion.
-- Until the browser preference is loaded, the motion switch is disabled and explains that it is loading. The first styled paint remains reduced; an initial server value must not be treated as the saved choice.
+- Until the browser preference is loaded, the motion control is a disabled ordinary button with loading help and no switch role or checked state. Once loaded, it exposes the saved choice as an enabled switch. The first styled paint remains reduced; an initial server value must not be treated as the saved choice.
 - Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
 - No motion that delays a request, replays on query-string updates, or runs continuously behind working forms.
 

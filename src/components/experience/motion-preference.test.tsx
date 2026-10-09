@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import userEvent from '@testing-library/user-event';
@@ -97,7 +97,7 @@ it('keeps persisted local reduction during hydration when OS motion is normal', 
 });
 
 it.each([false, true])(
-  'keeps the switch unavailable until the saved browser choice (%s) is known, then toggles that choice',
+  'keeps the preference unknown until the saved browser choice (%s) is known, then exposes and toggles that choice',
   async (saved) => {
     mockSystemMotion(false);
     window.localStorage.setItem('it-inventory-reduce-motion', String(saved));
@@ -111,8 +111,13 @@ it.each([false, true])(
     document.body.appendChild(container);
     let root: ReturnType<typeof hydrateRoot> | undefined;
     try {
-      const toggle = container.querySelector('button')!;
+      const toggle = within(container).getByRole('button', {
+        name: 'Reduce motion in this browser',
+      });
       expect(toggle).toBeDisabled();
+      expect(toggle).not.toHaveAttribute('role');
+      expect(toggle).not.toHaveAttribute('aria-checked');
+      expect(within(container).queryByRole('switch')).not.toBeInTheDocument();
       expect(toggle).toHaveAccessibleDescription(
         "Loading this browser's motion preference.",
       );
@@ -120,6 +125,11 @@ it.each([false, true])(
         root = hydrateRoot(container, view);
       });
       await waitFor(() => {
+        expect(
+          within(container).getByRole('switch', {
+            name: 'Reduce motion in this browser',
+          }),
+        ).toBe(toggle);
         expect(toggle).toBeEnabled();
         expect(toggle).toHaveAttribute('aria-checked', String(saved));
       });

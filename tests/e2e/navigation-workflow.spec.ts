@@ -601,12 +601,15 @@ test('motion Settings waits for the browser choice before the first keyboard act
     });
     try {
       await probe.goto('/settings', { waitUntil: 'commit' });
-      const toggle = probe.getByRole('switch', {
+      const loading = probe.getByRole('button', {
         name: 'Reduce motion in this browser',
       });
-      await expect(toggle).toBeVisible();
-      await expect(toggle).toBeDisabled();
-      await expect(toggle).toHaveAccessibleDescription(
+      await expect(loading).toBeVisible();
+      await expect(loading).toBeDisabled();
+      await expect(loading).not.toHaveAttribute('role');
+      await expect(loading).not.toHaveAttribute('aria-checked');
+      await expect(probe.getByRole('switch')).toHaveCount(0);
+      await expect(loading).toHaveAccessibleDescription(
         "Loading this browser's motion preference.",
       );
       await expect(probe.locator('html')).toHaveAttribute(
@@ -614,6 +617,9 @@ test('motion Settings waits for the browser choice before the first keyboard act
         'reduced',
       );
       release();
+      const toggle = probe.getByRole('switch', {
+        name: 'Reduce motion in this browser',
+      });
       await expect(toggle).toBeEnabled();
       await expect(toggle).toHaveAttribute('aria-checked', String(saved));
       await toggle.focus();
