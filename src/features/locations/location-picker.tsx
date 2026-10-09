@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { RequiredMark } from '@/components/forms/validation';
+import { countLabel } from '@/lib/count';
 import { pickerPosition } from './picker-position';
 import type { LocationRef } from '../inventory/contracts-ui';
 import {
@@ -25,6 +26,8 @@ export type LocationPickerProps = {
   id?: string;
   excludeIds?: string[];
   sourceIds?: string[];
+  /** Current item balances for source options; omitted counts remain unknown. */
+  availability?: Record<string, number>;
   allowAll?: boolean;
   emptyLabel?: string;
   required?: boolean;
@@ -47,6 +50,7 @@ export function LocationPicker({
   id,
   excludeIds,
   sourceIds,
+  availability,
   allowAll = false,
   emptyLabel = 'All locations',
   required = false,
@@ -61,6 +65,10 @@ export function LocationPicker({
     emptyLabel === 'All locations'
       ? 'All locations, no location filter'
       : emptyLabel;
+  const stockLabel = (location: LocationRef | null | undefined) =>
+    location && availability && Object.hasOwn(availability, location.id)
+      ? `${countLabel(availability[location.id], 'unit')} available`
+      : '';
   const generatedId = useId();
   const controlId = id ?? generatedId;
   const searchId = controlId + '-search';
@@ -595,7 +603,7 @@ export function LocationPicker({
                       role="option"
                       aria-label={
                         location
-                          ? `${location.name}, ${location.breadcrumb}, ${location.code}`
+                          ? `${location.name}, ${location.breadcrumb}, ${location.code}${stockLabel(location) ? ', ' + stockLabel(location) : ''}`
                           : emptyAccessibleLabel
                       }
                       id={listId + '-' + index}
@@ -618,6 +626,11 @@ export function LocationPicker({
                               ? 'No location filter'
                               : emptyLabel)}
                         </span>
+                        {stockLabel(location) && (
+                          <span className="block text-sm text-slate-300">
+                            {stockLabel(location)}
+                          </span>
+                        )}
                       </span>
                       {location && (
                         <span className="experience-code shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs text-slate-400">
@@ -676,7 +689,7 @@ export function LocationPicker({
                       }
                       aria-label={
                         location
-                          ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}`
+                          ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}${!isNavigation && stockLabel(location) ? ', ' + stockLabel(location) : ''}`
                           : emptyAccessibleLabel
                       }
                       tabIndex={
@@ -727,6 +740,11 @@ export function LocationPicker({
                       <span className="min-w-0 flex-1 font-medium break-words">
                         {location?.name ?? emptyLabel}
                         {selectedRow ? ' ✓' : ''}
+                        {!isNavigation && stockLabel(location) && (
+                          <span className="block text-sm font-normal text-slate-300">
+                            {stockLabel(location)}
+                          </span>
+                        )}
                         {isGroup && (
                           <span className="ml-2 text-xs font-normal text-slate-400">
                             {row?.destinationCount}{' '}

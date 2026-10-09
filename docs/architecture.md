@@ -8,6 +8,34 @@ Inventory creation and site-opening forms keep per-tab recovery in sessionStorag
 
 Existing quantity and asset metadata tasks use separate versioned recovery envelopes scoped by browser origin, backend origin, authenticated actor, record kind/UUID and metadata task. They share the bounded creation-input parser and limits, retain an explicit allowlist of reconciliation metadata, and preserve the original record version, published form snapshots, raw inputs, touched/cleared answers and datetime display drafts. Returning and reopening Edit details restores the task without restoring a prior confirmation. Newer records and schemas still require the existing conflict/schema review; recovered versions are never silently adopted. Actor or environment changes hide the mounted task. Recovery excludes file content, signed URLs and credentials.
 
+An explicitly closed or replaced metadata task finalizes its own editing recovery
+envelope before leaving, including normalized no-op edits that have no unsaved
+semantic changes. Task close, switch and reset share the existing discard cleanup;
+failed marker storage falls back only to removing the matching editing envelope.
+If both paths fail or another writer replaced it, the task stays open with recovery
+guidance. Repeated cleanup accepts only the same owned terminal envelope under the
+current storage session and comparison checks. Reopening then starts from current
+record values and a new editing instance. Pending and uncertain requests remain
+blocked. An editor is not finalized merely because its current input normalizes
+to no changes or its record is stale. Back, reload and external navigation retain
+the existing recovery contract; cancelable navigation gestures do not finalize a
+still-mounted editor.
+
+A pristine memory-only metadata editor with no owned persisted envelope can
+close or switch tasks without recovery finalization, including when storage
+cannot be read during hydration. Any inaccessible envelope remains untouched.
+Durable drafts, including reverted edits, still require the existing exact-envelope
+cleanup; dirty, pending and uncertain work retains its safeguards.
+
+A hidden editor whose actor or backend changed may explicitly close or switch
+tasks once no command is pending or uncertain; that exit touches neither scope's
+recovery. Unknown results establish the unresolved task guard before suppressing
+an old actor's response, so account changes cannot make a submitted command clean.
+Returning to the original scope, including after remount, recovers the original
+command and request identity. Definitive acknowledgement or rejection still uses
+the existing exact-envelope transitions before the stale response is suppressed;
+those resolved tasks may leave without discarding their scoped recovery.
+
 Metadata recovery stores the exact update command, actor and request UUID before dispatch. Unknown outcomes replay that command after navigation; only its matching acknowledged completion or definitive rejection may resolve a submitted envelope. Instance/sequence comparisons prevent stale mounts from replacing a newer command or terminal marker. Explicit Cancel or task discard records only that task's discard marker; successful saves retain a saved marker and expose Details saved and Done. Pristine edit opens keep their original baseline in memory without allocating storage. The edit store separately caps entries at 2 MiB, 8 MiB total and 32 record tasks; capacity and browser-quota pressure reclaim only validated saved/discarded envelopes after comparing their stored value again. Editing, submitted and invalid entries are never evicted. Mount generations and envelope comparisons prevent stale writers from reviving reclaimed tasks. Storage failure preserves in-memory work and pauses dispatch until durable request storage succeeds. Same-tab internal links require an explicit Stay/discard choice while recovery is unavailable; pending or uncertain commands offer Stay only. Explicit discard can remove only its matching editing envelope when writing a discard marker fails. Modifier clicks and new-tab links retain their browser behavior. Browser Back/Forward and reload recovery cannot be guaranteed until storage is restored; native unload warnings remain where supported. Per-tab/session recovery has the same browser-data and termination limitations as creation recovery.
 
 Inventory result links carry an allowlisted internal return scope with normalized search/type/category/location/site/status/restock filters and page, plus a bounded row-position anchor. Anchors use page-local ordinals to keep inventory identifiers out of telemetry selectors. Record pages return to that scope or fall back to Inventory for direct or invalid targets. External, protocol-relative and malformed targets and recursive return parameters are excluded; ordinary links preserve browser modifier-click behavior. If current results no longer contain the previous page, the list redirects to the nearest available page and explains the adjustment.

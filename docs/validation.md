@@ -12,6 +12,45 @@ For isolated hosted export proof, set the **server-only** `EXPORT_DIAGNOSTICS_EN
 
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
+The canonical database integration gate runs
+`tests/integration/audit-four-edit-integrity.ts` after the existing Audit three
+contracts. It directly calls every supported legacy/v2/v3 metadata update API,
+checks authorization before receipt replay, stale intent, receipt mismatch,
+omitted/cleared metadata, lifecycle, exact no-op timestamps/events/provenance,
+integer version exhaustion, historical datetime equivalence and rejected
+malformed/overprecision values. Independent PostgreSQL connections overlap a
+real edit and a no-op in both serial orders. Current assignment origin checks
+cover more than 25 transfers/corrections, a new assignment episode and site
+opening without a storage origin. These tests require the existing clean local
+database gate; static inspection is not a pass.
+
+The same suite distinguishes explicit false, zero and empty-string answers from
+absence: an identical set retains the historical envelope, unset changes once,
+repeated unset is a no-op, and restoring a falsy answer is a real edit. A separate
+rollback-isolated case extracts exactly the previous and candidate
+`quantity_update(uuid,jsonb)` definitions from repository migrations. The old
+implementation actually generates its receipt/event; the candidate then replays
+that exact response and refuses replay for an inactive member. Complete inventory,
+history, receipt and function definition/ACL snapshots are restored afterward.
+This proves replay of a receipt produced by the previous implementation in one
+transaction. It does not prove committed receipt durability across a literal
+full migration upgrade. That requires a disposable prepare/apply/verify run,
+following the existing `tests/integration/custody-upgrade.ts` pattern; the ordinary
+fully migrated `test:db:compatibility` suite has no pre-migration preparation phase.
+
+`edit-integrity.spec.ts` and the focused additions in `inventory.spec.ts` exercise
+unchanged asset/quantity editors, real case-only asset tag edits, Receive defaults,
+Move/Issue source counts and current-episode Return defaults with manual/cleared
+destinations and stale-form review. Unit/component tests cover malformed and
+ineligible origins, transport errors, unchanged grandfathered answers and exact
+microsecond comparison. Custody form regressions also reject resubmission after
+a definitive stale-version response before new props arrive, retain the draft
+through failed read refreshes, and require explicit latest-holdings adoption and
+renewed review before using a new version/request. Uncertain outcomes retain the
+original command for exact retry. Final UI acceptance also requires real populated screens
+at desktop and 390 px in Full/Reduced motion, with captures on the validated
+candidate. Local code/test additions do not establish that browser acceptance.
+
 | Command                       | Responsibility                                                            |
 | ----------------------------- | ------------------------------------------------------------------------- |
 | npm run typecheck             | Strict application/test TypeScript                                        |
@@ -75,6 +114,16 @@ The light `required` job repeats the complete evidence lookup, including fresh l
 The full `npm run test:e2e` runs exclusive files first with one worker, then the reviewed independent files with at most two workers. Tests within each file retain their order (`fullyParallel: false`). `scripts/e2e-scheduling.ts` is the explicit parallel allowlist; every unlisted or future spec defaults to the exclusive phase. Shared membership/session changes, singleton label defaults, signing-key expiry, Storage quotas and the custody fixtures used by visual inspection stay exclusive. `experience-visual.spec.ts` also stays exclusive: it selects the first global inventory, category and site records, which another test could archive, retire, rename or remove between navigation and inspection. A reader of mutable records owned by another spec needs exclusive scheduling or stable spec-owned fixtures before entering the parallel allowlist. Parallel mutable workflows target unique inventory/category/site identities and use separate browser contexts; they do not publish shared default-category forms. Stable seeded categories/locations may be read while all parallel writers leave those references unchanged. The default full gate retains one backend-specific build, server, user seed and signing-key lifecycle. No test results or backend builds are cached.
 
 Focused commands such as `npm run test:e2e -- tests/e2e/room.spec.ts` use the original single `chromium` project without dependency expansion. Any explicit Playwright arguments select this ordinary mode, including a full serial comparison with `npm run test:e2e -- --workers=1`. For discovery alone, `E2E_FULL_SUITE=1 npm run test:e2e:list` lists the scheduled partition; omit that environment flag for ordinary discovery. The scheduling regression checks compare the actual full discovered test identities in both modes, reject duplicates, verify project placement and preserve focused room selection. They run in `npm run test`.
+
+Separately authenticated SDK fixture clients in parallel specs must end only their
+own session with `auth.signOut({ scope: 'local' })`. The installed Auth client
+defaults to global sign-out, which can invalidate the same staff account's browser
+session and another worker's session. The scheduling regression checks direct SDK
+cleanup calls in the reviewed parallel specs for explicit local scope. It does not
+change production sign-out or make new files eligible for parallel execution.
+Unchanged metadata edits expose Close and Nothing to save; browser readiness waits
+target enabled editable fields, then retain Review/Confirm assertions after actual
+changes. Real parallel CI remains the verification of fixture-session isolation.
 
 Ordinary CI captures traces and videos on the first retry; ordinary local runs retain failure traces and disable video. Both retain failure screenshots. Set `E2E_CAPTURE_EVIDENCE=1` explicitly to capture traces and videos on every attempt, including successful tests, through the same `npm run test:e2e` backend-specific build. The flag changes diagnostic capture only: test selection, assertions, ordering and retry counts remain intact. Both `experience-recordings.spec.ts` journeys always run; explicit evidence mode additionally requires their recorders and saves `navigation-designer-gesture-save.webm` and `room-camera-label-print-preview.webm` under ignored `.local-tools/experience-visual/recordings`. Normal runs still close their pages but do not save named recordings. The dedicated Checkpoint 2 acceptance config retains its explicit trace capture. Unit policy checks and actual Playwright discovery compare both capture modes in ordinary and scheduled selection.
 

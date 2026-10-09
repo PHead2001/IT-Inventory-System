@@ -17,18 +17,40 @@ async function signIn(page: Page) {
   ).toBeVisible();
 }
 
-async function finishMetadata(page: Page) {
+async function finishMetadata(page: Page, changed = true) {
   const form = page.getByRole('form', {
     name: 'Edit quantity metadata',
     exact: true,
   });
-  await expect(form.getByRole('status')).toHaveText('Details saved.');
-  await form.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(form.getByRole('status')).toHaveText(
+    changed ? 'Details saved.' : 'Nothing changed.',
+  );
+  await form
+    .getByRole('button', { name: changed ? 'Done' : 'Close', exact: true })
+    .click();
+  await expect(form).toBeHidden();
   await expect(
     page
       .getByRole('region', { name: 'Record tasks' })
       .getByRole('button', { name: 'Edit details', exact: true }),
   ).toBeFocused();
+}
+
+async function metadataRecovery(page: Page, entity: string) {
+  return page.evaluate((id) => {
+    const entry = Object.keys(sessionStorage)
+      .filter((key) => key.startsWith('inventory-metadata-edit-v1:'))
+      .map((key) => JSON.parse(sessionStorage.getItem(key)!))
+      .find((entry) => entry.scope.entity === id);
+    if (!entry) throw new Error('Missing metadata recovery for owned record');
+    return {
+      status: entry.status,
+      version: entry.baseline.version,
+      name: entry.inputs?.core.name,
+      command: entry.command,
+      completedRequestId: entry.completedRequestId,
+    };
+  }, entity);
 }
 
 async function expectStableMetadataDone(page: Page) {
@@ -250,7 +272,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('world');
-  await expect(metadataReviewButton(editForm)).toBeEnabled();
+  await expect(editForm.getByLabel(/Tracking note/)).toBeEnabled();
   await expect(editForm.getByText(/changed from version/)).toHaveCount(0);
   await expect(
     editForm.getByRole('button', { name: /Use reviewed .* version/ }),
@@ -289,10 +311,69 @@ test('published custom fields preserve independent concurrent edits, refresh own
     await metadataReviewButton(otherEdit).click();
     await metadataSaveButton(otherEdit).click();
     await expectRecordVersion(other, 5);
+    const convergedRecord = await client
+      .from('quantity_items')
+      .select('version,updated_at')
+      .eq('id', itemId)
+      .single();
+    expect(convergedRecord.error).toBeNull();
+    const convergedEvents = await client
+      .from('quantity_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('item_id', itemId);
+    expect(convergedEvents.error).toBeNull();
     await metadataReviewButton(editForm).click();
     await metadataSaveButton(editForm).click();
-    await expectRecordVersion(page, 6);
-    await finishMetadata(page);
+    // A definitive stale rejection retains the reviewed baseline and draft.
+    // Explicit review accepts the other writer's persisted intent without a
+    // second mutation, a no-op receipt or a claimed save acknowledgement.
+    await expect(
+      editForm.getByRole('button', { name: 'Review current details' }),
+    ).toBeEnabled();
+    await expect(
+      editForm.getByText('Nothing changed.', { exact: true }),
+    ).toHaveCount(0);
+    expect(await metadataRecovery(page, itemId)).toEqual({
+      status: 'editing',
+      version: 4,
+      name: converged,
+      command: null,
+      completedRequestId: null,
+    });
+    await page.reload();
+    await openRecordTask(page, 'Edit quantity metadata');
+    await expect(
+      editForm.getByRole('button', { name: 'Review current details' }),
+    ).toBeEnabled();
+    expect((await metadataRecovery(page, itemId)).version).toBe(4);
+    await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
+      converged,
+    );
+    await editForm
+      .getByRole('button', { name: 'Review current details' })
+      .click();
+    await expect(
+      editForm.getByText('Nothing to save.', { exact: true }),
+    ).toBeVisible();
+    expect((await metadataRecovery(page, itemId)).version).toBe(5);
+    await expect(
+      editForm.getByRole('button', { name: 'Confirm save' }),
+    ).toHaveCount(0);
+    await editForm.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(editForm).toBeHidden();
+    const afterConvergence = await client
+      .from('quantity_items')
+      .select('version,updated_at')
+      .eq('id', itemId)
+      .single();
+    expect(afterConvergence.error).toBeNull();
+    expect(afterConvergence.data).toEqual(convergedRecord.data);
+    const afterConvergenceEvents = await client
+      .from('quantity_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('item_id', itemId);
+    expect(afterConvergenceEvents.error).toBeNull();
+    expect(afterConvergenceEvents.count).toBe(convergedEvents.count);
     await openRecordTask(page, 'Edit quantity metadata');
     await expect(editForm.getByLabel('Name', { exact: true })).toHaveValue(
       converged,
@@ -321,7 +402,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await editForm.getByLabel(/Tracking note/).fill('okay');
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
-  await expectRecordVersion(page, 7);
+  await expectRecordVersion(page, 6);
   await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
   await expect(page.getByText('okay', { exact: true })).toBeVisible();
@@ -332,16 +413,16 @@ test('published custom fields preserve independent concurrent edits, refresh own
     .getByRole('checkbox', { name: /existing custom values.*legacy values/ })
     .check();
   await metadataSaveButton(editForm).click();
-  await expectRecordVersion(page, 8);
+  await expectRecordVersion(page, 7);
   await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
-  await expect(metadataReviewButton(editForm)).toBeEnabled();
+  await expect(editForm.getByLabel('Name', { exact: true })).toBeEnabled();
   await editForm
     .getByLabel('Name', { exact: true })
     .fill('After category ' + suffix);
   await metadataReviewButton(editForm).click();
   await metadataSaveButton(editForm).click();
-  await expectRecordVersion(page, 9);
+  await expectRecordVersion(page, 8);
   await page.reload();
   await expect(
     page.getByRole('heading', {
@@ -353,7 +434,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await page.getByRole('link', { name: 'View all item history' }).click();
   await expect(
     page.getByRole('heading', { name: 'Details updated', exact: true }),
-  ).toHaveCount(8);
+  ).toHaveCount(7);
 });
 
 test('creation clears every linked required-field error during correction and both search surfaces retain bounded readable UUID-looking answers', async ({
