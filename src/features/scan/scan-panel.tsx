@@ -8,9 +8,9 @@ import {
 } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { IScannerControls } from '@zxing/browser';
 import styles from './scan-visual.module.css';
 import { assignmentEpoch } from './assign-batch';
+import { createCameraSession } from './camera-session';
 import {
   resolveItemCode,
   resolveScan,
@@ -20,7 +20,7 @@ import {
 export function ScanPanel() {
   const router = useRouter();
   const video = useRef<HTMLVideoElement>(null);
-  const controls = useRef<IScannerControls | null>(null);
+  const session = useRef<ReturnType<typeof createCameraSession> | null>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
   const consumed = useRef(false);
@@ -38,18 +38,12 @@ export function ScanPanel() {
   const [result, setResult] = useState<ScanResolution | null>(null);
   const [busy, setBusy] = useState(false);
   const [scopeBlocked, setScopeBlocked] = useState(false);
+  const [previewKey, setPreviewKey] = useState(0);
 
   const stop = useCallback(() => {
     generation.current++;
-    controls.current?.stop();
-    controls.current = null;
-    if (
-      typeof MediaStream !== 'undefined' &&
-      video.current?.srcObject instanceof MediaStream
-    ) {
-      video.current.srcObject.getTracks().forEach((track) => track.stop());
-      video.current.srcObject = null;
-    }
+    session.current?.stop();
+    session.current = null;
     if (mounted.current) {
       setCamera('idle');
       setBusy(false);
@@ -175,6 +169,7 @@ export function ScanPanel() {
       return;
     completionFocus.current = null;
     stop();
+    setPreviewKey((key) => key + 1);
     setCameraIssue(false);
     consumed.current = false;
     setResult(null);
@@ -195,24 +190,21 @@ export function ScanPanel() {
       const reader = new InventoryCodeReader(undefined, {
         delayBetweenScanAttempts: 250,
       });
-      const running = await reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: 'environment' } }, audio: false },
-        video.current,
-        (decoded) => {
-          if (
-            decoded &&
-            mounted.current &&
-            token === generation.current &&
-            !consumed.current
-          )
-            void open(decoded.getText());
-        },
-      );
-      if (!mounted.current || token !== generation.current) {
-        running.stop();
+      const current = createCameraSession(reader, video.current, (decoded) => {
+        if (
+          decoded &&
+          mounted.current &&
+          token === generation.current &&
+          !consumed.current
+        )
+          void open(decoded.getText());
+      });
+      session.current = current;
+      const running = await current.start();
+      if (!running || !mounted.current || token !== generation.current) {
+        current.stop();
         return;
       }
-      controls.current = running;
       setCamera('running');
     } catch (error) {
       if (!mounted.current || token !== generation.current) return;
@@ -250,6 +242,7 @@ export function ScanPanel() {
             opens information only.
           </p>
           <video
+            key={previewKey}
             ref={video}
             muted
             playsInline

@@ -25,7 +25,7 @@ vi.mock('@zxing/browser', async () => {
   const { NotFoundException } = await import('@zxing/library');
   return {
     BrowserMultiFormatReader: class {
-      decodeFromConstraints = mocks.decode;
+      decodeFromStream = mocks.decode;
       decodeFromCanvas() {
         throw new NotFoundException();
       }
@@ -65,7 +65,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   Object.defineProperty(navigator, 'mediaDevices', {
     configurable: true,
-    value: { getUserMedia: vi.fn() },
+    value: {
+      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }),
+    },
   });
   mocks.decode.mockResolvedValue({ stop: mocks.stop });
   mocks.resolve.mockResolvedValue({ status: 'unknown', matches: [] });
@@ -236,12 +238,16 @@ it('announces a resolved active record before normal navigation', async () => {
   expect(mocks.push).toHaveBeenCalledWith('/locations/ITC');
 });
 it('releases pending decoder setup after an account change and ignores its late frame', async () => {
+  const track = { stop: vi.fn() };
+  const stream = { getTracks: () => [track] } as unknown as MediaStream;
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(stream);
   const setup = deferred<{ stop: () => void }>();
   mocks.decode.mockReturnValue(setup.promise);
   render(<ScanPanel />);
   fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
   await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
   act(() => invalidateAssignmentCallbacks());
+  expect(track.stop).toHaveBeenCalled();
   act(() => mocks.decode.mock.calls[0][2]({ getText: () => 'LOC:ITC' }));
   await act(async () => setup.resolve({ stop: mocks.stop }));
   expect(mocks.stop).toHaveBeenCalledTimes(1);
@@ -252,6 +258,48 @@ it('releases pending decoder setup after an account change and ignores its late 
     screen.getByRole('button', { name: 'Start camera' }),
   ).toBeInTheDocument();
 });
+it('stops active Scan capture on invalidation without allowing old frames to look up records', async () => {
+  const track = { stop: vi.fn() };
+  vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
+    getTracks: () => [track],
+  } as unknown as MediaStream);
+  render(<ScanPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await screen.findByRole('button', { name: 'Stop camera' });
+  act(() => invalidateAssignmentCallbacks());
+  expect(track.stop).toHaveBeenCalled();
+  expect(mocks.stop).toHaveBeenCalledOnce();
+  act(() => mocks.decode.mock.calls[0][2]({ getText: () => 'LOC:ITC' }));
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  expect(mocks.push).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Start camera' })).toBeDisabled();
+});
+it.each(['invalidate', 'unmount'] as const)(
+  'releases late Scan permission after %s before decoder startup',
+  async (action) => {
+    const permission = deferred<MediaStream>();
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValue(
+      permission.promise,
+    );
+    const track = { stop: vi.fn() };
+    const view = render(<ScanPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+    await waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce(),
+    );
+    if (action === 'unmount') view.unmount();
+    else act(() => invalidateAssignmentCallbacks());
+    await act(async () =>
+      permission.resolve({
+        getTracks: () => [track],
+      } as unknown as MediaStream),
+    );
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(mocks.decode).not.toHaveBeenCalled();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  },
+);
 it('does not let an old failure steal focus or clear a newer pending inspection', async () => {
   const old = deferred<unknown>();
   const current = deferred<unknown>();
@@ -280,7 +328,7 @@ it('starts only on action, requests rear camera, and releases on Stop', async ()
   expect(mocks.decode).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
   await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
-  expect(mocks.decode.mock.calls[0][0]).toMatchObject({
+  expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
     video: { facingMode: { ideal: 'environment' } },
     audio: false,
   });
