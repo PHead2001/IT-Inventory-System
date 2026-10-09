@@ -1506,7 +1506,7 @@ export function MetadataForm({
   };
   const cancel = () => {
     if (taskCompleted || pending || uncertain || dispatched.current) return;
-    if (dirty && !refreshNeeded) setDiscardOpen(true);
+    if (dirty && !noChanges && !refreshNeeded) setDiscardOpen(true);
     else discard();
   };
   useEffect(() => {
@@ -1691,7 +1691,7 @@ export function MetadataForm({
       setRefreshNeeded(false);
     } catch {
       setRecordRefreshError(
-        'The saved record could not be refreshed. Retry loading it.',
+        'The record could not be refreshed. Retry loading it.',
       );
     }
   };
@@ -1753,9 +1753,29 @@ export function MetadataForm({
     return [];
   }
   const validation = useFormValidation(collectValidationIssues);
+  const currentEditPayload = !creating && !uncertain ? payload() : null;
+  const normalizedEdit =
+    currentEditPayload && normalizeEditIntent(kind, currentEditPayload);
+  const noChanges = Boolean(
+    !creating &&
+    !uncertain &&
+    !itemStale &&
+    !schemaStale &&
+    !recordBlocked &&
+    baseline &&
+    definition &&
+    normalizedEdit &&
+    editSummary({
+      baseline,
+      intent: normalizedEdit,
+      definition,
+      categories,
+      timeZone,
+    }).length === 0,
+  );
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (taskCompleted) return;
+    if (taskCompleted || noChanges) return;
     if (
       !uncertain &&
       !pending &&
@@ -2094,7 +2114,8 @@ export function MetadataForm({
           };
           if (!storeEdit(saved, active, requestId)) {
             setRecoveryError(
-              'Details were saved, but completion could not be retained. Retry the same save to record its acknowledgement safely.',
+              (result.changed ? 'Details were saved' : 'Nothing changed') +
+                ', but completion could not be retained. Retry the same save to record its acknowledgement safely.',
             );
             setUncertain(true);
             setState(null);
@@ -2224,7 +2245,7 @@ export function MetadataForm({
             } else if (!fresh.ok) setRecordRefreshError(fresh.message);
           } catch {
             setRecordRefreshError(
-              'The saved record could not be refreshed. Retry loading it.',
+              'The record could not be refreshed. Retry loading it.',
             );
           }
         } else {
@@ -2559,14 +2580,17 @@ export function MetadataForm({
       )}
       {refreshNeeded && (
         <div role="status">
-          Metadata saved. {recordRefreshError || 'Loading the saved record...'}{' '}
+          {state?.ok && !state.changed ? 'Nothing changed.' : 'Metadata saved.'}{' '}
+          {recordRefreshError || 'Loading the acknowledged record...'}{' '}
           <Button
             type="button"
             variant="outline"
             disabled={pending || actorStale}
             onClick={() => void reloadSaved()}
           >
-            Retry saved record refresh
+            {state?.ok && !state.changed
+              ? 'Retry record refresh'
+              : 'Retry saved record refresh'}
           </Button>
         </div>
       )}
@@ -2786,56 +2810,48 @@ export function MetadataForm({
         )}
       </fieldset>
       <ValidationSummary issues={validation.issues} />
-      {!preview && !terminalDraft && review && !schemaStale && !itemStale && (
-        <div
-          className="rounded border border-cyan-700 p-3"
-          role="region"
-          aria-label="Metadata review"
-        >
-          {creating && creationIntent && definition ? (
-            (() => {
-              const summary = creationSummary({
-                kind,
-                intent: creationIntent,
-                categories,
-                locations,
-                definition,
-                touched,
-                openingSite,
-              });
-              return (
-                <>
-                  <h2
-                    ref={creationReviewHeading}
-                    tabIndex={-1}
-                    className="scroll-mt-24 text-lg font-semibold"
-                  >
-                    Review{' '}
-                    {kind === 'quantity' ? 'quantity item' : 'individual asset'}
-                  </h2>
-                  {summary.opening && (
-                    <p className="mt-2 text-sm">{summary.opening}</p>
-                  )}
-                  <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
-                    {summary.rows.map((row) => (
-                      <div key={row.label} className="min-w-0">
-                        <dt className="text-sm text-slate-400">{row.label}</dt>
-                        <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                          {row.value}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <details className="mt-3">
-                    <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-                      Record details & custom answers
-                    </summary>
-                    <dl className="space-y-3">
-                      {summary.details.map((row, index) => (
-                        <div key={`${row.label}:${index}`} className="min-w-0">
+      {!preview &&
+        !terminalDraft &&
+        review &&
+        !noChanges &&
+        !schemaStale &&
+        !itemStale && (
+          <div
+            className="rounded border border-cyan-700 p-3"
+            role="region"
+            aria-label="Metadata review"
+          >
+            {creating && creationIntent && definition ? (
+              (() => {
+                const summary = creationSummary({
+                  kind,
+                  intent: creationIntent,
+                  categories,
+                  locations,
+                  definition,
+                  touched,
+                  openingSite,
+                });
+                return (
+                  <>
+                    <h2
+                      ref={creationReviewHeading}
+                      tabIndex={-1}
+                      className="scroll-mt-24 text-lg font-semibold"
+                    >
+                      Review{' '}
+                      {kind === 'quantity'
+                        ? 'quantity item'
+                        : 'individual asset'}
+                    </h2>
+                    {summary.opening && (
+                      <p className="mt-2 text-sm">{summary.opening}</p>
+                    )}
+                    <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                      {summary.rows.map((row) => (
+                        <div key={row.label} className="min-w-0">
                           <dt className="text-sm text-slate-400">
                             {row.label}
-                            {row.source ? ` · ${row.source}` : ''}
                           </dt>
                           <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                             {row.value}
@@ -2843,82 +2859,102 @@ export function MetadataForm({
                         </div>
                       ))}
                     </dl>
-                  </details>
-                </>
-              );
-            })()
-          ) : (
-            <section aria-label="Changed details">
-              <h2 className="font-semibold">
-                Review changed details for {core.name || 'this record'}
-              </h2>
-              {editIntent &&
-                baseline &&
-                definition &&
-                (() => {
-                  const rows = editSummary({
-                    baseline,
-                    intent: editIntent,
-                    definition,
-                    categories,
-                    timeZone,
-                  });
-                  return rows.length ? (
-                    <dl className="mt-3 space-y-3">
-                      {rows.map((row) => (
-                        <div key={row.key} className="min-w-0">
-                          <dt className="text-sm text-slate-400">
-                            {row.label}
-                          </dt>
-                          <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            <span>{row.before}</span>
-                            <span aria-label=" changes to "> → </span>
-                            <span>{row.after}</span>
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : (
-                    <p>No changed values. Retained answers stay unchanged.</p>
-                  );
-                })()}
-            </section>
-          )}
-          {legacyMigration && (
-            <label className="mt-2 flex items-start gap-2">
-              <input
-                type="checkbox"
-                disabled={pending || uncertain}
-                checked={ackLegacy}
-                onChange={(event) => {
-                  const acknowledged = event.target.checked;
-                  setAckLegacy(acknowledged);
-                  if (!creating && editIntent)
-                    setEditIntent({
-                      ...editIntent,
-                      acknowledge_legacy_values: acknowledged,
+                    <details className="mt-3">
+                      <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+                        Record details & custom answers
+                      </summary>
+                      <dl className="space-y-3">
+                        {summary.details.map((row, index) => (
+                          <div
+                            key={`${row.label}:${index}`}
+                            className="min-w-0"
+                          >
+                            <dt className="text-sm text-slate-400">
+                              {row.label}
+                              {row.source ? ` · ${row.source}` : ''}
+                            </dt>
+                            <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              {row.value}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </details>
+                  </>
+                );
+              })()
+            ) : (
+              <section aria-label="Changed details">
+                <h2 className="font-semibold">
+                  Review changed details for {core.name || 'this record'}
+                </h2>
+                {editIntent &&
+                  baseline &&
+                  definition &&
+                  (() => {
+                    const rows = editSummary({
+                      baseline,
+                      intent: editIntent,
+                      definition,
+                      categories,
+                      timeZone,
                     });
-                }}
-              />
-              I understand that existing custom values from the previous
-              category will remain visible as legacy values.
-            </label>
-          )}
-          {duplicates.length > 0 && (
-            <p className="text-amber-200">
-              Serial also recorded on: {duplicates.join('; ')}. Duplicate
-              serials are allowed.
-            </p>
-          )}
-          {!creating && (
-            <p className="text-sm text-slate-400">
-              {openingSite
-                ? 'Opening details, custom values and site custody save together as one version and event.'
-                : 'Custom values and core details save together with history.'}
-            </p>
-          )}
-        </div>
-      )}
+                    return rows.length ? (
+                      <dl className="mt-3 space-y-3">
+                        {rows.map((row) => (
+                          <div key={row.key} className="min-w-0">
+                            <dt className="text-sm text-slate-400">
+                              {row.label}
+                            </dt>
+                            <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              <span>{row.before}</span>
+                              <span aria-label=" changes to "> → </span>
+                              <span>{row.after}</span>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : (
+                      <p>No changed values. Retained answers stay unchanged.</p>
+                    );
+                  })()}
+              </section>
+            )}
+            {legacyMigration && (
+              <label className="mt-2 flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  disabled={pending || uncertain}
+                  checked={ackLegacy}
+                  onChange={(event) => {
+                    const acknowledged = event.target.checked;
+                    setAckLegacy(acknowledged);
+                    if (!creating && editIntent)
+                      setEditIntent({
+                        ...editIntent,
+                        acknowledge_legacy_values: acknowledged,
+                      });
+                  }}
+                />
+                I understand that existing custom values from the previous
+                category will remain visible as legacy values.
+              </label>
+            )}
+            {duplicates.length > 0 && (
+              <p className="text-amber-200">
+                Serial also recorded on: {duplicates.join('; ')}. Duplicate
+                serials are allowed.
+              </p>
+            )}
+            {!creating && (
+              <p className="text-sm text-slate-400">
+                {openingSite
+                  ? 'Opening details, custom values and site custody save together as one version and event.'
+                  : 'Custom values and core details save together with history.'}
+              </p>
+            )}
+          </div>
+        )}
       {!preview && state && !state.ok && (
         <p
           role="alert"
@@ -2929,7 +2965,9 @@ export function MetadataForm({
       )}
       {!preview && state?.ok && (
         <>
-          <p role="status">Details saved.</p>
+          <p role="status">
+            {state.changed ? 'Details saved.' : 'Nothing changed.'}
+          </p>
           {!creating && (
             <Button
               type="button"
@@ -2946,7 +2984,7 @@ export function MetadataForm({
                 }
               }}
             >
-              Done
+              {state.changed ? 'Done' : 'Close'}
             </Button>
           )}
           {!creating && !resetTask && (
@@ -2974,41 +3012,48 @@ export function MetadataForm({
             'flex flex-wrap gap-2 rounded bg-slate-950/95 py-3'
           }
         >
-          <Button
-            disabled={
-              taskCompleted ||
-              (editRecoveryEnabled && (!editReady || editBlocked)) ||
-              (recoveryEnabled &&
-                (!recoveryReady ||
-                  recoveryBlocked ||
-                  !!terminalDraft ||
-                  !!storedEditing)) ||
-              pending ||
-              actorStale ||
-              (!uncertain &&
-                (!form ||
-                  schemaStale ||
-                  schemaConflictPending ||
-                  !!schemaRefreshError ||
-                  recordBlocked ||
-                  refreshNeeded)) ||
-              (review && legacyMigration && !ackLegacy)
-            }
-          >
-            {uncertain
-              ? 'Retry same save'
-              : review
-                ? creating
-                  ? kind === 'quantity'
-                    ? 'Add quantity item'
-                    : 'Add individual asset'
-                  : 'Confirm save'
-                : creating
-                  ? kind === 'quantity'
-                    ? 'Review quantity item'
-                    : 'Review individual asset'
-                  : 'Review details'}
-          </Button>
+          {noChanges && (
+            <p role="status" className="self-center text-sm">
+              Nothing to save.
+            </p>
+          )}
+          {!noChanges && (
+            <Button
+              disabled={
+                taskCompleted ||
+                (editRecoveryEnabled && (!editReady || editBlocked)) ||
+                (recoveryEnabled &&
+                  (!recoveryReady ||
+                    recoveryBlocked ||
+                    !!terminalDraft ||
+                    !!storedEditing)) ||
+                pending ||
+                actorStale ||
+                (!uncertain &&
+                  (!form ||
+                    schemaStale ||
+                    schemaConflictPending ||
+                    !!schemaRefreshError ||
+                    recordBlocked ||
+                    refreshNeeded)) ||
+                (review && legacyMigration && !ackLegacy)
+              }
+            >
+              {uncertain
+                ? 'Retry same save'
+                : review
+                  ? creating
+                    ? kind === 'quantity'
+                      ? 'Add quantity item'
+                      : 'Add individual asset'
+                    : 'Confirm save'
+                  : creating
+                    ? kind === 'quantity'
+                      ? 'Review quantity item'
+                      : 'Review individual asset'
+                    : 'Review details'}
+            </Button>
+          )}
           <Button
             ref={cancelRef}
             type="button"
@@ -3022,9 +3067,9 @@ export function MetadataForm({
             }
             onClick={cancel}
           >
-            Cancel
+            {noChanges ? 'Close' : 'Cancel'}
           </Button>
-          {review && (
+          {review && !noChanges && (
             <Button
               type="button"
               variant="outline"

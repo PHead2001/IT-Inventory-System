@@ -16,6 +16,7 @@ import {
 } from '@/features/inventory/components/task-state';
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
+import type { AssetReturnSuggestion } from './return-suggestion';
 import {
   RequiredMark,
   useFormValidation,
@@ -40,6 +41,8 @@ type Props = {
   siteHoldings?: SiteHolding[];
   currentLocation?: LocationRef | null;
   currentSite?: Site | null;
+  returnSuggestion?: AssetReturnSuggestion;
+  returnSuggestionError?: boolean;
 };
 const titles: Record<string, string> = {
   issue: 'Issue stock to a site',
@@ -93,12 +96,38 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     quantity: string;
     reference: string;
   } | null>(null);
+  const [returnOrigin] = useState(() => {
+    const suggestion = latest.returnSuggestion;
+    const unavailable = {
+      status: 'unavailable' as const,
+      locationId: null,
+      loadError: Boolean(latest.returnSuggestionError),
+    };
+    if (
+      kind !== 'asset' ||
+      action !== 'return' ||
+      suggestion?.assetId !== entityId ||
+      suggestion.assetVersion !== version
+    )
+      return unavailable;
+    if (suggestion.status !== 'suggested')
+      return { ...unavailable, status: suggestion.status };
+    if (!suggestion.locationId) return unavailable;
+    const eligible = pickerLocations(locations, 'destination').some(
+      (row) => row.id === suggestion.locationId,
+    );
+    return {
+      status: eligible ? ('suggested' as const) : ('ineligible' as const),
+      locationId: eligible ? suggestion.locationId : null,
+      loadError: false,
+    };
+  });
   const [values, setValues] = useState({
     source_location_id:
       currentLocation?.id ??
       storageBalances.find((row) => row.quantity > 0)?.location.id ??
       '',
-    destination_location_id: '',
+    destination_location_id: returnOrigin.locationId ?? '',
     source_site_id:
       currentSite?.id ??
       siteHoldings.find((row) => row.quantity > 0)?.site_id ??
@@ -581,6 +610,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                   ? [currentLocation.id]
                   : []
             }
+            availability={
+              quantity
+                ? Object.fromEntries(
+                    storageBalances.map((row) => [
+                      row.location.id,
+                      row.quantity,
+                    ]),
+                  )
+                : undefined
+            }
             value={values.source_location_id}
             onValueChange={(value) => update('source_location_id', value)}
             required
@@ -591,20 +630,47 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           />
         )}
         {toStorage && (
-          <LocationPicker
-            id={`${kind}-${action}-destination`}
-            label="Return to storage"
-            locations={locations}
-            mode="destination"
-            value={values.destination_location_id}
-            onValueChange={(value) => update('destination_location_id', value)}
-            required
-            error={
-              validation.issues.find(
-                (issue) => issue.id === scope + '-destination',
-              )?.message
-            }
-          />
+          <>
+            <LocationPicker
+              id={`${kind}-${action}-destination`}
+              label="Return to storage"
+              locations={locations}
+              mode="destination"
+              value={values.destination_location_id}
+              onValueChange={(value) =>
+                update('destination_location_id', value)
+              }
+              required
+              error={
+                validation.issues.find(
+                  (issue) => issue.id === scope + '-destination',
+                )?.message
+              }
+            />
+            {!quantity && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => update('destination_location_id', '')}
+                  disabled={pending || uncertain || completed}
+                >
+                  Clear destination
+                </Button>
+                <p className="text-sm text-slate-400">
+                  {returnOrigin.loadError
+                    ? 'The previous storage location could not be checked. Choose a destination, or refresh to retry.'
+                    : returnOrigin.status === 'suggested'
+                      ? 'Initially suggested from this asset’s site assignment. You can choose another destination.'
+                      : returnOrigin.status === 'no_storage_origin'
+                        ? 'This assignment began at a site, with no recorded storage origin. Choose a destination.'
+                        : returnOrigin.status === 'ineligible'
+                          ? 'The previous storage location is no longer available. Choose a destination.'
+                          : 'The storage origin for this assignment is unavailable. Choose a destination.'}
+                </p>
+              </>
+            )}
+          </>
         )}
         {fromSite && (
           <label className="block space-y-2">

@@ -12,6 +12,41 @@ For isolated hosted export proof, set the **server-only** `EXPORT_DIAGNOSTICS_EN
 
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
+The canonical database integration gate runs
+`tests/integration/audit-four-edit-integrity.ts` after the existing Audit three
+contracts. It directly calls every supported legacy/v2/v3 metadata update API,
+checks authorization before receipt replay, stale intent, receipt mismatch,
+omitted/cleared metadata, lifecycle, exact no-op timestamps/events/provenance,
+integer version exhaustion, historical datetime equivalence and rejected
+malformed/overprecision values. Independent PostgreSQL connections overlap a
+real edit and a no-op in both serial orders. Current assignment origin checks
+cover more than 25 transfers/corrections, a new assignment episode and site
+opening without a storage origin. These tests require the existing clean local
+database gate; static inspection is not a pass.
+
+The same suite distinguishes explicit false, zero and empty-string answers from
+absence: an identical set retains the historical envelope, unset changes once,
+repeated unset is a no-op, and restoring a falsy answer is a real edit. A separate
+rollback-isolated case extracts exactly the previous and candidate
+`quantity_update(uuid,jsonb)` definitions from repository migrations. The old
+implementation actually generates its receipt/event; the candidate then replays
+that exact response and refuses replay for an inactive member. Complete inventory,
+history, receipt and function definition/ACL snapshots are restored afterward.
+This proves replay of a receipt produced by the previous implementation in one
+transaction. It does not prove committed receipt durability across a literal
+full migration upgrade. That requires a disposable prepare/apply/verify run,
+following the existing `tests/integration/custody-upgrade.ts` pattern; the ordinary
+fully migrated `test:db:compatibility` suite has no pre-migration preparation phase.
+
+`edit-integrity.spec.ts` and the focused additions in `inventory.spec.ts` exercise
+unchanged asset/quantity editors, real case-only asset tag edits, Receive defaults,
+Move/Issue source counts and current-episode Return defaults with manual/cleared
+destinations and stale-form review. Unit/component tests cover malformed and
+ineligible origins, transport errors, unchanged grandfathered answers and exact
+microsecond comparison. Final UI acceptance also requires real populated screens
+at desktop and 390 px in Full/Reduced motion, with captures on the validated
+candidate. Local code/test additions do not establish that browser acceptance.
+
 | Command                       | Responsibility                                                            |
 | ----------------------------- | ------------------------------------------------------------------------- |
 | npm run typecheck             | Strict application/test TypeScript                                        |
