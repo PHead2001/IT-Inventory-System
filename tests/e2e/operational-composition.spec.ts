@@ -479,7 +479,13 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   const created = page.getByRole('listitem').filter({
     has: page.getByRole('heading', { name: 'Created', exact: true }),
   });
-  await expect(created).toContainText('Record created');
+  await expect(created).toHaveCount(1);
+  await expect(
+    created.getByRole('heading', { name: 'Created', exact: true }),
+  ).toBeVisible();
+  await expect(
+    created.getByRole('link', { name, exact: true }),
+  ).toHaveAttribute('href', '/inventory/assets/' + id);
   await expect(created.getByText(tag, { exact: true })).toHaveCount(0);
   await created
     .locator('summary')
