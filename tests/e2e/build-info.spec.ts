@@ -52,6 +52,11 @@ test('Settings identifies the compiled served build for active viewers at narrow
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails.viewer);
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  // Sign-in's server action must finish before a new document navigation.
+  await expect(page).toHaveURL(/\/inventory$/);
+  await expect(
+    page.getByRole('heading', { name: 'Inventory', exact: true }),
+  ).toBeVisible();
   await page.goto('/settings');
   await page.setViewportSize({ width: 375, height: 812 });
   const section = page.getByRole('region', { name: 'Build & environment' });
