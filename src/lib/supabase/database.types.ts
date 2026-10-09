@@ -938,6 +938,7 @@ export type Database = {
       label_defaults: {
         Row: {
           format: string
+          layout: Json | null
           page: string
           singleton: boolean
           size: string
@@ -946,6 +947,7 @@ export type Database = {
         }
         Insert: {
           format?: string
+          layout?: Json | null
           page?: string
           singleton?: boolean
           size?: string
@@ -954,6 +956,7 @@ export type Database = {
         }
         Update: {
           format?: string
+          layout?: Json | null
           page?: string
           singleton?: boolean
           size?: string
@@ -1650,6 +1653,7 @@ export type Database = {
       configuration_label_defaults: {
         Row: {
           format: string | null
+          layout: Json | null
           page: string | null
           size: string | null
           updated_at: string | null
@@ -1657,6 +1661,7 @@ export type Database = {
         }
         Insert: {
           format?: string | null
+          layout?: Json | null
           page?: string | null
           size?: string | null
           updated_at?: string | null
@@ -1664,6 +1669,7 @@ export type Database = {
         }
         Update: {
           format?: string | null
+          layout?: Json | null
           page?: string | null
           size?: string | null
           updated_at?: string | null

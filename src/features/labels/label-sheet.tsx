@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { barcodeCompatibleTag } from '@/features/scan/targets';
+import { sheetGeometry, type PrintLayout } from './print-layout';
 
 const qrCache = new Map<string, Promise<string>>();
 function qrImage(url: string): Promise<string> {
@@ -95,6 +96,7 @@ export function LabelSheet({
   page,
   format,
   generation,
+  layout,
 }: {
   records: LabelRecord[];
   origin: string;
@@ -103,21 +105,32 @@ export function LabelSheet({
   page: 'A4' | 'letter';
   format: 'qr' | 'code128';
   generation: string;
+  layout?: PrintLayout | null;
 }) {
-  const [width, height] = size.split('x').map(Number);
+  const geometry = sheetGeometry(size, page, layout);
+  const width = geometry.labelWidth / 10;
+  const height = geometry.labelHeight / 10;
+  const pages = Array.from(
+    { length: Math.ceil(records.length / geometry.capacity) },
+    (_, index) =>
+      records.slice(index * geometry.capacity, (index + 1) * geometry.capacity),
+  );
   const reducedMotion = useEffectiveReducedMotion();
   const copyOrdinals = new Map<string, number>();
   return (
     <>
-      <style>{`@page { size: ${page}; margin: 8mm; background: #fff; }
+      <style>{`@page { size: ${geometry.sheetWidth / 10}mm ${geometry.sheetHeight / 10}mm; margin: 0; background: #fff; }
       @media print { :root { color-scheme: light !important; --background: #fff !important; --foreground: #000 !important; background: #fff !important; }
       html, body, body > * { background: #fff !important; }
+      html, body { margin: 0 !important; padding: 0 !important; }
       body { color: #000 !important; }
       .experience-app { min-height: 0 !important; }
       body > * { visibility: hidden !important; }
       .label-print-root:not([data-print-authorized="true"]) { display: none !important; }
       .label-print-root[data-print-authorized="true"], .label-print-root[data-print-authorized="true"] * { visibility: visible !important; }
-      .label-print-root { position: static !important; width: 100%; margin: 0; padding: 0; border: 0; background: white; }
+      .label-print-root { display: block !important; position: static !important; width: auto; min-height: 0 !important; margin: 0; padding: 0; border: 0; background: white; }
+      .label-page { break-after: page; page-break-after: always; overflow: hidden; }
+      .label-page:last-child { break-after: auto; page-break-after: auto; }
       .label-print-root .label-card { border: 0.2mm solid #222; }
       .label-print-root .label-card, .label-print-root .label-card * { color: black !important; background: white !important; }
       .label-print-root .label-card { break-inside: avoid; page-break-inside: avoid; }
@@ -125,35 +138,56 @@ export function LabelSheet({
       .label-print-root .label-card * { animation: none !important; transition: none !important; }
     }`}</style>
       <div
-        className="label-print-root mt-6 flex flex-wrap content-start gap-[3mm] rounded-xl bg-white p-[3mm] text-black"
+        className="label-print-root mt-6 grid gap-6 text-black"
         aria-label="Print preview"
         data-sheet-generation={generation}
       >
-        {records.map((record) => {
-          const identity = JSON.stringify([record.kind, record.key]);
-          const ordinal = copyOrdinals.get(identity) ?? 0;
-          copyOrdinals.set(identity, ordinal + 1);
-          return (
-            <motion.div
-              key={JSON.stringify([identity, ordinal])}
-              className="label-preview-item"
-              layout={reducedMotion ? false : 'position'}
-              initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reducedMotion ? 0 : 0.2 }}
-            >
-              <LabelCard
-                record={record}
-                origin={origin}
-                preview={preview}
-                width={width}
-                height={height}
-                format={format}
-                generation={generation}
-              />
-            </motion.div>
-          );
-        })}
+        {pages.map((recordsOnPage, pageIndex) => (
+          <div
+            key={pageIndex}
+            className="label-page bg-white"
+            data-page-number={pageIndex + 1}
+            style={{
+              boxSizing: 'border-box',
+              width: `${geometry.sheetWidth / 10}mm`,
+              height: `${geometry.sheetHeight / 10}mm`,
+              padding: `${geometry.marginTop / 10}mm ${geometry.marginRight / 10}mm ${geometry.marginBottom / 10}mm ${geometry.marginLeft / 10}mm`,
+              display: 'grid',
+              gridTemplateColumns: `repeat(${geometry.columns}, ${width}mm)`,
+              gridTemplateRows: `repeat(${geometry.rows}, ${height}mm)`,
+              columnGap: `${geometry.gapX / 10}mm`,
+              rowGap: `${geometry.gapY / 10}mm`,
+              alignContent: 'start',
+              justifyContent: 'start',
+            }}
+          >
+            {recordsOnPage.map((record) => {
+              const identity = JSON.stringify([record.kind, record.key]);
+              const ordinal = copyOrdinals.get(identity) ?? 0;
+              copyOrdinals.set(identity, ordinal + 1);
+              return (
+                <motion.div
+                  key={JSON.stringify([identity, ordinal])}
+                  className="label-preview-item"
+                  layout={reducedMotion ? false : 'position'}
+                  initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: reducedMotion ? 0 : 0.2 }}
+                >
+                  <LabelCard
+                    record={record}
+                    origin={origin}
+                    preview={preview}
+                    width={width}
+                    height={height}
+                    format={format}
+                    generation={generation}
+                  />
+                </motion.div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </>
   );
@@ -260,7 +294,8 @@ function LabelCard({
     };
   }, [payload, format, width, barcodeKey]);
   const useBarcode = format === 'code128' && payload && barcodeWidthMm !== null;
-  const codeMm = Math.min(height - 10, width >= 90 ? 30 : 22);
+  // Keep the complete QR and its quiet zone at one of the supported sizes.
+  const codeMm = width >= 90 && height >= (preview ? 39 : 34) ? 30 : 22;
   const printable = printableLabelLines(record);
   // Fitting belongs to the current content/layout, independently of QR identity.
   const fittingKey = JSON.stringify([

@@ -10,6 +10,7 @@ import {
 } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
+import { PDFDocument } from 'pdf-lib';
 import {
   BinaryBitmap,
   BarcodeFormat,
@@ -395,6 +396,7 @@ async function verifiedPreviewPdf(
     .locator('.label-print-root')
     .evaluate((node) => node.setAttribute('data-print-authorized', 'true'));
   try {
+    await page.emulateMedia({ media: 'print' });
     return await page.pdf({
       path: destination,
       preferCSSPageSize: true,
@@ -404,8 +406,49 @@ async function verifiedPreviewPdf(
     await page
       .locator('.label-print-root')
       .evaluate((node) => node.removeAttribute('data-print-authorized'));
+    await page.emulateMedia({ media: 'screen' });
   }
 }
+
+test('custom single-label media survives reload, rejects incomplete drafts and prints exact pages', async ({
+  page,
+}, info) => {
+  await signIn(page, 'viewer');
+  await page.goto('/labels?location=ITC-D01');
+  const queue = page.getByRole('region', { name: 'Label queue' });
+  await expect(queue).toContainText('1 distinct record');
+  await page.getByRole('combobox', { name: 'Output' }).selectOption('single');
+  await page.getByLabel('Label width (mm)').fill('90.1');
+  await page.getByLabel('Label height (mm)').fill('50.2');
+  await queue.getByLabel('Copies', { exact: true }).fill('3');
+  await readyPreview(page, 3);
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Output' })).toHaveValue(
+    'single',
+  );
+  await expect(page.getByLabel('Label width (mm)')).toHaveValue('90.1');
+  await expect(queue.getByLabel('Copies', { exact: true })).toHaveValue('3');
+  await page.getByLabel('Label width (mm)').fill('90.');
+  await expect(
+    page.getByRole('button', { name: /Print selected labels/ }),
+  ).toBeDisabled();
+  await expect(page.locator('.label-print-root')).toHaveCount(0);
+  await page.getByLabel('Label width (mm)').fill('90.1');
+  await readyPreview(page, 3);
+  const bytes = await verifiedPreviewPdf(
+    page,
+    info.outputPath('custom-single.pdf'),
+    info,
+  );
+  const pdf = await PDFDocument.load(bytes);
+  expect(pdf.getPageCount()).toBe(3);
+  for (const sheet of pdf.getPages()) {
+    expect(Math.abs(sheet.getWidth() - (90.1 * 72) / 25.4)).toBeLessThan(1);
+    expect(Math.abs(sheet.getHeight() - (50.2 * 72) / 25.4)).toBeLessThan(1);
+  }
+  await page.getByRole('combobox', { name: 'Output' }).selectOption('preset');
+  await expect(page.getByLabel('Label width (mm)')).toHaveCount(0);
+});
 
 test('larger labels retry normal text fitting while preserving the QR and print barrier', async ({
   page,

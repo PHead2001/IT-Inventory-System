@@ -1,4 +1,5 @@
 import { ASSET_UUID, LOCATION_CODE } from '@/features/scan/targets';
+import { printLayoutSchema, type PrintLayout } from './print-layout';
 export type LabelKind = 'location' | 'asset' | 'quantity';
 export type QueueKey = { kind: LabelKind; key: string };
 export type QueueEntry = QueueKey & {
@@ -19,6 +20,7 @@ export type JobSettings = {
   size: '90x50' | '70x35';
   page: 'letter' | 'A4';
   format: 'qr' | 'code128';
+  layout?: PrintLayout | null;
 };
 export const defaultFilters: LabelSearchFilters = {
   q: '',
@@ -105,6 +107,7 @@ export function parseStoredQueue(
   entries: QueueEntry[];
   filters: LabelSearchFilters;
   job: JobSettings;
+  layoutRecovery?: { value: unknown };
 } | null {
   if (!raw || raw.length > 100_000) return null;
   try {
@@ -142,6 +145,17 @@ export function parseStoredQueue(
       return null;
     const filters = stored.filters as LabelSearchFilters | undefined;
     const job = stored.job as JobSettings | undefined;
+    const validJob =
+      job &&
+      ['90x50', '70x35'].includes(job.size) &&
+      ['letter', 'A4'].includes(job.page) &&
+      ['qr', 'code128'].includes(job.format);
+    const hasLayout = Boolean(job && Object.hasOwn(job, 'layout'));
+    const layout = hasLayout
+      ? printLayoutSchema.nullable().safeParse(job?.layout)
+      : null;
+    const layoutRecovery =
+      hasLayout && !layout?.success ? { value: job?.layout } : undefined;
     return {
       entries: entries as QueueEntry[],
       filters:
@@ -156,13 +170,15 @@ export function parseStoredQueue(
         filters.page >= 1
           ? filters
           : defaultFilters,
-      job:
-        job &&
-        ['90x50', '70x35'].includes(job.size) &&
-        ['letter', 'A4'].includes(job.page) &&
-        ['qr', 'code128'].includes(job.format)
-          ? job
-          : fallbackJob,
+      job: validJob
+        ? {
+            size: job.size,
+            page: job.page,
+            format: job.format,
+            ...(hasLayout && layout?.success ? { layout: layout.data } : {}),
+          }
+        : { ...fallbackJob },
+      ...(layoutRecovery ? { layoutRecovery } : {}),
     };
   } catch {
     return null;

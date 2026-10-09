@@ -12,6 +12,8 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
+import { PrintMediaEditor } from './print-media-editor';
+import type { PrintLayout } from './print-layout';
 import type {
   CategoryRef,
   LocationRef,
@@ -224,6 +226,13 @@ function LabelDesignerWorkspace({
     setDraftState(next);
   };
   const [job, setJob] = useState<JobSettings>(defaults);
+  const [layoutValid, setLayoutValid] = useState(true);
+  const [layoutRecovery, setLayoutRecovery] = useState<{
+    value: unknown;
+  } | null>(null);
+  const [mediaReset, setMediaReset] = useState(0);
+  const geometryEpoch = useRef(0);
+  const [mediaGeneration, setMediaGeneration] = useState(0);
   const [locationCode, setLocationCode] = useState('');
   const [search, setSearch] = useState<{
     rows: LabelCandidate[];
@@ -252,6 +261,20 @@ function LabelDesignerWorkspace({
   const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const activePrintAbort = useRef<AbortController | null>(null);
+  const changeMedia = (next: JobSettings, valid = true) => {
+    geometryEpoch.current++;
+    setMediaGeneration(geometryEpoch.current);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    setReadySheetKey('');
+    setFormatAcknowledged(false);
+    setFallbackPending(false);
+    setLayoutValid(valid);
+    setJob(next);
+    if (valid) {
+      setLayoutRecovery(null);
+    }
+  };
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
@@ -298,6 +321,9 @@ function LabelDesignerWorkspace({
         setFilters(stored.filters);
         setDraftState(stored.filters);
         setJob(stored.job);
+        setLayoutRecovery(stored.layoutRecovery ?? null);
+        setLayoutValid(!stored.layoutRecovery);
+        setMediaReset((value) => value + 1);
       }
       setHydrated(true);
     });
@@ -310,13 +336,17 @@ function LabelDesignerWorkspace({
     try {
       sessionStorage.setItem(
         storageKey,
-        JSON.stringify({ entries, filters, job }),
+        JSON.stringify({
+          entries,
+          filters,
+          job: layoutRecovery ? { ...job, layout: layoutRecovery.value } : job,
+        }),
       );
     } catch {
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job]);
+  }, [storageKey, hydrated, entries, filters, job, layoutRecovery]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.
@@ -856,6 +886,7 @@ function LabelDesignerWorkspace({
   };
   const print = async () => {
     if (
+      !layoutValid ||
       intentPending ||
       !prepared ||
       !printRows ||
@@ -867,6 +898,11 @@ function LabelDesignerWorkspace({
     )
       return;
     const epoch = ++queueEpoch.current;
+    const printGeometryEpoch = geometryEpoch.current;
+    const currentPrint = () =>
+      epoch === queueEpoch.current &&
+      printGeometryEpoch === geometryEpoch.current &&
+      !printAbort.signal.aborted;
     activePrintAbort.current?.abort();
     const printAbort = new AbortController();
     activePrintAbort.current = printAbort;
@@ -876,7 +912,7 @@ function LabelDesignerWorkspace({
       const fresh = await getQueueRecords(
         entries.map(({ kind, key }) => ({ kind, key })),
       );
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       currentReadVerified = true;
       const observed = latchObservedChanges(currentEntries.current, fresh);
       if (observed !== currentEntries.current) setEntries(observed);
@@ -907,6 +943,7 @@ function LabelDesignerWorkspace({
         : null;
       const printGeneration = refreshedRows
         ? JSON.stringify([
+            printGeometryEpoch,
             selectionKey,
             totalCopies(entries),
             job,
@@ -937,9 +974,9 @@ function LabelDesignerWorkspace({
         printGeneration,
         totalCopies(entries),
         printAbort.signal,
-        () => epoch === queueEpoch.current,
+        currentPrint,
       );
-      if (readiness === 'cancelled' || epoch !== queueEpoch.current) return;
+      if (readiness === 'cancelled' || !currentPrint()) return;
       if (readiness !== 'ready') {
         setMessage(
           'Wait for every code and label text to fit, or choose a larger label.',
@@ -959,13 +996,13 @@ function LabelDesignerWorkspace({
         );
         return;
       }
-      if (epoch !== queueEpoch.current || printAbort.signal.aborted) return;
+      if (!currentPrint()) return;
       // The final check grants exactly one print lifecycle. A second
       // beforeprint (including Ctrl/Cmd+P) cannot reuse that grant.
       clearPrintAuthorization.current?.();
       let armed = true;
       const beforePrint = () => {
-        if (armed) {
+        if (armed && currentPrint()) {
           armed = false;
           sheet.dataset.printAuthorized = 'true';
         } else delete sheet.dataset.printAuthorized;
@@ -987,7 +1024,7 @@ function LabelDesignerWorkspace({
         clear();
       }
     } catch {
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       setValidatedKey('');
       setRefreshFailed(true);
       if (!currentReadVerified) {
@@ -1039,6 +1076,7 @@ function LabelDesignerWorkspace({
       ? expandLabels(entries, prepared)
       : printRows;
   const sheetKey = JSON.stringify([
+    mediaGeneration,
     selectionKey,
     totalCopies(entries),
     job,
@@ -1047,7 +1085,7 @@ function LabelDesignerWorkspace({
   useEffect(() => {
     let current = true;
     const sheet = document.querySelector<HTMLElement>('.label-print-root');
-    if (!sheet || !displayRows?.length) return;
+    if (!layoutValid || !sheet || !displayRows?.length) return;
     const check = () => {
       if (!current) return;
       const cards = Array.from(
@@ -1100,7 +1138,7 @@ function LabelDesignerWorkspace({
     };
     // Sheet identity captures rows and layout; readiness follows the rendered DOM.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetKey, formatAcknowledged]);
+  }, [sheetKey, formatAcknowledged, layoutValid]);
 
   return (
     <div className={styles.workspace}>
@@ -1719,11 +1757,12 @@ function LabelDesignerWorkspace({
               value={job.size}
               disabled={busy}
               onChange={(event) => {
-                setJob({
+                changeMedia({
                   ...job,
                   size: event.target.value as JobSettings['size'],
+                  layout: null,
                 });
-                clearPrintAuthorization.current?.();
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1740,11 +1779,12 @@ function LabelDesignerWorkspace({
               value={job.page}
               disabled={busy}
               onChange={(event) => {
-                setJob({
+                changeMedia({
                   ...job,
                   page: event.target.value as JobSettings['page'],
+                  layout: null,
                 });
-                clearPrintAuthorization.current?.();
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1762,10 +1802,13 @@ function LabelDesignerWorkspace({
               value={job.format}
               disabled={busy}
               onChange={(event) => {
-                setJob({
-                  ...job,
-                  format: event.target.value as JobSettings['format'],
-                });
+                changeMedia(
+                  {
+                    ...job,
+                    format: event.target.value as JobSettings['format'],
+                  },
+                  layoutValid,
+                );
                 clearPrintAuthorization.current?.();
                 setFormatAcknowledged(false);
                 setFallbackPending(false);
@@ -1783,6 +1826,33 @@ function LabelDesignerWorkspace({
         <p id="job-barcode-help" className={styles.subtle}>
           {barcodeTypeHelp}
         </p>
+        <PrintMediaEditor
+          key={mediaReset}
+          layout={job.layout}
+          size={job.size}
+          page={job.page}
+          onChange={(layout: PrintLayout | null, valid) =>
+            changeMedia(valid ? { ...job, layout } : job, valid)
+          }
+        />
+        {layoutRecovery && (
+          <p role="alert" className={styles.error}>
+            The saved print dimensions are invalid. Your queue is retained.
+            Review new dimensions or reset the print media before printing.
+          </p>
+        )}
+        {!layoutValid && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => {
+              changeMedia({ ...job, layout: null });
+              setMediaReset((value) => value + 1);
+            }}
+          >
+            Reset print media
+          </button>
+        )}
         <p className={styles.subtle}>
           New jobs start with the shared choices in Settings. Print at actual
           size / 100%. Code 128 asset tags require reprinting if the tag
@@ -1858,6 +1928,7 @@ function LabelDesignerWorkspace({
           <button
             type="button"
             disabled={
+              !layoutValid ||
               intentPending ||
               !prepared ||
               busy ||
@@ -1915,7 +1986,7 @@ function LabelDesignerWorkspace({
               </span>
             </div>
           )}
-        {displayRows && (
+        {layoutValid && displayRows && (
           <div className={styles.sheetFrame}>
             <LabelSheet
               records={displayRows}
@@ -1925,6 +1996,7 @@ function LabelDesignerWorkspace({
               page={job.page}
               format={job.format}
               generation={sheetKey}
+              layout={job.layout}
             />
           </div>
         )}

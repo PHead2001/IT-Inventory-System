@@ -109,3 +109,38 @@ describe('session-scoped queue', () => {
     expect(sessionStorage.getItem('other-application')).toBe('keep');
   });
 });
+
+it('constructs a validated cached job, retains old media and preserves invalid media for explicit recovery', () => {
+  const stored = {
+    entries: [entry(1)],
+    filters: defaultFilters,
+    job: defaultJob,
+  };
+  const custom = {
+    version: 1,
+    mode: 'single',
+    labelWidth: 700,
+    labelHeight: 350,
+  };
+  expect(parseStoredQueue(JSON.stringify(stored))?.job).toEqual(defaultJob);
+  const valid = parseStoredQueue(
+    JSON.stringify({
+      ...stored,
+      job: { ...defaultJob, layout: custom, arbitrary: 'discard' },
+    }),
+  );
+  expect(valid?.job).toEqual({ ...defaultJob, layout: custom });
+  for (const invalid of [
+    { ...custom, labelWidth: 30 },
+    { ...custom, labelWidth: null },
+    { ...custom, extra: 0 },
+    'not geometry',
+  ]) {
+    const result = parseStoredQueue(
+      JSON.stringify({ ...stored, job: { ...defaultJob, layout: invalid } }),
+    );
+    expect(result?.entries).toEqual(stored.entries);
+    expect(result?.layoutRecovery).toEqual({ value: invalid });
+    expect(result?.job).toEqual(defaultJob);
+  }
+});

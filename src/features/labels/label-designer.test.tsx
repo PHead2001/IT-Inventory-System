@@ -148,6 +148,242 @@ beforeEach(() => {
   vi.stubGlobal('print', vi.fn());
 });
 
+it('retains a queue with invalid cached geometry and blocks its preview until explicit reset', async () => {
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [
+        {
+          kind: quantity.kind,
+          key: quantity.key,
+          copies: 3,
+          baselineTag: null,
+          baselineState: 'active',
+          lifecycleAcknowledged: true,
+        },
+      ],
+      filters: defaultFilters,
+      job: {
+        ...defaultJob,
+        layout: {
+          version: 1,
+          mode: 'single',
+          labelWidth: null,
+          labelHeight: 350,
+        },
+      },
+    }),
+  );
+  render(<LabelDesigner {...props} initial={[]} />);
+  expect(
+    await screen.findByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '3 labels',
+  );
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.job.layout.labelWidth).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries[0].copies,
+  ).toBe(3);
+});
+
+it('invalid raw geometry revokes print authorization without another inventory fetch', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const calls = mocks.getQueueRecords.mock.calls.length;
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'sheet' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const before = document
+    .querySelector('.label-print-root')
+    ?.getAttribute('data-sheet-generation');
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.' },
+  });
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls);
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.1' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(
+    document
+      .querySelector('.label-print-root')
+      ?.getAttribute('data-sheet-generation'),
+  ).not.toBe(before);
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls);
+});
+
+it('changing barcode type preserves an invalid raw media draft and blocks preview', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'sheet' },
+  });
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.' },
+  });
+  expect(printButton()).toBeDisabled();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'code128',
+  );
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('90.');
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(printButton()).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.1' },
+  });
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+});
+
+it('changing barcode type preserves invalid cached media until explicit reset', async () => {
+  const badLayout = {
+    version: 1,
+    mode: 'single',
+    labelWidth: null,
+    labelHeight: 350,
+  };
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: { ...defaultJob, layout: badLayout },
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  expect(
+    await screen.findByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'code128',
+  );
+  expect(
+    screen.getByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(printButton()).toBeDisabled();
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.job.layout).toEqual(badLayout);
+  expect(saved.job.format).toBe('code128');
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+});
+
+it('cancels a final authorized read when media changes, then revalidates the new print', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let resolve!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(printButton());
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '80' },
+  });
+  await act(async () => {
+    resolve([quantity, asset]);
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const calls = mocks.getQueueRecords.mock.calls.length;
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls + 1);
+});
+
+it('cancels readiness while an image decode is outstanding after a media edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const image = document.createElement('img');
+  image.src = 'data:image/png;base64,decode';
+  Object.defineProperties(image, {
+    complete: { value: true },
+    naturalWidth: { value: 320 },
+  });
+  let finish!: () => void;
+  image.decode = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  document.querySelector('.label-card')!.append(image);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(image.decode).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByLabelText('Label height (mm)'), {
+    target: { value: '40' },
+  });
+  await act(async () => {
+    finish();
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+});
+
+it('synchronously revokes the one-lifecycle grant before a media edit can reuse beforeprint', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let authorization: string | undefined;
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+        target: { value: '90.' },
+      });
+      window.dispatchEvent(new Event('beforeprint'));
+      authorization =
+        document.querySelector<HTMLElement>('.label-print-root')?.dataset
+          .printAuthorized;
+    }),
+  );
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(authorization).toBeUndefined();
+  expect(printButton()).toBeDisabled();
+});
+
 it('omits empty search paging without changing the existing label queue', async () => {
   render(<LabelDesigner {...props} />);
   expect(
