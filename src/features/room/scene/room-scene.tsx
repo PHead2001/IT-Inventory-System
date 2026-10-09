@@ -53,7 +53,7 @@ import {
   type LocationOccupancy,
 } from '../occupancy-contract';
 import { exposedTargetAnchor } from './exposed-anchor';
-import { createInitialFramePolicy } from './initial-frame';
+import { createInitialFramePolicy, hasMeasuredViewport } from './initial-frame';
 import { RoomLabelHtml } from './room-label-html';
 import { SafeCanvas as Canvas } from './safe-canvas';
 import {
@@ -556,7 +556,7 @@ export function finishFocusAnimation(
   camera.zoom = motion.toZoom;
   camera.updateProjectionMatrix();
 }
-function CameraRig({
+export function CameraRig({
   room,
   bindings,
   focusRequest,
@@ -746,8 +746,7 @@ function CameraRig({
     if (
       !(camera instanceof OrthographicCamera) ||
       !controls.current ||
-      size.width <= 0 ||
-      size.height <= 0
+      !hasMeasuredViewport(size.width, size.height)
     )
       return;
     const freshRoom = initializedRoom.current !== room;
@@ -869,7 +868,10 @@ function CameraRig({
       lastFocusRequest.current.room === room
     )
       return;
-    if (size.width <= 0 || size.height <= 0 || initializedRoom.current !== room)
+    if (
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
+    )
       return;
     lastFocusRequest.current = { ...focusRequest, room };
     if (focusRequest.code || focusRequest.requestId > 0)
@@ -945,7 +947,8 @@ function CameraRig({
       !command.id ||
       command.id === lastCommandId.current ||
       !(camera instanceof OrthographicCamera) ||
-      !controls.current
+      !controls.current ||
+      !hasMeasuredViewport(size.width, size.height)
     )
       return;
     initialFrame.current.manual();
@@ -1017,6 +1020,8 @@ function CameraRig({
   }, [
     command,
     camera,
+    size.width,
+    size.height,
     initialTarget,
     room,
     currentFrame,

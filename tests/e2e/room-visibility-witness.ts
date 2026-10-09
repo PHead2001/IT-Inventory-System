@@ -3,6 +3,8 @@ import {
   Matrix4,
   Ray,
   Vector3,
+  RGBAFormat,
+  UnsignedByteType,
   type Scene,
   type Camera,
   type WebGLRenderer,
@@ -82,146 +84,208 @@ export async function observeRoomScene(page: Page) {
 
 /** Capture once after settling: no frame subscriptions, scene/camera writes or flags. */
 export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
-  return page.evaluate(() => {
-    if ((window.__roomWitnessStores?.size ?? 0) > 8)
-      throw new Error('Room witness root bound exceeded');
-    const canvas = document.querySelector('[data-room-surface] canvas');
-    const states = [...(window.__roomWitnessStores ?? [])]
-      .map((store) => store.getState())
-      .filter((state) => state.gl.domElement === canvas);
-    if (states.length !== 1)
-      throw new Error(
-        'Actual R3F scene capture unavailable: expected one committed canvas store',
-      );
-    const { scene, camera } = states[0];
-    const triangles: WitnessTriangle[] = [];
-    let objects = 0;
-    scene.traverse((object) => {
-      if (++objects > 5000)
-        throw new Error('Room witness object bound exceeded');
-      if (!('isMesh' in object) || !object.isMesh) return;
-      for (
-        let parent: import('three').Object3D | null = object;
-        parent;
-        parent = parent.parent
-      )
-        if (!parent.visible) return;
-      const mesh = object as import('three').Mesh;
-      if ('isInstancedMesh' in mesh || 'isSkinnedMesh' in mesh)
+  return page.evaluate(
+    ({ rgbaFormat, unsignedByteType }) => {
+      if ((window.__roomWitnessStores?.size ?? 0) > 8)
+        throw new Error('Room witness root bound exceeded');
+      const canvas = document.querySelector('[data-room-surface] canvas');
+      const states = [...(window.__roomWitnessStores ?? [])]
+        .map((store) => store.getState())
+        .filter((state) => state.gl.domElement === canvas);
+      if (states.length !== 1)
         throw new Error(
-          'Room witness requires supported unskinned noninstanced geometry',
+          'Actual R3F scene capture unavailable: expected one committed canvas store',
         );
-      const position = mesh.geometry.getAttribute('position');
-      if (!position || position.itemSize !== 3)
-        throw new Error('Room witness position geometry unavailable');
-      const materials = Array.isArray(mesh.material)
-        ? mesh.material
-        : [mesh.material];
-      const groups = mesh.geometry.groups.length
-        ? mesh.geometry.groups
-        : Array.isArray(mesh.material)
-          ? [] // Three draws material arrays only through geometry groups.
-          : [
-              {
-                start: 0,
-                count: mesh.geometry.index?.count ?? position.count,
-                materialIndex: 0,
-              },
-            ];
-      let code: string | null = null;
-      for (
-        let parent: import('three').Object3D | null = mesh;
-        parent;
-        parent = parent.parent
-      ) {
-        const owner = parent.userData.roomHoverTarget as
-          { code?: string } | undefined;
-        if (owner?.code) {
-          code = owner.code;
-          break;
-        }
-      }
-      const matrix = mesh.matrixWorld.elements;
-      const point = (index: number) => {
-        const x = position.getX(index),
-          y = position.getY(index),
-          z = position.getZ(index);
-        return [
-          matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
-          matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
-          matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14],
-        ];
-      };
-      const drawStart = mesh.geometry.drawRange.start;
-      const drawEnd = Math.min(
-        mesh.geometry.index?.count ?? position.count,
-        drawStart + mesh.geometry.drawRange.count,
-      );
-      for (const group of groups) {
-        const material = materials[group.materialIndex ?? 0];
-        if (!material)
-          throw new Error('Room witness material group unavailable');
+      const { scene, camera } = states[0];
+      const triangles: WitnessTriangle[] = [];
+      let objects = 0;
+      let alphaTexels = 0;
+      const alphaBounds = new Map<import('three').Texture, [number, number]>();
+      const textureAlpha = (
+        texture: import('three').Texture,
+      ): [number, number] => {
+        const previous = alphaBounds.get(texture);
+        if (previous) return previous;
+        const image = texture.image as
+          { width?: number; height?: number; data?: unknown } | undefined;
+        const width = image?.width ?? 0,
+          height = image?.height ?? 0;
+        const texels = width * height;
         if (
-          !material.visible ||
-          material.opacity <= 0 ||
-          (material.transparent && material.opacity < 0.99)
+          !('isDataTexture' in texture) ||
+          !texture.isDataTexture ||
+          texture.format !== rgbaFormat ||
+          texture.type !== unsignedByteType ||
+          !Number.isSafeInteger(width) ||
+          !Number.isSafeInteger(height) ||
+          width <= 0 ||
+          height <= 0 ||
+          texels > 262144 ||
+          alphaTexels + texels > 262144 ||
+          !(image?.data instanceof Uint8Array) ||
+          image.data.length !== texels * 4 ||
+          texture.mipmaps.length
         )
-          continue;
-        if ('wireframe' in material && material.wireframe) continue;
-        if (
-          ('alphaMap' in material && material.alphaMap) ||
-          material.alphaTest > 0
-        )
-          throw new Error('Room witness opaque alpha coverage is unsupported');
-        if (![0, 1, 2].includes(material.side))
-          throw new Error('Room witness material side is unsupported');
-        const start = Math.max(group.start, drawStart),
-          end = Math.min(group.start + group.count, drawEnd);
-        if (start % 3 || (end - start) % 3)
-          throw new Error('Room witness nontriangle draw range');
-        for (let offset = start; offset < end; offset += 3) {
-          const vertices = (
-            mesh.matrixWorld.determinant() < 0 ? [0, 2, 1] : [0, 1, 2]
-          ).flatMap((delta) =>
-            point(mesh.geometry.index?.getX(offset + delta) ?? offset + delta),
+          throw new Error(
+            'Room witness alpha coverage resource is unsupported or exceeds bounds',
           );
-          if (vertices.some((value) => !Number.isFinite(value)))
-            throw new Error('Room witness nonfinite vertex');
-          triangles.push({ code, side: material.side, vertices });
-          if (triangles.length > 25000)
-            throw new Error('Room witness triangle bound exceeded');
+        alphaTexels += texels;
+        let min = 255,
+          max = 0;
+        for (let offset = 3; offset < image.data.length; offset += 4) {
+          min = Math.min(min, image.data[offset]);
+          max = Math.max(max, image.data[offset]);
         }
-      }
-    });
-    if (!triangles.length)
-      throw new Error('Room witness captured no opaque triangles');
-    const rect = canvas!.getBoundingClientRect();
-    const snapshot = {
-      triangles,
-      view: [...camera.matrixWorldInverse.elements],
-      projection: [...camera.projectionMatrix.elements],
-      frame: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      masks: [
-        ...document.querySelectorAll<HTMLElement>('[data-room-obstruction]'),
-      ]
-        .filter((element) => element.getClientRects().length > 0)
-        .map((element) => {
-          const rect = element.getBoundingClientRect();
-          return {
-            left: rect.left,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-          };
-        }),
-    };
-    if (
-      new TextEncoder().encode(JSON.stringify(snapshot)).byteLength >
-      8 * 1024 * 1024
-    )
-      throw new Error('Room witness serialized byte bound exceeded');
-    return snapshot;
-  });
+        const bounds: [number, number] = [min / 255, max / 255];
+        alphaBounds.set(texture, bounds);
+        return bounds;
+      };
+      scene.traverse((object) => {
+        if (++objects > 5000)
+          throw new Error('Room witness object bound exceeded');
+        if (!('isMesh' in object) || !object.isMesh) return;
+        for (
+          let parent: import('three').Object3D | null = object;
+          parent;
+          parent = parent.parent
+        )
+          if (!parent.visible) return;
+        const mesh = object as import('three').Mesh;
+        if ('isInstancedMesh' in mesh || 'isSkinnedMesh' in mesh)
+          throw new Error(
+            'Room witness requires supported unskinned noninstanced geometry',
+          );
+        const position = mesh.geometry.getAttribute('position');
+        if (!position || position.itemSize !== 3)
+          throw new Error('Room witness position geometry unavailable');
+        const materials = Array.isArray(mesh.material)
+          ? mesh.material
+          : [mesh.material];
+        const groups = mesh.geometry.groups.length
+          ? mesh.geometry.groups
+          : Array.isArray(mesh.material)
+            ? [] // Three draws material arrays only through geometry groups.
+            : [
+                {
+                  start: 0,
+                  count: mesh.geometry.index?.count ?? position.count,
+                  materialIndex: 0,
+                },
+              ];
+        let code: string | null = null;
+        for (
+          let parent: import('three').Object3D | null = mesh;
+          parent;
+          parent = parent.parent
+        ) {
+          const owner = parent.userData.roomHoverTarget as
+            { code?: string } | undefined;
+          if (owner?.code) {
+            code = owner.code;
+            break;
+          }
+        }
+        const matrix = mesh.matrixWorld.elements;
+        const point = (index: number) => {
+          const x = position.getX(index),
+            y = position.getY(index),
+            z = position.getZ(index);
+          return [
+            matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
+            matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
+            matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14],
+          ];
+        };
+        const drawStart = mesh.geometry.drawRange.start;
+        const drawEnd = Math.min(
+          mesh.geometry.index?.count ?? position.count,
+          drawStart + mesh.geometry.drawRange.count,
+        );
+        for (const group of groups) {
+          const material = Array.isArray(mesh.material)
+            ? materials[group.materialIndex ?? 0]
+            : mesh.material;
+          if (!material)
+            throw new Error('Room witness material group unavailable');
+          if (
+            !material.visible ||
+            material.opacity <= 0 ||
+            (material.transparent && material.opacity < 0.99)
+          )
+            continue;
+          if ('wireframe' in material && material.wireframe) continue;
+          if (
+            ('alphaMap' in material && material.alphaMap) ||
+            material.alphaTest > 0
+          )
+            throw new Error(
+              'Room witness opaque alpha coverage is unsupported',
+            );
+          if (material.transparent && 'map' in material && material.map) {
+            const [min, max] = textureAlpha(
+              material.map as import('three').Texture,
+            );
+            // Filtered alpha cannot exceed the maximum actual texel alpha. Mixed
+            // opaque/nonopaque coverage needs a pixel oracle this helper lacks.
+            if (max * material.opacity < 0.99) continue;
+            if (min * material.opacity < 0.99)
+              throw new Error(
+                'Room witness mixed alpha coverage is unsupported',
+              );
+          }
+          if (![0, 1, 2].includes(material.side))
+            throw new Error('Room witness material side is unsupported');
+          const start = Math.max(group.start, drawStart),
+            end = Math.min(group.start + group.count, drawEnd);
+          if (start % 3 || (end - start) % 3)
+            throw new Error('Room witness nontriangle draw range');
+          for (let offset = start; offset < end; offset += 3) {
+            const vertices = (
+              mesh.matrixWorld.determinant() < 0 ? [0, 2, 1] : [0, 1, 2]
+            ).flatMap((delta) =>
+              point(
+                mesh.geometry.index?.getX(offset + delta) ?? offset + delta,
+              ),
+            );
+            if (vertices.some((value) => !Number.isFinite(value)))
+              throw new Error('Room witness nonfinite vertex');
+            triangles.push({ code, side: material.side, vertices });
+            if (triangles.length > 25000)
+              throw new Error('Room witness triangle bound exceeded');
+          }
+        }
+      });
+      if (!triangles.length)
+        throw new Error('Room witness captured no opaque triangles');
+      const rect = canvas!.getBoundingClientRect();
+      const snapshot = {
+        triangles,
+        view: [...camera.matrixWorldInverse.elements],
+        projection: [...camera.projectionMatrix.elements],
+        frame: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        masks: [
+          ...document.querySelectorAll<HTMLElement>('[data-room-obstruction]'),
+        ]
+          .filter((element) => element.getClientRects().length > 0)
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+            };
+          }),
+      };
+      if (
+        new TextEncoder().encode(JSON.stringify(snapshot)).byteLength >
+        8 * 1024 * 1024
+      )
+        throw new Error('Room witness serialized byte bound exceeded');
+      return snapshot;
+    },
+    { rgbaFormat: RGBAFormat, unsignedByteType: UnsignedByteType },
+  );
 }
 
 /** Independent bounded ray/triangle oracle. No production visibility helper. */

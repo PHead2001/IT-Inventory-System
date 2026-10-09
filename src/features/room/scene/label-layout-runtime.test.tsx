@@ -67,6 +67,92 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('keeps placement pending through actual centered full/compact CSS measurement and preserves focused neighbors', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const measured: { compact: boolean; pending: string | undefined }[] = [];
+    const make = (left: number) => {
+      const item = label(host),
+        full = document.createElement('span');
+      full.dataset.roomLabelFull = 'true';
+      item.element.append(full);
+      vi.spyOn(full, 'getBoundingClientRect').mockReturnValue({
+        ...viewport,
+        width: 122,
+        height: 32,
+      });
+      vi.mocked(item.element.getBoundingClientRect).mockImplementation(() => {
+        const compact = item.element.dataset.labelCompact === 'true';
+        measured.push({ compact, pending: canvas.dataset.labelLayoutPending });
+        const width = compact ? 44 : 140,
+          height = 44;
+        const dx = Number(item.element.dataset.labelDx ?? 0),
+          dy = Number(item.element.dataset.labelDy ?? 0);
+        // Html center translates by half the changing button dimensions.
+        const x = left + (140 - width) / 2 + dx,
+          y = 28 + dy;
+        return {
+          ...viewport,
+          left: x,
+          right: x + width,
+          top: y,
+          bottom: y + height,
+          width,
+          height,
+        };
+      });
+      return item;
+    };
+    const a = make(70),
+      b = make(78),
+      registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas);
+    const options = {
+      priority: 3,
+      mandatory: true,
+      compact: true,
+      locationCode: 'A',
+    };
+    const unregister = registry.register('a', a.element, a.leader, options);
+    registry.register('b', b.element, b.leader, {
+      ...options,
+      locationCode: 'B',
+    });
+    a.element.focus();
+    flush();
+    expect(
+      measured.every((measurement) => measurement.pending === 'true'),
+    ).toBe(true);
+    expect(measured.some((measurement) => measurement.compact)).toBe(true);
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    const first = a.element.getBoundingClientRect(),
+      neighbor = b.element.getBoundingClientRect();
+    for (const rect of [first, neighbor]) {
+      expect(rect.left).toBeGreaterThanOrEqual(2);
+      expect(rect.right).toBeLessThanOrEqual(158);
+      expect(rect.width).toBe(44);
+    }
+    expect(
+      first.right + 3 <= neighbor.left ||
+        neighbor.right + 3 <= first.left ||
+        first.bottom + 3 <= neighbor.top ||
+        neighbor.bottom + 3 <= first.top,
+    ).toBe(true);
+    unregister();
+    registry.register('a', a.element, a.leader, {
+      ...options,
+      preferFull: true,
+      inspection: 'focus',
+    });
+    flush();
+    expect(a.element).toHaveFocus();
+    expect(b.element.getBoundingClientRect()).toEqual(neighbor);
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
   it('retains a displaced marker across effect cleanup and focus registration without moving its neighbor', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
@@ -190,6 +276,47 @@ describe('unified room label registry', () => {
     expect(queue).toHaveLength(0);
     cleanup();
     expect(canvas.dataset.labelLayoutPending).toBeUndefined();
+  });
+  it('fails explicitly at the synchronous remeasurement bound instead of publishing unstable placement', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    let reads = 0;
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => ({
+      ...viewport,
+      width: ++reads % 2 ? 40 : 41,
+      height: 18,
+    }));
+    const notify = vi.fn(),
+      registry = createRoomLabelRegistry(notify),
+      cleanup = registry.connect(canvas);
+    registry.register('unstable', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+    });
+    flush();
+    expect(reads).toBe(8);
+    expect(canvas.dataset.labelLayoutPending).toBe('true');
+    expect(canvas.dataset.labelLayoutError).toMatch(/four placement passes/);
+    expect(canvas.dataset.labelLayoutRevision).toBeUndefined();
+    expect(notify).not.toHaveBeenCalled();
+    expect(queue).toHaveLength(0);
+    vi.mocked(full.getBoundingClientRect).mockReturnValue({
+      ...viewport,
+      width: 40,
+      height: 18,
+    });
+    registry.schedule();
+    flush();
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(canvas.dataset.labelLayoutError).toBeUndefined();
+    cleanup();
   });
   it('remeasures after font readiness and font changes, then removes that subscription', async () => {
     const previous = Object.getOwnPropertyDescriptor(document, 'fonts');
