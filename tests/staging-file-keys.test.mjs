@@ -46,6 +46,82 @@ const backend = { fingerprint: 'c'.repeat(64), updatedAt: 10 };
 const revision = migrationRevision(
   STAGING_FILE_MIGRATIONS.map((version) => ({ version })),
 );
+
+test('shared staging environment reads retain globals and exact staging scopes beyond 100 project rows', async () => {
+  const global = {
+    id: 'global',
+    key: 'INVENTORY_FILE_KEYS_JSON',
+    target: ['preview'],
+  };
+  const exact = {
+    id: 'exact',
+    key: 'UNRELATED',
+    gitBranch: 'staging',
+    target: ['production'],
+    customEnvironmentIds: ['custom'],
+  };
+  const response = {
+    envs: [
+      global,
+      exact,
+      ...Array.from({ length: 110 }, (_, i) => ({
+        id: `other_${i}`,
+        key: 'UNRELATED',
+        gitBranch: `other/${i}`,
+      })),
+    ],
+    hiddenProductionEnvCount: 3,
+  };
+  const providers = stagingFileProviders({
+    currentDeployment: async () => {},
+    runtimeBinding: async () => {},
+    request: async () => response,
+  });
+  const projected = await providers.vercel.envs('staging');
+  assert.deepEqual(projected.envs, [global, exact]);
+  assert.equal(projected.hiddenProductionEnvCount, 3);
+  assert.throws(() => selectStagingFileEnv(projected), {
+    code: 'STAGING_ENV_OWNERSHIP',
+  });
+});
+
+test('canonical staging guards pass the explicit staging branch on every environment read', async () => {
+  const f = fixture(),
+    branches = [],
+    envs = f.options.vercel.envs;
+  f.options.vercel.envs = async (branch) => {
+    branches.push(branch);
+    return envs();
+  };
+  await provisionStagingFiles(f.options);
+  assert.ok(branches.length >= 4);
+  assert.ok(branches.every((branch) => branch === 'staging'));
+});
+
+test('shared staging environment reads refuse duplicate global/exact/foreign identities before filtering', async () => {
+  for (const branches of [
+    ['staging', 'other'],
+    [null, 'other'],
+    ['other', 'another'],
+    ['staging', 'staging'],
+  ]) {
+    const pair = branches.map((gitBranch) => ({
+      id: 'conflicting-provider-id',
+      key: 'UNRELATED',
+      gitBranch,
+    }));
+    for (const rows of [pair, [...pair].reverse()]) {
+      const providers = stagingFileProviders({
+        currentDeployment: async () => {},
+        runtimeBinding: async () => {},
+        request: async () => ({ envs: rows }),
+      });
+      await assert.rejects(providers.vercel.envs('staging'), {
+        code: 'FILE_ENV_BOUNDS',
+      });
+    }
+  }
+});
 test('local catalog drift produces a review artifact, fails and leaves expectations untouched', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'staging-routine-candidate-'));
   try {

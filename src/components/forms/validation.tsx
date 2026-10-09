@@ -11,13 +11,6 @@ export function RequiredMark() {
     </span>
   );
 }
-export function RequiredFieldsNote() {
-  return (
-    <p className="text-sm text-slate-400">
-      Fields marked * or (required) are required. Other fields are optional.
-    </p>
-  );
-}
 
 function focusField(id: string) {
   const target = document.getElementById(id);

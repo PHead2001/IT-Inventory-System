@@ -39,6 +39,44 @@ it('authenticates once and shares one lazy location read across concurrent scope
   );
 });
 
+it('binds count reads to this scope without reauthorization or cross-scope clients', async () => {
+  const first = client();
+  const second = client();
+  first.rpc.mockResolvedValue({
+    data: [{ location_code: 'ITC-D01', entry_count: '1' }],
+    error: null,
+  });
+  second.rpc.mockResolvedValue({
+    data: [{ location_code: 'ITC-D01', entry_count: '2' }],
+    error: null,
+  });
+  mocks.member
+    .mockResolvedValueOnce({ member: { user_id: 'first' }, supabase: first })
+    .mockResolvedValueOnce({ member: { user_id: 'second' }, supabase: second });
+  const [a, b] = await Promise.all([
+    createInventoryReadScope(),
+    createInventoryReadScope(),
+  ]);
+  expect(
+    await Promise.all([
+      a.getLocationEntryCounts(['ITC-D01']),
+      b.getLocationEntryCounts(['ITC-D01']),
+    ]),
+  ).toEqual([{ 'ITC-D01': '1' }, { 'ITC-D01': '2' }]);
+  expect(mocks.member).toHaveBeenCalledTimes(2);
+  for (const supabase of [first, second]) {
+    expect(supabase.rpc).toHaveBeenCalledExactlyOnceWith(
+      'inventory_location_entry_counts',
+      { p_location_codes: ['ITC-D01'] },
+    );
+    expect(supabase.from).not.toHaveBeenCalled();
+  }
+  await expect(
+    a.getLocationEntryCounts(['ITC-D01', 'ITC-D01']),
+  ).rejects.toThrow('Invalid location count request');
+  expect(first.rpc).toHaveBeenCalledOnce();
+});
+
 it('keeps overlapping actor scopes separate and rechecks membership on a later request', async () => {
   const first = client();
   const second = client();

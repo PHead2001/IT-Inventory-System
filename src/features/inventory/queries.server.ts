@@ -28,6 +28,7 @@ import {
   previewSearchBatch,
 } from '@/features/metadata/queries.server';
 import { containingSpace } from '@/features/room/spaces';
+import { readLocationEntryCounts } from '@/features/room/occupancy.server';
 
 const dashboardSchema = z.object({
   configured_count: z.number().int().nonnegative(),
@@ -107,6 +108,8 @@ export async function createInventoryReadScope() {
   return {
     member: context.member,
     getLocations: getScopedLocations,
+    getLocationEntryCounts: (codes: string[]) =>
+      readLocationEntryCounts(context, codes),
     getInventory: (input: Record<string, string | undefined> = {}) =>
       readInventory(context, input, getScopedLocations),
   };

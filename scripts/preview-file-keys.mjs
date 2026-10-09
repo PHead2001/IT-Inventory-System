@@ -194,11 +194,11 @@ export async function provisionPreviewFiles(options) {
   await guard();
   options = { ...options, expectedSha: pr.head.sha };
   const id = `pvf${child}`;
-  selectFileEnv(await vercel.envs(), pr.head.ref);
+  selectFileEnv(await vercel.envs(pr.head.ref), pr.head.ref);
   let key = assertKey(await database.read(child, id), id);
   if (!key) {
     await guard();
-    selectFileEnv(await vercel.envs(), pr.head.ref);
+    selectFileEnv(await vercel.envs(pr.head.ref), pr.head.ref);
     try {
       await database.stage(
         child,
@@ -219,7 +219,7 @@ export async function provisionPreviewFiles(options) {
     sha: pr.head.sha,
     child,
   };
-  let env = selectFileEnv(await vercel.envs(), base.branch);
+  let env = selectFileEnv(await vercel.envs(base.branch), base.branch);
   const marker = parseIntent(env?.comment);
   const sameGeneration =
     marker?.child === child && marker.generation === generation;
@@ -252,7 +252,7 @@ export async function provisionPreviewFiles(options) {
   if (!sameOperation && deployment) fail('FILE_DEPLOYMENT_UNCERTAIN');
 
   const exactEnv = async () => {
-    const fresh = selectFileEnv(await vercel.envs(), base.branch);
+    const fresh = selectFileEnv(await vercel.envs(base.branch), base.branch);
     if (
       fresh?.id !== env?.id ||
       fresh?.comment !== env?.comment ||
@@ -290,7 +290,7 @@ export async function provisionPreviewFiles(options) {
       // A committed marker without a deployment remains uncertain on rerun.
       fail('FILE_ENV_WRITE_UNCERTAIN');
     }
-    env = selectFileEnv(await vercel.envs(), base.branch);
+    env = selectFileEnv(await vercel.envs(base.branch), base.branch);
     if (
       !env ||
       (previousId && env.id !== previousId) ||

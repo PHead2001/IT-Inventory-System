@@ -165,7 +165,7 @@ export async function provisionStagingFiles(options) {
   )
     fail('STAGING_INPUT_DENIED');
   let backend;
-  let env = selectStagingFileEnv(await vercel.envs());
+  let env = selectStagingFileEnv(await vercel.envs(STAGING_BRANCH));
   let deployment;
   let key;
   let context;
@@ -285,7 +285,8 @@ export async function provisionStagingFiles(options) {
     fail('STAGING_KEY_OWNERSHIP');
   if (!key) {
     await guard();
-    if (selectStagingFileEnv(await vercel.envs())) fail('STAGING_ENV_CHANGED');
+    if (selectStagingFileEnv(await vercel.envs(STAGING_BRANCH)))
+      fail('STAGING_ENV_CHANGED');
     try {
       await database.stage(
         STAGING_REF,
@@ -339,7 +340,7 @@ export async function provisionStagingFiles(options) {
   deployment = selectDeployment(await vercel.deployments(context), context);
   if (sameOperation === !deployment) fail('STAGING_DEPLOYMENT_UNCERTAIN', true);
   const exact = async (expectedKey = keySnapshot) => {
-    const freshEnv = selectStagingFileEnv(await vercel.envs());
+    const freshEnv = selectStagingFileEnv(await vercel.envs(STAGING_BRANCH));
     if (
       freshEnv?.id !== env?.id ||
       freshEnv?.comment !== env?.comment ||
@@ -383,7 +384,7 @@ export async function provisionStagingFiles(options) {
     } catch {
       fail('STAGING_ENV_WRITE_UNCERTAIN', true);
     }
-    env = selectStagingFileEnv(await vercel.envs());
+    env = selectStagingFileEnv(await vercel.envs(STAGING_BRANCH));
     if (!env || (oldId && oldId !== env.id) || env.comment !== context.intent)
       fail('STAGING_ENV_WRITE_UNCERTAIN', true);
     context.intentUpdatedAt = env.updatedAt;

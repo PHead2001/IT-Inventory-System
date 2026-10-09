@@ -92,6 +92,55 @@ async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   ).toBeVisible();
 }
 
+async function chooseMapMode(page: Page, mode: 'Guided' | 'Free Orbit') {
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  const wasOpen = (await more.getAttribute('aria-expanded')) === 'true';
+  if (!wasOpen) await more.click();
+  await page
+    .getByRole('region', { name: 'More map controls', exact: true })
+    .getByRole('button', { name: mode, exact: true })
+    .click();
+  if (!wasOpen) await more.click();
+}
+async function recenterMap(page: Page) {
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  const wasOpen = (await more.getAttribute('aria-expanded')) === 'true';
+  if (!wasOpen) await more.click();
+  await page.getByRole('button', { name: 'Recenter', exact: true }).click();
+  if (!wasOpen) await more.click();
+}
+async function activateMap(page: Page) {
+  if (await page.locator('canvas[data-map-active="true"]').count()) return;
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  let activation = page
+    .getByRole('button', { name: 'Interact with map', exact: true })
+    .filter({ visible: true });
+  const needsOverflow = (await activation.count()) === 0;
+  const wasOpen = (await more.getAttribute('aria-expanded')) === 'true';
+  if (needsOverflow && !wasOpen) await more.click();
+  activation = page
+    .getByRole('button', { name: 'Interact with map', exact: true })
+    .filter({ visible: true });
+  await activation.evaluate((element) =>
+    element.focus({ preventScroll: true }),
+  );
+  await page.keyboard.press('Enter');
+  if (needsOverflow && !wasOpen) await more.click();
+  await expect(page.locator('canvas')).toHaveAttribute(
+    'data-map-active',
+    'true',
+  );
+}
+
 async function selected(page: Page, code: string) {
   await expect(page).toHaveURL(
     new RegExp('/room\\?.*location=' + code + '(?:&|$)'),
@@ -122,6 +171,12 @@ async function chooseRoomLocation(page: Page, code: string) {
   await browser.getByRole('button', { name: new RegExp(`${code}$`) }).click();
 }
 
+async function settledLabels(page: Page) {
+  await expect(
+    page.locator('[aria-label="Interactive room canvas"] canvas'),
+  ).toHaveAttribute('data-label-layout-pending', 'false');
+}
+
 async function ready(page: Page) {
   const show = page.getByRole('button', { name: 'Show room', exact: true });
   if (await show.isVisible()) await show.click();
@@ -132,6 +187,223 @@ async function ready(page: Page) {
   await expect(viewer.locator('canvas')).toBeVisible();
   return viewer;
 }
+
+test('compact map controls preserve page wheel scrolling in passive and active states', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page);
+  await page.goto('/room?location=ITC-S1A');
+  const viewer = await ready(page);
+  // Graphics readiness precedes the initial 300ms selection focus. Observe its
+  // completion before attributing any camera movement to browser input.
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const canvas = viewer.locator('canvas');
+  await page.evaluate(() =>
+    document.addEventListener(
+      'wheel',
+      (event) => {
+        const canvas = document.querySelector('canvas');
+        queueMicrotask(() => {
+          if (canvas)
+            canvas.dataset.lastWheelCancelled = String(event.defaultPrevented);
+        });
+      },
+      { capture: true, passive: true },
+    ),
+  );
+  for (const active of [false, true]) {
+    if (active) await activateMap(page);
+    await canvas.evaluate((element) =>
+      element.scrollIntoView({ block: 'start' }),
+    );
+    const box = await canvas.boundingBox();
+    expect(box).toBeTruthy();
+    const beforeScroll = await page.evaluate(() => window.scrollY);
+    const before = await camera(page);
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + 80);
+    await page.mouse.wheel(0, 160);
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(beforeScroll + 30);
+    await expect(canvas).toHaveAttribute('data-last-wheel-cancelled', 'false');
+    const after = await camera(page);
+    expect(after.zoom).toBeCloseTo(before.zoom, 6);
+    near(after.position, before.position);
+  }
+  await page.keyboard.press('Escape');
+  await expect(canvas).toHaveAttribute('data-map-active', 'false');
+  expect(
+    await canvas.evaluate((element) => getComputedStyle(element).touchAction),
+  ).toBe('auto');
+  for (const width of [375, 390, 640]) {
+    await page.setViewportSize({ width, height: 844 });
+    const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+    const buttons = await toolbar.getByRole('button').all();
+    const boxes = (
+      await Promise.all(buttons.map((button) => button.boundingBox()))
+    ).filter((box) => box !== null);
+    expect(
+      Math.max(...boxes.map((box) => box!.y)) -
+        Math.min(...boxes.map((box) => box!.y)),
+    ).toBeLessThan(2);
+    expect(boxes.every((box) => box!.width >= 44 && box!.height >= 44)).toBe(
+      true,
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const toolbarBox = await toolbar.boundingBox();
+    const canvasBox = await canvas.boundingBox();
+    expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(
+      canvasBox!.y,
+    );
+  }
+});
+
+test('real Chromium touch swipes scroll passively and activated gestures rotate and pinch', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.goto('/room?location=ITC-S1A');
+  const viewer = await ready(page);
+  // Graphics readiness precedes the initial 300ms selection focus. Observe its
+  // completion before attributing any camera movement to browser input.
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+  const canvas = viewer.locator('canvas');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', {
+    enabled: true,
+    maxTouchPoints: 2,
+  });
+  const touch = async (
+    type: 'touchStart' | 'touchMove' | 'touchEnd',
+    points: { x: number; y: number; id: number }[],
+  ) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+  await canvas.evaluate((element) =>
+    element.scrollIntoView({ block: 'start' }),
+  );
+  let box = (await canvas.boundingBox())!;
+  const before = await camera(page);
+  const scroll = await page.evaluate(() => window.scrollY);
+  const x = box.x + box.width / 2;
+  const y = Math.max(100, box.y + 240);
+  await touch('touchStart', [{ x, y, id: 0 }]);
+  for (let step = 1; step <= 8; step++)
+    await touch('touchMove', [{ x, y: y - step * 16, id: 0 }]);
+  await touch('touchEnd', []);
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(scroll + 30);
+  expect((await camera(page)).zoom).toBeCloseTo(before.zoom, 5);
+  near((await camera(page)).position, before.position);
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  await activateMap(page);
+  await canvas.scrollIntoViewIfNeeded();
+  box = (await canvas.boundingBox())!;
+  const center = {
+    x: box.x + box.width / 2,
+    y: Math.max(80, Math.min(700, box.y + box.height / 2)),
+  };
+  const activated = await camera(page);
+  await touch('touchStart', [{ ...center, id: 0 }]);
+  for (let step = 1; step <= 8; step++)
+    await touch('touchMove', [{ x: center.x + step * 10, y: center.y, id: 0 }]);
+  await touch('touchEnd', []);
+  expect(
+    Math.abs((await camera(page)).azimuth - activated.azimuth),
+  ).toBeGreaterThan(0.05);
+  const beforePinch = await camera(page);
+  await touch('touchStart', [
+    { x: center.x - 18, y: center.y, id: 0 },
+    { x: center.x + 18, y: center.y, id: 1 },
+  ]);
+  for (let step = 1; step <= 6; step++)
+    await touch('touchMove', [
+      { x: center.x - 18 - step * 6, y: center.y, id: 0 },
+      { x: center.x + 18 + step * 6, y: center.y, id: 1 },
+    ]);
+  await touch('touchEnd', []);
+  expect((await camera(page)).zoom).toBeGreaterThan(beforePinch.zoom);
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
+  await page.keyboard.press('Escape');
+  await expect(canvas).toHaveAttribute('data-map-active', 'false');
+  await cdp.detach();
+});
+
+test('all visible room text shares collision placement and demand rendering settles', async ({
+  page,
+}) => {
+  test.setTimeout(75_000);
+  await page.addInitScript(() => {
+    const prototype = WebGL2RenderingContext.prototype;
+    const original = prototype.drawElements;
+    prototype.drawElements = function (...args) {
+      const result = original.apply(this, args);
+      if (this.canvas instanceof HTMLCanvasElement)
+        this.canvas.dataset.testDrawCalls = String(
+          Number(this.canvas.dataset.testDrawCalls ?? 0) + 1,
+        );
+      return result;
+    };
+  });
+  await login(page);
+  await page.goto('/room?location=ITC-RED');
+  const viewer = await ready(page);
+  const canvas = viewer.locator('canvas');
+  await page.getByRole('button', { name: 'Fit room' }).click();
+  await page.getByRole('button', { name: 'Show all labels' }).click();
+  for (const width of [1280, 375, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.getByRole('button', { name: 'Fit room' }).click();
+    const labels = viewer.locator(
+      '[data-room-label-code], [data-room-decorative-label], [data-hover-tooltip]',
+    );
+    await expect
+      .poll(() => labels.filter({ visible: true }).count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        const boxes = (
+          await Promise.all(
+            (await labels.filter({ visible: true }).all()).map((label) =>
+              label.boundingBox(),
+            ),
+          )
+        ).filter((box) => box !== null);
+        return boxes.every((box, index) =>
+          boxes
+            .slice(index + 1)
+            .every(
+              (other) =>
+                box!.x + box!.width <= other!.x ||
+                other!.x + other!.width <= box!.x ||
+                box!.y + box!.height <= other!.y ||
+                other!.y + other!.height <= box!.y,
+            ),
+        );
+      })
+      .toBe(true);
+  }
+  let previous = -1;
+  let stable = 0;
+  await expect
+    .poll(
+      async () => {
+        const draws = Number(await canvas.getAttribute('data-test-draw-calls'));
+        stable = draws > 0 && draws === previous ? stable + 1 : 0;
+        previous = draws;
+        return stable;
+      },
+      { intervals: [100, 200, 250] },
+    )
+    .toBeGreaterThanOrEqual(3);
+});
 
 type CameraReading = {
   azimuth: number;
@@ -384,6 +656,17 @@ async function clickSceneLocation(page: Page, code: string, viaLabel = false) {
   // One path exercises the actual canvas mesh, while another exercises the
   // accessible projected label. Both must navigate through the same code contract.
   const label = viewer.locator('[data-location-code="' + code + '"]').first();
+  await settledLabels(page);
+  // Fit may legitimately declutter leaf labels. Reveal this target using real
+  // zoom controls; the label itself must still perform the navigation.
+  for (
+    let zoom = 0;
+    zoom < 4 && (await label.getAttribute('data-label-suppressed')) === 'true';
+    zoom++
+  ) {
+    await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+    await settledLabels(page);
+  }
   await expect(label).toBeVisible();
   await label.scrollIntoViewIfNeeded();
   await expect(label).toBeInViewport();
@@ -493,29 +776,47 @@ test('Free Orbit labels follow exposed storage under actual pointer movement fro
   await login(page);
   await page.goto('/room?location=ITC');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  const toolbar = page.locator('[data-room-surface]');
+  await chooseMapMode(page, 'Free Orbit');
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
-  await toolbar.locator('summary').click();
+  await settledLabels(page);
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const rotate = toolbar.getByRole('button', { name: 'Rotate right' });
   const up = toolbar.getByRole('button', { name: 'Tilt up' });
   const down = toolbar.getByRole('button', { name: 'Tilt down' });
   for (let index = 0; index < 3; index++) await rotate.click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   for (const view of ['oblique', 'overhead', 'underside', 'panned'] as const) {
     if (view === 'overhead') {
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
       for (let index = 0; index < 5; index++) await up.click();
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
     } else if (view === 'underside') {
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
       for (let index = 0; index < 12; index++) await down.click();
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
     } else if (view === 'panned') {
       await toolbar.getByRole('button', { name: 'Fit room' }).click();
-      await toolbar.locator('summary').click();
+      await settledLabels(page);
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
       await toolbar.getByRole('button', { name: 'Pan right' }).click();
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
     }
     const { code } = await hoverAnyVisibleStorage(page);
     expect(code, `visible storage target at ${view}`).toMatch(/^ITC-/);
@@ -534,8 +835,8 @@ test('hover tooltip survives DOM handoff and a stationary pointer tracks camera 
   await login(page);
   await page.goto('/room?location=ITC');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  const toolbar = page.locator('[data-room-surface]');
+  await chooseMapMode(page, 'Free Orbit');
   const { code } = await hoverAnyVisibleStorage(page);
   const tooltip = viewer.locator('[data-hover-tooltip="true"]');
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC');
@@ -547,12 +848,18 @@ test('hover tooltip survives DOM handoff and a stationary pointer tracks camera 
   await page.goto('/room?location=ITC');
   await ready(page);
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
-  await toolbar.locator('summary').click();
+  await settledLabels(page);
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const shelfPoint = await hoverSceneMesh(page, 'ITC-S1A');
   await expect(tooltip).toHaveAttribute('data-location-code', 'ITC-S1A');
   expect(await pointerRayIntersectsBinding(page, shelfPoint, 'ITC-S1A')).toBe(
     true,
   );
+  // Keep the pointer on the DOM handoff while the underlying scene moves;
+  // retaining the button must not retain a location that left the visible ray.
+  await tooltip.hover();
   const canvas = viewer.locator('canvas');
   const pan = toolbar.getByRole('button', { name: 'Pan right' });
   // DOM activation keeps the real pointer fixed. Pan until an independent
@@ -590,6 +897,7 @@ test('hover tooltip survives DOM handoff and a stationary pointer tracks camera 
 
   await page.setViewportSize({ width: 320, height: 640 });
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   await hoverAnyVisibleStorage(page);
   const tooltipBounds = await tooltip.boundingBox();
   const canvasBounds = await canvas.boundingBox();
@@ -639,11 +947,15 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
     has: page.getByRole('link', { name: inventoryName, exact: true }),
   });
   await expect(fixtureRow.getByText('7 units', { exact: true })).toBeVisible();
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  const toolbar = page.locator('[data-room-surface]');
   await toolbar.getByRole('button', { name: 'Show all labels' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const objectLabel = viewer.locator('[data-location-code="ITC-S1A"]').first();
   await expect(objectLabel).toBeVisible();
   const labelBox = await objectLabel.boundingBox();
@@ -661,9 +973,13 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
     ),
     'double-clicking an object must not run floor recenter',
   ).toBeGreaterThan(1);
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const meshBox = await objectLabel.boundingBox();
   expect(meshBox).toBeTruthy();
   const meshPoint = {
@@ -686,6 +1002,7 @@ test('real WebGL room raycasting selects shelf and drawer inventory', async ({
     'double-clicking furniture must not run floor recenter',
   ).toBeGreaterThan(1);
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await settledLabels(page);
   await clickSceneLocation(page, 'ITC-D01', true);
   await expect(
     inventory.getByRole('link', { name: inventoryName, exact: true }),
@@ -705,7 +1022,7 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
     await page.setViewportSize(viewport);
     await page.goto('/room?location=ITC-S1A');
     const viewer = await ready(page);
-    const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+    const toolbar = page.locator('[data-room-surface]');
     await toolbar.getByRole('button', { name: 'Show all labels' }).click();
     for (const code of ['ITC-D01', 'ITC-D04']) {
       const label = viewer.locator(`[data-location-code="${code}"]`).first();
@@ -716,10 +1033,11 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
       await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
       await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
     }
-    await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+    await chooseMapMode(page, 'Free Orbit');
     const clicked = new Set<string>();
     for (let side = 0; side < 4; side++) {
       await toolbar.getByRole('button', { name: 'Fit room' }).click();
+      await settledLabels(page);
       for (const code of ['ITC-D01', 'ITC-D04']) {
         const label = viewer.locator(`[data-location-code="${code}"]`).first();
         if ((await label.getAttribute('data-label-suppressed')) === 'true') {
@@ -738,6 +1056,17 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
           continue;
         }
         await label.scrollIntoViewIfNeeded({ timeout: 3000 });
+        await settledLabels(page);
+        expect(
+          await label.evaluate((element) => {
+            const text = element.firstChild;
+            if (!text) return 0;
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            return range.getClientRects().length;
+          }),
+          'ordinary drawer names remain readable on one line',
+        ).toBe(1);
         const box = await label.boundingBox();
         expect(box, `visible label bounds for ${code}`).toBeTruthy();
         const point = {
@@ -759,11 +1088,16 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
         await expect(viewer).toHaveAttribute('data-selected-code', code);
         clicked.add(code);
         await toolbar.getByRole('button', { name: 'Fit room' }).click();
+        await settledLabels(page);
       }
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
       for (let step = 0; step < 9; step++)
         await toolbar.getByRole('button', { name: 'Rotate right' }).click();
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
     }
     expect(clicked.has('ITC-D01'), 'Drawer 1 label reachable').toBe(true);
     expect(clicked.has('ITC-D04'), 'Drawer 4 label reachable').toBe(true);
@@ -777,13 +1111,18 @@ test('panned camera keeps visible drawer labels clickable', async ({
   await login(page);
   await page.goto('/room');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  const toolbar = page.locator('[data-room-surface]');
   await toolbar.getByRole('button', { name: 'Show all labels' }).click();
   for (const direction of ['Pan right', 'Pan left']) {
     await toolbar.getByRole('button', { name: 'Fit room' }).click();
-    await toolbar.locator('summary').click();
+    await settledLabels(page);
+    await toolbar
+      .getByRole('button', { name: 'More map controls', exact: true })
+      .click();
     await toolbar.getByRole('button', { name: direction }).click();
-    await toolbar.locator('summary').click();
+    await toolbar
+      .getByRole('button', { name: 'More map controls', exact: true })
+      .click();
     let clicked = false;
     for (const code of ['ITC-D01', 'ITC-D04']) {
       const label = viewer.locator(`[data-location-code="${code}"]`).first();
@@ -829,14 +1168,17 @@ test('real controls orbit through both complete turns and preserve selection acr
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
-  await expect(
-    toolbar.getByRole('button', { name: 'Free Orbit' }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  const toolbar = page.locator('[data-room-surface]');
+  await chooseMapMode(page, 'Free Orbit');
+  await expect(viewer.locator('canvas')).toHaveAttribute(
+    'data-orbit-mode',
+    'free',
+  );
   const start = await camera(page);
   expect(start.mode).toBe('free');
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const right = toolbar.getByRole('button', { name: 'Rotate right' });
   const left = toolbar.getByRole('button', { name: 'Rotate left' });
   const raw: number[] = [start.azimuth];
@@ -857,13 +1199,21 @@ test('real controls orbit through both complete turns and preserve selection acr
     2 * Math.PI,
   );
   near(counterclockwise.target, start.target);
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await viewer.locator('canvas').scrollIntoViewIfNeeded();
   const bounds = await viewer.locator('canvas').boundingBox();
   expect(bounds).toBeTruthy();
   const y = bounds!.y + bounds!.height * 0.48;
   await page.mouse.move(bounds!.x + bounds!.width * 0.72, y);
+  await activateMap(page);
   await page.mouse.down();
+  await expect(viewer.locator('canvas')).toHaveAttribute(
+    'data-map-active',
+    'true',
+  );
+  await expect(viewer.locator('canvas')).toBeFocused();
   await page.mouse.move(bounds!.x + bounds!.width * 0.28, y, { steps: 12 });
   await page.mouse.up();
   expect(
@@ -872,15 +1222,20 @@ test('real controls orbit through both complete turns and preserve selection acr
   await page.reload();
   await ready(page);
   expect((await camera(page)).mode).toBe('free');
-  await toolbar.getByRole('button', { name: 'Guided' }).click();
+  await chooseMapMode(page, 'Guided');
   const guided = await camera(page);
   expect(guided.mode).toBe('guided');
   expect(Math.abs(guided.azimuth)).toBeLessThanOrEqual(Math.PI / 4 + 0.001);
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
-  await toolbar.locator('summary').click();
+  await settledLabels(page);
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Pan left' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   expect((await camera(page)).target).not.toEqual([42, 35, -63]);
   const floorPoint = await exposedFloorPoint(page);
   await page.screenshot({
@@ -902,28 +1257,38 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
   await login(page);
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
-  await toolbar.locator('summary').click();
+  const toolbar = page.locator('[data-room-surface]');
+  await chooseMapMode(page, 'Free Orbit');
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const up = toolbar.getByRole('button', { name: 'Tilt up' });
   const down = toolbar.getByRole('button', { name: 'Tilt down' });
   for (let step = 0; step < 10; step++) await up.click();
   const top = await camera(page);
   expect(top.elevation).toBeGreaterThan(1.55);
   expect(top.elevation).toBeLessThan(Math.PI / 2);
-  await toolbar.locator('summary').click();
-  await toolbar.getByRole('button', { name: 'Recenter' }).click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  await recenterMap(page);
   expect((await camera(page)).elevation).toBeCloseTo(top.elevation, 4);
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   expect((await camera(page)).elevation).toBeCloseTo(top.elevation, 4);
   await page.screenshot({ path: testInfo.outputPath('desktop-free-top.png') });
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   for (let step = 0; step < 19; step++) await down.click();
   const bottom = await camera(page);
   expect(bottom.elevation).toBeLessThan(-1.55);
   expect(bottom.elevation).toBeGreaterThan(-Math.PI / 2);
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   expect((await camera(page)).elevation).toBeCloseTo(bottom.elevation, 4);
   await page.screenshot({
     path: testInfo.outputPath('desktop-free-bottom.png'),
@@ -953,14 +1318,20 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await page.setViewportSize({ width: 390, height: 844 });
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   expectFramed(await camera(page), 'ITC');
   await viewer.screenshot({
     path: testInfo.outputPath('phone-free-bottom.png'),
   });
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   for (let step = 0; step < 19; step++) await up.click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   expect((await camera(page)).elevation).toBeGreaterThan(1.55);
   expectFramed(await camera(page), 'ITC');
   await viewer.screenshot({ path: testInfo.outputPath('phone-free-top.png') });
@@ -969,17 +1340,21 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
-  await toolbar.getByRole('button', { name: 'Guided' }).click();
+  await chooseMapMode(page, 'Guided');
   const guided = await camera(page);
   expect(guided.elevation).toBeGreaterThanOrEqual((35 * Math.PI) / 180 - 0.001);
   expect(guided.elevation).toBeLessThanOrEqual((70 * Math.PI) / 180 + 0.001);
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   for (let step = 0; step < 8; step++) await down.click();
   expect((await camera(page)).elevation).toBeCloseTo((35 * Math.PI) / 180, 3);
   for (let step = 0; step < 8; step++) await up.click();
   expect((await camera(page)).elevation).toBeCloseTo((70 * Math.PI) / 180, 3);
-  await toolbar.locator('summary').click();
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  await chooseMapMode(page, 'Free Orbit');
   const canvas = viewer.locator('canvas');
   await canvas.scrollIntoViewIfNeeded();
   const frame = await canvas.boundingBox();
@@ -987,7 +1362,13 @@ test('Free Orbit tilts to both poles and below the horizon while Guided clamps b
   const beforeDrag = await camera(page);
   const x = frame!.x + frame!.width * 0.5;
   await page.mouse.move(x, frame!.y + frame!.height * 0.4);
+  await activateMap(page);
   await page.mouse.down();
+  await expect(viewer.locator('canvas')).toHaveAttribute(
+    'data-map-active',
+    'true',
+  );
+  await expect(viewer.locator('canvas')).toBeFocused();
   await page.mouse.move(x, frame!.y + frame!.height * 0.75, { steps: 12 });
   await page.mouse.up();
   expect(
@@ -1005,13 +1386,15 @@ test('recenter restores overview target while preserving orbit, zoom and selecti
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  const toolbar = page.locator('[data-room-surface]');
   await toolbar.getByRole('button', { name: 'Zoom in' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Rotate right' }).click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
   const before = await camera(page);
-  await toolbar.getByRole('button', { name: 'Recenter' }).click();
+  await recenterMap(page);
   const recentered = await camera(page);
   near(recentered.target, [42, 35, -63]);
   expect(recentered.zoom).toBeCloseTo(before.zoom, 5);
@@ -1022,10 +1405,13 @@ test('recenter restores overview target while preserving orbit, zoom and selecti
   );
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   await toolbar.getByRole('button', { name: 'Pan left' }).click();
   const panned = await camera(page);
   expect(panned.target).not.toEqual(recentered.target);
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const floorPoint = await exposedFloorPoint(page);
   await page.mouse.dblclick(floorPoint.x, floorPoint.y);
   const floor = await camera(page);
@@ -1035,6 +1421,7 @@ test('recenter restores overview target while preserving orbit, zoom and selecti
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await page.setViewportSize({ width: 1024, height: 700 });
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
+  await settledLabels(page);
   expectFramed(await camera(page), 'ITC');
   await expect(viewer.locator('canvas')).toBeVisible();
 });
@@ -1064,16 +1451,21 @@ test('root and large aggregate focus fit their geometry at desktop and phone wid
   }
   await page.goto('/room?location=ITC');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  const toolbar = page.locator('[data-room-surface]');
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
-  await toolbar.locator('summary').click();
+  await settledLabels(page);
+  await chooseMapMode(page, 'Free Orbit');
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   for (let step = 0; step < 2; step++)
     await toolbar.getByRole('button', { name: 'Rotate left' }).click();
   expect(Math.abs((await camera(page)).azimuth)).toBeLessThan(0.02);
   for (let step = 0; step < 6; step++)
     await toolbar.getByRole('button', { name: 'Rotate right' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const completed = Number(await viewer.getAttribute('data-focus-count'));
   await toolbar.getByRole('button', { name: 'Center selected' }).click();
   await expect
@@ -1093,14 +1485,18 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   await page.goto('/room?location=ITC-D01');
   const viewer = await ready(page);
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+  const toolbar = page.locator('[data-room-surface]');
   const canvas = viewer.locator('canvas');
   const bounds = await canvas.boundingBox();
   expect(bounds).toBeTruthy();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
   await toolbar.getByRole('button', { name: 'Pan right' }).click();
-  await toolbar.locator('summary').click();
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   const displaced = await camera(page);
   const completedBefore = Number(await viewer.getAttribute('data-focus-count'));
   // CI input delivery can exceed the whole 300 ms animation. Control elapsed
@@ -1117,7 +1513,10 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
     bounds!.x + bounds!.width * 0.5,
     bounds!.y + bounds!.height * 0.5,
   );
+  await activateMap(page);
   await page.mouse.down({ button: 'right' });
+  await expect(canvas).toHaveAttribute('data-map-active', 'true');
+  await expect(canvas).toBeFocused();
   await page.mouse.move(
     bounds!.x + bounds!.width * 0.62,
     bounds!.y + bounds!.height * 0.5,
@@ -1170,8 +1569,8 @@ test('captures four room sides and searchable picker at desktop and phone widths
   await login(page);
   await page.goto('/room?location=ITC-S1A');
   const viewer = await ready(page);
-  const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-  await toolbar.getByRole('button', { name: 'Free Orbit' }).click();
+  const toolbar = page.locator('[data-room-surface]');
+  await chooseMapMode(page, 'Free Orbit');
   await page.screenshot({
     path: testInfo.outputPath('desktop-selected-focus.png'),
   });
@@ -1186,16 +1585,21 @@ test('captures four room sides and searchable picker at desktop and phone widths
     }
     for (const side of ['front', 'right', 'back', 'left'] as const) {
       await toolbar.getByRole('button', { name: 'Fit room' }).click();
+      await settledLabels(page);
       expectFramed(await camera(page), 'ITC');
       const path = testInfo.outputPath(`${width}-${side}.png`);
       if (width === 'desktop') await page.screenshot({ path });
       else await viewer.screenshot({ path });
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
       const initial = (await camera(page)).unwrapped;
       for (let step = 0; step < 9; step++)
         await toolbar.getByRole('button', { name: 'Rotate right' }).click();
       expect((await camera(page)).unwrapped - initial).toBeGreaterThan(1.5);
-      await toolbar.locator('summary').click();
+      await toolbar
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
     }
     const showAll = toolbar.getByRole('button', { name: 'Show all labels' });
     if ((await showAll.getAttribute('aria-pressed')) !== 'true')
@@ -1522,4 +1926,69 @@ test('unavailable WebGL preserves location inventory, search and ordinary detail
       .getByRole('region', { name: 'Location inventory', exact: true })
       .getByRole('link', { name: inventoryName, exact: true }),
   ).toHaveCount(1);
+});
+
+test('optional room counts reconcile with active leaf contents and refresh as uncached snapshots', async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto('/room?space=it-closet&location=ITC-D01');
+  const viewer = page.getByTestId('room-viewer');
+  await expect(viewer.locator('canvas')).toBeVisible();
+  await page
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
+  const toggle = page.getByRole('button', {
+    name: 'Show item counts',
+    exact: true,
+  });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const snapshot = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/room/occupancy?') &&
+      response.status() === 200,
+  );
+  await toggle.click();
+  const countsResponse = await snapshot;
+  expect(countsResponse.headers()['cache-control']).toBe('private, no-store');
+  const counts = await countsResponse.json();
+  expect(counts.counts['ITC-D01']).toMatch(/^[1-9][0-9]*$/);
+  await selected(page, 'ITC-D01');
+  const badgeLabel = viewer.locator('[data-room-label-code="ITC-D01"]');
+  await expect(badgeLabel).toBeVisible();
+  await expect(badgeLabel).toContainText(
+    counts.counts['ITC-D01'] +
+      (counts.counts['ITC-D01'] === '1' ? ' item' : ' items'),
+  );
+  await expect(badgeLabel).toHaveAccessibleName(/active inventory entries/);
+  const contents = await page.request.get(
+    '/api/room/contents?space=it-closet&location=ITC-D01',
+  );
+  expect(contents.ok()).toBe(true);
+  expect(counts.counts['ITC-D01']).toBe(
+    String((await contents.json()).result.total),
+  );
+  await expect(
+    page.getByText(/Counts are a snapshot of active items/),
+  ).toBeVisible();
+  const refreshed = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/room/occupancy?') &&
+      response.status() === 200,
+  );
+  const refreshedContents = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/room/contents?') &&
+      response.status() === 200,
+  );
+  await page
+    .getByRole('button', { name: 'Refresh inventory', exact: true })
+    .click();
+  await refreshed;
+  await refreshedContents;
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(
+    page.getByText(/Counts are a snapshot of active items/),
+  ).toHaveCount(0);
 });

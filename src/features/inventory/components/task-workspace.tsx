@@ -177,9 +177,7 @@ export function TaskWorkspace({
         ) : (
           <details key={group}>
             <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-              {group === 'secondary'
-                ? 'Other tasks'
-                : 'Lifecycle & consequential actions'}
+              {group === 'secondary' ? 'Other tasks' : 'Retire or archive'}
             </summary>
             {controls}
             {descriptions}
