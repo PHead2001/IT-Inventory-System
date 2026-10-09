@@ -38,6 +38,7 @@ export const defaultJob: JobSettings = {
 export const MAX_DISTINCT = 200;
 export const MAX_LABELS = 500;
 export const MAX_COPIES = 100;
+export const MAX_COPY_DRAFT_LENGTH = 80;
 
 export function queueIdentity(value: QueueKey): string {
   return value.kind + ':' + value.key;
@@ -108,13 +109,15 @@ export function parseStoredQueue(
   filters: LabelSearchFilters;
   job: JobSettings;
   layoutRecovery?: { value: unknown };
+  copyDrafts?: Record<string, string>;
 } | null {
   if (!raw || raw.length > 100_000) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return null;
     const stored = value as Record<string, unknown>;
-    if (!Array.isArray(stored.entries)) return null;
+    if (!Array.isArray(stored.entries) || stored.entries.length > MAX_DISTINCT)
+      return null;
     const entries = stored.entries.map((item) => {
       if (!item || typeof item !== 'object') return null;
       const row = item as Record<string, unknown>;
@@ -156,6 +159,22 @@ export function parseStoredQueue(
       : null;
     const layoutRecovery =
       hasLayout && !layout?.success ? { value: job?.layout } : undefined;
+    // Optional drafts never replace validated counts or adopt values after another
+    // entry changes. Preserve blank distinctly from a missing draft on reload.
+    const copyDrafts = Object.fromEntries(
+      (entries as QueueEntry[]).flatMap((entry) => {
+        const id = queueIdentity(entry);
+        const drafts = stored.copyDrafts;
+        if (!drafts || typeof drafts !== 'object' || Array.isArray(drafts))
+          return [];
+        const raw = Object.hasOwn(drafts, id)
+          ? (drafts as Record<string, unknown>)[id]
+          : undefined;
+        return typeof raw === 'string'
+          ? [[id, raw.slice(0, MAX_COPY_DRAFT_LENGTH)]]
+          : [];
+      }),
+    );
     return {
       entries: entries as QueueEntry[],
       filters:
@@ -179,6 +198,7 @@ export function parseStoredQueue(
           }
         : { ...fallbackJob },
       ...(layoutRecovery ? { layoutRecovery } : {}),
+      copyDrafts,
     };
   } catch {
     return null;

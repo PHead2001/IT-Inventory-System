@@ -252,6 +252,20 @@
   font-size: 13px;
   line-height: 1.45;
 }
+.copiesControl {
+  display: grid;
+  gap: 7px;
+  flex: 1 1 180px;
+  min-width: 0;
+  justify-items: start;
+}
+.copyNotice {
+  margin: 0;
+  color: #ffceb5;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .copiesInput {
   width: 72px;
   min-height: 44px;

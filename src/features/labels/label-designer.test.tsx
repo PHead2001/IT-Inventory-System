@@ -114,6 +114,176 @@ const props = {
 const printButton = () =>
   screen.getByRole('button', { name: /Print selected labels/ });
 
+it.each(['101', '0', '-1', '1.5', ''])(
+  'retains invalid Copies draft %j beside its last valid count and blocks output until correction',
+  async (raw) => {
+    render(<LabelDesigner {...props} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const input = screen.getAllByRole('spinbutton', { name: 'Copies' })[0];
+    fireEvent.change(input, { target: { value: '3' } });
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const reads = mocks.getQueueRecords.mock.calls.length;
+    fireEvent.change(input, { target: { value: raw } });
+    expect(input).toHaveValue(raw === '' ? null : Number(raw));
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(
+      `${raw === '' ? 'Empty value' : `“${raw}”`} is invalid. Use whole numbers from 1–100 copies per record and at most 500 labels total. Last valid count: 3 copies. Printing is paused until corrected or reverted.`,
+    );
+    expect(printButton()).toBeDisabled();
+    expect(screen.queryByLabelText('Print preview')).toBeNull();
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+    expect(mocks.getQueueRecords).toHaveBeenCalledTimes(reads);
+    fireEvent.change(input, { target: { value: '2' } });
+    expect(input).not.toHaveAttribute('aria-invalid', 'true');
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(document.querySelectorAll('.label-card')).toHaveLength(3);
+    fireEvent.click(printButton());
+    await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  },
+);
+
+it('keeps a 501-label draft unresolved across other edits and reload, with explicit revert', async () => {
+  const rows = Array.from({ length: 6 }, (_, index) => ({
+    ...quantity,
+    key: `7b84a7cf-197b-45b1-8016-${index.toString(16).padStart(12, '0')}`,
+    name: `Adapters ${index}`,
+  }));
+  mocks.getQueueRecords.mockResolvedValue(rows);
+  const view = render(<LabelDesigner {...props} initial={rows} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const controls = screen.getAllByRole('spinbutton', { name: 'Copies' });
+  for (let index = 0; index < 5; index++)
+    fireEvent.change(controls[index], {
+      target: { value: index === 4 ? '99' : '100' },
+    });
+  fireEvent.change(controls[5], { target: { value: '2' } });
+  expect(controls[5]).toHaveAttribute('aria-invalid', 'true');
+  expect(controls[5]).toHaveAccessibleDescription(/Last valid count: 1 copy/);
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '500 labels',
+  );
+  fireEvent.change(controls[0], { target: { value: '99' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Paper size' }), {
+    target: { value: 'A4' },
+  });
+  expect(controls[5]).toHaveValue(2);
+  expect(printButton()).toBeDisabled();
+  view.unmount();
+  render(<LabelDesigner {...props} initial={[]} />);
+  const restored = await screen.findAllByRole('spinbutton', { name: 'Copies' });
+  expect(restored[5]).toHaveValue(2);
+  expect(restored[5]).toHaveAttribute('aria-invalid', 'true');
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Revert Copies' }));
+  expect(restored[5]).toHaveValue(1);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(document.querySelectorAll('.label-card')).toHaveLength(499);
+});
+
+it('cleans up only removed copy drafts and Clear removes every unresolved edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const inputs = screen.getAllByRole('spinbutton', { name: 'Copies' });
+  fireEvent.change(inputs[0], { target: { value: '101' } });
+  fireEvent.change(inputs[1], { target: { value: '' } });
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  fireEvent.click(within(queue).getAllByRole('button', { name: 'Remove' })[0]);
+  expect(screen.getAllByRole('button', { name: 'Revert Copies' })).toHaveLength(
+    1,
+  );
+  expect(screen.getByRole('spinbutton', { name: 'Copies' })).toHaveValue(null);
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear queue' }));
+  expect(screen.queryByRole('button', { name: 'Revert Copies' })).toBeNull();
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).copyDrafts,
+  ).toEqual({});
+});
+
+it('cancels a pending final read even when an invalid Copies draft is corrected before the read resolves', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(printButton());
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '101' },
+  });
+  // Programmatic events exercise the synchronous guard even during busy work.
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '1' },
+  });
+  await act(async () => {
+    finish([quantity, asset]);
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+});
+
+it('cancels pending image readiness after an invalid Copies edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const image = document.createElement('img');
+  Object.defineProperties(image, {
+    complete: { value: true },
+    naturalWidth: { value: 320 },
+  });
+  let finish!: () => void;
+  image.decode = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  document.querySelector('.label-card')!.append(image);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(image.decode).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '' },
+  });
+  await act(async () => {
+    finish();
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  expect(printButton()).toBeDisabled();
+  expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+});
+
+it('synchronously revokes an armed native beforeprint grant on invalid Copies edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const sheet = document.querySelector<HTMLElement>('.label-print-root')!;
+  let authorization: string | undefined;
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      fireEvent.change(
+        screen.getAllByRole('spinbutton', { name: 'Copies' })[0],
+        { target: { value: '101' } },
+      );
+      window.dispatchEvent(new Event('beforeprint'));
+      authorization = sheet.dataset.printAuthorized;
+    }),
+  );
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(authorization).toBeUndefined();
+  expect(printButton()).toBeDisabled();
+  expect(screen.getAllByRole('spinbutton', { name: 'Copies' })[0]).toHaveValue(
+    101,
+  );
+});
+
 async function reviewAndAcknowledge(name = 'Laptop') {
   const notice = await screen.findByRole('alert', {
     name: 'Label item decisions',

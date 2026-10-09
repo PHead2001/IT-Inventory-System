@@ -26,6 +26,59 @@ import { chooseLocation } from './location-picker';
 const rootCode = 'ITC';
 test.use({ deviceScaleFactor: 2 });
 
+for (const width of [1280, 390]) {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    test(`invalid Copies retains its draft and explicit recovery at ${width}px with ${reducedMotion} motion`, async ({
+      page,
+    }, testInfo) => {
+      await signIn(page);
+      await page.setViewportSize({ width, height: 844 });
+      await page.emulateMedia({ reducedMotion });
+      await page.goto('/labels?location=ITC-RED');
+      const queue = page.getByRole('region', { name: 'Label queue' });
+      const copies = queue.getByRole('spinbutton', {
+        name: 'Copies',
+        exact: true,
+      });
+      const print = page.getByRole('button', { name: /Print selected labels/ });
+      await expect(print).toBeEnabled();
+      await copies.fill('101');
+      await expect(copies).toHaveValue('101');
+      await expect(copies).toHaveAttribute('aria-invalid', 'true');
+      await expect(copies).toHaveAccessibleDescription(
+        /“101” is invalid.*1–100.*500.*Last valid count: 1 copy/,
+      );
+      await expect(print).toBeDisabled();
+      await expect(page.locator('.label-print-root')).toHaveCount(0);
+      await copies.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath('invalid-copies.png'),
+      });
+      await page.reload();
+      await expect(copies).toHaveValue('101');
+      await expect(print).toBeDisabled();
+      await queue.getByRole('button', { name: 'Revert Copies' }).click();
+      await expect(copies).toHaveValue('1');
+      await expect(print).toBeEnabled();
+      await copies.fill('');
+      await expect(copies).toHaveAccessibleDescription(
+        /Empty value is invalid/,
+      );
+      await expect(print).toBeDisabled();
+      await copies.fill('2');
+      await expect(copies).not.toHaveAttribute('aria-invalid', 'true');
+      await expect(print).toBeEnabled();
+      await expect(page.locator('.label-card')).toHaveCount(2);
+      expect(
+        await page
+          .locator('body')
+          .evaluate((body) => body.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await queue.getByRole('button', { name: 'Clear queue' }).click();
+    });
+  }
+}
+
 test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
   page,
 }, testInfo) => {
