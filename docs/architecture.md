@@ -129,6 +129,8 @@ zero is returned explicitly; unknown or ineligible codes are omitted. Loading,
 errors and omitted codes must remain unknown. There are no aggregate-parent
 totals or implied claims about physically empty storage.
 
+The additive inventory_location_occupancy(text[]) read preserves the legacy entry-count RPC. It returns separate decimal-text quantity-product, quantity-unit and active physically stored asset counts for the same bounded authorized active leaf scope. Independent aggregates avoid quantity/asset join amplification. It is stable, security invoker, uses an empty search path and fully qualified relations, and is executable only by authenticated callers with active membership. The new transport validates canonical integers in 0..9223372036854775807. Request UUID and actor/origin/public-backend/space identity prevent old snapshots from returning after repeated scopes; five-second RPC and eight-second browser application deadlines yield unavailable state. The SQL five-second statement timeout remains configured; real REST timeout proof is separate from inspecting configuration.
+
 Active location names are unique within their parent under
 `lower(btrim(name))`; null parents share one root scope. Different parents may
 use the same name. A partial unique index and authoritative checks after the
@@ -294,7 +296,7 @@ and registered space names by stable location code; coordinates, geometry, bindi
 identity and historical snapshots remain independent. See [custody and locations](custody-and-locations.md)
 for lifecycle, concurrency, replay and fixture contracts.
 
-Guided is the default camera mode, constraining both azimuth and elevation; returning from Free Orbit clamps both to their nearest allowed values. Free Orbit allows unrestricted horizontal rotation and viewing above or below the room, with a small pole epsilon to avoid the numerical singularity and no camera roll. Recenter restores the room overview target while preserving angle and zoom; Fit room reframes against the available canvas; Center selected follows the existing primary and aggregate focus bindings. Tilt up/down controls complement camera rotation. Location labels appear on hover by default, with a Show all labels toggle; touch selection remains available through the conventional location panel.
+Guided is the default camera mode, constraining both azimuth and elevation; returning from Free Orbit clamps both to their nearest allowed values. Free Orbit allows unrestricted horizontal rotation and viewing above or below the room, with a small pole epsilon to avoid the numerical singularity and no camera roll. Recenter restores the room overview target while preserving angle and zoom; Fit room reframes against the available canvas; Center selected follows the existing primary and aggregate focus bindings. Tilt up/down controls complement camera rotation. Location labels appear on hover or through Show labels in More. The exposed selected location always keeps highest-priority readable text; occupied leaf locations retain one measured 44px action each when counts are enabled. Shared placement reserves the nonmodal More overlay, uses exposed transformed geometry and preserves opaque occlusion. Initial Fit waits for positive canvas sizing while pristine; later resize preserves camera intent. The conventional location panel remains available.
 
 ## Labels, scanning and low stock
 

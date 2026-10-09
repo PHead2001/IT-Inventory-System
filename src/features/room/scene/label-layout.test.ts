@@ -17,6 +17,106 @@ const label = (
 });
 
 describe('scene label placement', () => {
+  it('expands focus text only when every occupied action stays in its original placement', () => {
+    const input: LabelRect[] = [
+      {
+        ...label('focus', 10, 10),
+        priority: 3,
+        mandatory: true,
+        width: 130,
+        height: 44,
+        compact: { width: 44, height: 44 },
+      },
+      {
+        ...label('neighbor', 70, 10),
+        priority: 3,
+        mandatory: true,
+        width: 130,
+        height: 44,
+        compact: { width: 44, height: 44 },
+      },
+    ];
+    const normal = layoutLabels(input, viewport);
+    const focused = layoutLabels(
+      input.map((entry) => ({ ...entry, preferFull: entry.id === 'focus' })),
+      viewport,
+    );
+    expect(focused).toEqual(normal);
+    expect(focused.every((entry) => entry.visible && entry.compact)).toBe(true);
+    const spacious = layoutLabels(
+      [{ ...input[0], preferFull: true }],
+      viewport,
+    );
+    expect(spacious[0]).toMatchObject({
+      visible: true,
+      compact: false,
+      dx: 0,
+      dy: 0,
+    });
+  });
+  it('fits 28 occupied 44px actions plus a wrapped selected label on a narrow 310px canvas', () => {
+    const input: LabelRect[] = [
+      {
+        ...label('selected', 30, 160, true),
+        locationCode: 'SELECTED',
+        priority: 4,
+        mandatory: true,
+        width: 240,
+        height: 84,
+      },
+      ...Array.from({ length: 27 }, (_, index) => ({
+        ...label(`occupied-${index}`, 140, 195),
+        locationCode: `L${String(index).padStart(2, '0')}`,
+        priority: 3,
+        mandatory: true,
+        width: 220,
+        height: 62,
+        compact: { width: 44, height: 44 },
+      })),
+    ];
+    const result = layoutLabels(input, {
+      left: 0,
+      top: 0,
+      right: 310,
+      bottom: 410,
+    });
+    expect(result.every((item) => item.visible)).toBe(true);
+    const areas = result.map((item) => {
+      const source = input.find((row) => row.id === item.id)!;
+      const size = item.compact ? source.compact! : source;
+      return {
+        left: source.left + item.dx,
+        top: source.top + item.dy,
+        right: source.left + item.dx + size.width,
+        bottom: source.top + item.dy + size.height,
+      };
+    });
+    for (const [index, area] of areas.entries())
+      for (const other of areas.slice(index + 1))
+        expect(
+          area.left >= other.right + 3 ||
+            area.right + 3 <= other.left ||
+            area.top >= other.bottom + 3 ||
+            area.bottom + 3 <= other.top,
+        ).toBe(true);
+  });
+  it('reports insufficient capacity instead of shrinking mandatory actions or pretending they fit an overlay', () => {
+    const input = Array.from({ length: 28 }, (_, index) => ({
+      ...label(`L${index}`, 150, 150),
+      locationCode: `L${index}`,
+      priority: 3,
+      mandatory: true,
+      width: 44,
+      height: 44,
+    }));
+    const result = layoutLabels(
+      input,
+      { left: 0, top: 0, right: 310, bottom: 410 },
+      [{ left: 10, top: 0, right: 310, bottom: 300 }],
+    );
+    expect(result.filter((item) => item.visible).length).toBeLessThan(28);
+    expect(result.some((item) => !item.visible)).toBe(true);
+  });
   it('uses preferred positions and separates colliding drawer rows deterministically', () => {
     const input = [label('D04', 50, 37), label('D01', 50, 30)];
     const first = layoutLabels(input, viewport);

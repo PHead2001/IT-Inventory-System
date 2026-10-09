@@ -43,7 +43,11 @@ it('bridges decorative and interactive Html roots into their own room registry',
             code="ITC-D01"
             label="Drawer 1"
             priority={3}
-            count="2"
+            occupancy={{
+              quantity_product_count: '1',
+              quantity_unit_count: '31',
+              asset_count: '2',
+            }}
             onSelect={select}
           />
         </RoomLabelHtml>
@@ -75,9 +79,9 @@ it('bridges decorative and interactive Html roots into their own room registry',
     secondRegister.mock.calls[0][1],
   );
   const button = screen.getByRole('button', {
-    name: /Select Drawer 1.*2 active inventory entries/,
+    name: /Select Drawer 1.*1 product.*31 units.*2 assets/,
   });
-  expect(button).toHaveTextContent('2 items');
+  expect(button).toHaveTextContent('1 product / 31 units / 2 assets');
   act(() => button.click());
   expect(select).toHaveBeenCalledExactlyOnceWith('ITC-D01');
   view.unmount();

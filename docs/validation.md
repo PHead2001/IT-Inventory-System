@@ -251,3 +251,11 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## Audit 4.2 room interaction evidence
+
+Focused occupancy tests cover exact decimal counts above the JS safe-integer limit, signed-bigint bounds, actor/origin/public-backend/request identity, off/on and A→B→A deferred responses, cleanup cancellation, and five/eight-second application deadlines. The additive pgTAP suite covers leaf zero/unknown semantics, products/units/assets, site/retirement exclusions, caller membership/grants, bounded requests and compatibility with the legacy entry read. SQL timeout configuration is not elapsed-time REST proof.
+
+Room tests cover opaque occlusion and exposed transformed face samples, shared placement and mandatory 44px markers, selected long text, passive/active wheel ownership, pointer cancellation, Escape focus and pristine initial framing. Pure dimensions and mocked DOM rectangles are supplementary capacity evidence only. The real room feature spec creates one journaled owned quantity definition across all 28 existing modeled holding leaves through canonical loopback-only RPCs and clears it through normal audited archive cleanup. It compares authoritative triples and exercises the 375px populated map with More open, without changing existing labels or seeds. Do not run its writes against a hosted backend.
+
+Acceptance still requires real WebGL at 375px with the actual canvas, loaded fonts, selected long text and open More; independent exposed-object coverage, no overlapping/shrunk actions, accurate authorized triples, actual camera/input/focus response, resize and settled demand-idle evidence. Long-label component/DOM stress cannot replace current-geometry browser proof. Run the clean database gate and authentic type regeneration, then the complete exact-candidate gates and independent reviews described above; unavailable Docker/browser execution is an explicit limitation, never a pass.

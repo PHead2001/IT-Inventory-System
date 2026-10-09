@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import {
   Focus,
   Maximize,
@@ -7,7 +7,6 @@ import {
   MoreHorizontal,
   MousePointer2,
   Plus,
-  Tags,
   Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -39,6 +38,8 @@ export function RoomToolbar({
   onLabelsChange,
   showCounts,
   onCountsChange,
+  interactionRef,
+  onOverlayChange,
 }: {
   active: boolean;
   onActiveChange(active: boolean): void;
@@ -51,36 +52,61 @@ export function RoomToolbar({
   onLabelsChange(): void;
   showCounts: boolean;
   onCountsChange(): void;
+  interactionRef?: RefObject<HTMLButtonElement | null>;
+  onOverlayChange?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [help, setHelp] = useState(false);
+  const host = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const more = useRef<HTMLButtonElement>(null);
+  const localInteraction = useRef<HTMLButtonElement>(null);
+  const interact = interactionRef ?? localInteraction;
   const panelId = useId();
-  const close = () => {
+  const close = (restore = true) => {
     setOpen(false);
     setHelp(false);
-    more.current?.focus();
+    if (restore) more.current?.focus({ preventScroll: true });
   };
-  const handleEscape = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      onActiveChange(false);
-      close();
-    }
-  };
-  const secondary: [ViewCommandKind, string][] = [
-    ['recenter', 'Recenter'],
-    ['left', 'Pan left'],
-    ['right', 'Pan right'],
-    ['up', 'Pan up'],
-    ['down', 'Pan down'],
-    ['rotate-left', 'Rotate left'],
-    ['rotate-right', 'Rotate right'],
-    ['tilt-up', 'Tilt up'],
-    ['tilt-down', 'Tilt down'],
-  ];
+  useEffect(() => {
+    onOverlayChange?.();
+    if (!open) return;
+    panel.current
+      ?.querySelector<HTMLButtonElement>('button')
+      ?.focus({ preventScroll: true });
+    const outside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !host.current?.contains(event.target)
+      ) {
+        setOpen(false);
+        setHelp(false);
+      }
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [open, onOverlayChange]);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || (!active && !open)) return;
+      event.preventDefault();
+      setOpen(false);
+      setHelp(false);
+      if (active) {
+        onActiveChange(false);
+        interact.current?.focus({ preventScroll: true });
+      } else more.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [active, open, onActiveChange, interact]);
+  const control = (kind: ViewCommandKind, label: string) => (
+    <Button key={kind} variant="outline" onClick={() => onCommand(kind)}>
+      {label}
+    </Button>
+  );
   return (
-    <>
+    <div ref={host} className={styles.toolbarHost}>
       <div
         role="toolbar"
         aria-label="Room camera controls"
@@ -108,16 +134,6 @@ export function RoomToolbar({
         <Button
           variant="outline"
           className={styles.iconButton}
-          aria-label="Show all labels"
-          title="Show all labels"
-          aria-pressed={showLabels}
-          onClick={onLabelsChange}
-        >
-          <Tags aria-hidden="true" size={19} />
-        </Button>
-        <Button
-          variant="outline"
-          className={styles.iconButton}
           aria-label="Zoom out"
           title="Zoom out"
           onClick={() => onCommand('zoom-out')}
@@ -134,8 +150,9 @@ export function RoomToolbar({
           <Plus aria-hidden="true" size={19} />
         </Button>
         <Button
+          ref={interact}
           variant="outline"
-          className={`${styles.iconButton} ${styles.activationPrimary}`}
+          className={styles.iconButton}
           aria-label={
             active ? 'Done interacting with map' : 'Interact with map'
           }
@@ -157,7 +174,6 @@ export function RoomToolbar({
           title="More map controls"
           aria-expanded={open}
           aria-controls={panelId}
-          onKeyDown={handleEscape}
           onClick={() => {
             setOpen(!open);
             setHelp(false);
@@ -168,20 +184,14 @@ export function RoomToolbar({
       </div>
       {open && (
         <div
+          ref={panel}
           id={panelId}
           role="region"
           aria-label="More map controls"
+          data-room-obstruction="true"
           className={styles.moreMenu}
-          onKeyDown={handleEscape}
         >
-          <Button
-            variant="outline"
-            className={styles.activationOverflow}
-            aria-pressed={active}
-            onClick={() => onActiveChange(!active)}
-          >
-            {active ? 'Done interacting with map' : 'Interact with map'}
-          </Button>
+          {control('recenter', 'Recenter')}
           <div
             role="group"
             aria-label="Orbit mode"
@@ -198,17 +208,40 @@ export function RoomToolbar({
               </Button>
             ))}
           </div>
-          <div className={styles.secondaryControls}>
-            {secondary.map(([kind, label]) => (
-              <Button
-                key={kind}
-                variant="outline"
-                onClick={() => onCommand(kind)}
-              >
-                {label}
-              </Button>
-            ))}
+          <div role="group" aria-label="Pan" className={styles.panControls}>
+            <span />
+            {control('up', 'Pan up')}
+            <span />
+            {control('left', 'Pan left')}
+            <span aria-hidden="true">Pan</span>
+            {control('right', 'Pan right')}
+            <span />
+            {control('down', 'Pan down')}
+            <span />
           </div>
+          <div
+            role="group"
+            aria-label="Rotate"
+            className={styles.secondaryControls}
+          >
+            {control('rotate-left', 'Rotate left')}
+            {control('rotate-right', 'Rotate right')}
+          </div>
+          <div
+            role="group"
+            aria-label="Tilt"
+            className={styles.secondaryControls}
+          >
+            {control('tilt-up', 'Tilt up')}
+            {control('tilt-down', 'Tilt down')}
+          </div>
+          <Button
+            variant="outline"
+            aria-pressed={showLabels}
+            onClick={onLabelsChange}
+          >
+            Show labels
+          </Button>
           <Button
             variant="outline"
             aria-pressed={showCounts}
@@ -226,35 +259,35 @@ export function RoomToolbar({
           {help && (
             <div className={styles.controlsHelp}>
               <p>
-                Click or tap a location to select it. Scroll normally over the
-                map.
+                Click or tap a location to select it. Outside Interact mode,
+                scroll and swipe move the page.
               </p>
               <p>
-                Choose Interact with map to drag with one finger or the left
-                mouse button to rotate. Pinch or use + and − to zoom. Right-drag
-                or use the pan buttons to pan. Done, Escape or leaving the map
+                Choose Interact with map to rotate by dragging, or zoom with an
+                ordinary wheel or direct two-finger pinch. Ctrl/Command+wheel
+                and browser trackpad pinch remain browser zoom. Right-drag or
+                the Pan buttons move the view. Done, Escape or leaving the map
                 ends interaction.
               </p>
               <p>
                 Guided limits rotation; Free Orbit also views above and below.
-                Double-click exposed floor to recenter. Every camera action has
-                a keyboard button here; Tab moves between controls, and Enter or
-                Space activates a button. The location browser works without the
-                map.
+                Double-click exposed floor to recenter. Tab moves freely between
+                controls and the map; Enter or Space activates a button. The
+                location browser works without the map.
               </p>
               <p>
-                Item counts are active inventory entries at each destination:
-                one per quantity item with positive stock and one per active
-                individual asset. They do not add unrelated stock units.
-                Unavailable counts are omitted.
+                Counts mark occupied visible locations. Focus or select a marker
+                for its products, units and individual assets at that leaf
+                location. Unknown counts are omitted. Hidden locations remain in
+                the location browser.
               </p>
             </div>
           )}
-          <Button variant="outline" onClick={close}>
+          <Button variant="outline" onClick={() => close()}>
             Close controls
           </Button>
         </div>
       )}
-    </>
+    </div>
   );
 }

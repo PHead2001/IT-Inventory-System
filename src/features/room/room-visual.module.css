@@ -267,17 +267,63 @@
   gap: 4px;
 }
 .moreMenu {
+  position: absolute;
+  top: 49px;
+  right: 0;
+  z-index: 30;
   display: grid;
   gap: 8px;
-  width: 100%;
+  width: min(240px, 100%);
   min-width: 0;
-  max-height: min(65vh, 560px);
+  max-height: min(35dvh, 220px);
   overflow: auto;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--room-border) 48%, transparent);
   border-radius: 10px;
   background: var(--room-menu-background);
   scrollbar-color: var(--room-border) var(--room-menu-background);
+}
+.toolbarHost {
+  position: relative;
+  min-width: 0;
+}
+.panControls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  align-items: center;
+  text-align: center;
+}
+.panControls button {
+  padding-inline: 2px;
+}
+.secondaryControls button {
+  padding-inline: 4px;
+}
+.labelFull {
+  display: block;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 100px));
+  overflow-wrap: anywhere;
+}
+.labelCompact {
+  display: none;
+}
+.locationLabel[data-label-compact='true'] {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+.locationLabel[data-label-compact='true'] .labelFull {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+.locationLabel[data-label-compact='true'] .labelCompact {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
 }
 .secondaryControls {
   display: grid;
@@ -353,17 +399,6 @@
 .countBadge {
   color: var(--room-selected-edge);
   font-variant-numeric: tabular-nums;
-}
-.activationOverflow {
-  display: none;
-}
-@container (max-width: 319px) {
-  .cameraToolbar .activationPrimary {
-    display: none;
-  }
-  .activationOverflow {
-    display: inline-flex;
-  }
 }
 .canvasFrame {
   position: relative;

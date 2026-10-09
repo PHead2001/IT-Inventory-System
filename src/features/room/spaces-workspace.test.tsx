@@ -13,7 +13,7 @@ vi.mock('next/dynamic', () => ({
     function Scene(props: {
       showCounts?: boolean;
       onCountsChange?: (show: boolean) => void;
-      locationEntryCounts?: Record<string, string>;
+      locationOccupancy?: import('./occupancy-contract').RoomOccupancy;
       selectedCode: string | null;
       onSelect: (code: string) => void;
       focusRequest: { requestId: number };
@@ -30,7 +30,7 @@ vi.mock('next/dynamic', () => ({
       return (
         <div
           data-testid="scene-selection"
-          data-counts={JSON.stringify(props.locationEntryCounts ?? null)}
+          data-counts={JSON.stringify(props.locationOccupancy ?? null)}
           data-code={props.selectedCode ?? ''}
           data-focus={props.focusRequest.requestId}
           data-focus-on-restore={String(props.focusOnRestore)}
@@ -175,6 +175,7 @@ afterEach(() => {
 it('uses browser-only guidance without a map, including singular destination and group', () => {
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={[
         ...locations,
         {
@@ -211,6 +212,7 @@ it('shows an empty destination with one count and no empty pager', async () => {
   );
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -251,6 +253,7 @@ it('recovers an invalid contents page with replacement, keeping location and an 
   );
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -270,6 +273,7 @@ it('refers to the browser when the map is hidden or failed and restores map guid
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -316,6 +320,7 @@ it('highlights immediately and ignores slow A/B/A contents responses', async () 
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -350,6 +355,7 @@ it('switches to inventory-only office and keeps browser usable', async () => {
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -375,6 +381,7 @@ it('restores the compatible modeled-space camera after hiding and switching spac
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -415,6 +422,7 @@ it('keeps new location focus pending across graphics recovery, then preserves th
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -468,6 +476,7 @@ it('clears an unfinished focus on manual cancellation and hiding the room', asyn
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -506,6 +515,7 @@ it('keeps the same room definition when an SSR-equivalent space becomes canonica
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={{ ...spaces[0] }}
@@ -538,6 +548,7 @@ it('counts only completed focus for the current actor and space', async () => {
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -578,6 +589,7 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -613,6 +625,7 @@ it('replays focus for a modeled location reached through browser history', async
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -656,6 +669,7 @@ it('pages contents without remounting the room or delaying selection', async () 
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -712,6 +726,7 @@ it('rejects a successful response for the wrong user or location', async () => {
   );
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -734,6 +749,7 @@ it('explains a transport failure and retries the same selection', async () => {
   const user = userEvent.setup();
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -760,10 +776,20 @@ it('loads counts only when enabled and refreshes counts and contents together on
           identity: {
             userId: 'test-user',
             environment: window.location.origin,
+            backend: 'https://backend.example',
+            generation: new URL(url, window.location.origin).searchParams.get(
+              'generation',
+            ),
             spaceId: 'it-closet',
             filter: 'type=all;status=active',
           },
-          counts: { 'ITC-D01': '3' },
+          counts: {
+            'ITC-D01': {
+              quantity_product_count: '1',
+              quantity_unit_count: '31',
+              asset_count: '2',
+            },
+          },
         }),
       });
     return Promise.resolve(response('Cable', 'ITC-D01'));
@@ -771,6 +797,7 @@ it('loads counts only when enabled and refreshes counts and contents together on
   vi.stubGlobal('fetch', fetcher);
   render(
     <SpacesWorkspace
+      backend="https://backend.example"
       locations={locations}
       userId="test-user"
       initialSpace={spaces[0]}
@@ -785,7 +812,7 @@ it('loads counts only when enabled and refreshes counts and contents together on
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(
       'data-counts',
-      '{"ITC-D01":"3"}',
+      '{"ITC-D01":{"quantity_product_count":"1","quantity_unit_count":"31","asset_count":"2"}}',
     ),
   );
   const before = fetcher.mock.calls.length;
@@ -793,7 +820,7 @@ it('loads counts only when enabled and refreshes counts and contents together on
     window.dispatchEvent(new Event('pageshow'));
   });
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 2));
-  await screen.findByText(/Counts are a snapshot/);
+  await screen.findByText(/counts are a snapshot/);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
 });

@@ -7,6 +7,12 @@ export type LabelOptions = {
   priority: number;
   locationCode?: string;
   interactive?: boolean;
+  mandatory?: boolean;
+  compact?: boolean;
+  preferFull?: boolean;
+  readableSummary?: string;
+  inspection?: 'focus' | 'hover' | null;
+  isVisible?: () => boolean;
 };
 type Entry = {
   element: HTMLElement;
@@ -14,6 +20,8 @@ type Entry = {
   options: LabelOptions;
   dx: number;
   dy: number;
+  placed: boolean;
+  compact: boolean;
 };
 
 function sceneLabelVisible(element: HTMLElement, host: HTMLElement) {
@@ -29,14 +37,18 @@ function sceneLabelVisible(element: HTMLElement, host: HTMLElement) {
 
 /** One registry spans R3F Html portals and the ordinary DOM hover label. */
 export function createRoomLabelRegistry(
-  onSuppressionChange: (count: number) => void,
+  onSuppressionChange: (count: number, missingCodes?: string[]) => void,
+  onReadSummaryChange?: (summary: string | null) => void,
 ) {
   const entries = new Map<string, Entry>();
   let canvas: HTMLCanvasElement | null = null;
   let observer: ResizeObserver | null = null;
+  let overlays: MutationObserver | null = null;
   let pending: number | null = null;
   let lastSuppressed = -1;
+  let lastMissing = '';
   let revision = 0;
+  let lastSummary: string | null = null;
   const place = () => {
     pending = null;
     if (canvas) canvas.dataset.labelLayoutPending = 'false';
@@ -46,17 +58,43 @@ export function createRoomLabelRegistry(
       return;
     const labels: LabelRect[] = [];
     for (const [id, entry] of entries) {
-      if (!sceneLabelVisible(entry.element, host)) continue;
+      if (
+        !sceneLabelVisible(entry.element, host) ||
+        entry.options.isVisible?.() === false
+      ) {
+        entry.element.dataset.roomExposed = 'false';
+        entry.element.dataset.labelSuppressed = 'true';
+        entry.element.style.visibility = 'hidden';
+        entry.element.style.pointerEvents = 'none';
+        entry.element.tabIndex = -1;
+        entry.element.setAttribute('aria-hidden', 'true');
+        entry.leader.style.display = 'none';
+        entry.placed = false;
+        continue;
+      }
       const rect = entry.element.getBoundingClientRect();
+      entry.element.dataset.roomExposed = 'true';
+      const full = entry.element.querySelector<HTMLElement>(
+        '[data-room-label-full]',
+      );
+      const fullRect = full?.getBoundingClientRect();
       labels.push({
         id,
-        selected: entry.options.priority === 3,
+        selected: entry.options.priority >= 4,
         priority: entry.options.priority,
         locationCode: entry.options.locationCode,
         left: rect.left - entry.dx,
         top: rect.top - entry.dy,
-        width: rect.width,
-        height: rect.height,
+        width: fullRect?.width ? Math.max(44, fullRect.width + 18) : rect.width,
+        height: fullRect?.height
+          ? Math.max(44, fullRect.height + 12)
+          : rect.height,
+        mandatory: entry.options.mandatory,
+        preferFull: entry.options.preferFull,
+        compact: entry.options.compact ? { width: 44, height: 44 } : undefined,
+        previous: entry.placed
+          ? { dx: entry.dx, dy: entry.dy, compact: entry.compact }
+          : undefined,
       });
     }
     const reserved = Array.from(
@@ -67,12 +105,27 @@ export function createRoomLabelRegistry(
       .filter((element) => element.getClientRects().length > 0)
       .map((element) => element.getBoundingClientRect());
     let suppressed = 0;
+    const missing: string[] = [];
+    let summary: string | null = null;
+    let focusedSummary = false;
     for (const result of layoutLabels(labels, viewport, reserved)) {
       const entry = entries.get(result.id);
       if (!entry) continue;
       const { element, leader, options } = entry;
       entry.dx = result.dx;
       entry.dy = result.dy;
+      entry.placed = result.visible;
+      entry.compact = result.compact ?? false;
+      element.dataset.labelCompact = String(entry.compact);
+      if (
+        options.inspection &&
+        options.readableSummary &&
+        (entry.compact || !result.visible) &&
+        (!summary || (options.inspection === 'focus' && !focusedSummary))
+      ) {
+        summary = options.readableSummary;
+        focusedSummary = options.inspection === 'focus';
+      }
       element.dataset.labelDx = String(result.dx);
       element.dataset.labelDy = String(result.dy);
       element.dataset.labelSuppressed = String(!result.visible);
@@ -85,6 +138,8 @@ export function createRoomLabelRegistry(
       if (result.visible) element.removeAttribute('aria-hidden');
       else {
         suppressed += 1;
+        if (options.mandatory && options.locationCode)
+          missing.push(options.locationCode);
         if (document.activeElement === element) element.blur();
         element.setAttribute('aria-hidden', 'true');
       }
@@ -95,9 +150,14 @@ export function createRoomLabelRegistry(
         leader.style.transform = `rotate(${Math.atan2(result.dy, result.dx)}rad)`;
       }
     }
-    if (suppressed !== lastSuppressed) {
+    if (lastSummary !== summary) {
+      lastSummary = summary;
+      onReadSummaryChange?.(summary);
+    }
+    if (suppressed !== lastSuppressed || missing.join('|') !== lastMissing) {
       lastSuppressed = suppressed;
-      onSuppressionChange(suppressed);
+      lastMissing = missing.join('|');
+      onSuppressionChange(suppressed, missing);
     }
     if (canvas) canvas.dataset.labelLayoutRevision = String(++revision);
   };
@@ -121,7 +181,16 @@ export function createRoomLabelRegistry(
         options,
         dx: Number(element.dataset.labelDx ?? 0),
         dy: Number(element.dataset.labelDy ?? 0),
+        // Option changes run effect cleanup before registering again. Keep the
+        // same DOM action's placement; layout still validates every constraint.
+        placed:
+          element.dataset.labelLayoutId === id &&
+          element.dataset.labelSuppressed === 'false',
+        compact:
+          element.dataset.labelLayoutId === id &&
+          element.dataset.labelCompact === 'true',
       };
+      element.dataset.labelLayoutId = id;
       entries.set(id, entry);
       observer?.observe(element);
       schedule();
@@ -132,21 +201,42 @@ export function createRoomLabelRegistry(
         schedule();
       };
     },
-    connect(element: HTMLCanvasElement) {
+    connect(element: HTMLCanvasElement, invalidateGeometry?: () => void) {
       canvas = element;
-      observer = new ResizeObserver(schedule);
+      let connected = true;
+      const changed = () => {
+        if (!connected) return;
+        invalidateGeometry?.();
+        schedule();
+      };
+      observer = new ResizeObserver(changed);
       observer.observe(element);
       for (const entry of entries.values()) observer.observe(entry.element);
-      document.fonts?.addEventListener('loadingdone', schedule);
-      void document.fonts?.ready.then(schedule);
+      const surface = element.closest('[data-room-surface]');
+      const observeOverlays = () => {
+        surface
+          ?.querySelectorAll('[data-room-obstruction]')
+          .forEach((panel) => observer?.observe(panel));
+        changed();
+      };
+      if (surface) {
+        overlays = new MutationObserver(observeOverlays);
+        overlays.observe(surface, { childList: true, subtree: true });
+        observeOverlays();
+      }
+      document.fonts?.addEventListener('loadingdone', changed);
+      void document.fonts?.ready.then(changed);
       schedule();
       return () => {
+        connected = false;
         delete element.dataset.labelLayoutPending;
         delete element.dataset.labelLayoutRevision;
         canvas = null;
         observer?.disconnect();
         observer = null;
-        document.fonts?.removeEventListener('loadingdone', schedule);
+        overlays?.disconnect();
+        overlays = null;
+        document.fonts?.removeEventListener('loadingdone', changed);
         if (pending !== null) cancelAnimationFrame(pending);
         pending = null;
       };
@@ -181,8 +271,11 @@ export function LabelLayoutDriver({
 }: {
   registry: RoomLabelRegistry;
 }) {
-  const { gl } = useThree();
+  const { gl, invalidate } = useThree();
   useFrame(registry.schedule);
-  useEffect(() => registry.connect(gl.domElement), [registry, gl]);
+  useEffect(
+    () => registry.connect(gl.domElement, invalidate),
+    [registry, gl, invalidate],
+  );
   return null;
 }

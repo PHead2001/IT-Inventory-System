@@ -111,9 +111,13 @@ describe('rendered mesh selection', () => {
         hasRenderedSelection: false,
       }),
     ]);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Selected location: Office storage (OFFICE-ONLY)',
-    );
+    expect(
+      screen
+        .getAllByRole('status')
+        .find((element) =>
+          element.textContent?.startsWith('Selected location:'),
+        )!,
+    ).toHaveTextContent('Selected location: Office storage (OFFICE-ONLY)');
     const rigProps: Record<string, unknown>[] = [];
     const findRig = (children: ReactNode) =>
       Children.forEach(children, (child) => {
@@ -198,11 +202,11 @@ describe('room scene controls', () => {
     const user = userEvent.setup();
     const first = sceneProps();
     const view = render(<RoomScene {...first} />);
-    const toggle = screen.getByRole('button', { name: 'Show all labels' });
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
+    const toggle = screen.getByRole('button', { name: 'Show labels' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByRole('button', { name: 'More map controls' }));
     expect(screen.getByRole('button', { name: 'Tilt up' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Tilt down' })).toBeEnabled();
     view.rerender(<RoomScene {...sceneProps()} />);
@@ -223,9 +227,13 @@ describe('room scene controls', () => {
       } as RoomSceneProps['room']['nodes'][number],
     ];
     render(<RoomScene {...props} />);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Selected location: Shelf 1A (ITC-S1A)',
-    );
+    expect(
+      screen
+        .getAllByRole('status')
+        .find((element) =>
+          element.textContent?.startsWith('Selected location:'),
+        )!,
+    ).toHaveTextContent('Selected location: Shelf 1A (ITC-S1A)');
   });
 
   it('requires explicit activation and disarms through Done, Escape and focus leaving the map', async () => {
@@ -262,61 +270,41 @@ describe('room scene controls', () => {
     expect(activate()).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it.each(['activation', 'Pan left', 'Controls'])(
-    'releases map interaction with one Escape from the overflow %s control without losing selection',
+  it.each(['Pan left', 'Controls'])(
+    'Escape from %s restores Interact and preserves selection',
     async (control) => {
       const user = userEvent.setup();
       const props = sceneProps({ selectedCode: 'ITC-S1A' });
       render(<RoomScene {...props} />);
+      await user.click(
+        screen.getByRole('button', { name: 'Interact with map' }),
+      );
       const more = screen.getByRole('button', { name: 'More map controls' });
       await user.click(more);
       const panel = screen.getByRole('region', { name: 'More map controls' });
-      // Narrow layouts put activation in the overflow. Use that real button
-      // rather than the primary toolbar's copy, regardless of jsdom layout.
-      await user.click(
-        within(panel).getByRole('button', { name: 'Interact with map' }),
-      );
       expect(
-        within(panel).getByRole('button', {
-          name: 'Done interacting with map',
-        }),
-      ).toHaveAttribute('aria-pressed', 'true');
-      if (control !== 'activation') {
-        await user.click(within(panel).getByRole('button', { name: control }));
-      }
-
+        within(panel).queryByRole('button', { name: /interacting with map/ }),
+      ).toBeNull();
+      await user.click(within(panel).getByRole('button', { name: control }));
       await user.keyboard('{Escape}');
-
-      expect(more).toHaveFocus();
+      const interact = screen.getByRole('button', {
+        name: 'Interact with map',
+      });
+      expect(interact).toHaveFocus();
+      expect(interact).toHaveAttribute('aria-pressed', 'false');
       expect(more).toHaveAttribute('aria-expanded', 'false');
       expect(
-        screen.queryByRole('region', { name: 'More map controls' }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Interact with map' }),
-      ).toHaveAttribute('aria-pressed', 'false');
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Selected location: ITC-S1A',
-      );
+        screen.getByText('Map interaction off. Scroll moves the page.'),
+      ).toHaveAttribute('role', 'status');
+      expect(screen.getByText(/Selected location: ITC-S1A/)).toBeVisible();
       expect(props.onSelect).not.toHaveBeenCalled();
-
-      // Escape leaves ordinary controls usable and resets help disclosure.
+      await user.tab();
+      expect(more).toHaveFocus();
       await user.keyboard('{Enter}');
       expect(screen.getByRole('button', { name: 'Controls' })).toHaveAttribute(
         'aria-expanded',
         'false',
       );
-      const reopened = screen.getByRole('region', {
-        name: 'More map controls',
-      });
-      await user.click(
-        within(reopened).getByRole('button', { name: 'Interact with map' }),
-      );
-      expect(
-        within(reopened).getByRole('button', {
-          name: 'Done interacting with map',
-        }),
-      ).toHaveAttribute('aria-pressed', 'true');
     },
   );
 
@@ -327,7 +315,7 @@ describe('room scene controls', () => {
     await user.click(more);
     await user.click(screen.getByRole('button', { name: /^Controls$/ }));
     expect(
-      screen.getByText(/Item counts are active inventory entries/),
+      screen.getByText(/Counts mark occupied visible locations/),
     ).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Show item counts' }),

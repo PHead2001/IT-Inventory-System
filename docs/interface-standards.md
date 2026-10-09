@@ -142,8 +142,8 @@ Rules:
 
 Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 
-- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. The primary set (Fit, Center selected, labels, zoom) stays visible; camera mode and pan go in an overflow menu. The toolbar never covers the selected object after a camera focus.
-- **Labels:** every visible label goes through the shared `layoutLabels` pass, including section markers. A label shifted from its anchor gets a leader line. Density follows zoom: groups when zoomed out, drawers when zoomed in.
+- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. Fit, Center selected, zoom, Interact and More stay visible with 44px targets at 375px; labels, counts and grouped camera controls go in a compact anchored nonmodal popover. The toolbar never covers the selected object after a camera focus.
+- **Labels:** every visible label goes through the shared `layoutLabels` pass, including section markers. A label shifted from its anchor gets a leader line. Selected readable text has first priority, then one occupied marker per exposed occupied location; optional full text may not displace these actions. Measure wrapped text and compact 44px footprints. Opaque occlusion is preserved; crowded unsupported views explicitly list affected locations.
 - **Selection:** outline or glow in the accent color, with unselected geometry slightly dimmed. Clearing the selection restores it.
 - **Information:** occupied locations may show count badges, which follow the same collision rules.
 - **Look:** low-poly and measured, grounded with soft contact shadows and a subtle floor grid. Keep `frameloop="demand"`. No continuous idle motion under Reduced motion.

@@ -39,7 +39,13 @@ function interactiveAncestor(object: Object3D): VisibleRoomTarget | null {
 export function visibleRoomTarget(
   intersections: Intersection<Object3D>[],
 ): VisibleRoomTarget | null {
-  for (const { object } of intersections) {
+  return visibleRoomHit(intersections)?.target ?? null;
+}
+
+/** Retain the actual first visible intersection for camera-side anchors. */
+export function visibleRoomHit(intersections: Intersection<Object3D>[]) {
+  for (const hit of intersections) {
+    const { object } = hit;
     if (!(object instanceof Mesh) || object.userData.hoverPassThrough) continue;
     if (!object.visible || !object.material) continue;
     let hiddenParent = false;
@@ -53,7 +59,7 @@ export function visibleRoomTarget(
       materials.every((material) => !material.visible || material.opacity <= 0)
     )
       continue;
-    return interactiveAncestor(object);
+    return { hit, target: interactiveAncestor(object) };
   }
   return null;
 }

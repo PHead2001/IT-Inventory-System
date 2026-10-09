@@ -7,6 +7,7 @@ import {
   spaceLocations,
 } from '@/features/room/spaces';
 import { SpacesWorkspace } from '@/features/room/spaces-workspace';
+import { supabaseConfig } from '@/lib/supabase/config';
 
 export const metadata = { title: 'Spaces & maps' };
 
@@ -53,6 +54,7 @@ export default async function RoomPage({
       <SpacesWorkspace
         locations={locations}
         userId={member.user_id}
+        backend={new URL(supabaseConfig().url).origin}
         initialSpace={space}
         initialCode={selectedCode}
         initialNotice={fallbackNotice}

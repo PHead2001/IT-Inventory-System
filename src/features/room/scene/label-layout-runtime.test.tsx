@@ -67,6 +67,108 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('retains a displaced marker across effect cleanup and focus registration without moving its neighbor', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const a = label(host),
+      b = label(host);
+    const registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas);
+    registry.register('a', a.element, a.leader, {
+      priority: 3,
+      mandatory: true,
+      compact: true,
+      locationCode: 'A',
+    });
+    const options = {
+      priority: 3,
+      mandatory: true,
+      compact: true,
+      locationCode: 'B',
+    };
+    const unregister = registry.register('b', b.element, b.leader, options);
+    flush();
+    const displaced = b.element.dataset.labelDx;
+    expect(displaced).not.toBe('0');
+    // Camera geometry changes leave the previous B placement valid while its
+    // old preferred pixel becomes free. Focus must still retain that placement.
+    vi.mocked(a.element.getBoundingClientRect).mockReturnValue({
+      ...viewport,
+      left: 110,
+      top: 30,
+      right: 154,
+      bottom: 74,
+      width: 44,
+      height: 44,
+    });
+    unregister();
+    registry.register('b', b.element, b.leader, {
+      ...options,
+      preferFull: true,
+      inspection: 'focus',
+    });
+    flush();
+    expect(b.element.dataset.labelDx).toBe(displaced);
+    expect(a.element.dataset.labelDx).toBe('0');
+    expect(a.element.dataset.labelSuppressed).toBe('false');
+    expect(b.element.dataset.labelSuppressed).toBe('false');
+    cleanup();
+  });
+  it('supplies a quiet readable focused summary when full text would displace another occupied action', () => {
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const first = label(host),
+      second = label(host);
+    const full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    first.element.append(full);
+    vi.spyOn(full, 'getBoundingClientRect').mockReturnValue({
+      ...viewport,
+      width: 140,
+      height: 44,
+    });
+    const summary = vi.fn();
+    const registry = createRoomLabelRegistry(vi.fn(), summary);
+    const cleanup = registry.connect(canvas);
+    const text = 'Long drawer name (ITC-D01) · 1 product / 31 units / 2 assets';
+    const options = {
+      priority: 3,
+      mandatory: true,
+      compact: true,
+      locationCode: 'ITC-D01',
+      preferFull: true,
+      inspection: 'focus' as const,
+      readableSummary: text,
+    };
+    registry.register('first', first.element, first.leader, options);
+    registry.register('second', second.element, second.leader, {
+      priority: 3,
+      mandatory: true,
+      compact: true,
+      locationCode: 'ITC-D02',
+    });
+    flush();
+    expect(first.element.dataset.labelCompact).toBe('true');
+    expect(second.element.dataset.labelSuppressed).toBe('false');
+    expect(summary).toHaveBeenCalledExactlyOnceWith(text);
+    registry.schedule();
+    flush();
+    expect(summary).toHaveBeenCalledOnce();
+    registry.register('first', first.element, first.leader, {
+      ...options,
+      inspection: null,
+      preferFull: false,
+    });
+    flush();
+    expect(summary).toHaveBeenLastCalledWith(null);
+    cleanup();
+  });
   it('marks camera/layout work pending synchronously and settles one revision per bounded placement', () => {
     const host = document.createElement('div');
     const canvas = document.createElement('canvas');
@@ -195,7 +297,9 @@ describe('unified room label registry', () => {
     });
     flush();
     expect(current.element.dataset.labelSuppressed).toBe('false');
-    expect(occluded.element.dataset.labelSuppressed).toBeUndefined();
+    expect(occluded.element.dataset.labelSuppressed).toBe('true');
+    expect(occluded.element.tabIndex).toBe(-1);
+    expect(occluded.element).toHaveAttribute('aria-hidden', 'true');
     cleanup();
   });
 });

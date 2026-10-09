@@ -1,3 +1,9 @@
+vi.mock('@/lib/supabase/config', () => ({
+  supabaseConfig: () => ({
+    url: 'https://backend.example',
+    key: 'public-test',
+  }),
+}));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 vi.mock('@/lib/auth/session.server', () => ({

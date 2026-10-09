@@ -32,22 +32,24 @@ function setupToolbar() {
 }
 
 describe('room toolbar Escape', () => {
-  it('closes keyboard-opened controls and disarms while focus remains on More', async () => {
+  it('focuses the first popover control then Escape disarms and restores Interact', async () => {
     const { user, onActiveChange } = setupToolbar();
     const more = screen.getByRole('button', { name: 'More map controls' });
-    for (let index = 0; index < 7; index += 1) await user.tab();
+    for (let index = 0; index < 6; index += 1) await user.tab();
     expect(more).toHaveFocus();
     await user.keyboard('{Enter}');
     expect(
       screen.getByRole('region', { name: 'More map controls' }),
     ).toBeVisible();
-    expect(more).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Recenter' })).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(
       screen.queryByRole('region', { name: 'More map controls' }),
     ).not.toBeInTheDocument();
     expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(more).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Interact with map' }),
+    ).toHaveFocus();
     expect(onActiveChange).toHaveBeenCalledExactlyOnceWith(false);
     expect(
       screen.getByRole('button', { name: 'Interact with map' }),
@@ -67,9 +69,11 @@ describe('room toolbar Escape', () => {
     expect(
       screen.queryByRole('region', { name: 'More map controls' }),
     ).not.toBeInTheDocument();
-    expect(more).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Interact with map' }),
+    ).toHaveFocus();
     expect(onActiveChange).toHaveBeenCalledExactlyOnceWith(false);
-    await user.keyboard('{Enter}');
+    await user.click(more);
     expect(screen.getByRole('button', { name: 'Controls' })).toHaveAttribute(
       'aria-expanded',
       'false',
