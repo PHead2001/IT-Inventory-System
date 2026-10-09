@@ -117,7 +117,11 @@ export function RoomToolbar({
           className={styles.iconButton}
           aria-label="Fit room"
           title="Fit room"
-          onClick={() => onCommand('fit')}
+          onClick={(event) => {
+            event.currentTarget.focus({ preventScroll: true });
+            close(false);
+            onCommand('fit');
+          }}
         >
           <Maximize aria-hidden="true" size={19} />
         </Button>
@@ -127,7 +131,11 @@ export function RoomToolbar({
           aria-label="Center selected"
           title="Center selected"
           disabled={!canFocusSelected}
-          onClick={onRequestFocus}
+          onClick={(event) => {
+            event.currentTarget.focus({ preventScroll: true });
+            close(false);
+            onRequestFocus();
+          }}
         >
           <Focus aria-hidden="true" size={19} />
         </Button>
@@ -191,7 +199,15 @@ export function RoomToolbar({
           data-room-obstruction="true"
           className={styles.moreMenu}
         >
-          {control('recenter', 'Recenter')}
+          <Button
+            variant="outline"
+            onClick={() => {
+              close();
+              onCommand('recenter');
+            }}
+          >
+            Recenter
+          </Button>
           <div
             role="group"
             aria-label="Orbit mode"

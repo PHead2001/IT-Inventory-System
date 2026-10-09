@@ -146,6 +146,38 @@ describe('rendered mesh selection', () => {
 });
 
 describe('room scene controls', () => {
+  it('Fit, Center selected and Recenter dismiss More without changing logical selection or active interaction', async () => {
+    const user = userEvent.setup(),
+      props = sceneProps({ selectedCode: 'ITC-S1A', canFocusSelected: true });
+    render(<RoomScene {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Interact with map' }));
+    for (const name of ['Fit room', 'Center selected', 'Recenter']) {
+      await user.click(
+        screen.getByRole('button', { name: 'More map controls' }),
+      );
+      await user.click(screen.getByRole('button', { name }));
+      expect(
+        screen.queryByRole('region', { name: 'More map controls' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: name === 'Recenter' ? 'More map controls' : name,
+        }),
+      ).toHaveFocus();
+      expect(
+        screen.getByRole('button', { name: 'Done interacting with map' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      expect(
+        screen
+          .getAllByRole('status')
+          .find((element) =>
+            element.textContent?.startsWith('Selected location:'),
+          ),
+      ).toHaveTextContent('ITC-S1A');
+      expect(props.onSelect).not.toHaveBeenCalled();
+    }
+    expect(props.onRequestFocus).toHaveBeenCalledOnce();
+  });
   it('finishes an interrupted focus at its intended valid target and zoom', () => {
     const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
     const target = new Vector3(2, 3, 4);

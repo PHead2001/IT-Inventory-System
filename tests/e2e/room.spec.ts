@@ -249,7 +249,8 @@ async function recenterMap(page: Page) {
   const wasOpen = (await more.getAttribute('aria-expanded')) === 'true';
   if (!wasOpen) await more.click();
   await page.getByRole('button', { name: 'Recenter', exact: true }).click();
-  if (!wasOpen) await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await expect(more).toBeFocused();
 }
 async function activateMap(page: Page) {
   if (await page.locator('canvas[data-map-active="true"]').count()) return;
@@ -1582,6 +1583,9 @@ test('recenter restores overview target while preserving orbit, zoom and selecti
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await toolbar.getByRole('button', { name: 'Fit room' }).click();
   await settledLabels(page);
+  await toolbar
+    .getByRole('button', { name: 'More map controls', exact: true })
+    .click();
   await toolbar.getByRole('button', { name: 'Pan left' }).click();
   const panned = await camera(page);
   expect(panned.target).not.toEqual(recentered.target);
@@ -2428,6 +2432,75 @@ test('375px populated room gives every independently witnessed opaque target an 
       await full.evaluate((element, text) => {
         if (element.firstChild) element.firstChild.textContent = text;
       }, original);
+      await settledLabels(page);
+      // A revealing primary action must remove the actual opaque popup before
+      // focusing the selected geometry. Selection came from an actual canvas
+      // pointer journey above, not injected selection or visibility state.
+      const center = page.getByRole('button', {
+        name: 'Center selected',
+        exact: true,
+      });
+      const beforeFocus = Number(await viewer.getAttribute('data-focus-count'));
+      const active = await canvas.getAttribute('data-map-active');
+      await center.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await expect(
+        page.getByRole('region', { name: 'More map controls', exact: true }),
+      ).toHaveCount(0);
+      await expect(center).toBeFocused();
+      await expect(canvas).toHaveAttribute('data-map-active', active!);
+      await expect(viewer).toHaveAttribute('data-selected-code', code);
+      await expect(viewer).toHaveAttribute('data-focused-code', code);
+      await expect(viewer).toHaveAttribute(
+        'data-focus-count',
+        String(beforeFocus + 1),
+      );
+      await canvas.scrollIntoViewIfNeeded();
+      await settledLabels(page);
+      const centeredScene = await captureRoomWitness(page);
+      const centeredWitnesses = roomVisibilityWitnesses(centeredScene);
+      expect(
+        centeredWitnesses.has(code),
+        'centered selected target has independently witnessed uncovered opaque geometry',
+      ).toBe(true);
+      await expect(label).toBeVisible();
+      await expect(label).toHaveAttribute('aria-pressed', 'true');
+      await expect(label).toHaveAttribute('data-label-compact', 'false');
+      await expect(label.locator('[data-room-label-full]')).toBeVisible();
+      const centeredUncovered = await uncoveredRoomWitnesses(
+        page,
+        centeredWitnesses,
+      );
+      const centeredPoint = centeredUncovered.get(code);
+      if (centeredPoint) {
+        await page.mouse.move(centeredPoint.x, centeredPoint.y);
+        await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
+      }
+      await testInfo.attach('center-selected-after-more', {
+        body: JSON.stringify({
+          code,
+          independentlyWitnessed: centeredWitnesses.has(code),
+          actualCanvasPointerJourney: !!centeredPoint,
+          pointerLimit: centeredPoint
+            ? null
+            : 'No independently sampled selected pixel was uncovered in actual DOM hit-testing; real-pointer proof is unavailable for this pose.',
+        }),
+        contentType: 'application/json',
+      });
+      await page.screenshot({
+        path: testInfo.outputPath('375-center-selected-dismissed-more.png'),
+      });
+      await page.mouse.move(15, 15);
+      await more.click();
+      const fit = page.getByRole('button', { name: 'Fit room', exact: true });
+      await fit.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await expect(fit).toBeFocused();
+      await expect(canvas).toHaveAttribute('data-map-active', active!);
+      await expect(viewer).toHaveAttribute('data-selected-code', code);
+      // Retain the existing next-pose/open-More capacity scenario.
+      await more.click();
+      await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
     }
     if (selectedCode && witnesses.has(selectedCode)) {
