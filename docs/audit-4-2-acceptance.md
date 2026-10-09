@@ -156,3 +156,7 @@ returns and retains the same selected editor/draft. Focused regressions cover
 fallback stability, resize/font/recovery reattachment and short-mode section jumps.
 The prepared actual-pointer 1180×300 journey also checks document scrolling and
 restoration to 1180×757. Browser execution and integrated acceptance remain pending.
+The PR #48 browser correction reserves a useful canvas beside the 18 rem inspector
+at 1180 px, preserves phone settings/Canvas navigation, and checks initial panel
+alignment separately from scrolled sticky clearance. The earlier CI browser
+failures remain recorded; corrected browser execution is still pending.

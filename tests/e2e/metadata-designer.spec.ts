@@ -340,6 +340,10 @@ for (const { width, height } of [
       )!;
       return {
         width: bounds.width,
+        canvasWidth: node
+          .closest('[data-testid="designer-panes"]')!
+          .querySelector('[data-testid="designer-canvas"]')!
+          .getBoundingClientRect().width,
         top: bounds.top,
         bottom: bounds.bottom,
         height: bounds.height,
@@ -352,6 +356,8 @@ for (const { width, height } of [
       };
     });
     if (width >= 1152) expect(geometry.width).toBeGreaterThanOrEqual(288);
+    if (width === 1180)
+      expect(geometry.canvasWidth).toBeGreaterThanOrEqual(400);
     expect(geometry.top).toBeGreaterThanOrEqual(geometry.toolbarBottom);
     if (!flow)
       expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport + 1);
@@ -466,6 +472,15 @@ test('phone designer preserves touch targets, inline boolean state, and long-tex
     '[data-control-id]:has(button[aria-label="Drag Name"])',
   );
   await nameControl.press('Enter');
+  await expect(
+    inspectorFor(nameControl).getByRole('heading', {
+      name: 'Inspector',
+      exact: true,
+    }),
+  ).toBeFocused();
+  // Selecting opens settings on a phone; gesture handles belong to Canvas.
+  await panels.getByRole('button', { name: 'Canvas', exact: true }).click();
+  await expect(nameControl).toHaveAttribute('data-selected', 'true');
   for (const control of [
     nameControl.getByRole('button', { name: 'Drag Name' }),
     nameControl.getByRole('button', { name: 'Resize Name' }),

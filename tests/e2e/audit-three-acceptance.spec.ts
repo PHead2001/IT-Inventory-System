@@ -244,13 +244,17 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     await expect(
       page.getByRole('heading', { name: renamed, exact: true }),
     ).toBeVisible();
-    const locationHeader = page
-      .getByRole('heading', { name: renamed, level: 1, exact: true })
-      .locator('..');
-    const roomLink = locationHeader.locator(
-      `:scope > a[href="/room?location=${before.data!.code}"]`,
-    );
+    const roomLink = page
+      .getByRole('navigation', { name: 'Location actions', exact: true })
+      .getByRole('link', {
+        name: `Show ${before.data!.code} in room`,
+        exact: true,
+      });
     await expect(roomLink).toHaveCount(1);
+    await expect(roomLink).toHaveAttribute(
+      'href',
+      `/room?location=${before.data!.code}`,
+    );
     await expect(roomLink).toHaveAccessibleName(
       `Show ${before.data!.code} in room`,
     );

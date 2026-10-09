@@ -1151,6 +1151,26 @@ test('configuration and inventory creation surfaces render at desktop and phone 
           .locator('[data-control-id]')
           .filter({ hasText: 'Visual check field' }),
       ).toBeVisible();
+      const inspectorClearance = await page
+        .getByTestId('designer-inspector')
+        .evaluate((inspector) => {
+          const toolbar = document.querySelector<HTMLElement>(
+            '[role="toolbar"][aria-label="Form designer"]',
+          )!;
+          return {
+            top: inspector.getBoundingClientRect().top,
+            toolbarBottom: toolbar.getBoundingClientRect().bottom,
+          };
+        });
+      expect(inspectorClearance.top).toBeGreaterThanOrEqual(
+        inspectorClearance.toolbarBottom + 15,
+      );
+      // Sticky settings deliberately stay above a scrolled canvas. Compare the
+      // initial panel alignment separately, with the document at its origin.
+      await page.evaluate(() =>
+        window.scrollTo({ top: 0, behavior: 'instant' }),
+      );
+      await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
       const panels = await page.evaluate(() => {
         const heading = (text: string) =>
           [...document.querySelectorAll('main h3')].find(

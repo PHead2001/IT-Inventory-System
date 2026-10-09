@@ -202,10 +202,16 @@
 
 @media (min-width: 1152px) {
   .panes {
-    grid-template-columns: 9rem minmax(0, 1fr) minmax(18rem, 20rem);
+    grid-template-columns: 8rem minmax(0, 1fr) 18rem;
   }
   .inspector {
     position: sticky;
     top: var(--designer-inspector-top);
+  }
+}
+
+@media (min-width: 1280px) {
+  .panes {
+    grid-template-columns: 9rem minmax(0, 1fr) minmax(18rem, 20rem);
   }
 }
