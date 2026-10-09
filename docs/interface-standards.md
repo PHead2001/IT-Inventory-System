@@ -59,6 +59,7 @@ Write for the staff member in the moment, not for a reviewer of the implementati
 - Use domain words staff already use: location, assigned to, in stock, retired. Avoid model terms on screen: transaction, definition, holding, custody record, revision, payload, scope.
 - Show one short line of help at most. Move long explanations behind a "?" or "Learn more" disclosure.
 - Mark optional fields "(optional)". Do not explain the asterisk convention on every form.
+- Validation summaries list separate linked field entries, with spacing and visible markers. Activating an entry focuses its field; live validation clears entries without stealing edit focus.
 - Error messages say what is wrong and how to fix it, next to the field.
 - Plain does not mean vague. Never trade truthfulness for friendliness (see §6).
 
@@ -122,6 +123,7 @@ Use motion where it explains a change:
 Rules:
 
 - Transition only the properties that change. No `transition: all`.
+- Settings exposes **Reduce motion in this browser** as a labeled switch. Its checked state is the saved browser choice; adjacent help explains effective motion and any OS requirement. Turning it off cannot override system reduced motion.
 - Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
 - No motion that delays a request, replays on query-string updates, or runs continuously behind working forms.
 
@@ -131,6 +133,7 @@ Rules:
 
 - Pickers and popovers are at least as wide as their trigger, anchor below it and never cover their own label.
 - File inputs use one styled drop zone with a browse button and show the selected file name and thumbnail. Do not render the native "Choose File" control.
+- File selection explains **Nothing uploads until you choose Upload and review.**
 - Drop and Browse share local type/size/name validation. Image previews use revocable local object URLs; PDFs show a filename/document marker and are never embedded before review. Selection grants no publication or inspection trust. Existing upload, inspection, review, replacement and cleanup boundaries remain authoritative.
 - Long option lists use a themed scrollbar and keep the search field in view.
 - Destructive confirmations follow §3. Free-text reasons may offer preset chips that fill the field.

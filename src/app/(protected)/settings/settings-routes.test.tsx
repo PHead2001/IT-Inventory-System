@@ -133,7 +133,7 @@ it('offers browser-personal motion preferences on the member Settings landing pa
     screen.getByRole('region', { name: 'Appearance & preferences' }),
   ).toHaveTextContent('personal preference for this browser');
   expect(
-    screen.getByRole('button', { name: 'Reduce motion locally' }),
+    screen.getByRole('switch', { name: 'Reduce motion in this browser' }),
   ).toBeVisible();
   expect(mocks.categories).not.toHaveBeenCalled();
 });

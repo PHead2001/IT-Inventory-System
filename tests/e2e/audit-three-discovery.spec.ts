@@ -424,12 +424,14 @@ test('Settings hierarchy and the search location picker expose keyboard paths an
     .getByLabel('Search locations', { exact: true })
     .fill('ITC-D07');
   await expect(
-    configuration.getByRole('list', { name: 'Locations' }),
+    configuration.getByRole('tree', { name: 'Locations' }),
   ).toBeVisible();
   await expect(
     configuration.getByText('1 matching locations', { exact: true }),
   ).toBeVisible();
-  const result = configuration.getByRole('link', { name: /ITC-D07 · Active$/ });
+  const result = configuration.getByRole('treeitem', {
+    name: /ITC-D07 · Active$/,
+  });
   await result.scrollIntoViewIfNeeded();
   await withinViewport(result);
   await result.press('Enter');

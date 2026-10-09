@@ -37,7 +37,7 @@ it('shares hierarchy order, supports keyboard collapse and full-path search with
   fireEvent.change(screen.getByRole('searchbox'), {
     target: { value: 'IT Closet / Drawer' },
   });
-  expect(screen.getByRole('link', { name: /Drawer 7/ })).toHaveAttribute(
+  expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveAttribute(
     'href',
     '/settings/locations/ITC-D07',
   );
@@ -71,4 +71,78 @@ it('uses one tree Tab stop while arrow keys expose children and pointer collapse
   ).not.toBeInTheDocument();
   await user.tab();
   expect(screen.getByRole('button', { name: 'After locations' })).toHaveFocus();
+});
+
+const group = {
+  ...root,
+  id: 'group',
+  name: 'Right Storage',
+  code: 'ITC-R',
+  parent_id: root.id,
+};
+const deepLeaf = { ...leaf, parent_id: group.id };
+it('collapses below the first level and reveals search ancestors without losing the browsing expansion', () => {
+  render(<SettingsLocationTree locations={[deepLeaf, group, root]} />);
+  expect(screen.getAllByRole('treeitem')).toHaveLength(2);
+  expect(
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
+  ).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.change(screen.getByRole('searchbox'), {
+    target: { value: 'ITC-D07' },
+  });
+  expect(screen.getAllByRole('treeitem')).toHaveLength(3);
+  expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveAttribute(
+    'aria-level',
+    '3',
+  );
+  expect(
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+  expect(
+    screen.queryByRole('treeitem', { name: /Drawer 7/ }),
+  ).not.toBeInTheDocument();
+});
+it('reveals the selected location ancestors with a single selected tree Tab stop', async () => {
+  const user = userEvent.setup();
+  render(
+    <SettingsLocationTree
+      locations={[deepLeaf, group, root]}
+      selectedCode="ITC-D07"
+    />,
+  );
+  const selected = screen.getByRole('treeitem', { name: /Drawer 7/ });
+  expect(selected).toHaveAttribute('aria-current', 'page');
+  await user.tab();
+  await user.tab();
+  expect(selected).toHaveFocus();
+  await user.keyboard('{ArrowLeft}');
+  expect(
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
+  ).toHaveFocus();
+});
+
+it('keeps search branch controls truthful and search expansion separate from browsing', () => {
+  render(<SettingsLocationTree locations={[deepLeaf, group, root]} />);
+  const search = screen.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: 'ITC-R' } });
+  expect(
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
+  ).not.toHaveAttribute('aria-expanded');
+  fireEvent.change(search, { target: { value: 'ITC-D07' } });
+  const parent = screen.getByRole('treeitem', { name: /^Right Storage/ });
+  parent.focus();
+  fireEvent.keyDown(parent, { key: 'ArrowLeft' });
+  expect(parent).toHaveAttribute('aria-expanded', 'false');
+  expect(parent).toHaveFocus();
+  expect(
+    screen.queryByRole('treeitem', { name: /Drawer 7/ }),
+  ).not.toBeInTheDocument();
+  fireEvent.keyDown(parent, { key: 'ArrowRight' });
+  expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toBeVisible();
+  fireEvent.change(search, { target: { value: '' } });
+  expect(screen.getAllByRole('treeitem')).toHaveLength(2);
+  expect(
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
+  ).toHaveAttribute('aria-expanded', 'false');
 });

@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
   await expect(
-    page.getByRole('button', { name: 'Reduce motion locally' }),
+    page.getByRole('switch', { name: 'Reduce motion in this browser' }),
   ).toHaveCount(0);
   await page.getByLabel('Email', { exact: true }).fill(fixture.emails[role]);
   await page.getByLabel('Password', { exact: true }).fill(fixture.password);
@@ -547,28 +547,188 @@ test('viewer controls personal motion in Settings and retains it across routes w
     name: 'Appearance & preferences',
   });
   await preference
-    .getByRole('button', { name: 'Reduce motion locally' })
+    .getByRole('switch', { name: 'Reduce motion in this browser' })
     .focus();
   await page.keyboard.press('Enter');
   await expect(
-    preference.getByRole('button', { name: 'Use system motion setting' }),
-  ).toHaveText(/Reduced locally/);
+    preference.getByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toHaveAttribute('aria-checked', 'true');
   await page
     .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('link', { name: 'Inventory' })
     .click();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
   await expect(
-    page.getByRole('button', { name: 'Use system motion setting' }),
+    page.getByRole('switch', { name: 'Reduce motion in this browser' }),
   ).toHaveCount(0);
   await page.goto('/settings');
   await preference
-    .getByRole('button', { name: 'Use system motion setting' })
+    .getByRole('switch', { name: 'Reduce motion in this browser' })
     .click();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(
-    preference.getByRole('button', { name: 'Reduce motion locally' }),
-  ).toHaveText(/Reduced by system/);
+    preference.getByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toHaveAccessibleDescription(
+    'Reduced motion is required by your system, even when this switch is off.',
+  );
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
 });
+
+for (const width of [1280, 375, 390]) {
+  for (const reduced of [false, true]) {
+    test(`working controls preserve accessible state at ${width}px with ${reduced ? 'Reduced' : 'Full'} motion`, async ({
+      page,
+    }, testInfo) => {
+      await signIn(page);
+      await page.setViewportSize({ width, height: width === 1280 ? 900 : 812 });
+      await page.emulateMedia({
+        reducedMotion: reduced ? 'reduce' : 'no-preference',
+      });
+      await page.goto('/settings');
+      const toggle = page.getByRole('switch', {
+        name: 'Reduce motion in this browser',
+      });
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await toggle.focus();
+      await page.keyboard.press('Space');
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-motion',
+        'reduced',
+      );
+      await page.keyboard.press('Space');
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-motion',
+        reduced ? 'reduced' : 'full',
+      );
+      await expect(toggle).toHaveAccessibleDescription(
+        reduced
+          ? 'Reduced motion is required by your system, even when this switch is off.'
+          : 'Full motion is active.',
+      );
+      await page.screenshot({
+        path: testInfo.outputPath('motion-settings.png'),
+        fullPage: true,
+      });
+
+      await page.goto('/settings/locations');
+      const tree = page.getByRole('tree', { name: 'Locations' });
+      const right = tree.getByRole('treeitem', { name: /ITC-R · Active$/ });
+      await expect(right).toHaveAttribute('aria-expanded', 'false');
+      await expect(
+        tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
+      ).toHaveCount(0);
+      await right.focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(
+        tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
+      ).toBeVisible();
+      await page
+        .getByLabel('Search locations', { exact: true })
+        .fill('ITC-D07');
+      const selected = tree.getByRole('treeitem', {
+        name: /ITC-D07 · Active$/,
+      });
+      await expect(right).toHaveAttribute('aria-expanded', 'true');
+      await expect(selected).toHaveAttribute('aria-level', '3');
+      await selected.press('Enter');
+      await page
+        .getByRole('link', { name: 'All locations', exact: true })
+        .click();
+      const returned = page.getByRole('treeitem', {
+        name: /ITC-D07 · Active$/,
+      });
+      await expect(returned).toHaveAttribute('aria-current', 'page');
+      await expect(returned).toHaveAttribute('tabindex', '0');
+      await page.screenshot({
+        path: testInfo.outputPath('selected-location-tree.png'),
+        fullPage: true,
+      });
+
+      await page.goto('/locations/ITC-RED?status=all');
+      const actions = page.getByRole('navigation', {
+        name: 'Location actions',
+      });
+      await expect(actions.getByRole('link')).toHaveCount(4);
+      const actionLinks = actions.getByRole('link');
+      await actionLinks.first().focus();
+      for (let index = 1; index < 4; index++) {
+        await page.keyboard.press('Tab');
+        await expect(actionLinks.nth(index)).toBeFocused();
+      }
+
+      await expect(
+        actions.getByRole('link', { name: 'Print label', exact: true }),
+      ).toHaveAttribute('href', '/labels?location=ITC-RED');
+      await expect(
+        actions.getByRole('link', { name: 'History', exact: true }),
+      ).toHaveAttribute('href', '/history?location=ITC-RED');
+      const exportHref = await actions
+        .getByRole('link', { name: 'Export', exact: true })
+        .getAttribute('href');
+      const exportQuery = new URL(exportHref!, page.url()).searchParams;
+      expect(exportQuery.get('location')).toBe('ITC-RED');
+      expect(exportQuery.get('status')).toBe('all');
+      await expect(page.getByText(/Current scope:/)).toHaveCount(0);
+      await expect(
+        page.getByRole('link', { name: 'All statuses', exact: true }),
+      ).toHaveAttribute('aria-current', 'page');
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-motion',
+        reduced ? 'reduced' : 'full',
+      );
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath('location-actions.png'),
+        fullPage: true,
+      });
+
+      await page.goto('/inventory/assets/new');
+      const form = page.getByRole('form', {
+        name: 'Add individual asset',
+        exact: true,
+      });
+      await metadataReviewButton(form).click();
+      const summary = form
+        .getByRole('alert')
+        .filter({ has: page.getByRole('list') });
+      await expect(summary.getByRole('listitem')).not.toHaveCount(0);
+      const links = summary.getByRole('link');
+      const firstId = (await links.first().getAttribute('href'))!.slice(1);
+      await expect
+        .poll(() =>
+          page
+            .locator(`[id="${firstId}"]`)
+            .evaluate(
+              (field) =>
+                field === document.activeElement ||
+                field.contains(document.activeElement),
+            ),
+        )
+        .toBe(true);
+      await links.last().click();
+      const lastId = (await links.last().getAttribute('href'))!.slice(1);
+      await expect
+        .poll(() =>
+          page
+            .locator(`[id="${lastId}"]`)
+            .evaluate(
+              (field) =>
+                field === document.activeElement ||
+                field.contains(document.activeElement),
+            ),
+        )
+        .toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath('linked-validation-errors.png'),
+        fullPage: true,
+      });
+    });
+  }
+}

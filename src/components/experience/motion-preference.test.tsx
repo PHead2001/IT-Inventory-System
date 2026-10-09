@@ -105,16 +105,23 @@ it('combines OS and local choices and responds to either changing', async () => 
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('false');
-  expect(toggle).toHaveTextContent('Full motion');
+  expect(toggle).toHaveAccessibleDescription('Full motion is active.');
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
   act(() => setSystem(true));
-  expect(toggle).toHaveTextContent('Reduced by system');
+  expect(toggle).toHaveAccessibleDescription(
+    'Reduced motion is required by your system, even when this switch is off.',
+  );
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  expect(toggle).toHaveTextContent('Reduced locally');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(toggle).toHaveAccessibleDescription(
+    'Reduced motion is active. Your system also requires reduced motion.',
+  );
   act(() => setSystem(false));
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   await user.click(toggle);
@@ -155,9 +162,11 @@ it('keeps the local reduced-motion choice across mounts', async () => {
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   first.unmount();
   render(
@@ -168,8 +177,8 @@ it('keeps the local reduced-motion choice across mounts', async () => {
     </MotionPreference>,
   );
   expect(
-    screen.getByRole('button', { name: 'Use system motion setting' }),
-  ).toHaveAttribute('aria-pressed', 'true');
+    screen.getByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toHaveAttribute('aria-checked', 'true');
 });
 
 it('renders and toggles when browser storage rejects reads and writes', async () => {
@@ -189,11 +198,13 @@ it('renders and toggles when browser storage rejects reads and writes', async ()
     </MotionPreference>,
   );
   expect(screen.getByText('Workspace')).toBeInTheDocument();
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
 });

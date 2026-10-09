@@ -45,6 +45,9 @@ it('uses one local browse/drop path, revokes image previews, and never embeds or
     />,
   );
   await screen.findByText('Uploaded · review required');
+  expect(
+    screen.getByText(/Nothing uploads until you choose Upload and review\./),
+  ).toBeVisible();
   const image = new File(['benign image fixture'], 'selected.png', {
     type: 'image/png',
   });

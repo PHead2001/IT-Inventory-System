@@ -250,7 +250,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
     const active = page.getByRole('link', { name: 'Active only', exact: true });
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('Current scope: Active only')).toBeVisible();
+    await expect(page.getByText('Current scope: Active only')).toHaveCount(0);
     await expect(page.getByText('28 matching rows')).toBeVisible();
     const split = page.locator('li').filter({
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
@@ -304,9 +304,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
-    await page
-      .getByRole('link', { name: 'Download location inventory CSV' })
-      .click();
+    await page.getByRole('link', { name: 'Export' }).click();
     const download = await downloading;
     const path = testInfo.outputPath('all-status-location.csv');
     await download.saveAs(path);
@@ -651,9 +649,7 @@ test('Office codes, compact duplicate child links and empty destination remain a
     await page.getByRole('link', { name: 'Include all statuses' }).click();
     await expect(page.getByText('No recorded inventory here.')).toBeVisible();
     const downloaded = page.waitForEvent('download');
-    await page
-      .getByRole('link', { name: 'Download location inventory CSV' })
-      .click();
+    await page.getByRole('link', { name: 'Export' }).click();
     const path = testInfo.outputPath('empty-destination.csv');
     await (await downloaded).saveAs(path);
     expect(csvRows(await readFile(path, 'utf8'))).toHaveLength(1);

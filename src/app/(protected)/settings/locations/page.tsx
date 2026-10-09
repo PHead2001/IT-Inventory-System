@@ -4,8 +4,14 @@ import { getManagedLocations } from '@/features/custody/queries.server';
 import { SettingsLocationTree } from '@/features/locations/settings-location-tree';
 import { panel } from '@/features/inventory/components/read-ui';
 
-export default async function ManageLocationsPage() {
+export default async function ManageLocationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ selected?: string | string[] }>;
+}) {
   await requireMember();
+  const raw = (await searchParams).selected;
+  const selectedCode = typeof raw === 'string' ? raw : undefined;
   const locations = await getManagedLocations();
   return (
     <>
@@ -27,7 +33,11 @@ export default async function ManageLocationsPage() {
         permanent codes and room bindings are maintained with reviewed room
         code.
       </p>
-      <SettingsLocationTree locations={locations} />
+      <SettingsLocationTree
+        key={selectedCode ?? 'all'}
+        locations={locations}
+        selectedCode={selectedCode}
+      />
     </>
   );
 }

@@ -8,20 +8,39 @@ import {
   pickerLocations,
   pickerTree,
   visiblePickerTree,
+  locationAncestorIds,
   type PickerTreeRow,
 } from './picker-model';
 
 export function SettingsLocationTree({
   locations,
+  selectedCode,
 }: {
   locations: ManagedLocation[];
+  selectedCode?: string;
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState(
-    () => new Set(locations.map((item) => item.id)),
+  const [expanded, setExpanded] = useState(() => {
+    const byId = new Map(locations.map((item) => [item.id, item]));
+    const initial = new Set(
+      locations
+        .filter((item) => !item.parent_id || !byId.has(item.parent_id))
+        .map((item) => item.id),
+    );
+    let parent = locations.find(
+      (item) => item.code === selectedCode,
+    )?.parent_id;
+    while (parent && byId.has(parent) && !initial.has(parent)) {
+      initial.add(parent);
+      parent = byId.get(parent)?.parent_id;
+    }
+    return initial;
+  });
+  const [searchCollapsed, setSearchCollapsed] = useState(new Set<string>());
+  const [focused, setFocused] = useState<string | null>(
+    locations.find((item) => item.code === selectedCode)?.id ?? null,
   );
-  const [focused, setFocused] = useState<string | null>(null);
   const refs = useMemo<LocationRef[]>(() => {
     const byId = new Map(locations.map((item) => [item.id, item]));
     return locations.map((item) => {
@@ -44,18 +63,43 @@ export function SettingsLocationTree({
   }, [locations]);
   const tree = pickerTree(refs, 'browse');
   const searching = Boolean(query.trim());
-  const rows: Pick<
-    PickerTreeRow,
-    'location' | 'depth' | 'hasChildren' | 'parentId'
-  >[] = searching
-    ? pickerLocations(refs, 'browse', { query }).map((location) => ({
-        location,
-        depth: 0,
-        hasChildren: false,
-        parentId: null,
-      }))
-    : visiblePickerTree(tree, expanded);
+  const matches = searching ? pickerLocations(refs, 'browse', { query }) : [];
+  const revealed = new Set(expanded);
+  const included = new Set<string>();
+  for (const match of matches) {
+    included.add(match.id);
+    for (const ancestor of locationAncestorIds(match, refs)) {
+      included.add(ancestor);
+      revealed.add(ancestor);
+    }
+  }
+  for (const locationId of searchCollapsed) revealed.delete(locationId);
+  const searchParents = new Set(
+    tree
+      .filter((row) => included.has(row.location.id))
+      .map((row) => row.parentId),
+  );
+  const rows: PickerTreeRow[] = visiblePickerTree(
+    searching
+      ? tree
+          .filter((row) => included.has(row.location.id))
+          .map((row) => ({
+            ...row,
+            hasChildren: searchParents.has(row.location.id),
+          }))
+      : tree,
+    revealed,
+  );
   function toggle(locationId: string, open: boolean) {
+    if (searching) {
+      setSearchCollapsed((current) => {
+        const next = new Set(current);
+        if (open) next.delete(locationId);
+        else next.add(locationId);
+        return next;
+      });
+      return;
+    }
     setExpanded((current) => {
       const next = new Set(current);
       if (open) next.add(locationId);
@@ -84,6 +128,7 @@ export function SettingsLocationTree({
         value={query}
         onChange={(event) => {
           setQuery(event.target.value);
+          setSearchCollapsed(new Set());
           setFocused(null);
         }}
         className="experience-field mt-2 min-h-11 w-full px-3 py-2"
@@ -91,18 +136,18 @@ export function SettingsLocationTree({
       />
       <p role="status" className="my-3 text-xs text-slate-300">
         {searching
-          ? `${rows.length} matching locations`
+          ? `${matches.length} matching locations`
           : `${locations.length} locations`}
       </p>
       <ul
-        role={searching ? 'list' : 'tree'}
+        role="tree"
         aria-label="Locations"
         className="divide-y divide-slate-700/70"
       >
         {rows.map((row, index) => (
           <li
             key={row.location.id}
-            role={searching ? 'listitem' : 'none'}
+            role="none"
             className="flex min-w-0 items-start gap-2 py-2"
             style={{ paddingLeft: row.depth * 16 }}
           >
@@ -111,34 +156,34 @@ export function SettingsLocationTree({
                 type="button"
                 tabIndex={-1}
                 onClick={() => {
-                  toggle(row.location.id, !expanded.has(row.location.id));
+                  toggle(row.location.id, !revealed.has(row.location.id));
                   focus(index);
                 }}
-                aria-label={`${expanded.has(row.location.id) ? 'Collapse' : 'Expand'} ${row.location.name}`}
+                aria-label={`${revealed.has(row.location.id) ? 'Collapse' : 'Expand'} ${row.location.name}`}
                 className="min-h-11 min-w-11 text-cyan-300"
               >
-                {expanded.has(row.location.id) ? '⌄' : '›'}
+                {revealed.has(row.location.id) ? '⌄' : '›'}
               </button>
             ) : (
               <span className="w-11 shrink-0" aria-hidden="true" />
             )}
             <Link
               id={`${id}-${index}`}
-              role={searching ? undefined : 'treeitem'}
-              aria-level={searching ? undefined : row.depth + 1}
+              role="treeitem"
+              aria-level={row.depth + 1}
+              aria-current={
+                row.location.code === selectedCode ? 'page' : undefined
+              }
               aria-expanded={
-                row.hasChildren ? expanded.has(row.location.id) : undefined
+                row.hasChildren ? revealed.has(row.location.id) : undefined
               }
               tabIndex={
-                searching ||
-                focused === row.location.id ||
-                (focused === null && index === 0)
+                focused === row.location.id || (focused === null && index === 0)
                   ? 0
                   : -1
               }
               onFocus={() => setFocused(row.location.id)}
               onKeyDown={(event) => {
-                if (searching) return;
                 if (
                   ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
                 ) {
@@ -153,13 +198,13 @@ export function SettingsLocationTree({
                 }
                 if (event.key === 'ArrowRight' && row.hasChildren) {
                   event.preventDefault();
-                  if (!expanded.has(row.location.id))
+                  if (!revealed.has(row.location.id))
                     toggle(row.location.id, true);
                   else focus(index + 1);
                 }
                 if (event.key === 'ArrowLeft') {
                   event.preventDefault();
-                  if (row.hasChildren && expanded.has(row.location.id))
+                  if (row.hasChildren && revealed.has(row.location.id))
                     toggle(row.location.id, false);
                   else if (row.parentId)
                     focus(

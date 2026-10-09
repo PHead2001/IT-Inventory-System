@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useId, useSyncExternalStore } from 'react';
 import { MotionConfig } from 'motion/react';
 
 const storageKey = 'it-inventory-reduce-motion';
@@ -74,6 +74,7 @@ export function MotionPreference({ children }: { children: React.ReactNode }) {
 }
 
 export function MotionToggle() {
+  const descriptionId = useId();
   const { local, system } = useMotionState();
 
   function toggle() {
@@ -88,27 +89,33 @@ export function MotionToggle() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      className="experience-motion-toggle"
-      aria-pressed={local}
-      aria-label={local ? 'Use system motion setting' : 'Reduce motion locally'}
-    >
-      <span>
+    <div className="space-y-2">
+      <button
+        type="button"
+        role="switch"
+        onClick={toggle}
+        className="experience-motion-toggle"
+        aria-checked={local}
+        aria-label="Reduce motion in this browser"
+        aria-describedby={descriptionId}
+      >
+        <span>Reduce motion in this browser</span>
+        <span aria-hidden="true" className="experience-motion-state">
+          <span className="experience-motion-track">
+            <span />
+          </span>
+          {local ? 'On' : 'Off'}
+        </span>
+      </button>
+      <p id={descriptionId} className="experience-muted text-sm">
         {local
-          ? 'Reduced locally'
+          ? system
+            ? 'Reduced motion is active. Your system also requires reduced motion.'
+            : 'Reduced motion is active in this browser.'
           : system
-            ? 'Reduced by system'
-            : 'Full motion'}
-      </span>
-      <small>
-        {local
-          ? 'Use system setting'
-          : system
-            ? 'System setting active · reduce locally'
-            : 'Reduce motion'}
-      </small>
-    </button>
+            ? 'Reduced motion is required by your system, even when this switch is off.'
+            : 'Full motion is active.'}
+      </p>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
+import type { InventoryResult } from '../contracts-ui';
 import {
   HistoryList,
   InventoryRows,
@@ -652,4 +653,128 @@ it('adds useful changed fields and omits summaries that merely repeat event head
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getAllByText('View event details')[0]);
   expect(screen.getAllByText('Reason: End of service')[0]).toBeVisible();
+});
+
+const scopedRow: InventoryResult = {
+  kind: 'quantity' as const,
+  id: 'scoped-item',
+  name: 'Adapters',
+  categoryName: 'Parts',
+  status: 'active',
+  location,
+  quantity: 3,
+  assetTag: null,
+  serialNumber: null,
+  recordedTotal: 7,
+  availableQuantity: '7',
+  assignedQuantity: '2',
+  ownedQuantity: '9',
+  reorderThreshold: null,
+  stockState: 'disabled',
+};
+it('omits only the current location from scoped rows while retaining child locations, sites and overall totals', () => {
+  const child = {
+    ...location,
+    id: 'child',
+    code: 'ITC-S4C',
+    name: '4C',
+    breadcrumb: 'IT Closet / Shelf 4 / 4C',
+  };
+  render(
+    <InventoryRows
+      currentLocationId={location.id}
+      rows={[
+        scopedRow,
+        { ...scopedRow, location: child, quantity: 4 },
+        {
+          ...scopedRow,
+          location: null,
+          site: {
+            id: 'site',
+            code: 'A',
+            name: 'Example Property',
+          },
+          quantity: 2,
+        },
+      ]}
+    />,
+  );
+  const rows = screen.getAllByRole('listitem');
+  expect(
+    within(rows[0]).queryByText('Storage / custody'),
+  ).not.toBeInTheDocument();
+  expect(
+    within(rows[0]).queryByRole('link', { name: /ITC-S4B/ }),
+  ).not.toBeInTheDocument();
+  expect(within(rows[0]).getByText('3 units')).toBeVisible();
+  expect(
+    within(rows[0]).getByText('Overall totals: 2 assigned · 9 recorded'),
+  ).toBeVisible();
+  expect(
+    within(rows[1]).getByRole('link', {
+      name: 'IT Closet / Shelf 4 / 4C (ITC-S4C)',
+    }),
+  ).toHaveAttribute('href', '/locations/ITC-S4C');
+  expect(
+    within(rows[2]).getByRole('link', { name: /Assigned to Example Property/ }),
+  ).toHaveAttribute('href', '/sites/A');
+});
+it('keeps informative aggregate counts while suppressing redundant one-row location counts', () => {
+  const view = render(
+    <InventoryCount
+      compact
+      result={{ rows: [scopedRow], total: 1, page: 1, pageSize: 25 }}
+    />,
+  );
+  expect(screen.getByText('1 matching row')).toBeVisible();
+  expect(
+    screen.queryByText(/On this page|Distinct quantity products/),
+  ).not.toBeInTheDocument();
+  view.rerender(
+    <InventoryCount
+      compact
+      result={{
+        rows: [
+          scopedRow,
+          { ...scopedRow, location: { ...location, id: 'child' } },
+        ],
+        total: 2,
+        page: 1,
+        pageSize: 25,
+      }}
+    />,
+  );
+  expect(
+    screen.getByText(/On this page: 2 quantity rows with stock/),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Distinct quantity products on this page: 1/),
+  ).toBeVisible();
+  view.rerender(
+    <InventoryCount
+      compact
+      result={{
+        rows: [scopedRow, { ...scopedRow, id: 'different-item' }],
+        total: 2,
+        page: 1,
+        pageSize: 25,
+      }}
+    />,
+  );
+  expect(
+    screen.queryByText(/Distinct quantity products/),
+  ).not.toBeInTheDocument();
+});
+
+it('keeps page-local counts when a location has more results beyond a single-row page', () => {
+  render(
+    <InventoryCount
+      compact
+      result={{ rows: [scopedRow], total: 26, page: 2, pageSize: 25 }}
+    />,
+  );
+  expect(screen.getByText('26 matching rows')).toBeVisible();
+  expect(
+    screen.getByText(/On this page: 1 quantity row with stock/),
+  ).toBeVisible();
 });

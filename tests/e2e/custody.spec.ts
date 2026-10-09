@@ -276,9 +276,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toHaveAttribute('href', '/locations/' + locationCode);
   await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   await page.goto('/locations/' + locationCode);
-  await expect(
-    page.getByRole('link', { name: 'Print location label' }),
-  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Print label' })).toBeVisible();
   await noHorizontalOverflow(page);
   await page.goto('/labels?location=' + locationCode);
   await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');

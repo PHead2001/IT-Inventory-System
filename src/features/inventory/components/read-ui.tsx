@@ -40,23 +40,32 @@ export function LocationCode({ code }: { code: string }) {
 }
 export function InventoryCount({
   result,
+  compact = false,
 }: {
   result: PageResult<InventoryResult>;
+  compact?: boolean;
 }) {
   return (
     <div className="experience-muted text-sm tabular-nums">
       <p>{countLabel(result.total, 'matching row')}</p>
-      {result.rows.length > 0 && (
-        <p className="mt-1 text-xs">
-          On this page: {pageInventoryCounts(result.rows)}
-        </p>
-      )}
-      {pageDistinctQuantityProducts(result.rows) > 0 && (
-        <p className="mt-1 text-xs">
-          Distinct quantity products on this page:{' '}
-          {pageDistinctQuantityProducts(result.rows)} (overlaps the row counts).
-        </p>
-      )}
+      {result.rows.length > 0 &&
+        (!compact ||
+          result.rows.length > 1 ||
+          result.total > result.rows.length) && (
+          <p className="mt-1 text-xs">
+            On this page: {pageInventoryCounts(result.rows)}
+          </p>
+        )}
+      {pageDistinctQuantityProducts(result.rows) > 0 &&
+        (!compact ||
+          result.rows.filter((row) => row.kind === 'quantity').length >
+            pageDistinctQuantityProducts(result.rows)) && (
+          <p className="mt-1 text-xs">
+            Distinct quantity products on this page:{' '}
+            {pageDistinctQuantityProducts(result.rows)} (overlaps the row
+            counts).
+          </p>
+        )}
     </div>
   );
 }
@@ -88,11 +97,13 @@ export function InventoryRows({
   fileSummaries = [],
   emptyState,
   returnTo,
+  currentLocationId,
 }: {
   rows: InventoryResult[];
   fileSummaries?: FileListSummary[];
   emptyState?: ReactNode;
   returnTo?: string;
+  currentLocationId?: string;
 }) {
   if (!rows.length)
     return (
@@ -185,25 +196,31 @@ export function InventoryRows({
                     </span>
                   )}
               </div>
-              <div className={styles.location}>
-                <span className={styles.label}>Storage / custody</span>
-                {row.site ? (
-                  <Link
-                    className="text-cyan-300 underline [overflow-wrap:anywhere]"
-                    href={`/sites/${encodeURIComponent(row.site.code)}`}
-                  >
-                    Assigned to {row.site.name} ({row.site.code}) · no room
-                    model
-                  </Link>
-                ) : row.location ? (
-                  <>
-                    {row.status === 'retired' ? 'Last recorded storage: ' : ''}
-                    <LocationLink location={row.location} />
-                  </>
-                ) : (
-                  'No positive stock or active site holding — unlocated definition'
-                )}
-              </div>
+              {(row.site ||
+                !currentLocationId ||
+                row.location?.id !== currentLocationId) && (
+                <div className={styles.location}>
+                  <span className={styles.label}>Storage / custody</span>
+                  {row.site ? (
+                    <Link
+                      className="text-cyan-300 underline [overflow-wrap:anywhere]"
+                      href={`/sites/${encodeURIComponent(row.site.code)}`}
+                    >
+                      Assigned to {row.site.name} ({row.site.code}) · no room
+                      model
+                    </Link>
+                  ) : row.location ? (
+                    <>
+                      {row.status === 'retired'
+                        ? 'Last recorded storage: '
+                        : ''}
+                      <LocationLink location={row.location} />
+                    </>
+                  ) : (
+                    'No positive stock or active site holding — unlocated definition'
+                  )}
+                </div>
+              )}
             </div>
             <div className={styles.footer}>
               {row.serialNumber && (

@@ -386,7 +386,7 @@ test('representative shell and auth surfaces render at desktop and phone sizes w
       path: testInfo.outputPath('overview-phone-390-viewport.png'),
     });
     await expect(
-      page.getByRole('button', { name: 'Reduce motion locally' }),
+      page.getByRole('switch', { name: 'Reduce motion in this browser' }),
     ).toHaveCount(0);
     await expect(
       page.getByRole('heading', { name: 'Low-stock overview' }),
@@ -690,10 +690,10 @@ test('the first styled paint is reduced before hydration and the saved preferenc
       );
       await probe.goto('/settings');
       await expect(
-        probe.getByRole('button', {
-          name: saved ? 'Use system motion setting' : 'Reduce motion locally',
+        probe.getByRole('switch', {
+          name: 'Reduce motion in this browser',
         }),
-      ).toHaveAttribute('aria-pressed', String(saved));
+      ).toHaveAttribute('aria-checked', String(saved));
     } finally {
       release();
       await probe.close();
@@ -722,11 +722,13 @@ test('desktop navigation reaches personal motion Settings after long-page scroll
     const settingsBox = await settings.boundingBox();
     expect(settingsBox).toBeTruthy();
     await expect(
-      page.getByRole('button', { name: 'Reduce motion locally' }),
+      page.getByRole('switch', { name: 'Reduce motion in this browser' }),
     ).toHaveCount(0);
     await settings.click();
     await expect(page).toHaveURL(/\/settings$/);
-    const toggle = page.getByRole('button', { name: 'Reduce motion locally' });
+    const toggle = page.getByRole('switch', {
+      name: 'Reduce motion in this browser',
+    });
     await toggle.scrollIntoViewIfNeeded();
     const toggleBox = await toggle.boundingBox();
     expect(toggleBox).toBeTruthy();

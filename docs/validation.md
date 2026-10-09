@@ -251,3 +251,9 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## Audit 4.2 working controls
+
+U409/U410/N05–N07 focused regressions cover local/system motion precedence, cross-tab and unavailable-storage behavior, a single location action navigation with matching filter/export query, exact-current-location row suppression with child/site disambiguation, compact informative counts, collapsed settings hierarchy and selected/search ancestor reveal, keyboard tree focus, separate linked validation entries and local-only browse/drop selection. Motion helpers assert saved switch state explicitly. `navigation-workflow.spec.ts` prepares 1280, 375 and 390 px Full/Reduced journeys with screenshots, keyboard switch/tree/validation interactions and location action/export query checks; `files.spec.ts` retains actual file selection/upload journeys and checks the selection promise.
+
+The resource-constrained local pass uses fresh `npm ci`, focused tests with `--maxWorkers=1`, strict typecheck, owned lint/format, E2E discovery and complete base diff whitespace checks. Discovery is not browser execution. Build, complete application/database gates, authenticated hosted upload/clipboard/download behavior, actual desktop/phone appearance, focus styling/contrast, and before/after captures remain required at candidate certification. No Docker, reset or hosted writes are performed for this presentation slice.

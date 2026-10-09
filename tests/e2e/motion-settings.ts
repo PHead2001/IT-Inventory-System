@@ -5,15 +5,16 @@ export async function setLocalReducedMotion(page: Page, reduced: boolean) {
   const settings = await page.context().newPage();
   try {
     await settings.goto('/settings');
-    const toggle = settings.getByRole('button', {
-      name: reduced ? 'Reduce motion locally' : 'Use system motion setting',
+    const toggle = settings.getByRole('switch', {
+      name: 'Reduce motion in this browser',
     });
-    await toggle.click();
+    if ((await toggle.getAttribute('aria-checked')) !== String(reduced))
+      await toggle.click();
     await expect(
-      settings.getByRole('button', {
-        name: reduced ? 'Use system motion setting' : 'Reduce motion locally',
+      settings.getByRole('switch', {
+        name: 'Reduce motion in this browser',
       }),
-    ).toHaveAttribute('aria-pressed', String(reduced));
+    ).toHaveAttribute('aria-checked', String(reduced));
   } finally {
     await settings.close();
   }
