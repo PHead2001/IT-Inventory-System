@@ -602,7 +602,11 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     await page
       .getByRole('button', { name: 'Confirm assign', exact: true })
       .click();
-    await expect(page.getByText(/recovery cleanup failed/)).toBeVisible();
+    await expect(
+      page.getByText(
+        /Assignment confirmed\. Reload to finish updating this batch/,
+      ),
+    ).toBeVisible();
     expect(await count()).toBe(3);
     await page.reload(); // Clear-only reconciliation must not issue a new mutation.
     await expect(

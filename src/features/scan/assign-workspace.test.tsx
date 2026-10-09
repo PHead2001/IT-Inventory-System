@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { AssignmentWorkspace } from './assign-workspace';
 import {
@@ -19,6 +19,8 @@ import {
 } from './assign-recovery';
 import { assignmentCommand } from './assign-contracts';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import { AssignmentScopeGuard } from './assignment-scope-guard';
+import { useEffect } from 'react';
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   inspect: vi.fn(),
@@ -26,6 +28,20 @@ const mocks = vi.hoisted(() => ({
   receipt: vi.fn(),
   signOut: vi.fn(),
   detection: null as ((value: string | null) => void) | null,
+  realCamera: false,
+  decode: vi.fn(),
+  stop: vi.fn(),
+  guardFailure: false,
+}));
+vi.mock('@/lib/supabase/browser', () => ({
+  createSupabaseBrowserClient: () => ({
+    auth: {
+      onAuthStateChange: () => {
+        if (mocks.guardFailure) throw new Error('subscription unavailable');
+        return { data: { subscription: { unsubscribe: vi.fn() } } };
+      },
+    },
+  }),
 }));
 vi.mock('@/lib/auth/actions', () => ({ signOutSession: mocks.signOut }));
 vi.mock('next/navigation', () => ({
@@ -39,16 +55,28 @@ vi.mock('@/features/custody/actions', () => ({
   submitCustody: mocks.submit,
   loadCustodyReceipt: mocks.receipt,
 }));
-vi.mock('./assign-camera', () => ({
-  AssignCamera: ({
-    onDetection,
-  }: {
-    onDetection: (value: string | null) => void;
-  }) => {
-    mocks.detection = onDetection;
-    return <p>Controlled scanner input</p>;
+vi.mock('./inventory-code-reader', () => ({
+  InventoryCodeReader: class {
+    decodeFromStream = mocks.decode;
   },
 }));
+vi.mock('./assign-camera', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./assign-camera')>();
+  return {
+    AssignCamera: ({
+      onDetection,
+      scope,
+    }: {
+      onDetection: (value: string | null) => void;
+      scope: string;
+    }) => {
+      if (mocks.realCamera)
+        return <actual.AssignCamera onDetection={onDetection} scope={scope} />;
+      mocks.detection = onDetection;
+      return <p>Controlled scanner input</p>;
+    },
+  };
+});
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const site = {
@@ -96,6 +124,8 @@ const match = {
 beforeEach(() => {
   sessionStorage.clear();
   vi.resetAllMocks();
+  mocks.realCamera = false;
+  mocks.guardFailure = false;
   mocks.find.mockResolvedValue({ ok: true, status: 'found', matches: [match] });
   mocks.inspect.mockResolvedValue({ ok: true, candidate });
   mocks.submit.mockResolvedValue({
@@ -117,6 +147,7 @@ beforeEach(() => {
     },
   });
 });
+afterEach(() => vi.unstubAllGlobals());
 async function inspect() {
   fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
     target: { value: candidate.path },
@@ -124,6 +155,190 @@ async function inspect() {
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   await screen.findByRole('region', { name: 'Review assignment' });
 }
+it.each(['subscription', 'adoption'] as const)(
+  'catches an earlier sibling guard %s invalidation during initial mount without exposing private saved context or camera',
+  async (failure) => {
+    const original = render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(
+      screen.getByLabelText('Ticket number reference (optional)'),
+      { target: { value: 'PRIVATE-CONTEXT' } },
+    );
+    await inspect();
+    mocks.submit.mockRejectedValueOnce(new Error('unknown response'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('button', { name: 'Retry same assignment' });
+    const raw = readAssignmentRecovery(scope).raw;
+    original.unmount();
+    mocks.realCamera = true;
+    mocks.guardFailure = failure === 'subscription';
+    let storage: ReturnType<typeof vi.spyOn> | undefined;
+    function SetupFailure() {
+      useEffect(() => {
+        if (failure === 'adoption') {
+          const get = Storage.prototype.getItem;
+          storage = vi
+            .spyOn(Storage.prototype, 'getItem')
+            .mockImplementationOnce(function (this: Storage, key) {
+              if (key === 'inventory-assign-cleanup-v1')
+                throw new Error('temporary adoption failure');
+              return get.call(this, key);
+            });
+        }
+      }, []);
+      return null;
+    }
+    try {
+      render(
+        <>
+          <SetupFailure />
+          <AssignmentScopeGuard
+            actorId={props.actorId}
+            backend={props.backend}
+          />
+          <AssignmentWorkspace {...props} />
+        </>,
+      );
+      expect(screen.getByLabelText('Destination site')).toHaveValue('');
+      expect(
+        screen.getByLabelText('Ticket number reference (optional)'),
+      ).toHaveValue('');
+      expect(
+        screen.getByLabelText('Scan, paste, or search inventory'),
+      ).toHaveValue('');
+      expect(
+        screen.queryByRole('button', { name: 'Start camera' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Inspect equipment' }),
+      ).toBeDisabled();
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Your account or assignment environment changed',
+      );
+      expect(readAssignmentRecovery(scope).raw).toBe(raw);
+    } finally {
+      storage?.mockRestore();
+    }
+  },
+);
+it('stops actual capture on a fatal batch write failure and requires deliberate Start after storage recovers', async () => {
+  mocks.realCamera = true;
+  const track = { stop: vi.fn() };
+  const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [track] });
+  Object.defineProperty(navigator, 'mediaDevices', {
+    configurable: true,
+    value: { getUserMedia },
+  });
+  mocks.decode.mockResolvedValue({ stop: mocks.stop });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await screen.findByText(/Camera active/);
+  let finishLookup!: (result: unknown) => void;
+  mocks.find.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishLookup = resolve;
+    }),
+  );
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: candidate.path },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  expect(
+    screen.getByRole('region', { name: 'Assignment camera' }),
+  ).toHaveTextContent('Camera active');
+  expect(track.stop).not.toHaveBeenCalled();
+  await act(async () =>
+    finishLookup({ ok: true, status: 'found', matches: [match] }),
+  );
+  await screen.findByRole('region', { name: 'Review assignment' });
+  expect(track.stop).not.toHaveBeenCalled();
+  const previous = readBatch(scope).raw;
+  const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('storage full');
+  });
+  try {
+    fireEvent.change(
+      screen.getByLabelText('Ticket number reference (optional)'),
+      { target: { value: 'BLOCKED' } },
+    );
+    expect(
+      screen.queryByRole('region', { name: 'Assignment camera' }),
+    ).not.toBeInTheDocument();
+    expect(track.stop).toHaveBeenCalled();
+    act(() =>
+      mocks.decode.mock.calls[0][2]({
+        getText: () => 'late blocked detection',
+      }),
+    );
+    expect(readBatch(scope).raw).toBe(previous);
+    expect(mocks.find).toHaveBeenCalledOnce();
+  } finally {
+    set.mockRestore();
+  }
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'RESTORED' } },
+  );
+  expect(screen.getByRole('button', { name: 'Start camera' })).toBeEnabled();
+  expect(getUserMedia).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+  await screen.findByText(/Camera active/);
+  expect(getUserMedia).toHaveBeenCalledTimes(2);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it.each(['active', 'late permission'] as const)(
+  'Finish stops the actual %s camera and End requires a new deliberate Start',
+  async (mode) => {
+    mocks.realCamera = true;
+    const track = { stop: vi.fn() };
+    const stream = { getTracks: () => [track] } as unknown as MediaStream;
+    let permission!: (value: MediaStream) => void;
+    const getUserMedia = vi.fn().mockImplementation(() =>
+      mode === 'active'
+        ? Promise.resolve(stream)
+        : new Promise<MediaStream>((resolve) => {
+            permission = resolve;
+          }),
+    );
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    mocks.decode.mockResolvedValue({ stop: mocks.stop });
+    const view = render(<AssignmentWorkspace {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
+    if (mode === 'active') await screen.findByText(/Camera active/);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+    expect(
+      screen.queryByRole('region', { name: 'Assignment camera' }),
+    ).not.toBeInTheDocument();
+    if (mode === 'late permission') await act(async () => permission(stream));
+    expect(track.stop).toHaveBeenCalled();
+    if (mode === 'active') {
+      expect(mocks.stop).toHaveBeenCalledOnce();
+      act(() =>
+        mocks.decode.mock.calls[0][2]({ getText: () => 'late detection' }),
+      );
+    } else expect(mocks.decode).not.toHaveBeenCalled();
+    expect(mocks.find).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    view.unmount();
+    render(<AssignmentWorkspace {...props} />);
+    expect(
+      screen.getByRole('region', { name: 'Batch summary' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Start camera' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'End batch' }));
+    expect(screen.getByRole('button', { name: 'Start camera' })).toBeEnabled();
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    getUserMedia.mockResolvedValue({ getTracks: () => [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+    await screen.findByText(/Camera active/);
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+  },
+);
 it('keeps one original request and one confirmed checklist entry for two Confirm attempts before the server settles', async () => {
   const committed = await mocks.submit();
   mocks.submit.mockClear();
@@ -902,6 +1117,8 @@ it('retains original uncertain command if terminal ledger fails, then reconciles
   expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
   expect(screen.queryByText(/Nothing was submitted/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Finish batch' })).toBeDisabled();
+  for (const alert of screen.getAllByRole('alert'))
+    expect(alert).not.toHaveTextContent(/recovery|reconcile|original request/i);
   write.mockRestore();
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry same assignment' }),
@@ -912,6 +1129,39 @@ it('retains original uncertain command if terminal ledger fails, then reconciles
     readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
   ).toHaveLength(1);
   expect(readAssignmentRecovery(scope).value).toBeNull();
+});
+it('describes terminal save cleanup in plain language while retaining the original assignment until reload', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const nativeRemove = Storage.prototype.removeItem;
+  const remove = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('inventory-assign-v1:'))
+        throw new Error('storage unavailable');
+      nativeRemove.call(this, key);
+    });
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Assignment confirmed. Reload to finish updating this batch',
+    );
+    expect(alert).not.toHaveTextContent(/recovery|reconcile|original request/i);
+    expect(readAssignmentRecovery(scope).value?.command).toEqual(
+      mocks.submit.mock.calls[0][0],
+    );
+    expect(readBatch(scope).value?.entries[0].status).toBe('success');
+    expect(screen.getByRole('button', { name: 'Finish batch' })).toBeDisabled();
+  } finally {
+    remove.mockRestore();
+  }
+  view.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(readAssignmentRecovery(scope).value).toBeNull();
+  expect(mocks.submit).toHaveBeenCalledOnce();
 });
 it('privacy invalidates an unmounted pending writer and cannot resurrect context after authoritative logout', async () => {
   let finish!: (value: unknown) => void;
@@ -955,12 +1205,15 @@ it('blocks a restored inactive destination and keeps corrupt batch data intact',
   sessionStorage.setItem(batchKey(scope), '{broken');
   render(<AssignmentWorkspace {...props} />);
   expect(
-    screen.getByText(/earlier assignment recovery record is unavailable/),
+    screen.getByText(/Your earlier assignment cannot be opened/),
   ).toBeInTheDocument();
   expect(
     screen.getByRole('button', { name: 'Inspect equipment' }),
   ).toBeDisabled();
   expect(sessionStorage.getItem(batchKey(scope))).toBe('{broken');
+  expect(screen.getByRole('alert')).not.toHaveTextContent(
+    /recovery|incompatible|reconcile/i,
+  );
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 it('migrates legacy command-only recovery into one uncertain row before any fresh read or write', async () => {
@@ -1106,7 +1359,12 @@ it('blocks mismatched terminal/recovery snapshots before cleanup or fresh assign
   sessionStorage.setItem(batchKey(scope), JSON.stringify(raw));
   const commandBefore = readAssignmentRecovery(scope).raw;
   render(<AssignmentWorkspace {...props} />);
-  expect(screen.getByText(/Batch and recovery disagree/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/The saved assignment details do not match/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('alert')).not.toHaveTextContent(
+    /recovery|reconcile/i,
+  );
   expect(readAssignmentRecovery(scope).raw).toBe(commandBefore);
   expect(
     screen.getByRole('button', { name: 'Inspect equipment' }),

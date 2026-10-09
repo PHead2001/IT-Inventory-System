@@ -1,6 +1,7 @@
 'use client';
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -134,7 +135,12 @@ function AssignmentFields({
   const reviewRef = useRef<HTMLElement>(null);
   const chooserRef = useRef<HTMLUListElement>(null);
   const [ready, setReady] = useState(false);
-  const [storageError, setStorageError] = useState('');
+  const [storageError, setStorageIssue] = useState('');
+  const [fatalStorageError, setFatalStorageError] = useState(false);
+  const setStorageError = useCallback((message: string, fatal = true) => {
+    setStorageIssue(message);
+    setFatalStorageError(!!message && fatal);
+  }, []);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptIssue, setReceiptIssue] = useState('');
   const [restoring, setRestoring] = useState(false);
@@ -184,7 +190,7 @@ function AssignmentFields({
     const raw = storeBatch(value, batchRaw.current);
     if (!raw) {
       setStorageError(
-        'This batch could not be retained safely. Restore session storage and reconcile the retained assignment before continuing.',
+        'This batch could not be saved. Keep it open, restore browser storage access and check the earlier assignment before continuing.',
       );
       return false;
     }
@@ -263,7 +269,7 @@ function AssignmentFields({
     const stored = readAssignmentRecovery(identity);
     if (stored.blocked || savedBatch.blocked) {
       setStorageError(
-        'An earlier assignment recovery record is unavailable or incompatible. Keep it intact and restore access before submitting another assignment.',
+        'Your earlier assignment cannot be opened. Keep its saved data intact and contact IT support before assigning more.',
       );
       return;
     }
@@ -281,7 +287,7 @@ function AssignmentFields({
       );
       if (existing && !matchesRecoveryEntry(existing, stored.value)) {
         setStorageError(
-          'Batch and recovery disagree. Keep the original recovery intact before continuing.',
+          'The saved assignment details do not match. Keep this batch intact and contact IT support before continuing.',
         );
         return;
       }
@@ -297,7 +303,7 @@ function AssignmentFields({
           )
         ) {
           setStorageError(
-            'A confirmed result is saved, but recovery cleanup failed. Reload to reconcile before another assignment.',
+            'The assignment result is saved. Reload to finish updating this batch before assigning more.',
           );
           setBatch(restored);
           return;
@@ -313,7 +319,7 @@ function AssignmentFields({
           (restored.entries.length >= BATCH_LIMIT && !existing)
         ) {
           setStorageError(
-            'Batch and recovery do not agree. Keep recovery intact before continuing.',
+            'The saved assignment details do not match. Keep this batch intact and contact IT support before continuing.',
           );
           return;
         }
@@ -345,7 +351,7 @@ function AssignmentFields({
     }
     if (restored.entries.some((row) => row.status === 'uncertain')) {
       setStorageError(
-        'An uncertain assignment has no matching recovery. Keep this batch intact and restore its original recovery before continuing.',
+        'The result of an earlier assignment is still unknown, and its saved details cannot be opened. Keep this batch intact and contact IT support before continuing.',
       );
       setBatch(restored);
       return;
@@ -466,6 +472,8 @@ function AssignmentFields({
     const invalidate = () => {
       generation.current++;
       resolving.current = false;
+      setInput('');
+      setRestoring(false);
       setReady(false);
       setBatch(null);
       batchRef.current = null;
@@ -475,9 +483,12 @@ function AssignmentFields({
       );
     };
     window.addEventListener('assignment-scope-invalidated', invalidate);
+    // Earlier shell siblings may invalidate after bootstrap but before this
+    // passive subscription. The same handler must clear that stale private UI.
+    if (epoch.current !== assignmentEpoch()) invalidate();
     return () =>
       window.removeEventListener('assignment-scope-invalidated', invalidate);
-  }, []);
+  }, [setStorageError]);
   const unresolved = state.phase === 'pending' || state.phase === 'unknown';
   useEffect(() => {
     if (!unresolved) return;
@@ -552,7 +563,7 @@ function AssignmentFields({
             type: 'error',
             generation: token,
             message:
-              'Inspection could not be retained safely. Retry after restoring session storage.',
+              'The inspection could not be saved. Restore browser storage access before retrying.',
           });
           return;
         }
@@ -720,6 +731,7 @@ function AssignmentFields({
     ) {
       setStorageError(
         'The saved destination is unavailable. Choose an active site and inspect again.',
+        false,
       );
       return;
     }
@@ -776,20 +788,20 @@ function AssignmentFields({
       (!recovered.current && recovery.value)
     ) {
       setStorageError(
-        'Recovery changed or is unavailable. Keep the original request intact and reload before continuing.',
+        'The saved assignment changed or cannot be opened. Keep its original details intact and reload before continuing.',
       );
       return;
     }
     if (!recovered.current) {
       if (!saveBatch(projection)) {
         setStorageError(
-          'This assignment could not be retained safely. Keep the review open and restore session storage. Nothing was submitted.',
+          'This assignment could not be saved. Keep the review open and restore browser storage access. Nothing was submitted.',
         );
         return;
       } // write ahead: pending, provably not sent
       if (!storeAssignmentRecovery(durable, null)) {
         setStorageError(
-          'This assignment could not be retained safely. Keep the review open and retry when session storage is available. Nothing was submitted.',
+          'This assignment could not be saved. Keep the review open and retry when browser storage is available. Nothing was submitted.',
         );
         return;
       }
@@ -809,7 +821,7 @@ function AssignmentFields({
         units: durable.units,
       });
       setStorageError(
-        'Recovery could not be verified. Reload and reconcile the original request before continuing. Nothing was submitted by this attempt.',
+        'The saved assignment could not be checked. Keep its original details intact and reload before continuing. Nothing was submitted by this attempt.',
       );
       return;
     }
@@ -825,7 +837,7 @@ function AssignmentFields({
           dispatch({
             type: 'unknown',
             message:
-              'A saved result has no verifiable event. Retain and retry the original request before continuing.',
+              'The saved assignment result could not be checked. Retry the same assignment before continuing.',
           });
           return;
         }
@@ -842,7 +854,7 @@ function AssignmentFields({
           dispatch({
             type: 'unknown',
             message:
-              'Assignment confirmed, but its checklist could not be retained. Retry the same request to reconcile; do not start another assignment.',
+              'Assignment confirmed, but its checklist could not be saved. Retry the same assignment to check its result; do not start another assignment.',
           });
           return;
         }
@@ -854,7 +866,7 @@ function AssignmentFields({
           )
         ) {
           setStorageError(
-            'Assignment confirmed, but recovery cleanup failed. Reload to reconcile before issuing more.',
+            'Assignment confirmed. Reload to finish updating this batch before assigning more.',
           );
           setReady(false);
         } else recovered.current = null;
@@ -883,7 +895,7 @@ function AssignmentFields({
           dispatch({
             type: 'unknown',
             message:
-              'The rejection was received, but recovery could not be updated. Reload to reconcile before continuing.',
+              'The assignment was rejected, but this browser could not save that result. Reload to check this batch before continuing.',
           });
           setReady(false);
           return;
@@ -900,7 +912,7 @@ function AssignmentFields({
         dispatch({
           type: 'unknown',
           message:
-            'The assignment result could not be confirmed. Retry the same assignment; do not start a new request.',
+            'The assignment result could not be confirmed. Retry the same assignment; do not start another assignment.',
         });
     } finally {
       if (alive()) submitting.current = false;
@@ -1162,7 +1174,7 @@ function AssignmentFields({
                 {row.status === 'pending'
                   ? 'Pending inspection / review'
                   : row.status === 'uncertain'
-                    ? 'Uncertain — retry original request'
+                    ? 'Result unknown — retry the same assignment'
                     : row.status === 'success'
                       ? 'Confirmed'
                       : row.status === 'failed'
@@ -1277,20 +1289,22 @@ function AssignmentFields({
           </p>
         )}
       </section>
-      <AssignCamera
-        scope={actorId + ':' + backend}
-        onDetection={(value) => {
-          if (
-            gate.observe(
-              value,
-              freshReady &&
-                stateRef.current.phase === 'ready' &&
-                !!stateRef.current.context,
+      {ready && !fatalStorageError && !batch?.finished && (
+        <AssignCamera
+          scope={actorId + ':' + backend}
+          onDetection={(value) => {
+            if (
+              gate.observe(
+                value,
+                freshReady &&
+                  stateRef.current.phase === 'ready' &&
+                  !!stateRef.current.context,
+              )
             )
-          )
-            void lookup(value!, 'identifier');
-        }}
-      />
+              void lookup(value!, 'identifier');
+          }}
+        />
+      )}
       <form
         className={panel + ' space-y-3'}
         aria-label="Inspect equipment"

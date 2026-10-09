@@ -20,6 +20,11 @@ export function AssignmentScopeGuard({
         origin: window.location.origin,
         backend: new URL(backend).origin,
       });
+    } catch {
+      // Storage failure must fail closed without suppressing authoritative logout.
+      invalidateAssignmentPrivacy(false);
+    }
+    try {
       const client = createSupabaseBrowserClient();
       const { data } = client.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') invalidateAssignmentPrivacy(true);

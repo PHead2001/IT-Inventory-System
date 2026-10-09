@@ -4,6 +4,29 @@ This feature adds record labels, read-only Scan to open, explicitly confirmed Sc
 
 ## Scan-assignment batches
 
+A successful Finish unmounts the assignment camera, releases active tracks and
+fences late permission/decoder callbacks without clearing confirmed receipts.
+A restored finished summary offers no camera capture. End exposes a fresh idle
+camera; only a deliberate Start camera resumes capture. Camera controls are also
+absent until the saved batch has been checked. Fatal storage failures unmount
+active capture; after the failure
+is cleared, capture still requires a new deliberate Start. Ordinary inspection
+and review keep capture available. Blocked saved-assignment alerts
+describe the state and next action without exposing internal recovery terminology;
+they preserve uncertain commands and never advise clearing data or submitting a
+replacement assignment.
+
+The protected-shell Auth listener registers independently of batch-scope adoption.
+If browser storage is unavailable, scope adoption fails closed while the listener
+still records authoritative logout as strongest pending cleanup. When storage
+returns, logout removes original uncertain commands as well as private context;
+actor changes without logout retain uncertain commands. Scope changes and unmount
+unsubscribe the previous listener, including React StrictMode effect cleanup.
+The workspace compares its bootstrap privacy epoch immediately after subscribing
+to invalidation events, clearing private UI and capture if an earlier shell sibling
+invalidated between layout bootstrap and passive subscription. Exact uncertain
+commands remain intact for the separately authorized cleanup/retry path.
+
 Scan and assign retains a per-tab batch in versioned `sessionStorage`, scoped by browser origin, backend origin and authenticated actor. Destination, ticket, preferred source, historical inspection, compact checklist and confirmed event references survive a record visit, Back/Forward and reload. Saved batch context takes precedence over a URL destination hint. The preferred-source control reuses the searchable, naturally ordered inventory-bearing location tree, including **Choose for each item**. Source preference includes inactive inventory-bearing locations and locations below inactive ancestors so recorded holdings can be evacuated; non-holding ancestors provide navigation only. Active destination eligibility remains strict. Preference does not prove availability: the current authorized inspection and existing mutation RPC remain authoritative. An inactive saved destination requires a new active selection.
 
 Returning to a historical inspection automatically performs a nonmutating lifecycle/availability read. Confirmation remains disabled while this refresh is pending or failed. The chosen source and units remain explicit; a vanished or insufficient source is not silently replaced. Current authorization and destination eligibility are rechecked by the route/actions and the existing writer. Restoring an uncertain command takes priority over all fresh reads and assignments: its original version, source, units, destination, ticket and request UUID remain unchanged.
