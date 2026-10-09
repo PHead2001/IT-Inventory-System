@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { historySummary } from './history-summary';
 import {
   readFilters,
   mapLocation,
@@ -18,6 +19,68 @@ const location = mapLocation({
   active: true,
   can_hold_inventory: true,
   parent_id: other,
+});
+it('maps quantity history view rows with null endpoints into ledger-based move and receipt summaries', () => {
+  const destination = {
+    ...location,
+    id: other,
+    breadcrumb: 'IT Closet / Drawer 3',
+  };
+  const base = {
+    id,
+    kind: 'quantity',
+    entity_id: other,
+    entity_name: 'Cable',
+    event_type: 'moved',
+    created_at: '2026-10-07T12:00:00Z',
+    actor_name: 'Recorded staff',
+    reason: 'Recorded move',
+    before_metadata: null,
+    after_metadata: null,
+    custom_present: false,
+    custom_changed: false,
+    assignment_event_id: null,
+    assignment_kind: null,
+    assignment_from_location_id: null,
+    assignment_to_location_id: null,
+    assignment_from_site_id: null,
+    assignment_to_site_id: null,
+    assignment_from_label: null,
+    assignment_to_label: null,
+    assignment_quantity: null,
+    assignment_reference: null,
+    from_location_id: null,
+    to_location_id: null,
+    // The view sorts by location ID, which need not put the source first.
+    lines: [
+      { location_id: other, delta: 1, before_quantity: 30, after_quantity: 31 },
+      { location_id: id, delta: -1, before_quantity: 5, after_quantity: 4 },
+    ],
+  };
+  const move = mapHistory(historyRow.parse(base), [location, destination], []);
+  expect(move.fromLocation).toBeNull();
+  expect(move.toLocation).toBeNull();
+  expect(historySummary(move)).toBe(
+    `1 unit · ${location.breadcrumb} → IT Closet / Drawer 3`,
+  );
+  const receipt = mapHistory(
+    historyRow.parse({
+      ...base,
+      event_type: 'received',
+      lines: [base.lines[0]],
+    }),
+    [location, destination],
+    [],
+  );
+  expect(historySummary(receipt)).toBe(
+    '1 unit received · IT Closet / Drawer 3',
+  );
+  expect(
+    move.lines.map(({ before, after, delta }) => ({ before, after, delta })),
+  ).toEqual([
+    { before: 30, after: 31, delta: 1 },
+    { before: 5, after: 4, delta: -1 },
+  ]);
 });
 describe('inventory read contracts', () => {
   it('retains stable codes, database UUIDs and human breadcrumbs separately', () => {

@@ -11,10 +11,7 @@ import {
 import { DetailTasks } from '@/features/inventory/components/detail-tasks';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
-import {
-  getSites,
-  getEntityAssignments,
-} from '@/features/custody/queries.server';
+import { getSites } from '@/features/custody/queries.server';
 import { FilesPanel } from '@/features/files/files-panel';
 import {
   HistoryList,
@@ -36,11 +33,10 @@ export default async function AssetPage({
   const detail = await getAssetDetail(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
-  const [categories, locations, sites, assignments, forms] = await Promise.all([
+  const [categories, locations, sites, forms] = await Promise.all([
     getCategories(),
     getLocations(),
     getSites(),
-    getEntityAssignments('asset', id),
     getPublishedForms([asset.categoryId]),
   ]);
   return (
@@ -184,28 +180,10 @@ export default async function AssetPage({
           />
         </aside>
       </div>
-      {assignments.length > 0 && (
-        <section className="mb-6 space-y-3" aria-label="Custody history">
-          <h2 className="text-xl font-semibold">Custody history</h2>
-          {assignments.map((event) => (
-            <p className={panel} key={event.id}>
-              <span className="font-medium capitalize">
-                {event.kind.replaceAll('_', ' ')}
-              </span>{' '}
-              · {event.from_label || 'Opening'} →{' '}
-              {event.to_label || 'No destination'} · {event.actor_name} ·{' '}
-              <OperationalTimestamp value={event.created_at} />
-              {event.reason && (
-                <span className="mt-1 block">Reason: {event.reason}</span>
-              )}
-            </p>
-          ))}
-        </section>
-      )}
-      <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
-      <div className={styles.history}>
-        <HistoryList events={history} compact />
-      </div>
+      <section className={styles.history} aria-label="Recent history">
+        <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
+        <HistoryList events={history} compact linkToEvent />
+      </section>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"
         href={'/history?type=asset&entityId=' + asset.id}
@@ -215,4 +193,3 @@ export default async function AssetPage({
     </>
   );
 }
-import { OperationalTimestamp } from '@/components/operational-time';

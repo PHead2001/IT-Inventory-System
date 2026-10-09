@@ -15,8 +15,9 @@ const event: HistoryEvent = {
   actorName: 'Staff',
   reason: null,
   assignment: null,
-  fromLocation: from,
-  toLocation: to,
+  // The quantity history view intentionally exposes endpoints only in lines.
+  fromLocation: null,
+  toLocation: null,
   lines: [
     { location: from, delta: -3, before: 8, after: 5 },
     { location: to, delta: 3, before: 1, after: 4 },
@@ -52,12 +53,10 @@ it('collapses unchanged snapshot identity to At while preserving actual moves be
       fromLocation: from,
       toLocation: from,
     }),
-  ).toBe('Recorded location corrected');
+  ).toBe('At Original source');
 });
 it('summarizes moved amount from balanced recorded deltas, not current balance or repeated item names', () => {
-  expect(historySummary(event)).toBe(
-    '3 units · Original source → Destination (current location labels)',
-  );
+  expect(historySummary(event)).toBe('3 units · Original source → Destination');
   expect(
     historySummary({
       ...event,
@@ -77,6 +76,69 @@ it('summarizes moved amount from balanced recorded deltas, not current balance o
     }),
   ).toContain('Amount not recorded');
 });
+it('summarizes a real one-sided receipt from its ledger, regardless of endpoint fields or line order', () => {
+  expect(historySummary({ ...event, lines: [...event.lines].reverse() })).toBe(
+    '3 units · Original source → Destination',
+  );
+  expect(
+    historySummary({
+      ...event,
+      eventType: 'received',
+      lines: [event.lines[1]],
+    }),
+  ).toBe('3 units received · Destination');
+  expect(
+    historySummary({ ...event, eventType: 'received', lines: event.lines }),
+  ).toContain('Amount not recorded');
+});
+it('does not invent a transfer for missing, zero, inconsistent or ambiguous ledger lines', () => {
+  for (const lines of [
+    [],
+    [event.lines[1]],
+    [{ ...event.lines[0], after: 7 }, event.lines[1]],
+    [event.lines[0], { ...event.lines[1], location: from }],
+  ]) {
+    const summary = historySummary({ ...event, lines });
+    expect(summary).toContain('Amount not recorded');
+    expect(summary).not.toContain('→');
+  }
+});
+it('identifies recorded zero-change ledger events without inventing a transfer or receipt', () => {
+  const lines = event.lines.map((line) => ({
+    ...line,
+    delta: 0,
+    after: line.before,
+  }));
+  expect(historySummary({ ...event, lines })).toBe('No stock change recorded');
+  expect(
+    historySummary({ ...event, eventType: 'received', lines: [lines[0]] }),
+  ).toBe('No stock change recorded · Original source');
+});
+it('retains recorded corrections and distinguishes missing labels from missing amounts', () => {
+  expect(
+    historySummary({
+      ...event,
+      eventType: 'adjusted',
+      lines: [event.lines[0]],
+    }),
+  ).toBe('8 → 5 units (-3) · Original source');
+  expect(
+    historySummary({
+      ...event,
+      eventType: 'adjusted',
+      lines: [{ ...event.lines[0], delta: 0, after: 8 }],
+    }),
+  ).toBe('8 → 8 units (0) · Original source');
+  expect(
+    historySummary({
+      ...event,
+      lines: [
+        event.lines[0],
+        { ...event.lines[1], location: location('to', '') },
+      ],
+    }),
+  ).toBe('3 units · Original source → Location label unavailable');
+});
 it('uses immutable custody quantity and labels even when current location labels differ', () => {
   expect(
     historySummary({
@@ -93,12 +155,44 @@ it('uses immutable custody quantity and labels even when current location labels
     }),
   ).toBe('2 units · Historical closet → Historical site');
 });
-it('keeps metadata, corrections and unknown legacy operations distinct', () => {
-  expect(historySummary({ ...event, eventType: 'metadata_updated' })).toBe(
-    'Record details updated',
+it('distinguishes an unavailable custody label from an absent endpoint', () => {
+  const assignment = {
+    eventId: 'assignment',
+    kind: 'issued',
+    quantity: 2,
+    from: { locationId: 'storage', siteId: null, label: null },
+    to: { locationId: null, siteId: 'site', label: '' },
+    reference: null,
+  };
+  expect(historySummary({ ...event, assignment })).toBe(
+    '2 units · Source label unavailable → Destination label unavailable',
   );
+  expect(
+    historySummary({
+      ...event,
+      assignment: {
+        ...assignment,
+        from: { ...assignment.from, locationId: null },
+      },
+    }),
+  ).toBe('2 units · No recorded source → Destination label unavailable');
+});
+it('keeps metadata, corrections and unknown legacy operations distinct', () => {
+  expect(
+    historySummary({ ...event, eventType: 'metadata_updated' }),
+  ).toBeNull();
+  expect(
+    historySummary({
+      ...event,
+      eventType: 'metadata_updated',
+      metadataChanges: [
+        { field: 'Name', before: 'Cable', after: 'Patch cable' },
+      ],
+      customMetadataChanged: true,
+    }),
+  ).toBe('Changed: Name, Custom fields');
   expect(historySummary({ ...event, eventType: 'adjusted' })).toContain(
-    'Physical count corrected',
+    'Count details unavailable',
   );
   expect(
     historySummary({
