@@ -309,5 +309,3 @@ end;
 $$;
 revoke all on function private.metadata_compile_form(uuid,uuid,jsonb),
   private.metadata_option_paths(uuid,uuid,uuid[]) from public,anon,authenticated,service_role;
-
-
