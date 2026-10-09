@@ -2349,6 +2349,284 @@ describe('published metadata form', () => {
     });
     await screen.findByText('Details saved.');
   });
+  it.each(['quantity', 'asset', 'boolean', 'datetime'] as const)(
+    'retains a definitive stale %s convergence until current details are explicitly reviewed',
+    async (variant) => {
+      const current = form();
+      const kind = variant === 'asset' ? 'asset' : 'quantity';
+      current.published_definition.fields[0].applies_to = [kind];
+      if (variant === 'datetime')
+        current.published_definition.fields[0] = {
+          ...current.published_definition.fields[0],
+          type: 'datetime',
+          label: 'Observed at',
+          required: false,
+        };
+      const record = {
+        ...item,
+        ...(kind === 'asset'
+          ? {
+              assetTag: 'Cable-A',
+              serialNumber: null,
+              status: 'active' as const,
+            }
+          : {}),
+        customValues: {
+          [fieldId]: {
+            value: variant === 'datetime' ? '2026-10-08T12:00:00Z' : false,
+            validated_revision_id: firstRevision,
+          },
+        },
+      };
+      const latest = {
+        ...record,
+        version: 2,
+        name: ['quantity', 'asset'].includes(variant)
+          ? 'Converged'
+          : record.name,
+        customValues: {
+          [fieldId]: {
+            value:
+              variant === 'datetime'
+                ? '2026-10-09T07:00:00-05:00'
+                : variant === 'boolean',
+            validated_revision_id: firstRevision,
+          },
+        },
+      };
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'The record changed. Review your save.',
+      });
+      vi.mocked(refreshMetadataRecord).mockResolvedValue({
+        ok: true,
+        record: latest,
+        form: current,
+        draftForm: current,
+      });
+      render(
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? record : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  status: 'active',
+                  assetTag: 'Cable-A',
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      if (variant === 'boolean')
+        fireEvent.click(screen.getByLabelText('Inspected (required)'));
+      else if (variant === 'datetime') {
+        fireEvent.change(screen.getByLabelText('Display timezone'), {
+          target: { value: 'UTC' },
+        });
+        fireEvent.change(screen.getByLabelText('Date'), {
+          target: { value: '2026-10-09' },
+        });
+        fireEvent.change(screen.getByLabelText('Time'), {
+          target: { value: '12:00:00' },
+        });
+      } else
+        fireEvent.change(screen.getByLabelText('Name'), {
+          target: { value: 'Converged' },
+        });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      const accept = await screen.findByRole('button', {
+        name: 'Review current details',
+      });
+      await waitFor(() => expect(accept).toBeEnabled());
+      expect(submitInventory).toHaveBeenCalledOnce();
+      expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+      expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+        payload: { expected_version: 1 },
+      });
+      expect(
+        screen.getByText('The record changed. Review your save.'),
+      ).toBeVisible();
+      expect(screen.queryByText('Nothing changed.')).toBeNull();
+      expect(screen.queryByText('Nothing to save.')).toBeNull();
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      const retained = JSON.parse(sessionStorage.getItem(key)!);
+      expect(retained).toMatchObject({
+        status: 'editing',
+        baseline: { version: 1 },
+        command: null,
+        completedRequestId: null,
+      });
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(true);
+      fireEvent.submit(screen.getByRole('form'));
+      expect(submitInventory).toHaveBeenCalledOnce();
+      fireEvent.click(accept);
+      await screen.findByText('Nothing to save.');
+      expect(
+        screen.queryByText('The record changed. Review your save.'),
+      ).toBeNull();
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'editing',
+        baseline: { version: 2 },
+        instance: retained.instance,
+        command: null,
+      });
+      const reviewedUnload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(reviewedUnload);
+      expect(reviewedUnload.defaultPrevented).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByText('Discard changes?')).toBeNull();
+      expect(submitInventory).toHaveBeenCalledOnce();
+    },
+  );
+  it.each(['quantity', 'asset'] as const)(
+    'requires explicit review when refreshed %s props converge to the draft',
+    async (kind) => {
+      const current = form();
+      current.published_definition.fields[0].applies_to = [kind];
+      const record = {
+        ...item,
+        ...(kind === 'asset'
+          ? { assetTag: null, serialNumber: null, status: 'active' as const }
+          : {}),
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const editor = (version: number, name: string) => (
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? { ...record, version, name } : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  version,
+                  name,
+                  status: 'active',
+                  assetTag: null,
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />
+      );
+      const { rerender } = render(editor(1, 'Cable'));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Converged' },
+      });
+      rerender(editor(2, 'Converged'));
+      const accept = await screen.findByRole('button', {
+        name: 'Review current details',
+      });
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        baseline: { version: 1 },
+        inputs: { core: { name: 'Converged' } },
+      });
+      expect(screen.queryByText('Nothing to save.')).toBeNull();
+      fireEvent.click(accept);
+      await screen.findByText('Nothing to save.');
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        baseline: { version: 2 },
+      });
+      expect(submitInventory).not.toHaveBeenCalled();
+    },
+  );
+  it('rebases a case-only asset tag edit after an independent stale change', async () => {
+    const current = form();
+    current.published_definition.fields[0].applies_to = ['asset'];
+    current.published_definition.layout[0].controls.push({
+      id: otherCategory,
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 12,
+    });
+    const asset = {
+      ...item,
+      status: 'active' as const,
+      assetTag: 'Cable-A',
+      serialNumber: null,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    const latest = { ...asset, version: 2, model: 'Independent model' };
+    vi.mocked(submitInventory)
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Stale',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: asset.id,
+        version: '3',
+        changed: true,
+      });
+    vi.mocked(refreshMetadataRecord)
+      .mockResolvedValueOnce({
+        ok: true,
+        record: latest,
+        form: current,
+        draftForm: current,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        record: { ...latest, version: 3, assetTag: 'cable-a' },
+        form: current,
+        draftForm: current,
+      });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        kind="asset"
+        asset={asset}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Asset tag')).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText('Asset tag'), {
+      target: { value: 'cable-a' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await screen.findByText('Details saved.');
+    expect(submitInventory).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
+      operation: 'asset_update_v3',
+      payload: {
+        expected_version: 2,
+        asset_tag: 'cable-a',
+        model: 'Independent model',
+      },
+    });
+    const [first, second] = vi
+      .mocked(submitInventory)
+      .mock.calls.map(([command]) => command as { requestId: string });
+    expect(second.requestId).not.toBe(first.requestId);
+  });
   it('stops after another intervening stale rejection instead of looping', async () => {
     vi.mocked(submitInventory).mockResolvedValue({
       ok: false,
@@ -3471,6 +3749,106 @@ describe('existing edit recovery and review', () => {
       draftForm: form(),
     });
   });
+  it.each(['Done', 'Close task', 'Receive stock'])(
+    'allows one %s action after durable acknowledgement while the record refresh is still pending',
+    async (exit) => {
+      let acknowledge!: (
+        result: Awaited<ReturnType<typeof submitInventory>>,
+      ) => void;
+      let finishRead!: (
+        result: Awaited<ReturnType<typeof refreshMetadataRecord>>,
+      ) => void;
+      vi.mocked(submitInventory).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            acknowledge = resolve;
+          }),
+      );
+      vi.mocked(refreshMetadataRecord).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRead = resolve;
+          }),
+      );
+      render(
+        <TaskWorkspace
+          choices={[
+            { id: 'metadata', label: 'Edit details' },
+            { id: 'receive', label: 'Receive stock' },
+          ]}
+          context="Cable"
+        >
+          {(selected) =>
+            selected === 'metadata' ? (
+              <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+            ) : (
+              <p>Receive task opened</p>
+            )
+          }
+        </TaskWorkspace>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Durably saved name' },
+      });
+      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Receive stock' }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      expect(screen.getByRole('form')).toBeVisible();
+      const request = vi.mocked(submitInventory).mock.calls[0][0] as {
+        requestId: string;
+      };
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'submitted',
+        command: { requestId: request.requestId },
+      });
+      await act(async () =>
+        acknowledge({
+          ok: true,
+          entityId: item.id,
+          version: '2',
+          changed: true,
+        }),
+      );
+      await screen.findByText('Details saved.');
+      expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'saved',
+        inputs: null,
+        command: null,
+        completedRequestId: request.requestId,
+      });
+      expect(screen.getByRole('button', { name: exit })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: exit }));
+      try {
+        expect(screen.queryByRole('form')).toBeNull();
+        if (exit === 'Receive stock')
+          expect(screen.getByText('Receive task opened')).toBeVisible();
+        else
+          expect(
+            screen.getByRole('button', { name: 'Edit details' }),
+          ).toHaveFocus();
+        expect(submitInventory).toHaveBeenCalledOnce();
+        expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+          status: 'saved',
+          completedRequestId: request.requestId,
+        });
+      } finally {
+        await act(async () =>
+          finishRead({ ok: false, message: 'Read unavailable' }),
+        );
+      }
+    },
+  );
   it.each(['quantity', 'asset'] as const)(
     'recovers dirty %s metadata through task unmount without adopting a stale baseline',
     async (kind) => {

@@ -1036,13 +1036,35 @@ export function MetadataForm({
         reconciliation &&
         !recordBlocked &&
         (!schemaStale || schemaCompatible)
-      )
+      ) {
+        const refreshedForm = latestCategoryForm ?? form;
+        const revised = payload(
+          reconciliation.core,
+          reconciliation.custom,
+          reconciliation.touched,
+          latest,
+          refreshedForm,
+        );
+        // Matching another writer's result does not review its newer version.
+        // Keep real independent edits eligible for the existing reconciliation.
+        if (
+          !untouched &&
+          revised &&
+          refreshedForm &&
+          isUnchangedEdit(latest, revised, refreshedForm.published_definition)
+        ) {
+          recoveredEditing.current = true;
+          setRecoveredRecord(true);
+          setReview(false);
+          return;
+        }
         adopt(
           latest,
           reconciliation.core,
           reconciliation.custom,
           reconciliation.touched,
         );
+      }
     });
     return () => {
       cancelled = true;
@@ -1393,6 +1415,23 @@ export function MetadataForm({
     }
     return result;
   };
+  function isUnchangedEdit(
+    record: RecordMetadata,
+    proposed: Record<string, unknown>,
+    selectedDefinition: MetadataDefinition,
+  ) {
+    const intent = normalizeEditIntent(kind, proposed);
+    return Boolean(
+      intent &&
+      editSummary({
+        baseline: record,
+        intent,
+        definition: selectedDefinition,
+        categories,
+        timeZone,
+      }).length === 0,
+    );
+  }
   const currentEditPayload = !creating && !uncertain ? payload() : null;
   const normalizedEdit =
     currentEditPayload && normalizeEditIntent(kind, currentEditPayload);
@@ -1454,7 +1493,10 @@ export function MetadataForm({
     stored: EditEnvelope | null;
   } | null>(null);
   const discardEdit = () => {
-    if (pending || uncertain || dispatched.current) return false;
+    // A durable acknowledgement completes the write before its read refresh.
+    // Match the task's unlocked receipt controls while that refresh settles.
+    if ((pending && !state?.ok) || uncertain || dispatched.current)
+      return false;
     // A hidden stale mount may leave, but cannot finalize either scope's data.
     if (actorStale) return true;
     if (!editRecoveryEnabled || state?.ok || editBlocked) return true;
@@ -2053,7 +2095,21 @@ export function MetadataForm({
                 fresh.record,
                 revisedForm,
               );
-              if (revised) {
+              if (
+                revised &&
+                isUnchangedEdit(
+                  fresh.record,
+                  revised,
+                  revisedForm.published_definition,
+                )
+              ) {
+                // The original request definitively failed CAS. Preserve its
+                // reviewed baseline/draft until explicit acceptance; the normal
+                // rejection path below still resolves durable submitted recovery.
+                recoveredEditing.current = true;
+                setRecoveredRecord(true);
+                setReview(false);
+              } else if (revised) {
                 if (editRecoveryEnabled) {
                   const active = editRecovery.current!;
                   const editable: EditEnvelope = {
@@ -2498,12 +2554,12 @@ export function MetadataForm({
         !recordBlocked &&
         reconciliation && (
           <div role="alert">
-            The record changed while this draft was away. Review current details
+            The record changed since this draft began. Review current details
             while keeping your independent edits before saving.
             <Button
               type="button"
               variant="outline"
-              disabled={pending || uncertain || schemaStale}
+              disabled={pending || uncertain || actorStale || schemaStale}
               onClick={() => {
                 recoveredEditing.current = false;
                 setRecoveredRecord(false);
@@ -2514,6 +2570,7 @@ export function MetadataForm({
                   reconciliation.touched,
                   true,
                 );
+                setState(null);
               }}
             >
               Review current details

@@ -129,7 +129,7 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       .from('quantity_events')
       .select('id', { count: 'exact', head: true })
       .eq('item_id', itemId);
-    const edit = await openForm(page, 'Edit details');
+    const edit = await openForm(page, 'Edit quantity metadata');
     await expect(edit.getByText('Nothing to save.')).toBeVisible();
     await edit
       .getByLabel('Name', { exact: true })
@@ -139,6 +139,7 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       edit.getByRole('button', { name: 'Confirm save' }),
     ).toHaveCount(0);
     await edit.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(edit).toBeHidden();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     const after = await client
       .from('quantity_items')
