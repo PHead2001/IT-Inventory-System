@@ -13,6 +13,7 @@ import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { displayedInstant } from '../helpers/displayed-instant';
+import { exactOperationalTime as exactTime } from '../helpers/operational-time';
 
 function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
@@ -882,23 +883,3 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
     }
   }
 });
-
-async function exactTime(time: Locator) {
-  const summary = time.locator('xpath=parent::summary');
-  if (await summary.count()) {
-    const disclosure = summary.locator('xpath=parent::details');
-    await summary.focus();
-    if (
-      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
-    )
-      await summary.press('Enter');
-    await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
-    await expect(exact).toBeVisible();
-    await expect(disclosure).toContainText(
-      (await time.getAttribute('datetime'))!,
-    );
-    return exact;
-  }
-  return time;
-}

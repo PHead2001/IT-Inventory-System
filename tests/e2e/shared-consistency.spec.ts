@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expect, test, type Page, type Locator } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -10,6 +10,7 @@ import {
   openRecordTask,
 } from './record-task-controls';
 import { displayedInstant } from '../helpers/displayed-instant';
+import { exactOperationalTime as exactTime } from '../helpers/operational-time';
 
 async function login(page: Page, email = fixture.emails.staff) {
   await page.goto('/login');
@@ -607,23 +608,3 @@ test('shared print defaults persist while job overrides and printable output ret
     await reader.auth.signOut({ scope: 'local' });
   }
 });
-
-async function exactTime(time: Locator) {
-  const summary = time.locator('xpath=parent::summary');
-  if (await summary.count()) {
-    const disclosure = summary.locator('xpath=parent::details');
-    await summary.focus();
-    if (
-      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
-    )
-      await summary.press('Enter');
-    await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
-    await expect(exact).toBeVisible();
-    await expect(disclosure).toContainText(
-      (await time.getAttribute('datetime'))!,
-    );
-    return exact;
-  }
-  return time;
-}

@@ -543,8 +543,9 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await addOption(dialog, 'Café');
     await addOption(dialog, ' CAFE\u0301 ');
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(2);
+    await expect(dialog.locator('input[aria-invalid="true"]')).toHaveCount(2);
     await dialog
       .getByRole('button', { name: 'Add to form', exact: true })
       .click();
@@ -556,7 +557,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
       }),
     ).toHaveCount(0);
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(2);
     const duplicate = dialog
       .getByRole('textbox', { name: 'Option name:  CAFE\u0301 ', exact: true })
@@ -564,7 +565,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await duplicate.locator('summary').click();
     await duplicate.getByRole('button', { name: /Retire option/ }).click();
     await expect(
-      dialog.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+      dialog.getByRole('alert').filter({ hasText: 'matches another choice' }),
     ).toHaveCount(0);
     await finishField(dialog);
   }
@@ -578,7 +579,7 @@ test('flat choice authoring rejects Unicode/case/space siblings and restores a r
     await duplicate.locator('summary').click();
     await duplicate.getByRole('button', { name: /Restore option/ }).click();
     await expect(inspector.getByRole('status')).toContainText(
-      'an active sibling has the same name',
+      'an active choice in this field has the same name',
     );
     await expect(duplicate).toContainText('Retired');
     await duplicate.getByRole('textbox').fill('Café alternate');

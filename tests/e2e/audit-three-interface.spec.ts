@@ -10,6 +10,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { displayedInstant } from '../helpers/displayed-instant';
 import { cleanupInterfaceFixture } from '../helpers/interface-fixture-cleanup';
+import { expectRecordedInstantCopy } from '../helpers/operational-time';
 
 async function command(
   caller: SupabaseClient,
@@ -24,7 +25,12 @@ async function command(
   return result.data as Record<string, string>;
 }
 const test = base.extend<{
-  interfaceRecord: { id: string; categoryId: string; name: string };
+  interfaceRecord: {
+    id: string;
+    categoryId: string;
+    name: string;
+    itemCode: string;
+  };
 }>({
   interfaceRecord: async ({ baseURL }, provideRecord) => {
     expect(['localhost', '127.0.0.1']).toContain(new URL(baseURL!).hostname);
@@ -57,15 +63,17 @@ const test = base.extend<{
         .single();
       expect(form.error).toBeNull();
       const name = 'Interface quantity ' + suffix;
+      const itemCode = 'A3-UI-' + suffix.replaceAll('-', '').toUpperCase();
       const item = await command(caller, 'quantity_create_v2', {
         name,
+        item_code: itemCode,
         category_id: categoryId,
         initial_quantity: 0,
         expected_published_revision_id: form.data!.published_form_revision_id,
         custom_patch: { set: {}, unset: [] },
       });
       itemId = item.entity_id;
-      await provideRecord({ id: itemId, categoryId, name });
+      await provideRecord({ id: itemId, categoryId, name, itemCode });
     } finally {
       await cleanupInterfaceFixture({
         record: async () => {
@@ -196,13 +204,12 @@ test('loaded local fonts and populated scan, labels and form designer remain usa
   const id = interfaceRecord.id;
   await page.goto(`/inventory/quantity/${id}`);
   await expect(page).toHaveTitle('Quantity item · IT Inventory');
-  const disclosure = page
-    .locator('details')
-    .filter({ has: page.locator('summary > time') })
-    .first();
-  await disclosure.locator('summary').click();
-  const code = disclosure.locator('.experience-code');
+  const code = page
+    .getByText('Item code (SKU)', { exact: true })
+    .locator('..')
+    .locator('dd');
   await expect(code).toBeVisible();
+  await expect(code).toHaveText(interfaceRecord.itemCode);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const fonts = await code.evaluate((node) => {
     const root = getComputedStyle(document.documentElement);
@@ -400,7 +407,7 @@ test('relative history exposes exact timezone and original precision through key
   expect(displayedInstant((await exact.textContent())!)).toBe(
     Math.floor(Date.parse(original!) / 1000) * 1000,
   );
-  await expect(disclosure.getByText(original!, { exact: true })).toBeVisible();
+  await expectRecordedInstantCopy(disclosure, original!);
   await expect(time).toHaveAttribute('datetime', original!);
   await page.screenshot({
     path: info.outputPath('history-exact-disclosure.png'),

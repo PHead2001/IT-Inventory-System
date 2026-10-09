@@ -359,7 +359,12 @@ test('site count corrections show authoritative signed before and after counts, 
           exact: true,
         })
         .click();
-      await expect(completion).toContainText('Site count corrected');
+      await expect(
+        completion.getByRole('heading', {
+          name: after === before ? 'No change needed' : 'Site count corrected',
+          exact: true,
+        }),
+      ).toBeVisible();
       await expect(completion).toContainText(
         'Count correction at ' + site.name,
       );

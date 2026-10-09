@@ -450,12 +450,17 @@ test('activity presets resolve local calendar boundaries across both DST transit
   for (const [now, preset, from, until] of cases) {
     await page.clock.setFixedTime(new Date(now));
     await page.goto(base);
-    await page
-      .getByRole('combobox', { name: 'Activity range', exact: true })
-      .selectOption(preset);
+    // The failed CI attempt likely selected before hydration restored Custom.
+    // The browser-only zone is observable readiness; retain every range check.
     await expect(page.getByLabel('Display / preset timezone')).toHaveValue(
       'America/Chicago',
     );
+    await page
+      .getByRole('combobox', { name: 'Activity range', exact: true })
+      .selectOption(preset);
+    await expect(
+      page.getByRole('combobox', { name: 'Activity range', exact: true }),
+    ).toHaveValue(preset);
     await page.getByRole('button', { name: 'Filter activity' }).click();
     await expect(page).toHaveURL(
       (url) =>
@@ -476,9 +481,15 @@ test('activity presets resolve local calendar boundaries across both DST transit
     await verifyActivity(from, until);
   }
   await page.goto(base);
+  await expect(page.getByLabel('Display / preset timezone')).toHaveValue(
+    'America/Chicago',
+  );
   await page
     .getByRole('combobox', { name: 'Activity range', exact: true })
     .selectOption('today');
+  await expect(
+    page.getByRole('combobox', { name: 'Activity range', exact: true }),
+  ).toHaveValue('today');
   await page.getByLabel('Display / preset timezone').selectOption('UTC');
   await page.getByRole('button', { name: 'Filter activity' }).click();
   await expect(page).toHaveURL(
