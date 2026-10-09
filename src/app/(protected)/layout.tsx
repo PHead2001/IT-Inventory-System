@@ -9,6 +9,7 @@ import { AccountIdentity } from '@/components/experience/account-identity';
 import { Navigation } from '@/components/experience/navigation';
 import { PageArrival } from '@/components/experience/page-arrival';
 import { OperationalTimeProvider } from '@/components/operational-time';
+import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,10 @@ export default async function ApplicationLayout({
   const { member } = await requireMember();
   return (
     <OperationalTimeProvider>
+      <AssignmentScopeGuard
+        actorId={member.user_id}
+        backend={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}
+      />
       <MotionPreference>
         <div className="experience-app">
           <a href="#main-content" className="experience-skip-link">

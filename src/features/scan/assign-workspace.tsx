@@ -34,11 +34,30 @@ import {
 import {
   clearAssignmentRecovery,
   readAssignmentRecovery,
+  parseAssignmentRecovery,
   storeAssignmentRecovery,
   type AssignmentRecovery,
   type AssignmentScope,
 } from './assign-recovery';
 import { AssignCamera } from './assign-camera';
+import { LocationPicker } from '@/features/locations/location-picker';
+import { countLabel } from '@/lib/count';
+import {
+  adoptAssignmentScope,
+  assignmentEpoch,
+  batchTotals,
+  BATCH_LIMIT,
+  clearBatch,
+  emptyBatch,
+  historicalInspection,
+  matchesRecoveryEntry,
+  readBatch,
+  recoveryEntry,
+  storeBatch,
+  terminalFits,
+  type AssignmentBatch,
+  type BatchEntry,
+} from './assign-batch';
 
 type Props = {
   actorId: string;
@@ -87,19 +106,98 @@ function AssignmentFields({
   );
   const resolving = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const focusInput = useRef(false);
+  const focusDestination = useRef(false);
+  const previousReceiptId = useRef<string | undefined>(undefined);
+  const destinationRef = useRef<HTMLSelectElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
   const [gate] = useState(createDetectionGate);
   const scope = useRef<AssignmentScope | null>(null);
   const recovered = useRef<AssignmentRecovery | null>(null);
+  const recoveryRaw = useRef<string | null>(null);
+  const batchRef = useRef<AssignmentBatch | null>(null);
+  const batchRaw = useRef<string | null>(null);
+  const epoch = useRef(assignmentEpoch());
+  const entryId = useRef<string | null>(null);
+  const [batch, setBatch] = useState<AssignmentBatch | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const reviewRef = useRef<HTMLElement>(null);
+  const chooserRef = useRef<HTMLUListElement>(null);
   const [ready, setReady] = useState(false);
   const [storageError, setStorageError] = useState('');
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptIssue, setReceiptIssue] = useState('');
+  const [restoring, setRestoring] = useState(false);
+  useLayoutEffect(() => {
+    if (restoring) cancelRef.current?.focus();
+  }, [restoring]);
   useLayoutEffect(() => {
     stateRef.current = state;
   });
   useLayoutEffect(() => {
-    if (state.phase === 'ready' && state.receipt) inputRef.current?.focus();
-  }, [state.phase, state.receipt]);
+    if (focusDestination.current) {
+      focusDestination.current = false;
+      destinationRef.current?.focus();
+    }
+    if (focusInput.current && state.phase === 'ready') {
+      focusInput.current = false;
+      inputRef.current?.focus();
+    }
+  }, [state.phase, state.generation, state.context]);
+  useLayoutEffect(() => {
+    const eventId = state.receipt?.result.eventId;
+    if (
+      state.phase === 'ready' &&
+      !batch?.finished &&
+      eventId &&
+      eventId !== previousReceiptId.current
+    )
+      inputRef.current?.focus();
+    previousReceiptId.current = eventId;
+  }, [state.phase, state.receipt?.result.eventId, batch?.finished]);
+  useLayoutEffect(() => {
+    if (batch?.finished) summaryRef.current?.focus();
+  }, [batch?.finished]);
+  useLayoutEffect(() => {
+    if (state.phase === 'review') reviewRef.current?.focus();
+    else if (state.phase === 'choose') chooserRef.current?.focus();
+    else if (state.phase === 'ready' && state.message)
+      inputRef.current?.focus();
+  }, [state.phase, state.message]);
+  const alive = () => mounted.current && epoch.current === assignmentEpoch();
+  const resetReceiptRead = () => {
+    setReceiptLoading(false);
+    setReceiptIssue('');
+  };
+  const saveBatch = (value: AssignmentBatch) => {
+    if (!alive()) return false;
+    const raw = storeBatch(value, batchRaw.current);
+    if (!raw) {
+      setStorageError(
+        'This batch could not be retained safely. Restore session storage and reconcile the retained assignment before continuing.',
+      );
+      return false;
+    }
+    batchRaw.current = raw;
+    batchRef.current = value;
+    setBatch(value);
+    setStorageError('');
+    return true;
+  };
+  const updateEntry = (
+    patch: Partial<BatchEntry>,
+    extra: Partial<AssignmentBatch> = {},
+  ) => {
+    const saved = batchRef.current;
+    if (!saved || !entryId.current) return false;
+    return saveBatch({
+      ...saved,
+      ...extra,
+      entries: saved.entries.map((row) =>
+        row.id === entryId.current ? { ...row, ...patch } : row,
+      ),
+    });
+  };
   /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     let environment: string;
@@ -117,25 +215,220 @@ function AssignmentFields({
       backend: environment,
     };
     scope.current = identity;
+    try {
+      epoch.current = adoptAssignmentScope(identity);
+    } catch {
+      setStorageError(
+        'Session storage is unavailable. Restore storage access and reload before submitting an assignment.',
+      );
+      return;
+    }
+    const savedBatch = readBatch(identity);
     const stored = readAssignmentRecovery(identity);
-    if (stored.blocked) {
+    if (stored.blocked || savedBatch.blocked) {
       setStorageError(
         'An earlier assignment recovery record is unavailable or incompatible. Keep it intact and restore access before submitting another assignment.',
       );
       return;
     }
+    let restored = savedBatch.value ?? {
+      ...emptyBatch(identity),
+      context: stateRef.current.context,
+    };
+    batchRaw.current = savedBatch.raw;
+    batchRef.current = restored;
     if (stored.value) {
       recovered.current = stored.value;
-      dispatch({
-        type: 'restore',
-        context: stored.value.context,
-        candidate: stored.value.candidate,
-        command: stored.value.command,
-        sourceId: stored.value.sourceId,
-        units: stored.value.units,
-      });
+      recoveryRaw.current = stored.raw;
+      const existing = restored.entries.find(
+        (row) => row.requestId === stored.value!.command.requestId,
+      );
+      if (existing && !matchesRecoveryEntry(existing, stored.value)) {
+        setStorageError(
+          'Batch and recovery disagree. Keep the original recovery intact before continuing.',
+        );
+        return;
+      }
+      if (
+        existing &&
+        (existing.status === 'success' || existing.status === 'failed')
+      ) {
+        if (
+          !clearAssignmentRecovery(
+            identity,
+            stored.value.command.requestId,
+            stored.raw,
+          )
+        ) {
+          setStorageError(
+            'A confirmed result is saved, but recovery cleanup failed. Reload to reconcile before another assignment.',
+          );
+          setBatch(restored);
+          return;
+        }
+        recovered.current = null;
+      } else {
+        if (
+          restored.entries.some(
+            (row) =>
+              row.status === 'uncertain' &&
+              row.requestId !== stored.value!.command.requestId,
+          ) ||
+          (restored.entries.length >= BATCH_LIMIT && !existing)
+        ) {
+          setStorageError(
+            'Batch and recovery do not agree. Keep recovery intact before continuing.',
+          );
+          return;
+        }
+        entryId.current = existing?.id ?? crypto.randomUUID();
+        const uncertain = recoveryEntry(stored.value, entryId.current);
+        restored = {
+          ...restored,
+          context: stored.value.context,
+          finished: false,
+          historical: null,
+          entries: existing
+            ? restored.entries.map((row) =>
+                row.id === existing.id ? uncertain : row,
+              )
+            : [...restored.entries, uncertain],
+        };
+        if (!saveBatch(restored)) return;
+        dispatch({
+          type: 'restore',
+          context: stored.value.context,
+          candidate: stored.value.candidate,
+          command: stored.value.command,
+          sourceId: stored.value.sourceId,
+          units: stored.value.units,
+        });
+        setReady(true);
+        return;
+      }
     }
+    if (restored.entries.some((row) => row.status === 'uncertain')) {
+      setStorageError(
+        'An uncertain assignment has no matching recovery. Keep this batch intact and restore its original recovery before continuing.',
+      );
+      setBatch(restored);
+      return;
+    }
+    // A persisted inspection is historical, never a renewed confirmation.
+    const last = restored.entries.findLast((row) => row.status === 'success');
+    const snapshot = initialAssignState(restored.context);
+    if (last?.kind && last.entityId)
+      snapshot.receipt = {
+        result: {
+          ok: true,
+          changed: true,
+          entityId: last.entityId,
+          version: '1',
+          eventId: last.eventId ?? undefined,
+        },
+        name: last.name,
+        kind: last.kind,
+        entityId: last.entityId,
+        units: String(last.units),
+        sourceName: last.source,
+        siteName: last.context.siteName,
+        reference: last.context.reference,
+      };
+    if (restored.historical && !restored.finished) {
+      entryId.current = restored.historical.entryId;
+      snapshot.candidate = restored.historical.candidate;
+      snapshot.sourceId = restored.historical.sourceId;
+      snapshot.units = restored.historical.units;
+      snapshot.phase = 'conflict';
+      snapshot.message =
+        'Previous inspection retained for reference. Inspect current state before confirming.';
+    }
+    dispatch({ type: 'hydrate', snapshot });
+    setBatch(restored);
+    batchRef.current = restored;
     setReady(true);
+    const historical = restored.historical;
+    const context = restored.context;
+    if (
+      historical &&
+      context &&
+      !restored.finished &&
+      sites.some((site) => site.id === context.siteId && site.active)
+    ) {
+      const token = ++generation.current;
+      resolving.current = true;
+      cancelRef.current?.focus();
+      // This read never refreshes or substitutes an uncertain command.
+      snapshot.generation = token;
+      snapshot.message =
+        'Inspecting equipment… Previous inspection is historical until availability refresh completes.';
+      dispatch({ type: 'hydrate', snapshot });
+      setRestoring(true);
+      void (async () => {
+        try {
+          const result = await inspectAssignmentRecord({
+            path: historical.candidate.path,
+            actorId,
+            siteId: context.siteId,
+          });
+          if (!alive() || generation.current !== token) return;
+          if (!result.ok) {
+            dispatch({
+              type: 'hydrate',
+              snapshot: {
+                ...snapshot,
+                message:
+                  result.message +
+                  ' Previous inspection remains historical. Retry inspection before confirming.',
+              },
+            });
+            return;
+          }
+          // Preserve the chosen source/units; a missing holding needs an explicit choice.
+          if (
+            !updateEntry(
+              {
+                name: result.candidate.name,
+                kind: result.candidate.kind,
+                entityId: result.candidate.id,
+                identifier: result.candidate.identifier,
+                requestId: null,
+              },
+              { historical: { ...historical, candidate: result.candidate } },
+            )
+          )
+            return;
+          dispatch({ type: 'lookup', generation: token });
+          dispatch({
+            type: 'candidate',
+            generation: token,
+            candidate: result.candidate,
+            sourceId: historical.sourceId,
+            units: historical.units,
+            message:
+              'Availability refreshed. Review the source and units before confirming.',
+          });
+        } catch {
+          if (alive() && generation.current === token)
+            dispatch({
+              type: 'hydrate',
+              snapshot: {
+                ...snapshot,
+                message:
+                  'Availability could not be refreshed. Previous inspection remains historical; retry inspection before confirming.',
+              },
+            });
+        } finally {
+          if (alive() && generation.current === token) {
+            resolving.current = false;
+            setRestoring(false);
+          }
+        }
+      })();
+    }
+    // Bootstrap exactly once per keyed actor/backend. Fresh catalog props are
+    // checked before each new confirmation; they must not restart recovery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actorId, backend]);
   /* eslint-enable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
@@ -143,6 +436,22 @@ function AssignmentFields({
     return () => {
       mounted.current = false;
     };
+  }, []);
+  useEffect(() => {
+    const invalidate = () => {
+      generation.current++;
+      resolving.current = false;
+      setReady(false);
+      setBatch(null);
+      batchRef.current = null;
+      dispatch({ type: 'hydrate', snapshot: initialAssignState(null) });
+      setStorageError(
+        'Your account or assignment environment changed. Reopen Scan and assign under the current staff session.',
+      );
+    };
+    window.addEventListener('assignment-scope-invalidated', invalidate);
+    return () =>
+      window.removeEventListener('assignment-scope-invalidated', invalidate);
   }, []);
   const unresolved = state.phase === 'pending' || state.phase === 'unknown';
   useEffect(() => {
@@ -155,8 +464,36 @@ function AssignmentFields({
     return () => window.removeEventListener('beforeunload', warn);
   }, [unresolved]);
   const changeContext = (context: AssignmentContext | null) => {
-    if (submitting.current || stateRef.current.phase === 'unknown') return;
+    if (
+      !alive() ||
+      submitting.current ||
+      stateRef.current.phase === 'unknown' ||
+      batchRef.current?.finished
+    )
+      return;
+    const saved = batchRef.current;
+    if (
+      saved &&
+      !saveBatch({
+        ...saved,
+        context,
+        historical: null,
+        entries: saved.entries.map((row) =>
+          row.id === entryId.current && row.status === 'pending'
+            ? {
+                ...row,
+                status: 'skipped',
+                message: 'Batch context changed before confirmation.',
+              }
+            : row,
+        ),
+      })
+    )
+      return;
+    entryId.current = null;
+    resetReceiptRead();
     resolving.current = false;
+    setRestoring(false);
     dispatch({ type: 'context', context, generation: ++generation.current });
   };
   const inspect = async (match: ScanMatch, token: number) => {
@@ -168,26 +505,62 @@ function AssignmentFields({
         actorId,
         siteId: context.siteId,
       });
-      if (!mounted.current || generation.current !== token) return;
-      if (!result.ok)
+      if (!alive() || generation.current !== token) return;
+      if (!result.ok) {
+        updateEntry(
+          { status: 'failed', message: result.message.slice(0, 500) },
+          { historical: null },
+        );
         dispatch({ type: 'error', generation: token, message: result.message });
-      else
+      } else {
+        const sourceId =
+          selectedAssignmentSource(result.candidate, context.sourceId)?.id ??
+          '';
+        const inspection = {
+          candidate: result.candidate,
+          sourceId,
+          units: '1',
+          entryId: entryId.current!,
+        };
+        if (
+          !updateEntry(
+            {
+              name: result.candidate.name,
+              kind: result.candidate.kind,
+              entityId: result.candidate.id,
+              identifier: result.candidate.identifier,
+            },
+            { historical: inspection },
+          )
+        ) {
+          dispatch({
+            type: 'error',
+            generation: token,
+            message:
+              'Inspection could not be retained safely. Retry after restoring session storage.',
+          });
+          return;
+        }
         dispatch({
           type: 'candidate',
           generation: token,
           candidate: result.candidate,
-          sourceId:
-            selectedAssignmentSource(result.candidate, context.sourceId)?.id ??
-            '',
+          sourceId,
         });
+      }
     } catch {
-      if (mounted.current && generation.current === token)
+      if (alive() && generation.current === token) {
+        updateEntry(
+          { status: 'failed', message: 'Inspection could not complete.' },
+          { historical: null },
+        );
         dispatch({
           type: 'error',
           generation: token,
           message:
             'Inspection could not complete. Retry the lookup; nothing was assigned.',
         });
+      }
     }
   };
   const lookup = async (
@@ -199,6 +572,8 @@ function AssignmentFields({
     const current = stateRef.current;
     if (
       !ready ||
+      !alive() ||
+      batchRef.current?.finished ||
       !current.context ||
       resolving.current ||
       submitting.current ||
@@ -206,6 +581,42 @@ function AssignmentFields({
       (current.phase === 'choose' && !paging)
     )
       return;
+    const saved = batchRef.current;
+    if (!saved) return;
+    if (!paging) {
+      if (saved.entries.length >= BATCH_LIMIT || !terminalFits(saved)) {
+        setStorageError(
+          'This batch is full. Finish and End batch before starting another; all existing entries are retained.',
+        );
+        return;
+      }
+      entryId.current = crypto.randomUUID();
+      const row: BatchEntry = {
+        id: entryId.current,
+        status: 'pending',
+        name: 'Equipment inspection',
+        kind: null,
+        entityId: null,
+        identifier: null,
+        units: 0,
+        source: '',
+        context: { ...current.context },
+        requestId: null,
+        eventId: null,
+        message: '',
+      };
+      if (
+        !saveBatch({
+          ...saved,
+          entries: [...saved.entries, row],
+          historical: null,
+        })
+      )
+        return;
+    }
+    // Cancel is mounted and focused before disabling the input/submit control.
+    cancelRef.current?.focus();
+    resetReceiptRead();
     resolving.current = true;
     const token = ++generation.current;
     dispatch({ type: 'lookup', generation: token });
@@ -216,16 +627,28 @@ function AssignmentFields({
         mode: lookupMode,
         ...(lookupMode === 'search' ? { page } : {}),
       });
-      if (!mounted.current || generation.current !== token) return;
-      if (!resolution.ok)
+      if (!alive() || generation.current !== token) return;
+      if (!resolution.ok) {
+        updateEntry({
+          status: 'failed',
+          message: resolution.message.slice(0, 500),
+        });
         dispatch({
           type: 'error',
           generation: token,
           message: resolution.message,
         });
-      else if (resolution.status === 'found' && resolution.matches.length === 1)
+      } else if (
+        resolution.status === 'found' &&
+        resolution.matches.length === 1
+      )
         await inspect(resolution.matches[0], token);
-      else
+      else {
+        if (!resolution.matches.length)
+          updateEntry({
+            status: 'failed',
+            message: 'No matching inventory record.',
+          });
         dispatch({
           type: 'matches',
           generation: token,
@@ -242,29 +665,49 @@ function AssignmentFields({
                   ? 'No existing inventory matches. Check the identifier or use search; nothing was created.'
                   : 'Choose the intended record. Search and ambiguous identifiers never choose automatically.',
         });
+      }
     } catch {
-      if (mounted.current && generation.current === token)
+      if (alive() && generation.current === token) {
+        updateEntry({
+          status: 'failed',
+          message: 'Lookup could not complete.',
+        });
         dispatch({
           type: 'error',
           generation: token,
           message:
             'Lookup could not complete. Retry when your staff session is available.',
         });
+      }
     } finally {
-      if (generation.current === token) resolving.current = false;
+      if (alive() && generation.current === token) resolving.current = false;
     }
   };
   const confirm = async () => {
     const current = stateRef.current;
+    const identity = scope.current;
+    const saved = batchRef.current;
     if (
+      !alive() ||
       submitting.current ||
       !ready ||
       !current.candidate ||
       !current.context ||
-      !scope.current ||
+      !identity ||
+      !saved ||
+      saved.finished ||
       !['review', 'unknown'].includes(current.phase)
     )
       return;
+    if (
+      current.phase === 'review' &&
+      !sites.some((site) => site.id === current.context?.siteId && site.active)
+    ) {
+      setStorageError(
+        'The saved destination is unavailable. Choose an active site and inspect again.',
+      );
+      return;
+    }
     let command = current.command;
     if (current.phase !== 'unknown') {
       if (assignmentProblem(current.candidate, current.sourceId, current.units))
@@ -278,63 +721,156 @@ function AssignmentFields({
         crypto.randomUUID(),
       );
     }
-    if (!command) return;
+    if (!command || !entryId.current) return;
     const durable: AssignmentRecovery = {
       version: 1,
-      scope: scope.current,
+      scope: identity,
       context: current.context,
       candidate: current.candidate,
       sourceId: current.sourceId,
       units: current.units,
       command,
     };
-    if (!recovered.current && !storeAssignmentRecovery(durable, null)) {
+    const pending = {
+      ...recoveryEntry(durable, entryId.current),
+      status: 'pending' as const,
+    };
+    const projection = {
+      ...saved,
+      entries: saved.entries.map((row) =>
+        row.id === pending.id ? pending : row,
+      ),
+      historical: historicalInspection(current, pending.id),
+    };
+    if (!terminalFits(projection)) {
       setStorageError(
-        'This assignment could not be retained safely. Keep the review open and retry when session storage is available. Nothing was submitted.',
+        'This batch has reached its storage limit. Finish and End batch before another assignment. Nothing was submitted.',
       );
       return;
     }
+    // Every retry rereads exact recovery bytes, not merely request identity.
+    const recovery = readAssignmentRecovery(identity);
     if (
-      recovered.current &&
-      recovered.current.command.requestId !== command.requestId
+      recovery.blocked ||
+      (recovered.current &&
+        (recovery.raw !== recoveryRaw.current ||
+          JSON.stringify(recovery.value) !==
+            JSON.stringify(
+              parseAssignmentRecovery(JSON.stringify(durable), identity),
+            ))) ||
+      (!recovered.current && recovery.value)
     ) {
       setStorageError(
-        'Resolve the earlier request before starting another assignment.',
+        'Recovery changed or is unavailable. Keep the original request intact and reload before continuing.',
       );
       return;
     }
-    recovered.current = durable;
+    if (!recovered.current) {
+      if (!saveBatch(projection)) {
+        setStorageError(
+          'This assignment could not be retained safely. Keep the review open and restore session storage. Nothing was submitted.',
+        );
+        return;
+      } // write ahead: pending, provably not sent
+      if (!storeAssignmentRecovery(durable, null)) {
+        setStorageError(
+          'This assignment could not be retained safely. Keep the review open and retry when session storage is available. Nothing was submitted.',
+        );
+        return;
+      }
+      recovered.current = durable;
+      recoveryRaw.current = readAssignmentRecovery(identity).raw;
+    }
+    if (
+      !storeAssignmentRecovery(durable, durable, recoveryRaw.current) ||
+      !updateEntry({ ...pending, status: 'uncertain' })
+    ) {
+      dispatch({
+        type: 'restore',
+        context: durable.context,
+        candidate: durable.candidate,
+        command: durable.command,
+        sourceId: durable.sourceId,
+        units: durable.units,
+      });
+      setStorageError(
+        'Recovery could not be verified. Reload and reconcile the original request before continuing. Nothing was submitted by this attempt.',
+      );
+      return;
+    }
     submitting.current = true;
+    reviewRef.current?.focus();
+    recoveryRaw.current = readAssignmentRecovery(identity).raw;
     dispatch({ type: 'pending', command });
     try {
       const result = await submitCustody(command);
-      if (!mounted.current) return;
+      if (!alive()) return; // navigation keeps exact recovery; privacy blocks writes
       if (result.ok) {
-        const cleared = clearAssignmentRecovery(
-          scope.current,
-          command.requestId,
-        );
-        if (cleared) {
-          recovered.current = null;
-          setStorageError('');
-        } else {
-          setStorageError(
-            'Assignment confirmed, but its recovery marker could not be cleared. Reload and retry the same request to reconcile before issuing more.',
-          );
-          setReady(false);
-        }
-        dispatch({ type: 'committed', result });
-        setInput('');
-        inputRef.current?.focus();
-      } else if (custodyOutcomeUnresolved(result, current.phase === 'unknown'))
-        dispatch({ type: 'unknown', message: result.message });
-      else {
-        if (!clearAssignmentRecovery(scope.current, command.requestId)) {
+        if (!result.eventId || result.entityId !== current.candidate.id) {
           dispatch({
             type: 'unknown',
             message:
-              'The rejection was received, but recovery could not be updated. Retry the same request before continuing.',
+              'A saved result has no verifiable event. Retain and retry the original request before continuing.',
           });
+          return;
+        }
+        const duplicate = batchRef.current?.entries.find(
+          (row) => row.eventId === result.eventId && row.id !== entryId.current,
+        );
+        const retained =
+          !duplicate &&
+          updateEntry(
+            { status: 'success', eventId: result.eventId, message: '' },
+            { historical: null },
+          );
+        if (!retained) {
+          dispatch({
+            type: 'unknown',
+            message:
+              'Assignment confirmed, but its checklist could not be retained. Retry the same request to reconcile; do not start another assignment.',
+          });
+          return;
+        }
+        if (
+          !clearAssignmentRecovery(
+            identity,
+            command.requestId,
+            recoveryRaw.current,
+          )
+        ) {
+          setStorageError(
+            'Assignment confirmed, but recovery cleanup failed. Reload to reconcile before issuing more.',
+          );
+          setReady(false);
+        } else recovered.current = null;
+        dispatch({ type: 'committed', result });
+        setInput('');
+      } else if (
+        custodyOutcomeUnresolved(result, current.phase === 'unknown')
+      ) {
+        updateEntry({
+          status: 'uncertain',
+          message: result.message.slice(0, 500),
+        });
+        dispatch({ type: 'unknown', message: result.message });
+      } else {
+        if (
+          !updateEntry(
+            { status: 'failed', message: result.message.slice(0, 500) },
+            { historical: null },
+          ) ||
+          !clearAssignmentRecovery(
+            identity,
+            command.requestId,
+            recoveryRaw.current,
+          )
+        ) {
+          dispatch({
+            type: 'unknown',
+            message:
+              'The rejection was received, but recovery could not be updated. Reload to reconcile before continuing.',
+          });
+          setReady(false);
           return;
         }
         recovered.current = null;
@@ -345,19 +881,41 @@ function AssignmentFields({
         });
       }
     } catch {
-      if (mounted.current)
+      if (alive())
         dispatch({
           type: 'unknown',
           message:
             'The assignment result could not be confirmed. Retry the same assignment; do not start a new request.',
         });
     } finally {
-      submitting.current = false;
+      if (alive()) submitting.current = false;
     }
   };
   const next = () => {
-    if (submitting.current || unresolved) return;
+    if (!alive() || submitting.current || unresolved) return;
+    const saved = batchRef.current;
+    if (
+      saved &&
+      !saveBatch({
+        ...saved,
+        historical: null,
+        entries: saved.entries.map((row) =>
+          row.id === entryId.current && row.status === 'pending'
+            ? {
+                ...row,
+                status: 'skipped',
+                message: 'Skipped before confirmation.',
+              }
+            : row,
+        ),
+      })
+    )
+      return;
+    entryId.current = null;
+    focusInput.current = true;
+    resetReceiptRead();
     resolving.current = false;
+    setRestoring(false);
     dispatch({ type: 'next', generation: ++generation.current });
     setInput('');
     gate.rescan();
@@ -367,7 +925,95 @@ function AssignmentFields({
   const problem = candidate
     ? assignmentProblem(candidate, state.sourceId, state.units)
     : null;
-  const busy = unresolved || state.phase === 'lookup';
+  const busy = unresolved || state.phase === 'lookup' || restoring;
+  const totals = batchTotals(batch?.entries ?? []);
+  const destinationValid =
+    !!state.context &&
+    sites.some((site) => site.id === state.context?.siteId && site.active);
+  const freshReady = ready && !batch?.finished;
+  const cancelInspection = () => {
+    if (submitting.current || unresolved) return;
+    next();
+    inputRef.current?.focus();
+  };
+  const editReview = (edit: { sourceId?: string; units?: string }) => {
+    if (!alive() || unresolved || !entryId.current || !batchRef.current) return;
+    const snapshot = assignReducer(stateRef.current, { type: 'edit', ...edit });
+    if (
+      saveBatch({
+        ...batchRef.current,
+        context: snapshot.context,
+        historical: historicalInspection(snapshot, entryId.current),
+      })
+    )
+      dispatch({ type: 'edit', ...edit });
+  };
+  const refreshInspection = () => {
+    if (
+      !candidate ||
+      !freshReady ||
+      !destinationValid ||
+      resolving.current ||
+      submitting.current
+    )
+      return;
+    const saved = batchRef.current;
+    if (!saved) return;
+    const existing = saved.entries.find(
+      (row) => row.id === entryId.current && row.status === 'pending',
+    );
+    if (!existing && saved.entries.length >= BATCH_LIMIT) {
+      setStorageError(
+        'This batch is full. Finish and End batch before another inspection.',
+      );
+      return;
+    }
+    // Retrying an unfinished historical inspection reuses that row. A failed
+    // submitted operation stays immutable and a deliberate new inspection is new.
+    entryId.current = existing?.id ?? crypto.randomUUID();
+    const replacement: BatchEntry = {
+      id: entryId.current,
+      status: 'pending',
+      name: candidate.name,
+      kind: candidate.kind,
+      entityId: candidate.id,
+      identifier: candidate.identifier,
+      units: 0,
+      source: '',
+      context: { ...state.context! },
+      requestId: null,
+      eventId: null,
+      message: '',
+    };
+    if (
+      !saveBatch({
+        ...saved,
+        entries: existing
+          ? saved.entries.map((row) =>
+              row.id === existing.id ? replacement : row,
+            )
+          : [...saved.entries, replacement],
+        historical: null,
+      })
+    )
+      return;
+    cancelRef.current?.focus();
+    resetReceiptRead();
+    resolving.current = true;
+    const token = ++generation.current;
+    dispatch({ type: 'lookup', generation: token });
+    void inspect(
+      {
+        kind: candidate.kind,
+        path: candidate.path,
+        label: candidate.name,
+        state: candidate.status,
+      },
+      token,
+    ).finally(() => {
+      if (alive() && generation.current === token) resolving.current = false;
+    });
+  };
   return (
     <div className="space-y-5">
       <section
@@ -381,12 +1027,13 @@ function AssignmentFields({
         </p>
         {siteIssue && <p role="note">{siteIssue}</p>}
         <fieldset
-          disabled={unresolved || !ready}
+          disabled={unresolved || !freshReady}
           className="grid gap-3 sm:grid-cols-3"
         >
           <label className="space-y-2">
             Destination site
             <select
+              ref={destinationRef}
               aria-label="Destination site"
               className={field}
               value={state.context?.siteId ?? ''}
@@ -429,27 +1076,18 @@ function AssignmentFields({
               }
             />
           </label>
-          <label className="space-y-2">
-            Preferred storage source (optional)
-            <select
-              aria-label="Preferred storage source (optional)"
-              className={field}
-              value={state.context?.sourceId ?? ''}
-              disabled={!state.context}
-              onChange={(e) =>
-                state.context &&
-                changeContext({ ...state.context, sourceId: e.target.value })
-              }
-            >
-              <option value="">Choose for each item</option>
-              {locations.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.breadcrumb}
-                  {!row.active ? ' (inactive; existing stock can leave)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <LocationPicker
+            locations={locations}
+            mode="destination"
+            label="Preferred storage source (optional)"
+            value={state.context?.sourceId ?? ''}
+            allowAll
+            emptyLabel="Choose for each item"
+            disabled={!state.context || !freshReady || unresolved}
+            onValueChange={(sourceId) =>
+              state.context && changeContext({ ...state.context, sourceId })
+            }
+          />
         </fieldset>
         {state.context && (
           <p className="break-words text-sm text-cyan-200">
@@ -471,13 +1109,165 @@ function AssignmentFields({
           {storageError}
         </p>
       )}
+      {!destinationValid && state.context && (
+        <p role="alert">
+          The saved destination is unavailable. Choose an active site and
+          inspect again.
+        </p>
+      )}
+      <section
+        aria-label={batch?.finished ? 'Batch summary' : 'Batch checklist'}
+        ref={summaryRef}
+        tabIndex={-1}
+        className={panel + ' space-y-3'}
+      >
+        <h2 className="text-lg font-semibold">
+          {batch?.finished ? 'Batch finished' : 'Assignment checklist'}
+        </h2>
+        <p role="status">
+          {countLabel(totals.assetAssignments, 'asset assignment')}
+          {totals.assets !== totals.assetAssignments
+            ? ` (${countLabel(totals.assets, 'individual asset')})`
+            : ''}{' '}
+          · {countLabel(totals.quantityAssignments, 'quantity assignment')} (
+          {countLabel(totals.units, 'unit')}) confirmed · {totals.failed} failed
+          · {totals.skipped} skipped · {totals.pending} pending ·{' '}
+          {totals.uncertain} uncertain
+        </p>
+        <ol className="max-h-64 space-y-3 overflow-y-auto overscroll-contain">
+          {batch?.entries.map((row) => (
+            <li
+              key={row.id}
+              className="break-words border-b border-slate-700 pb-3"
+            >
+              <p className="font-medium">
+                {row.name}
+                {row.identifier ? ` · ${row.identifier}` : ''} ·{' '}
+                {row.status === 'pending'
+                  ? 'Pending inspection / review'
+                  : row.status === 'uncertain'
+                    ? 'Uncertain — retry original request'
+                    : row.status === 'success'
+                      ? 'Confirmed'
+                      : row.status === 'failed'
+                        ? 'Failed'
+                        : 'Skipped'}
+              </p>
+              <p className="text-sm">
+                {row.kind === 'asset'
+                  ? 'Individual asset'
+                  : row.kind === 'quantity' && row.units
+                    ? countLabel(row.units, 'unit')
+                    : 'Equipment inspection'}
+                {row.source ? ` · ${row.source} → ` : ' · Destination: '}
+                {row.context.siteName}
+                {row.context.reference
+                  ? ` · Ticket ${row.context.reference}`
+                  : ''}
+              </p>
+              {row.message && <p className="text-sm">{row.message}</p>}
+              {row.status === 'success' && (
+                <Link
+                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                  href={`/history/events/${row.kind}/${row.eventId}`}
+                >
+                  View committed history for {row.name}
+                </Link>
+              )}
+            </li>
+          ))}
+        </ol>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!ready || batch?.finished || busy}
+            onClick={() => {
+              if (!batchRef.current || !alive() || recovered.current) return;
+              const saved = batchRef.current;
+              if (
+                !saveBatch({
+                  ...saved,
+                  finished: true,
+                  historical: null,
+                  entries: saved.entries.map((row) =>
+                    row.status === 'pending'
+                      ? {
+                          ...row,
+                          status: 'skipped',
+                          message: 'Finished without assigning.',
+                        }
+                      : row,
+                  ),
+                })
+              )
+                return;
+              generation.current++;
+              resetReceiptRead();
+              dispatch({
+                type: 'hydrate',
+                snapshot: {
+                  ...initialAssignState(state.context),
+                  receipt: state.receipt,
+                },
+              });
+            }}
+          >
+            Finish batch
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!ready || !batch?.finished || busy}
+            onClick={() => {
+              if (
+                !scope.current ||
+                !alive() ||
+                !batchRef.current?.finished ||
+                recovered.current
+              )
+                return;
+              const pending = readAssignmentRecovery(scope.current);
+              if (
+                pending.blocked ||
+                pending.value ||
+                !clearBatch(scope.current, batchRaw.current)
+              ) {
+                setStorageError(
+                  'Batch could not be cleared safely. Restore session storage and reload before starting another batch.',
+                );
+                setReady(false);
+                return;
+              }
+              generation.current++;
+              resetReceiptRead();
+              focusDestination.current = true;
+              entryId.current = null;
+              batchRaw.current = null;
+              batchRef.current = emptyBatch(scope.current);
+              setBatch(batchRef.current);
+              dispatch({ type: 'hydrate', snapshot: initialAssignState(null) });
+              setStorageError('');
+              setInput('');
+            }}
+          >
+            End batch
+          </Button>
+        </div>
+        {totals.uncertain > 0 && (
+          <p>
+            Resolve the original assignment before finishing or ending this
+            batch.
+          </p>
+        )}
+      </section>
       <AssignCamera
         scope={actorId + ':' + backend}
         onDetection={(value) => {
           if (
             gate.observe(
               value,
-              ready &&
+              freshReady &&
                 stateRef.current.phase === 'ready' &&
                 !!stateRef.current.context,
             )
@@ -488,11 +1278,33 @@ function AssignmentFields({
       <form
         className={panel + ' space-y-3'}
         aria-label="Inspect equipment"
+        aria-busy={state.phase === 'lookup' || restoring}
         onSubmit={(e) => {
           e.preventDefault();
           void lookup(input);
         }}
       >
+        <Button
+          ref={cancelRef}
+          variant="outline"
+          type="button"
+          disabled={unresolved || !freshReady}
+          onClick={cancelInspection}
+        >
+          {state.phase === 'lookup' || restoring
+            ? 'Cancel inspection'
+            : 'Skip inspection / review'}
+        </Button>
+        {(state.phase === 'lookup' || restoring) && (
+          <div role="status" className="space-y-3">
+            <p>Inspecting equipment…</p>
+            <div aria-hidden="true" className="space-y-3">
+              <div className="h-6 w-2/3 rounded bg-slate-700" />
+              <div className="h-12 rounded bg-slate-800" />
+              <div className="h-12 rounded bg-slate-800" />
+            </div>
+          </div>
+        )}
         <label className="space-y-2">
           Lookup method
           <select
@@ -520,7 +1332,7 @@ function AssignmentFields({
             value={input}
             disabled={
               busy ||
-              !ready ||
+              !freshReady ||
               ['review', 'choose', 'conflict'].includes(state.phase)
             }
             onChange={(e) => setInput(e.target.value)}
@@ -529,10 +1341,10 @@ function AssignmentFields({
         <div className="flex flex-wrap gap-3">
           <Button
             disabled={
-              !ready ||
+              !freshReady ||
               busy ||
-              !state.context ||
-              ['review', 'choose'].includes(state.phase)
+              !destinationValid ||
+              ['review', 'choose', 'conflict'].includes(state.phase)
             }
           >
             Inspect equipment
@@ -540,7 +1352,7 @@ function AssignmentFields({
           <Button
             variant="outline"
             type="button"
-            disabled={busy || !ready}
+            disabled={busy || !freshReady}
             onClick={next}
           >
             Rescan / choose another
@@ -556,6 +1368,8 @@ function AssignmentFields({
         <ul
           className={panel + ' space-y-2'}
           aria-label="Choose inventory record"
+          ref={chooserRef}
+          tabIndex={-1}
         >
           {state.matches.map((match) => (
             <li key={match.path}>
@@ -563,15 +1377,16 @@ function AssignmentFields({
                 variant="outline"
                 type="button"
                 onClick={() => {
+                  if (!alive() || resolving.current || submitting.current)
+                    return;
+                  cancelRef.current?.focus();
+                  resetReceiptRead();
+                  resolving.current = true;
                   const token = ++generation.current;
                   dispatch({ type: 'lookup', generation: token });
-                  void inspect(match, token).catch(() => {
-                    if (mounted.current && token === generation.current)
-                      dispatch({
-                        type: 'error',
-                        generation: token,
-                        message: 'Inspection failed. Try again.',
-                      });
+                  void inspect(match, token).finally(() => {
+                    if (alive() && token === generation.current)
+                      resolving.current = false;
                   });
                 }}
               >
@@ -611,7 +1426,7 @@ function AssignmentFields({
             variant="outline"
             disabled={
               busy ||
-              !ready ||
+              !freshReady ||
               state.search.page >= 100000 ||
               state.search.page * state.search.pageSize >= state.search.total
             }
@@ -639,6 +1454,8 @@ function AssignmentFields({
       {candidate && (
         <section
           aria-label="Review assignment"
+          ref={reviewRef}
+          tabIndex={-1}
           className={panel + ' space-y-3'}
         >
           <h2 className="break-words text-lg font-semibold">
@@ -667,9 +1484,7 @@ function AssignmentFields({
                 aria-label="Storage source"
                 className={field}
                 value={state.sourceId}
-                onChange={(e) =>
-                  dispatch({ type: 'edit', sourceId: e.target.value })
-                }
+                onChange={(e) => editReview({ sourceId: e.target.value })}
               >
                 <option value="">Choose source</option>
                 {candidate.sources.map((source) => (
@@ -693,9 +1508,7 @@ function AssignmentFields({
                   }
                   step={1}
                   value={state.units}
-                  onChange={(e) =>
-                    dispatch({ type: 'edit', units: e.target.value })
-                  }
+                  onChange={(e) => editReview({ units: e.target.value })}
                 />
               </label>
             )}
@@ -712,7 +1525,7 @@ function AssignmentFields({
             <Button
               type="button"
               disabled={
-                !ready ||
+                !freshReady ||
                 state.phase === 'pending' ||
                 (state.phase !== 'unknown' &&
                   (!!problem || state.phase !== 'review'))
@@ -729,19 +1542,7 @@ function AssignmentFields({
               <Button
                 variant="outline"
                 type="button"
-                onClick={() => {
-                  const token = ++generation.current;
-                  dispatch({ type: 'lookup', generation: token });
-                  void inspect(
-                    {
-                      kind: candidate.kind,
-                      path: candidate.path,
-                      label: candidate.name,
-                      state: candidate.status,
-                    },
-                    token,
-                  );
-                }}
+                onClick={refreshInspection}
               >
                 Inspect current state
               </Button>
@@ -785,9 +1586,7 @@ function AssignmentFields({
                 Saved successfully. Event receipt details could not be loaded;
                 current holdings are not receipt balances.
               </p>
-              <p className="break-all text-xs">
-                {state.receipt.result.eventId}
-              </p>
+
               {state.receipt.result.eventId && (
                 <Button
                   type="button"
@@ -796,6 +1595,7 @@ function AssignmentFields({
                   onClick={async () => {
                     const receipt = state.receipt;
                     if (!receipt?.result.eventId || receiptLoading) return;
+                    const receiptToken = generation.current;
                     setReceiptLoading(true);
                     setReceiptIssue('');
                     try {
@@ -805,7 +1605,8 @@ function AssignmentFields({
                         eventId: receipt.result.eventId,
                         expectedActorId: actorId,
                       });
-                      if (!mounted.current) return;
+                      if (!alive() || generation.current !== receiptToken)
+                        return;
                       if (detail)
                         dispatch({
                           type: 'receipt',
@@ -817,12 +1618,13 @@ function AssignmentFields({
                           'Receipt details are unavailable. The assignment remains confirmed; retry under the original account.',
                         );
                     } catch {
-                      if (mounted.current)
+                      if (alive() && generation.current === receiptToken)
                         setReceiptIssue(
                           'Receipt details could not be loaded. The assignment remains confirmed.',
                         );
                     } finally {
-                      if (mounted.current) setReceiptLoading(false);
+                      if (alive() && generation.current === receiptToken)
+                        setReceiptLoading(false);
                     }
                   }}
                 >

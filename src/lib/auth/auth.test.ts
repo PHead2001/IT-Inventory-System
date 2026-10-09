@@ -25,7 +25,14 @@ vi.mock('next/navigation', () => ({
     throw new Error('REDIRECT:' + url);
   }),
 }));
-import { login, recover, confirmAuth, setPassword, logout } from './actions';
+import {
+  login,
+  recover,
+  confirmAuth,
+  setPassword,
+  logout,
+  signOutSession,
+} from './actions';
 const form = (data: Record<string, string>) => {
   const result = new FormData();
   for (const [key, value] of Object.entries(data)) result.set(key, value);
@@ -585,6 +592,23 @@ describe('auth boundaries', () => {
   it('signs out only the current session', async () => {
     await expect(logout()).rejects.toThrow('REDIRECT:/login');
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+  it('returns only sanitized verified signout status for browser privacy clearing', async () => {
+    expect(await signOutSession()).toEqual({ ok: true });
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    mocks.signOut.mockResolvedValue({
+      error: { message: 'private provider details', token: 'private' },
+    });
+    expect(await signOutSession()).toEqual({
+      ok: false,
+      message: 'Unable to sign out. Please try again.',
+    });
+    mocks.signOut.mockRejectedValue(new Error('private transport details'));
+    expect(await signOutSession()).toEqual({
+      ok: false,
+      message:
+        'Sign-out could not be confirmed. Retry when your connection is available.',
+    });
   });
   it('enforces password confirmation and length', () => {
     expect(

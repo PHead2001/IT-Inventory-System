@@ -150,6 +150,11 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await page
       .getByLabel('Ticket number reference (optional)', { exact: true })
       .fill(ticket);
+    await chooseLocation(
+      page.locator('body'),
+      'Preferred storage source (optional)',
+      'ITC-RED',
+    );
     const input = page.getByLabel('Scan, paste, or search inventory', {
       exact: true,
     });
@@ -158,6 +163,26 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await input.press('Enter');
     await expect(review).toContainText(quantityName);
     await expect(review.getByLabel('Units to assign')).toHaveValue('1');
+    expect(await eventCount()).toBe(0);
+    await review.getByRole('link', { name: 'Open inventory record' }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/inventory/quantity/${quantityId}$`),
+    );
+    await page.goBack();
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue(ticket);
+    await expect(page.getByLabel('Destination site')).toHaveValue(
+      site.data!.id,
+    );
+    await expect(
+      page.getByLabel('Preferred storage source (optional)'),
+    ).toContainText('ITC-RED');
+    await expect(
+      page.getByText(
+        'Availability refreshed. Review the source and units before confirming.',
+      ),
+    ).toBeVisible();
     expect(await eventCount()).toBe(0);
     await page
       .getByRole('button', { name: 'Confirm assign', exact: true })
@@ -172,6 +197,12 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await expect(
       page.getByLabel('Ticket number reference (optional)', { exact: true }),
     ).toHaveValue(ticket);
+    expect(await eventCount()).toBe(1);
+    await page.reload();
+    await expect(receipt).toContainText(quantityName);
+    await expect(
+      page.getByRole('region', { name: 'Batch checklist' }),
+    ).toContainText('1 quantity assignment (1 unit) confirmed');
     expect(await eventCount()).toBe(1);
 
     // The same identifier is a new, explicit keyboard-scanner intent, then a new confirmation.
@@ -202,6 +233,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await expect(receipt).toContainText(assetName);
     await expect(input).toBeEnabled();
     expect(await eventCount()).toBe(3);
+
     await input.fill(assetLabel);
     await input.press('Enter');
     await expect(review).toContainText('already assigned');
@@ -210,6 +242,25 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     ).toBeDisabled();
     expect(await eventCount()).toBe(3);
 
+    await page
+      .getByRole('button', { name: 'Finish batch', exact: true })
+      .click();
+    const summary = page.getByRole('region', { name: 'Batch summary' });
+    await expect(summary).toContainText(
+      '1 asset assignment · 2 quantity assignments (2 units) confirmed',
+    );
+    await expect(
+      summary.getByRole('link', { name: /View committed history/ }),
+    ).toHaveCount(3);
+    expect(await eventCount()).toBe(3);
+    await page.reload();
+    await expect(summary).toBeVisible();
+    await page.getByRole('button', { name: 'End batch', exact: true }).click();
+    await expect(page.getByLabel('Destination site')).toHaveValue('');
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    expect(await eventCount()).toBe(3);
     await page.goto('/scan');
     await page
       .getByLabel('Paste a label URL, barcode text, or exact identifier')
@@ -276,4 +327,234 @@ test('viewer assignment entry has no writable batch controls', async ({
   await expect(
     page.getByLabel('Destination site', { exact: true }),
   ).toHaveCount(0);
+});
+
+test('real scan batch cancels late reads, refreshes stale stock, reconciles lost responses/storage cleanup and clears on logout from another route', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(180_000);
+  await signIn(page);
+  const suffix = randomUUID().slice(0, 8).toUpperCase();
+  await page.goto('/settings/sites');
+  const siteForm = page.locator('form').filter({
+    has: page.getByRole('heading', {
+      name: 'Add property/site',
+      exact: true,
+    }),
+  });
+  await siteForm
+    .getByLabel('Name', { exact: true })
+    .fill(`Resilient scan ${suffix}`);
+  await siteForm
+    .getByLabel('Permanent code', { exact: true })
+    .fill(`RES-${suffix}`);
+  await siteForm.getByRole('button', { name: 'Save site' }).click();
+  await expect(
+    page.getByRole('region', { name: 'Site creation complete' }),
+  ).toBeVisible();
+  await page.goto('/inventory/quantity/new');
+  const form = page.getByRole('form', { name: 'Add quantity item' });
+  await form
+    .getByLabel('Name', { exact: true })
+    .fill(`Resilient adapters ${suffix}`);
+  await form.getByLabel('Initial quantity').fill('5');
+  await chooseLocation(form, 'Initial location', 'ITC-RED');
+  await metadataReviewButton(form).click();
+  await metadataSaveButton(form).click();
+  await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
+  const path = new URL(page.url()).pathname;
+  const client = await staffClient();
+  const site = await client
+    .from('sites')
+    .select('id')
+    .eq('code', `RES-${suffix}`)
+    .single();
+  expect(site.error).toBeNull();
+  const siteId = site.data!.id;
+  const count = async () => {
+    const result = await client
+      .from('assignment_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('to_site_id', siteId);
+    expect(result.error).toBeNull();
+    return result.count;
+  };
+  const inspect = async (target: Page) => {
+    const input = target.getByLabel('Scan, paste, or search inventory');
+    await input.fill(path);
+    await input.press('Enter');
+    await expect(
+      target.getByRole('region', { name: 'Review assignment' }),
+    ).toBeVisible();
+  };
+  try {
+    await page.goto(`/scan?mode=assign&site=${siteId}`);
+    await page
+      .getByLabel('Ticket number reference (optional)')
+      .fill(`PRIVATE-${suffix}`);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let delayed = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (
+        !delayed &&
+        route.request().method() === 'POST' &&
+        route.request().headers()['next-action']
+      ) {
+        delayed = true;
+        await held;
+      }
+      await route.continue();
+    });
+    await page.getByLabel('Scan, paste, or search inventory').fill(path);
+    await page.getByLabel('Scan, paste, or search inventory').press('Enter');
+    await expect(
+      page.getByText('Inspecting equipment…', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'true');
+    await expect(
+      page.getByRole('button', { name: 'Cancel inspection' }),
+    ).toBeFocused();
+    await page.getByRole('button', { name: 'Cancel inspection' }).click();
+    await expect(
+      page.getByLabel('Scan, paste, or search inventory'),
+    ).toBeFocused();
+    release();
+    await page.unroute('**/scan?mode=assign*');
+    await expect(
+      page.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveCount(0);
+    expect(await count()).toBe(0);
+    await inspect(page);
+    const other = await context.newPage();
+    await other.goto(`/scan?mode=assign&site=${siteId}`);
+    await expect(
+      other.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    await inspect(other);
+    await other
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      other.getByRole('region', { name: 'Latest assignment receipt' }),
+    ).toBeVisible();
+    await other.close();
+    expect(await count()).toBe(1);
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: 'Inspect current state' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Batch checklist' }),
+    ).toContainText('Failed');
+    expect(await count()).toBe(1);
+    await page.getByRole('button', { name: 'Inspect current state' }).click();
+    await expect(
+      page.getByRole('region', { name: 'Review assignment' }),
+    ).toContainText('4 available');
+    await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      (
+        window as Window & { restoreAssignmentStorage?: () => void }
+      ).restoreAssignmentStorage = () => {
+        Storage.prototype.setItem = original;
+      };
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('inventory-assign-v1:'))
+          throw new DOMException('quota', 'QuotaExceededError');
+        original.call(this, key, value);
+      };
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(page.getByText(/Nothing was submitted\./)).toBeVisible();
+    expect(await count()).toBe(1);
+    await page.evaluate(() =>
+      (
+        window as Window & { restoreAssignmentStorage?: () => void }
+      ).restoreAssignmentStorage?.(),
+    );
+    let lost = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (
+        !lost &&
+        route.request().method() === 'POST' &&
+        route.request().postData()?.includes('quantity_site_change')
+      ) {
+        lost = true;
+        await route.fetch(); // Execute the real server action, lose only its response.
+        await route.abort('failed');
+      } else await route.continue();
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: 'Retry same assignment' }),
+    ).toBeVisible();
+    expect(await count()).toBe(2);
+    await expect(
+      page.getByRole('button', { name: 'Finish batch' }),
+    ).toBeDisabled();
+    await page.unroute('**/scan?mode=assign*');
+    await page.reload();
+    await page.getByRole('button', { name: 'Retry same assignment' }).click();
+    await expect(
+      page.getByRole('region', { name: 'Latest assignment receipt' }),
+    ).toBeVisible();
+    expect(await count()).toBe(2);
+    await expect(
+      page
+        .getByRole('region', { name: 'Batch checklist' })
+        .getByRole('link', { name: /View committed history/ }),
+    ).toHaveCount(1);
+    await inspect(page);
+    await page.evaluate(() => {
+      const original = Storage.prototype.removeItem;
+      Storage.prototype.removeItem = function (key) {
+        if (key.startsWith('inventory-assign-v1:'))
+          throw new Error('cleanup unavailable');
+        original.call(this, key);
+      };
+    });
+    await page
+      .getByRole('button', { name: 'Confirm assign', exact: true })
+      .click();
+    await expect(page.getByText(/recovery cleanup failed/)).toBeVisible();
+    expect(await count()).toBe(3);
+    await page.reload(); // Clear-only reconciliation must not issue a new mutation.
+    await expect(
+      page.getByLabel('Scan, paste, or search inventory'),
+    ).toBeEnabled();
+    expect(await count()).toBe(3);
+    await page.goto('/inventory');
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(
+      await page.evaluate(() =>
+        Object.keys(sessionStorage).filter(
+          (key) =>
+            key.startsWith('inventory-assign-batch-v1:') ||
+            key.startsWith('inventory-assign-v1:'),
+        ),
+      ),
+    ).toEqual([]);
+    await signIn(page);
+    await page.goto('/scan?mode=assign');
+    await expect(page.getByLabel('Destination site')).toHaveValue('');
+    await expect(
+      page.getByLabel('Ticket number reference (optional)'),
+    ).toHaveValue('');
+    expect(await count()).toBe(3);
+  } finally {
+    await client.auth.signOut();
+  }
 });

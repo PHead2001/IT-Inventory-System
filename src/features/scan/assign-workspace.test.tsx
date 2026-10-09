@@ -6,13 +6,30 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { AssignmentWorkspace } from './assign-workspace';
+import {
+  invalidateAssignmentPrivacy,
+  readBatch,
+  batchKey,
+} from './assign-batch';
+import {
+  readAssignmentRecovery,
+  storeAssignmentRecovery,
+} from './assign-recovery';
+import { assignmentCommand } from './assign-contracts';
+import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
   inspect: vi.fn(),
   submit: vi.fn(),
   receipt: vi.fn(),
+  signOut: vi.fn(),
   detection: null as ((value: string | null) => void) | null,
+}));
+vi.mock('@/lib/auth/actions', () => ({ signOutSession: mocks.signOut }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock('./assign-actions', () => ({
   findAssignmentRecords: mocks.find,
@@ -161,6 +178,7 @@ it('retains exact unknown command across remount and authorization failure befor
       entityId: candidate.id,
       version: '8',
       changed: true,
+      eventId: id(8),
     });
   const view = render(<AssignmentWorkspace {...props} />);
   await inspect();
@@ -176,7 +194,7 @@ it('retains exact unknown command across remount and authorization failure befor
   fireEvent.click(
     await screen.findByRole('button', { name: 'Retry same assignment' }),
   );
-  await screen.findByText('Access revoked');
+  await screen.findByText('Access revoked', { selector: 'p[role=status]' });
   expect(screen.getByLabelText('Storage source')).toBeDisabled();
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry same assignment' }),
@@ -500,13 +518,13 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
   );
 });
 it('does not submit if durable storage fails and preserves success if only terminal cleanup fails', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
   const store = vi
     .spyOn(Storage.prototype, 'setItem')
     .mockImplementation(() => {
       throw new Error('quota');
     });
-  const view = render(<AssignmentWorkspace {...props} />);
-  await inspect();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await screen.findByText(/Nothing was submitted/);
   expect(mocks.submit).not.toHaveBeenCalled();
@@ -525,11 +543,9 @@ it('does not submit if durable storage fails and preserves success if only termi
   remove.mockRestore();
   view.unmount();
   render(<AssignmentWorkspace {...props} />);
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'Retry same assignment' }),
-  );
   await screen.findByRole('region', { name: 'Latest assignment receipt' });
-  expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+  expect(mocks.submit.mock.calls[0][0]).toEqual(original);
   expect(
     screen.getByLabelText('Scan, paste, or search inventory'),
   ).toBeEnabled();
@@ -562,4 +578,624 @@ it('masks the previous actor batch and discards late pending results on account 
   view.rerender(<AssignmentWorkspace {...props} />);
   await screen.findByRole('button', { name: 'Retry same assignment' });
   expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+
+const scope = {
+  actor: props.actorId,
+  origin: window.location.origin,
+  backend: props.backend,
+};
+it('retains context and historical inspection across a record visit/remount and ignores a new URL destination hint', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'PRIVATE-BATCH' } },
+  );
+  fireEvent.click(
+    screen.getByRole('combobox', {
+      name: 'Preferred storage source (optional)',
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole('treeitem', { name: /Red, selectable location/ }),
+  );
+  await inspect();
+  expect(
+    screen.getByRole('region', { name: 'Review assignment' }),
+  ).toHaveFocus();
+  view.unmount();
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: {
+      ...candidate,
+      version: '12',
+      sources: [{ ...candidate.sources[0], quantity: 1 }],
+    },
+  });
+  render(
+    <AssignmentWorkspace
+      {...props}
+      sites={[site, { ...site, id: id(12), name: 'Other' }]}
+      initialSiteId={id(12)}
+    />,
+  );
+  expect(screen.getByLabelText('Destination site')).toHaveValue(site.id);
+  expect(
+    screen.getByLabelText('Ticket number reference (optional)'),
+  ).toHaveValue('PRIVATE-BATCH');
+  expect(
+    screen.getByRole('combobox', {
+      name: 'Preferred storage source (optional)',
+    }),
+  ).toHaveTextContent('Red');
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  await screen.findByText(/Version 12/);
+  expect(mocks.inspect).toHaveBeenCalledTimes(2);
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeEnabled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('saves immutable operation context, separates totals, and Finish/End never submits stock writes', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'ORIGINAL' } },
+  );
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'NEW-TICKET' } },
+  );
+  const saved = readBatch(scope).value!;
+  expect(saved.context?.reference).toBe('NEW-TICKET');
+  expect(saved.entries[0]).toMatchObject({
+    status: 'success',
+    units: 1,
+    source: 'Closet / Red',
+    context: { reference: 'ORIGINAL', siteName: 'Headquarters' },
+  });
+  expect(
+    screen.getByRole('link', { name: 'View committed history for Adapters' }),
+  ).toHaveAttribute('href', `/history/events/quantity/${id(8)}`);
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  expect(
+    screen.getByRole('region', { name: 'Batch summary' }),
+  ).toHaveTextContent(
+    '0 asset assignments · 1 quantity assignment (1 unit) confirmed',
+  );
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+  view.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  expect(
+    screen.getByRole('region', { name: 'Batch summary' }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Inspect equipment' }),
+  ).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'End batch' }));
+  expect(screen.getByLabelText('Destination site')).toHaveValue('');
+  expect(readBatch(scope).value).toBeNull();
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+it('immediately announces inspection, focuses Cancel before disabling input, cancels late results and restores input focus', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.find.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const input = screen.getByLabelText('Scan, paste, or search inventory');
+  input.focus();
+  fireEvent.change(input, { target: { value: 'ADAPTER' } });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  expect(screen.getByText('Inspecting equipment…')).toBeInTheDocument();
+  expect(
+    screen.getByRole('form', { name: 'Inspect equipment' }),
+  ).toHaveAttribute('aria-busy', 'true');
+  expect(
+    screen.getByRole('button', { name: 'Cancel inspection' }),
+  ).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel inspection' }));
+  expect(input).toHaveFocus();
+  await act(async () =>
+    finish({ ok: true, status: 'found', matches: [match] }),
+  );
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+});
+it.each(['ticket', 'destination', 'source'] as const)(
+  'rejects late inspection/finally after changing %s and permits the new lookup',
+  async (fieldName) => {
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(
+      <AssignmentWorkspace
+        {...props}
+        sites={[site, { ...site, id: id(12), name: 'Other' }]}
+      />,
+    );
+    fireEvent.change(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+      { target: { value: candidate.path } },
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(1));
+    if (fieldName === 'ticket')
+      fireEvent.change(
+        screen.getByLabelText('Ticket number reference (optional)'),
+        { target: { value: 'NEW' } },
+      );
+    else if (fieldName === 'destination')
+      fireEvent.change(screen.getByLabelText('Destination site'), {
+        target: { value: id(12) },
+      });
+    else {
+      fireEvent.click(
+        screen.getByRole('combobox', {
+          name: 'Preferred storage source (optional)',
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('treeitem', { name: /Red, selectable location/ }),
+      );
+    }
+    let second!: (value: unknown) => void;
+    mocks.find.mockReturnValueOnce(
+      new Promise((resolve) => {
+        second = resolve;
+      }),
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    await act(async () => finish({ ok: true, candidate }));
+    expect(
+      screen.queryByRole('region', { name: 'Review assignment' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'true');
+    await act(async () => second({ ok: true, status: 'unknown', matches: [] }));
+    expect(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+    ).toHaveFocus();
+  },
+);
+it('retains original uncertain command if terminal ledger fails, then reconciles exactly once without counting replay', async () => {
+  render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const nativeSet = Storage.prototype.setItem;
+  const write = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(function (this: Storage, key, value) {
+      if (
+        key.startsWith('inventory-assign-batch-v1:') &&
+        value.includes('"status":"success"')
+      )
+        throw new Error('terminal quota');
+      nativeSet.call(this, key, value);
+    });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('button', { name: 'Retry same assignment' });
+  const command = readAssignmentRecovery(scope).value!.command;
+  expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
+  expect(screen.queryByText(/Nothing was submitted/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Finish batch' })).toBeDisabled();
+  write.mockRestore();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same assignment' }),
+  );
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit.mock.calls[1][0]).toEqual(command);
+  expect(
+    readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
+  ).toHaveLength(1);
+  expect(readAssignmentRecovery(scope).value).toBeNull();
+});
+it('privacy invalidates an unmounted pending writer and cannot resurrect context after authoritative logout', async () => {
+  let finish!: (value: unknown) => void;
+  const success = await mocks.submit();
+  mocks.submit.mockClear();
+  mocks.submit.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  view.unmount();
+  invalidateAssignmentPrivacy(true);
+  await act(async () => finish(success));
+  expect(readBatch(scope).value).toBeNull();
+  expect(readAssignmentRecovery(scope).value).toBeNull();
+  render(<AssignmentWorkspace {...props} initialSiteId={undefined} />);
+  expect(screen.getByLabelText('Destination site')).toHaveValue('');
+  expect(
+    screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+  ).not.toBeInTheDocument();
+});
+it('blocks a restored inactive destination and keeps corrupt batch data intact', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  view.unmount();
+  const second = render(
+    <AssignmentWorkspace {...props} sites={[{ ...site, active: false }]} />,
+  );
+  expect(
+    screen.getByText(/The saved destination is unavailable/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Inspect current state' }),
+  );
+  expect(mocks.inspect).toHaveBeenCalledTimes(1);
+  second.unmount();
+  sessionStorage.setItem(batchKey(scope), '{broken');
+  render(<AssignmentWorkspace {...props} />);
+  expect(
+    screen.getByText(/earlier assignment recovery record is unavailable/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Inspect equipment' }),
+  ).toBeDisabled();
+  expect(sessionStorage.getItem(batchKey(scope))).toBe('{broken');
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('migrates legacy command-only recovery into one uncertain row before any fresh read or write', async () => {
+  const context = {
+    siteId: site.id,
+    siteName: site.name,
+    sourceId: '',
+    reference: 'LEGACY',
+  };
+  const command = assignmentCommand(
+    candidate,
+    context,
+    id(3),
+    '1',
+    props.actorId,
+    id(20),
+  );
+  expect(
+    storeAssignmentRecovery(
+      {
+        version: 1,
+        scope,
+        context,
+        candidate,
+        sourceId: id(3),
+        units: '1',
+        command,
+      },
+      null,
+    ),
+  ).toBe(true);
+  render(<AssignmentWorkspace {...props} />);
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  expect(readBatch(scope).value?.entries[0]).toMatchObject({
+    status: 'uncertain',
+    requestId: command.requestId,
+    context: { reference: 'LEGACY' },
+  });
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same assignment' }),
+  );
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit.mock.calls[0][0]).toEqual(command);
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+});
+it('keeps storage-unavailable initialization explicit without crashing or permitting writes', () => {
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('unavailable');
+  });
+  expect(() => render(<AssignmentWorkspace {...props} />)).not.toThrow();
+  expect(
+    screen.getByText(/Session storage is unavailable/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Inspect equipment' }),
+  ).toBeDisabled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  read.mockRestore();
+});
+it('repeated Back/remount refreshes availability without adding rows or replacing a vanished chosen source', async () => {
+  const first = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  first.unmount();
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: {
+      ...candidate,
+      version: '9',
+      sources: [
+        { id: id(30), name: 'Other holding', active: true, quantity: 10 },
+      ],
+    },
+  });
+  const second = render(<AssignmentWorkspace {...props} />);
+  await screen.findByText(
+    'Availability refreshed. Review the source and units before confirming.',
+  );
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
+  expect(readBatch(scope).value?.historical?.sourceId).toBe(id(3));
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  second.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  await screen.findByText(
+    'Availability refreshed. Review the source and units before confirming.',
+  );
+  expect(mocks.inspect).toHaveBeenCalledTimes(3);
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('cancelled restoration ignores its late availability and finally after a new lookup', async () => {
+  const first = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  first.unmount();
+  let restored!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      restored = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel inspection' }));
+  let current!: (value: unknown) => void;
+  mocks.find.mockReturnValueOnce(
+    new Promise((resolve) => {
+      current = resolve;
+    }),
+  );
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'NEW' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await act(async () =>
+    restored({
+      ok: true,
+      candidate: { ...candidate, name: 'Stale restored name' },
+    }),
+  );
+  expect(
+    screen.getByRole('form', { name: 'Inspect equipment' }),
+  ).toHaveAttribute('aria-busy', 'true');
+  expect(screen.queryByText('Stale restored name')).not.toBeInTheDocument();
+  await act(async () => current({ ok: true, status: 'unknown', matches: [] }));
+  expect(
+    screen.getByLabelText('Scan, paste, or search inventory'),
+  ).toHaveFocus();
+});
+it('blocks mismatched terminal/recovery snapshots before cleanup or fresh assignment', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  mocks.submit.mockRejectedValueOnce(new Error('lost'));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('button', { name: 'Retry same assignment' });
+  view.unmount();
+  const raw = readBatch(scope).value!;
+  raw.entries[0] = {
+    ...raw.entries[0],
+    status: 'success',
+    eventId: id(8),
+    context: { ...raw.entries[0].context, reference: 'NOT-REVIEWED' },
+  };
+  sessionStorage.setItem(batchKey(scope), JSON.stringify(raw));
+  const commandBefore = readAssignmentRecovery(scope).raw;
+  render(<AssignmentWorkspace {...props} />);
+  expect(screen.getByText(/Batch and recovery disagree/)).toBeInTheDocument();
+  expect(readAssignmentRecovery(scope).raw).toBe(commandBefore);
+  expect(
+    screen.getByRole('button', { name: 'Inspect equipment' }),
+  ).toBeDisabled();
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+it('halts at capacity without eviction and allows settled Finish/End', () => {
+  const saved = {
+    version: 1,
+    scope,
+    context: {
+      siteId: site.id,
+      siteName: site.name,
+      sourceId: '',
+      reference: '',
+    },
+    historical: null,
+    finished: false,
+    entries: Array.from({ length: 200 }, (_, n) => ({
+      id: id(n + 100),
+      status: 'skipped',
+      name: 'Skipped equipment',
+      kind: null,
+      entityId: null,
+      identifier: null,
+      units: 0,
+      source: '',
+      context: {
+        siteId: site.id,
+        siteName: site.name,
+        sourceId: '',
+        reference: '',
+      },
+      requestId: null,
+      eventId: null,
+      message: '',
+    })),
+  };
+  sessionStorage.setItem(batchKey(scope), JSON.stringify(saved));
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  expect(screen.getByText(/This batch is full/)).toBeInTheDocument();
+  expect(readBatch(scope).value?.entries).toHaveLength(200);
+  expect(mocks.find).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Finish batch' }));
+  fireEvent.click(screen.getByRole('button', { name: 'End batch' }));
+  expect(readBatch(scope).value).toBeNull();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('keeps ticket typing focus after a confirmed receipt and focuses summary/destination on Finish/End', async () => {
+  const user = userEvent.setup();
+  render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  await user.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  const ticket = screen.getByLabelText('Ticket number reference (optional)');
+  await user.type(ticket, 'TICKET-ALL-CHARACTERS');
+  expect(ticket).toHaveValue('TICKET-ALL-CHARACTERS');
+  expect(ticket).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Finish batch' }));
+  expect(screen.getByRole('region', { name: 'Batch summary' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'End batch' }));
+  expect(screen.getByLabelText('Destination site')).toHaveFocus();
+});
+it('reuses the pending historical row after failed automatic refresh and a deliberate inspection retry', async () => {
+  const view = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  view.unmount();
+  mocks.inspect.mockRejectedValueOnce(new Error('refresh network'));
+  render(<AssignmentWorkspace {...props} />);
+  await screen.findByText(/Availability could not be refreshed/);
+  expect(
+    screen.getByRole('button', { name: 'Inspect equipment' }),
+  ).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Inspect current state' }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeEnabled(),
+  );
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  expect(readBatch(scope).value?.entries[0].status).toBe('success');
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('0 pending');
+});
+it('failed signout preserves the exact batch and blocks a late inspection callback until a fresh workspace return', async () => {
+  mocks.signOut.mockResolvedValue({
+    ok: false,
+    message: 'Unable to sign out. Please try again.',
+  });
+  const view = render(
+    <>
+      <QueueLogoutForm />
+      <AssignmentWorkspace {...props} />
+    </>,
+  );
+  fireEvent.change(
+    screen.getByLabelText('Ticket number reference (optional)'),
+    { target: { value: 'PRESERVE-PRIVATE' } },
+  );
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: candidate.path },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(2));
+  const before = readBatch(scope).raw;
+  fireEvent.submit(
+    screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
+  );
+  await screen.findByText('Unable to sign out. Please try again.');
+  expect(readBatch(scope).raw).toBe(before);
+  await act(async () =>
+    finish({
+      ok: true,
+      candidate: { ...candidate, name: 'Late unauthorized callback' },
+    }),
+  );
+  expect(readBatch(scope).raw).toBe(before);
+  expect(
+    screen.queryByText('Late unauthorized callback'),
+  ).not.toBeInTheDocument();
+  view.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  expect(
+    screen.getByLabelText('Ticket number reference (optional)'),
+  ).toHaveValue('PRESERVE-PRIVATE');
+  expect(readBatch(scope).value?.entries[0].status).toBe('success');
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+it('counts one replayed asset event once and two deliberate assignments as two events for one individual asset', async () => {
+  const asset = {
+    ...candidate,
+    kind: 'asset' as const,
+    path: '/inventory/assets/' + candidate.id,
+    name: 'Laptop',
+    identifier: 'TAG-1',
+  };
+  mocks.inspect.mockResolvedValue({ ok: true, candidate: asset });
+  mocks.submit
+    .mockRejectedValueOnce(new Error('lost response'))
+    .mockResolvedValueOnce({
+      ok: true,
+      changed: true,
+      entityId: asset.id,
+      version: '8',
+      eventId: id(8),
+    });
+  render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Retry same assignment' }),
+  );
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(
+    readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
+  ).toHaveLength(1);
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('1 asset assignment');
+  // A fresh caller-authorized inspection after a separate external return makes
+  // another deliberate assignment possible. Preserve both real events.
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: { ...asset, version: '9' },
+  });
+  mocks.submit.mockResolvedValue({
+    ok: true,
+    changed: true,
+    entityId: asset.id,
+    version: '10',
+    eventId: id(10),
+  });
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('region', { name: 'Batch checklist' }),
+    ).toHaveTextContent('2 asset assignments (1 individual asset)'),
+  );
+  expect(
+    readBatch(scope).value?.entries.filter((row) => row.status === 'success'),
+  ).toHaveLength(2);
+  expect(mocks.submit.mock.calls[0][0].requestId).toBe(
+    mocks.submit.mock.calls[1][0].requestId,
+  );
+  expect(mocks.submit.mock.calls[2][0].requestId).not.toBe(
+    mocks.submit.mock.calls[1][0].requestId,
+  );
 });

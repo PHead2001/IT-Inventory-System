@@ -64,10 +64,26 @@ export async function login(
     redirect(loginDestination(form.get('next')));
   });
 }
+export async function signOutSession(): Promise<
+  { ok: true } | { ok: false; message: string }
+> {
+  try {
+    const supabase = await createSupabaseServerClient(true);
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    return error
+      ? { ok: false, message: 'Unable to sign out. Please try again.' }
+      : { ok: true };
+  } catch {
+    return {
+      ok: false,
+      message:
+        'Sign-out could not be confirmed. Retry when your connection is available.',
+    };
+  }
+}
 export async function logout() {
-  const supabase = await createSupabaseServerClient(true);
-  const { error } = await supabase.auth.signOut({ scope: 'local' });
-  if (error) throw new Error('Unable to sign out. Please try again.');
+  const result = await signOutSession();
+  if (!result.ok) throw new Error(result.message);
   redirect('/login');
 }
 export async function recover(

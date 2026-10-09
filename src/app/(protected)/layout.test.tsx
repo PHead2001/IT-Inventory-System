@@ -6,7 +6,11 @@ vi.mock('@/lib/auth/session.server', () => ({
     member: { display_name: 'Viewer', role: 'viewer' },
   }),
 }));
-vi.mock('@/lib/auth/actions', () => ({ logout: vi.fn() }));
+vi.mock('@/lib/auth/actions', () => ({ signOutSession: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/',
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+}));
 vi.mock('@/features/telemetry/private-speed-insights', () => ({
   PrivateSpeedInsights: () => <span data-testid="private-speed-insights" />,
 }));

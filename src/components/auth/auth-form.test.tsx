@@ -7,8 +7,12 @@ const actions = vi.hoisted(() => ({
   confirmAuth: vi.fn(async () => ({})),
   setPassword: vi.fn(async () => ({})),
   logout: vi.fn(async () => ({})),
+  signOutSession: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+}));
 import { AuthForm } from './auth-form';
 it('uses accessible login fields and presents action errors', async () => {
   render(<AuthForm mode="login" />);

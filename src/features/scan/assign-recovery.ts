@@ -84,23 +84,29 @@ export function readAssignmentRecovery(scope: AssignmentScope) {
   try {
     const raw = sessionStorage.getItem(key(scope));
     return {
+      raw,
       value: raw ? parseAssignmentRecovery(raw, scope) : null,
       blocked: !!raw && !parseAssignmentRecovery(raw, scope),
     };
   } catch {
-    return { value: null, blocked: true };
+    return { raw: null, value: null, blocked: true };
   }
 }
 export function storeAssignmentRecovery(
   value: AssignmentRecovery,
   previous: AssignmentRecovery | null,
+  previousRaw?: string | null,
 ) {
   try {
     const raw = JSON.stringify(value);
     if (
       !parseAssignmentRecovery(raw, value.scope) ||
       sessionStorage.getItem(key(value.scope)) !==
-        (previous ? JSON.stringify(previous) : null)
+        (previousRaw === undefined
+          ? previous
+            ? JSON.stringify(previous)
+            : null
+          : previousRaw)
     )
       return false;
     sessionStorage.setItem(key(value.scope), raw);
@@ -112,9 +118,11 @@ export function storeAssignmentRecovery(
 export function clearAssignmentRecovery(
   scope: AssignmentScope,
   requestId: string,
+  expectedRaw?: string | null,
 ) {
   try {
     const raw = sessionStorage.getItem(key(scope));
+    if (expectedRaw !== undefined && raw !== expectedRaw) return false;
     const previous = raw ? parseAssignmentRecovery(raw, scope) : null;
     if (!previous || previous.command.requestId !== requestId) return false;
     sessionStorage.removeItem(key(scope));

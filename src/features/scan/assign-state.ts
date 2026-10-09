@@ -52,6 +52,7 @@ export const initialAssignState = (
   message: '',
 });
 export type AssignEvent =
+  | { type: 'hydrate'; snapshot: AssignState }
   | { type: 'context'; context: AssignmentContext | null; generation: number }
   | { type: 'lookup'; generation: number }
   | {
@@ -66,6 +67,8 @@ export type AssignEvent =
       generation: number;
       candidate: AssignmentCandidate;
       sourceId: string;
+      units?: string;
+      message?: string;
     }
   | { type: 'error'; generation: number; message: string }
   | { type: 'edit'; sourceId?: string; units?: string }
@@ -92,6 +95,7 @@ export function assignReducer(
   event: AssignEvent,
 ): AssignState {
   const unresolved = state.phase === 'pending' || state.phase === 'unknown';
+  if (event.type === 'hydrate') return event.snapshot;
   if (event.type === 'restore')
     return {
       ...state,
@@ -194,8 +198,8 @@ export function assignReducer(
         candidate: event.candidate,
         matches: [],
         sourceId: event.sourceId,
-        units: '1',
-        message: '',
+        units: event.units ?? '1',
+        message: event.message ?? '',
       };
     case 'error':
       return {
