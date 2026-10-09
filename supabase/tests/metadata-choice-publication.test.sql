@@ -10,8 +10,9 @@ declare category uuid:=gen_random_uuid(); revision uuid:=gen_random_uuid(); fiel
   actor uuid:=gen_random_uuid(); item uuid:=gen_random_uuid(); event uuid:=gen_random_uuid();
   proposal jsonb; baseline jsonb; choices jsonb; original text; answers jsonb; old_event jsonb;
   original_event text; original_options text;
-  current_id uuid; payload jsonb; response jsonb; token uuid; draft uuid; request uuid:=gen_random_uuid();
-  outcome text; before_state jsonb; after_state jsonb; prior_claims text;
+  current_id uuid; payload jsonb; response jsonb; review_token_uuid uuid; expired_review_count integer;
+  draft uuid; request uuid:=gen_random_uuid();
+  outcome text; before_state jsonb; after_state jsonb; prior_claims text; review_reasons jsonb;
 begin
   begin
     insert into auth.users(id,email) values(actor,'choice-publication-'||actor::text||'@example.test');
@@ -91,7 +92,15 @@ begin
       when 'staletoken' then proposal:=jsonb_set(proposal,'{fields,0,options,2,label}','"Unique corrected choice"');
       else raise exception 'unknown test variant';
     end case;
-    if route='final' then proposal:=jsonb_set(proposal,'{fields,0,required}','true'); end if;
+    -- The stale-token proposal matches rename/final's unexpired positive control.
+    -- Required=true makes confirmation meaningful; label-only changes have no
+    -- review reasons and would fail with the same error even without expiry.
+    if route='final' or change_kind='staletoken' then
+      proposal:=jsonb_set(proposal,'{fields,0,required}','true');
+      proposal:=jsonb_set(proposal,'{layout}',(proposal->'layout')||jsonb_build_array(jsonb_build_object(
+        'id',gen_random_uuid(),'label','Legacy choices','controls',jsonb_build_array(jsonb_build_object(
+          'id',gen_random_uuid(),'kind','field','field_id',field,'width',12)))));
+    end if;
     payload:=jsonb_build_object('category_id',category,'expected_actor_id',actor,
       'expected_published_revision_id',current_id,'expected_draft_id',null,'expected_draft_version','0','definition',proposal);
     if change_kind='stale' then payload:=jsonb_set(payload,'{expected_published_revision_id}',to_jsonb(gen_random_uuid()::text)); end if;
@@ -106,13 +115,20 @@ begin
     elsif route='final' or change_kind='staletoken' then
       -- Trusted token fixture reaches the final compiler independently of the
       -- review compiler. Application roles cannot arrange this private row.
+      review_reasons:=private.metadata_form_reasons(private.metadata_effective_definition(current_id,baseline),proposal);
+      if jsonb_array_length(review_reasons)=0 then raise exception 'confirmed review fixture must have consequential reasons'; end if;
       insert into private.form_save_reviews(actor_id,category_id,draft_version,published_id,proposal,
         reference_fingerprint,reasons,affected_quantity,affected_assets,newly_needs_quantity,newly_needs_assets,initial_request_id)
         values(actor,category,0,current_id,proposal,private.metadata_reference_fingerprint(category),
-          private.metadata_form_reasons(private.metadata_effective_definition(current_id,baseline),proposal),
-          0,0,0,0,gen_random_uuid()) returning form_save_reviews.token into token;
-      payload:=payload||jsonb_build_object('review_token',token);
-      if change_kind='staletoken' then update private.form_save_reviews set expires_at=now()-interval '1 second' where form_save_reviews.token=token; end if;
+          review_reasons,
+          0,0,0,0,gen_random_uuid()) returning form_save_reviews.token into review_token_uuid;
+      payload:=payload||jsonb_build_object('review_token',review_token_uuid);
+      if change_kind='staletoken' then
+        update private.form_save_reviews set expires_at=now()-interval '1 second'
+          where form_save_reviews.token=review_token_uuid;
+        get diagnostics expired_review_count=row_count;
+        if expired_review_count<>1 then raise exception 'expired review fixture must target exactly one token'; end if;
+      end if;
     end if;
     before_state:=jsonb_build_object('pointer',(select published_form_revision_id from public.categories where id=category),
       'version',(select version from public.categories where id=category),
@@ -128,6 +144,12 @@ begin
         end if;
       end if;
       outcome:='ok';
+      if route='final' and change_kind='rename' and
+        (response->>'status' is distinct from 'saved' or
+          (select published_form_revision_id from public.categories where id=category)
+            is distinct from (response->>'published_revision_id')::uuid) then
+        outcome:='unexpired review did not publish';
+      end if;
     exception when others then outcome:=sqlstate||':'||sqlerrm;
     end;
     after_state:=jsonb_build_object('pointer',(select published_form_revision_id from public.categories where id=category),
@@ -160,6 +182,7 @@ select is(pg_temp.choice_publication('case','final'),'P1021:ambiguous_active_fie
 select is(pg_temp.choice_publication('new','legacy'),'P1021:ambiguous_active_field_options','permissive legacy saved draft and review never establish collision provenance');
 select is(pg_temp.choice_publication('unrelated','legacy'),'ok','legacy publication preserves unchanged existing cross-parent and sibling collisions');
 select is(pg_temp.choice_publication('stale'),'P1002:stale_form','stale published revision is rejected before publication');
+select is(pg_temp.choice_publication('rename','final'),'ok','matching unexpired consequential review publishes and preserves original history and answers');
 select is(pg_temp.choice_publication('staletoken'),'P1017:stale_form_review','expired review cannot publish');
 select * from finish();
 rollback;
