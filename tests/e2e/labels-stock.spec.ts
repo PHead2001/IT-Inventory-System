@@ -1,3 +1,4 @@
+import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
 import { expectRecordVersion, openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -107,11 +108,13 @@ test('one-time label links survive removal and reload, clear obsolete lifecycle 
   await expect(page).toHaveURL(/\/labels$/);
   const queue = page.getByRole('region', { name: 'Label queue' });
   await expect(queue).toContainText('1 distinct record · 1 label');
+  await expectScopedInteractiveTransitions(page);
   await expect(page.getByRole('button', { name: 'Review item' })).toBeVisible();
   await queue
     .getByRole('button', { name: 'Remove from queue', exact: true })
     .click();
   await expect(queue).toContainText('0 distinct records · 0 labels');
+  await expectScopedInteractiveTransitions(page);
   await expect(page.getByRole('button', { name: 'Review item' })).toHaveCount(
     0,
   );
