@@ -210,17 +210,20 @@ export function OptionTreeEditor({
     [next[a], next[b]] = [next[b], next[a]];
     change({ ...field, options: next });
   };
-  const destinations = selected
-    ? options.filter(
-        (option) =>
-          option.active &&
-          canReparent(options, selected.id, option.id) &&
-          (!selected.active || compatibleSibling(selected.id, option.id)) &&
-          (index.paths.get(option.id) ?? option.label)
-            .toLowerCase()
-            .includes(destinationSearch.trim().toLowerCase()),
-      )
-    : [];
+  // Adding a choice selects it for focus, but does not open the move controls.
+  // Avoid scanning and validating the entire tree until destinations are needed.
+  const destinations =
+    hierarchy && moving && selected
+      ? options.filter(
+          (option) =>
+            option.active &&
+            canReparent(options, selected.id, option.id) &&
+            (!selected.active || compatibleSibling(selected.id, option.id)) &&
+            (index.paths.get(option.id) ?? option.label)
+              .toLowerCase()
+              .includes(destinationSearch.trim().toLowerCase()),
+        )
+      : [];
   return (
     <div
       className="space-y-2 rounded border border-slate-600 p-2 text-xs"

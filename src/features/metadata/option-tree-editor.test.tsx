@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 import type { Field } from './designer-model';
+import * as designerModel from './designer-model';
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base: Field = {
@@ -260,6 +261,25 @@ describe('choice editor', () => {
     expect(screen.getByLabelText('Option name: New option')).toHaveFocus();
     expect(current().options.at(-1)?.parent_id).toBe(id(1098));
     expect(screen.getByRole('button', { name: 'Add option' })).toBeDisabled();
+  });
+  it('validates move destinations only while the move controls are open', () => {
+    const validate = vi.spyOn(designerModel, 'canReparent');
+    try {
+      render(<Editor />);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add child option to USB' }),
+      );
+      expect(screen.getByLabelText('Option name: New option')).toHaveFocus();
+      expect(validate).not.toHaveBeenCalled();
+      tools('USB');
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).toHaveBeenCalled();
+      validate.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).not.toHaveBeenCalled();
+    } finally {
+      validate.mockRestore();
+    }
   });
   it('preserves 64-level choices and disallows adding a 65th level', () => {
     const options = Array.from({ length: 64 }, (_, n) => ({
