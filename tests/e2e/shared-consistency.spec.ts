@@ -10,6 +10,128 @@ import {
   openRecordTask,
 } from './record-task-controls';
 import { displayedInstant } from '../helpers/displayed-instant';
+import { auditCreateRecord } from './audit-two-controls';
+import { expectScopedInteractiveTransitions } from './interactive-style-contract';
+
+test('interactive transitions stay scoped across workspace routes and control states', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await login(page);
+  const owned = await auditCreateRecord(
+    page,
+    'quantity',
+    'Tools',
+    'Fictional style foundation ' + randomUUID(),
+  );
+  const recordHref = new URL(owned.url).pathname;
+  try {
+    await page.goto('/settings/forms');
+    const designerHref = await page
+      .getByRole('link', { name: 'Tools', exact: true })
+      .getAttribute('href');
+    expect(designerHref).toBeTruthy();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const reduced of [false, true]) {
+        await page.emulateMedia({
+          reducedMotion: reduced ? 'reduce' : 'no-preference',
+        });
+        for (const path of [
+          '/inventory',
+          '/room',
+          '/settings',
+          '/settings/labels',
+          designerHref!,
+          '/scan',
+          '/labels',
+          recordHref,
+        ]) {
+          await page.goto(path);
+          await expect(page.locator('main')).toBeVisible();
+          await expectScopedInteractiveTransitions(page);
+          await page.mouse.move(0, 0);
+          // Approved pre-refactor dark paint, asserted against the rendered cascade.
+          await expect(page.locator('body')).toHaveCSS(
+            'color',
+            'rgb(232, 244, 255)',
+          );
+          await expect(page.locator('body')).toHaveCSS(
+            'background-color',
+            'rgb(6, 13, 24)',
+          );
+          if (path === '/inventory') {
+            await expect(
+              page.getByRole('textbox', {
+                name: 'Search inventory',
+                exact: true,
+              }),
+            ).toHaveCSS('transition-property', 'border-color, box-shadow');
+          }
+          if (path === '/labels') {
+            const search = page.getByRole('button', {
+              name: 'Search',
+              exact: true,
+            });
+            await expect(search).toHaveCSS(
+              'background-color',
+              'rgb(116, 225, 237)',
+            );
+            await expect(search).toHaveCSS('color', 'rgb(7, 22, 34)');
+            if (!reduced)
+              await expect(search).toHaveCSS('transition-duration', '0s');
+          }
+          if (path === '/scan') {
+            const camera = page.getByRole('button', {
+              name: 'Start camera',
+              exact: true,
+            });
+            await expect(camera).toHaveCSS(
+              'background-color',
+              'rgb(117, 226, 236)',
+            );
+            await expect(camera).toHaveCSS('color', 'rgb(6, 19, 29)');
+          }
+          if (path === recordHref) {
+            await openRecordTask(page, 'Edit quantity metadata');
+            await expectScopedInteractiveTransitions(page);
+          }
+          const disclosure = page.locator('summary:visible').first();
+          if (await disclosure.count()) {
+            await disclosure.click();
+            await expectScopedInteractiveTransitions(page);
+          }
+          const control = page
+            .locator('button:visible, a:visible, input:visible')
+            .first();
+          await control.focus();
+          await expectScopedInteractiveTransitions(page);
+          if (width === 1440) {
+            await control.hover();
+            await expectScopedInteractiveTransitions(page);
+          }
+        }
+      }
+    }
+  } finally {
+    await page.goto(recordHref);
+    const archive = await openRecordTask(
+      page,
+      'Archive quantity definition and clear stock',
+    );
+    await archive
+      .getByLabel('Reason (required)')
+      .fill('Fictional style foundation fixture cleanup');
+    await archive.getByRole('checkbox', { name: /I understand/ }).check();
+    await archive
+      .getByRole('button', { name: 'Review archive and clear stock' })
+      .click();
+    await archive
+      .getByRole('button', { name: 'Confirm archive and clear stock' })
+      .click();
+    await expectRecordStatus(page, 'archived');
+  }
+});
 
 async function login(page: Page, email = fixture.emails.staff) {
   await page.goto('/login');
