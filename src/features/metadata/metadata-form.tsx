@@ -1036,13 +1036,35 @@ export function MetadataForm({
         reconciliation &&
         !recordBlocked &&
         (!schemaStale || schemaCompatible)
-      )
+      ) {
+        const refreshedForm = latestCategoryForm ?? form;
+        const revised = payload(
+          reconciliation.core,
+          reconciliation.custom,
+          reconciliation.touched,
+          latest,
+          refreshedForm,
+        );
+        // Matching another writer's result does not review its newer version.
+        // Keep real independent edits eligible for the existing reconciliation.
+        if (
+          !untouched &&
+          revised &&
+          refreshedForm &&
+          isUnchangedEdit(latest, revised, refreshedForm.published_definition)
+        ) {
+          recoveredEditing.current = true;
+          setRecoveredRecord(true);
+          setReview(false);
+          return;
+        }
         adopt(
           latest,
           reconciliation.core,
           reconciliation.custom,
           reconciliation.touched,
         );
+      }
     });
     return () => {
       cancelled = true;
@@ -1326,7 +1348,113 @@ export function MetadataForm({
       return false;
     return !!fieldValueError(field, value) || !!answerErrors[field.id];
   });
-  const dirty =
+  const payload = (
+    values = core,
+    answers = custom,
+    dirtyIds = touched,
+    record = baseline,
+    selectedForm = form,
+  ) => {
+    if (!definition || !selectedForm || invalidItemCode) return null;
+    const result: Record<string, unknown> = {
+      name: values.name,
+      description: values.description || null,
+      category_id: values.category_id,
+      manufacturer: values.manufacturer || null,
+      model: values.model || null,
+      expected_published_revision_id: selectedForm.published_revision_id,
+      custom_patch: buildCustomPatch(
+        selectedForm.published_definition,
+        kind,
+        answers,
+        creating
+          ? dirtyIds
+          : dirtyIds.filter(
+              (id) =>
+                !sameAnswer(answers, initialCustom(record?.customValues), id),
+            ),
+        creating,
+      ),
+    };
+    if (kind === 'quantity') {
+      result.item_code = normalizeItemCode(values.item_code);
+      if (
+        creating ||
+        values.reorder_threshold !==
+          initialCore(record, categories).reorder_threshold
+      )
+        result.reorder_threshold =
+          values.reorder_threshold === ''
+            ? null
+            : Number(values.reorder_threshold);
+      if (creating && !openingSite) {
+        result.initial_quantity = Number(values.initial_quantity);
+        result.initial_location_id =
+          Number(values.initial_quantity) > 0
+            ? values.initial_location_id
+            : null;
+      } else if (!creating) {
+        result.item_id = record?.id;
+        result.expected_version = record?.version;
+      }
+    } else {
+      result.asset_tag = values.asset_tag || null;
+      result.serial_number = values.serial_number || null;
+      if (creating && !openingSite) result.location_id = values.location_id;
+      else if (!creating) {
+        result.asset_id = record?.id;
+        result.expected_version = record?.version;
+      }
+    }
+    if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
+    if (creating && openingSite) {
+      result.site_id = openingSite.id;
+      result.reason = openingReason.trim() || null;
+      result.reference = openingReference.trim() || null;
+      if (kind === 'quantity') result.quantity = Number(openingQuantity);
+    }
+    return result;
+  };
+  function isUnchangedEdit(
+    record: RecordMetadata,
+    proposed: Record<string, unknown>,
+    selectedDefinition: MetadataDefinition,
+  ) {
+    const intent = normalizeEditIntent(kind, proposed);
+    return Boolean(
+      intent &&
+      editSummary({
+        baseline: record,
+        intent,
+        definition: selectedDefinition,
+        categories,
+        timeZone,
+      }).length === 0,
+    );
+  }
+  const currentEditPayload = !creating && !uncertain ? payload() : null;
+  const normalizedEdit =
+    currentEditPayload && normalizeEditIntent(kind, currentEditPayload);
+  const noChanges = Boolean(
+    !creating &&
+    !uncertain &&
+    !invalidAnswers &&
+    !Object.keys(dateTimes).some((id) => !!answerErrors[id]) &&
+    !itemStale &&
+    !schemaStale &&
+    !recordBlocked &&
+    baseline &&
+    definition &&
+    normalizedEdit &&
+    editSummary({
+      baseline,
+      intent: normalizedEdit,
+      definition,
+      categories,
+      timeZone,
+    }).length === 0,
+  );
+  const rawDirty =
     (recoveryEnabled && Object.keys(dateTimes).length > 0) ||
     (editRecoveryEnabled &&
       Object.keys(dateTimes).some((id) => !!answerErrors[id])) ||
@@ -1341,6 +1469,9 @@ export function MetadataForm({
         : baseline?.customValues?.[id]?.value;
       return JSON.stringify(custom[id]) !== JSON.stringify(original);
     });
+  // Match the empty normalized review across task switching, link/unload guards
+  // and Close. Invalid raw inputs and stale contexts still require protection.
+  const dirty = rawDirty && !noChanges;
   const cancelPath = creating
     ? inventoryReturnPath(
         returnTo,
@@ -1357,11 +1488,33 @@ export function MetadataForm({
   });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
+  const discardedEdit = useRef<{
+    envelope: EditEnvelope;
+    stored: EditEnvelope | null;
+  } | null>(null);
   const discardEdit = () => {
-    if (pending || uncertain || dispatched.current || actorStale) return false;
+    // A durable acknowledgement completes the write before its read refresh.
+    // Match the task's unlocked receipt controls while that refresh settles.
+    if ((pending && !state?.ok) || uncertain || dispatched.current)
+      return false;
+    // A hidden stale mount may leave, but cannot finalize either scope's data.
+    if (actorStale) return true;
     if (!editRecoveryEnabled || state?.ok || editBlocked) return true;
     const active = editRecovery.current;
+    // Close can finalize this edit before TaskWorkspace's reset runs cleanup.
+    // Accept that repeat only for our exact terminal envelope and current CAS
+    // session; a replacement writer must still block the exit.
+    if (active?.status === 'discarded')
+      return Boolean(
+        discardedEdit.current?.envelope === active &&
+        editSession.current &&
+        removeEdit(discardedEdit.current.stored, editSession.current),
+      );
     if (!active || active.status !== 'editing') return false;
+    // Pristine, memory-only editors own nothing to finalize. In particular,
+    // failed hydration must not block exit or touch an inaccessible envelope.
+    // Durable/reverted drafts still follow the exact-envelope cleanup below.
+    if (!editDurable.current && !editPrevious.current && !rawDirty) return true;
     const next: EditEnvelope = {
       ...active,
       sequence: active.sequence + 1,
@@ -1369,16 +1522,13 @@ export function MetadataForm({
       inputs: null,
       command: null,
     };
-    if (
-      !(editDurable.current && storeEdit(next, active)) &&
-      !(
-        editSession.current &&
-        removeEdit(
-          editDurable.current ? active : editPrevious.current,
-          editSession.current,
-        )
-      )
-    ) {
+    const stored = editDurable.current && storeEdit(next, active);
+    const previous = editDurable.current ? active : editPrevious.current;
+    const removed =
+      !stored &&
+      editSession.current &&
+      removeEdit(previous, editSession.current);
+    if (!stored && !removed) {
       setRecoveryError(
         recoveryLimitation +
           ' Discard could not be recorded; keep this task open and retry.',
@@ -1386,6 +1536,11 @@ export function MetadataForm({
       return false;
     }
     editRecovery.current = next;
+    discardedEdit.current = {
+      envelope: next,
+      // Removal preserves a pre-existing terminal marker on pristine reopen.
+      stored: stored ? next : previous?.status === 'editing' ? null : previous,
+    };
     return true;
   };
   useTaskDiscard(discardEdit);
@@ -1596,73 +1751,6 @@ export function MetadataForm({
       navigationAnchor.current = null;
     } else cancelRef.current?.focus();
   };
-  const payload = (
-    values = core,
-    answers = custom,
-    dirtyIds = touched,
-    record = baseline,
-    selectedForm = form,
-  ) => {
-    if (!definition || !selectedForm || invalidItemCode) return null;
-    const result: Record<string, unknown> = {
-      name: values.name,
-      description: values.description || null,
-      category_id: values.category_id,
-      manufacturer: values.manufacturer || null,
-      model: values.model || null,
-      expected_published_revision_id: selectedForm.published_revision_id,
-      custom_patch: buildCustomPatch(
-        selectedForm.published_definition,
-        kind,
-        answers,
-        creating
-          ? dirtyIds
-          : dirtyIds.filter(
-              (id) =>
-                !sameAnswer(answers, initialCustom(record?.customValues), id),
-            ),
-        creating,
-      ),
-    };
-    if (kind === 'quantity') {
-      result.item_code = normalizeItemCode(values.item_code);
-      if (
-        creating ||
-        values.reorder_threshold !==
-          initialCore(record, categories).reorder_threshold
-      )
-        result.reorder_threshold =
-          values.reorder_threshold === ''
-            ? null
-            : Number(values.reorder_threshold);
-      if (creating && !openingSite) {
-        result.initial_quantity = Number(values.initial_quantity);
-        result.initial_location_id =
-          Number(values.initial_quantity) > 0
-            ? values.initial_location_id
-            : null;
-      } else if (!creating) {
-        result.item_id = record?.id;
-        result.expected_version = record?.version;
-      }
-    } else {
-      result.asset_tag = values.asset_tag || null;
-      result.serial_number = values.serial_number || null;
-      if (creating && !openingSite) result.location_id = values.location_id;
-      else if (!creating) {
-        result.asset_id = record?.id;
-        result.expected_version = record?.version;
-      }
-    }
-    if (legacyMigration) result.acknowledge_legacy_values = ackLegacy;
-    if (creating && openingSite) {
-      result.site_id = openingSite.id;
-      result.reason = openingReason.trim() || null;
-      result.reference = openingReference.trim() || null;
-      if (kind === 'quantity') result.quantity = Number(openingQuantity);
-    }
-    return result;
-  };
   const reloadSaved = async () => {
     if (!baseline || mountedActor.current !== formActor) return;
     setRecordRefreshError('');
@@ -1691,7 +1779,7 @@ export function MetadataForm({
       setRefreshNeeded(false);
     } catch {
       setRecordRefreshError(
-        'The saved record could not be refreshed. Retry loading it.',
+        'The record could not be refreshed. Retry loading it.',
       );
     }
   };
@@ -1755,7 +1843,7 @@ export function MetadataForm({
   const validation = useFormValidation(collectValidationIssues);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (taskCompleted) return;
+    if (taskCompleted || noChanges) return;
     if (
       !uncertain &&
       !pending &&
@@ -2011,7 +2099,21 @@ export function MetadataForm({
                 fresh.record,
                 revisedForm,
               );
-              if (revised) {
+              if (
+                revised &&
+                isUnchangedEdit(
+                  fresh.record,
+                  revised,
+                  revisedForm.published_definition,
+                )
+              ) {
+                // The original request definitively failed CAS. Preserve its
+                // reviewed baseline/draft until explicit acceptance; the normal
+                // rejection path below still resolves durable submitted recovery.
+                recoveredEditing.current = true;
+                setRecoveredRecord(true);
+                setReview(false);
+              } else if (revised) {
                 if (editRecoveryEnabled) {
                   const active = editRecovery.current!;
                   const editable: EditEnvelope = {
@@ -2094,7 +2196,8 @@ export function MetadataForm({
           };
           if (!storeEdit(saved, active, requestId)) {
             setRecoveryError(
-              'Details were saved, but completion could not be retained. Retry the same save to record its acknowledgement safely.',
+              (result.changed ? 'Details were saved' : 'Nothing changed') +
+                ', but completion could not be retained. Retry the same save to record its acknowledgement safely.',
             );
             setUncertain(true);
             setState(null);
@@ -2172,7 +2275,10 @@ export function MetadataForm({
           }
         }
       }
-      if (!liveMount.current || mountedActor.current !== formActor) return;
+      if (!liveMount.current) return;
+      // Recovery above determines whether the exact command is resolved. Keep
+      // the task locked for an unknown result even when account changes hide
+      // its response; the new actor must not turn submitted recovery clean.
       setUncertain(
         !result.ok &&
           (result.code === 'unexpected' ||
@@ -2185,6 +2291,7 @@ export function MetadataForm({
                 'actor_changed',
               ].includes(result.code))),
       );
+      if (mountedActor.current !== formActor) return;
       setState(result);
       if (result.ok) {
         setReview(false);
@@ -2224,7 +2331,7 @@ export function MetadataForm({
             } else if (!fresh.ok) setRecordRefreshError(fresh.message);
           } catch {
             setRecordRefreshError(
-              'The saved record could not be refreshed. Retry loading it.',
+              'The record could not be refreshed. Retry loading it.',
             );
           }
         } else {
@@ -2451,12 +2558,12 @@ export function MetadataForm({
         !recordBlocked &&
         reconciliation && (
           <div role="alert">
-            The record changed while this draft was away. Review current details
+            The record changed since this draft began. Review current details
             while keeping your independent edits before saving.
             <Button
               type="button"
               variant="outline"
-              disabled={pending || uncertain || schemaStale}
+              disabled={pending || uncertain || actorStale || schemaStale}
               onClick={() => {
                 recoveredEditing.current = false;
                 setRecoveredRecord(false);
@@ -2467,6 +2574,7 @@ export function MetadataForm({
                   reconciliation.touched,
                   true,
                 );
+                setState(null);
               }}
             >
               Review current details
@@ -2559,14 +2667,17 @@ export function MetadataForm({
       )}
       {refreshNeeded && (
         <div role="status">
-          Metadata saved. {recordRefreshError || 'Loading the saved record...'}{' '}
+          {state?.ok && !state.changed ? 'Nothing changed.' : 'Metadata saved.'}{' '}
+          {recordRefreshError || 'Loading the acknowledged record...'}{' '}
           <Button
             type="button"
             variant="outline"
             disabled={pending || actorStale}
             onClick={() => void reloadSaved()}
           >
-            Retry saved record refresh
+            {state?.ok && !state.changed
+              ? 'Retry record refresh'
+              : 'Retry saved record refresh'}
           </Button>
         </div>
       )}
@@ -2786,56 +2897,48 @@ export function MetadataForm({
         )}
       </fieldset>
       <ValidationSummary issues={validation.issues} />
-      {!preview && !terminalDraft && review && !schemaStale && !itemStale && (
-        <div
-          className="rounded border border-cyan-700 p-3"
-          role="region"
-          aria-label="Metadata review"
-        >
-          {creating && creationIntent && definition ? (
-            (() => {
-              const summary = creationSummary({
-                kind,
-                intent: creationIntent,
-                categories,
-                locations,
-                definition,
-                touched,
-                openingSite,
-              });
-              return (
-                <>
-                  <h2
-                    ref={creationReviewHeading}
-                    tabIndex={-1}
-                    className="scroll-mt-24 text-lg font-semibold"
-                  >
-                    Review{' '}
-                    {kind === 'quantity' ? 'quantity item' : 'individual asset'}
-                  </h2>
-                  {summary.opening && (
-                    <p className="mt-2 text-sm">{summary.opening}</p>
-                  )}
-                  <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
-                    {summary.rows.map((row) => (
-                      <div key={row.label} className="min-w-0">
-                        <dt className="text-sm text-slate-400">{row.label}</dt>
-                        <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                          {row.value}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <details className="mt-3">
-                    <summary className="min-h-11 cursor-pointer py-2 font-semibold">
-                      Record details & custom answers
-                    </summary>
-                    <dl className="space-y-3">
-                      {summary.details.map((row, index) => (
-                        <div key={`${row.label}:${index}`} className="min-w-0">
+      {!preview &&
+        !terminalDraft &&
+        review &&
+        !noChanges &&
+        !schemaStale &&
+        !itemStale && (
+          <div
+            className="rounded border border-cyan-700 p-3"
+            role="region"
+            aria-label="Metadata review"
+          >
+            {creating && creationIntent && definition ? (
+              (() => {
+                const summary = creationSummary({
+                  kind,
+                  intent: creationIntent,
+                  categories,
+                  locations,
+                  definition,
+                  touched,
+                  openingSite,
+                });
+                return (
+                  <>
+                    <h2
+                      ref={creationReviewHeading}
+                      tabIndex={-1}
+                      className="scroll-mt-24 text-lg font-semibold"
+                    >
+                      Review{' '}
+                      {kind === 'quantity'
+                        ? 'quantity item'
+                        : 'individual asset'}
+                    </h2>
+                    {summary.opening && (
+                      <p className="mt-2 text-sm">{summary.opening}</p>
+                    )}
+                    <dl className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
+                      {summary.rows.map((row) => (
+                        <div key={row.label} className="min-w-0">
                           <dt className="text-sm text-slate-400">
                             {row.label}
-                            {row.source ? ` · ${row.source}` : ''}
                           </dt>
                           <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                             {row.value}
@@ -2843,82 +2946,102 @@ export function MetadataForm({
                         </div>
                       ))}
                     </dl>
-                  </details>
-                </>
-              );
-            })()
-          ) : (
-            <section aria-label="Changed details">
-              <h2 className="font-semibold">
-                Review changed details for {core.name || 'this record'}
-              </h2>
-              {editIntent &&
-                baseline &&
-                definition &&
-                (() => {
-                  const rows = editSummary({
-                    baseline,
-                    intent: editIntent,
-                    definition,
-                    categories,
-                    timeZone,
-                  });
-                  return rows.length ? (
-                    <dl className="mt-3 space-y-3">
-                      {rows.map((row) => (
-                        <div key={row.key} className="min-w-0">
-                          <dt className="text-sm text-slate-400">
-                            {row.label}
-                          </dt>
-                          <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            <span>{row.before}</span>
-                            <span aria-label=" changes to "> → </span>
-                            <span>{row.after}</span>
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : (
-                    <p>No changed values. Retained answers stay unchanged.</p>
-                  );
-                })()}
-            </section>
-          )}
-          {legacyMigration && (
-            <label className="mt-2 flex items-start gap-2">
-              <input
-                type="checkbox"
-                disabled={pending || uncertain}
-                checked={ackLegacy}
-                onChange={(event) => {
-                  const acknowledged = event.target.checked;
-                  setAckLegacy(acknowledged);
-                  if (!creating && editIntent)
-                    setEditIntent({
-                      ...editIntent,
-                      acknowledge_legacy_values: acknowledged,
+                    <details className="mt-3">
+                      <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+                        Record details & custom answers
+                      </summary>
+                      <dl className="space-y-3">
+                        {summary.details.map((row, index) => (
+                          <div
+                            key={`${row.label}:${index}`}
+                            className="min-w-0"
+                          >
+                            <dt className="text-sm text-slate-400">
+                              {row.label}
+                              {row.source ? ` · ${row.source}` : ''}
+                            </dt>
+                            <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              {row.value}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </details>
+                  </>
+                );
+              })()
+            ) : (
+              <section aria-label="Changed details">
+                <h2 className="font-semibold">
+                  Review changed details for {core.name || 'this record'}
+                </h2>
+                {editIntent &&
+                  baseline &&
+                  definition &&
+                  (() => {
+                    const rows = editSummary({
+                      baseline,
+                      intent: editIntent,
+                      definition,
+                      categories,
+                      timeZone,
                     });
-                }}
-              />
-              I understand that existing custom values from the previous
-              category will remain visible as legacy values.
-            </label>
-          )}
-          {duplicates.length > 0 && (
-            <p className="text-amber-200">
-              Serial also recorded on: {duplicates.join('; ')}. Duplicate
-              serials are allowed.
-            </p>
-          )}
-          {!creating && (
-            <p className="text-sm text-slate-400">
-              {openingSite
-                ? 'Opening details, custom values and site custody save together as one version and event.'
-                : 'Custom values and core details save together with history.'}
-            </p>
-          )}
-        </div>
-      )}
+                    return rows.length ? (
+                      <dl className="mt-3 space-y-3">
+                        {rows.map((row) => (
+                          <div key={row.key} className="min-w-0">
+                            <dt className="text-sm text-slate-400">
+                              {row.label}
+                            </dt>
+                            <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              <span>{row.before}</span>
+                              <span aria-label=" changes to "> → </span>
+                              <span>{row.after}</span>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : (
+                      <p>No changed values. Retained answers stay unchanged.</p>
+                    );
+                  })()}
+              </section>
+            )}
+            {legacyMigration && (
+              <label className="mt-2 flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  disabled={pending || uncertain}
+                  checked={ackLegacy}
+                  onChange={(event) => {
+                    const acknowledged = event.target.checked;
+                    setAckLegacy(acknowledged);
+                    if (!creating && editIntent)
+                      setEditIntent({
+                        ...editIntent,
+                        acknowledge_legacy_values: acknowledged,
+                      });
+                  }}
+                />
+                I understand that existing custom values from the previous
+                category will remain visible as legacy values.
+              </label>
+            )}
+            {duplicates.length > 0 && (
+              <p className="text-amber-200">
+                Serial also recorded on: {duplicates.join('; ')}. Duplicate
+                serials are allowed.
+              </p>
+            )}
+            {!creating && (
+              <p className="text-sm text-slate-400">
+                {openingSite
+                  ? 'Opening details, custom values and site custody save together as one version and event.'
+                  : 'Custom values and core details save together with history.'}
+              </p>
+            )}
+          </div>
+        )}
       {!preview && state && !state.ok && (
         <p
           role="alert"
@@ -2929,7 +3052,9 @@ export function MetadataForm({
       )}
       {!preview && state?.ok && (
         <>
-          <p role="status">Details saved.</p>
+          <p role="status">
+            {state.changed ? 'Details saved.' : 'Nothing changed.'}
+          </p>
           {!creating && (
             <Button
               type="button"
@@ -2946,7 +3071,7 @@ export function MetadataForm({
                 }
               }}
             >
-              Done
+              {state.changed ? 'Done' : 'Close'}
             </Button>
           )}
           {!creating && !resetTask && (
@@ -2974,41 +3099,48 @@ export function MetadataForm({
             'flex flex-wrap gap-2 rounded bg-slate-950/95 py-3'
           }
         >
-          <Button
-            disabled={
-              taskCompleted ||
-              (editRecoveryEnabled && (!editReady || editBlocked)) ||
-              (recoveryEnabled &&
-                (!recoveryReady ||
-                  recoveryBlocked ||
-                  !!terminalDraft ||
-                  !!storedEditing)) ||
-              pending ||
-              actorStale ||
-              (!uncertain &&
-                (!form ||
-                  schemaStale ||
-                  schemaConflictPending ||
-                  !!schemaRefreshError ||
-                  recordBlocked ||
-                  refreshNeeded)) ||
-              (review && legacyMigration && !ackLegacy)
-            }
-          >
-            {uncertain
-              ? 'Retry same save'
-              : review
-                ? creating
-                  ? kind === 'quantity'
-                    ? 'Add quantity item'
-                    : 'Add individual asset'
-                  : 'Confirm save'
-                : creating
-                  ? kind === 'quantity'
-                    ? 'Review quantity item'
-                    : 'Review individual asset'
-                  : 'Review details'}
-          </Button>
+          {noChanges && (
+            <p role="status" className="self-center text-sm">
+              Nothing to save.
+            </p>
+          )}
+          {!noChanges && (
+            <Button
+              disabled={
+                taskCompleted ||
+                (editRecoveryEnabled && (!editReady || editBlocked)) ||
+                (recoveryEnabled &&
+                  (!recoveryReady ||
+                    recoveryBlocked ||
+                    !!terminalDraft ||
+                    !!storedEditing)) ||
+                pending ||
+                actorStale ||
+                (!uncertain &&
+                  (!form ||
+                    schemaStale ||
+                    schemaConflictPending ||
+                    !!schemaRefreshError ||
+                    recordBlocked ||
+                    refreshNeeded)) ||
+                (review && legacyMigration && !ackLegacy)
+              }
+            >
+              {uncertain
+                ? 'Retry same save'
+                : review
+                  ? creating
+                    ? kind === 'quantity'
+                      ? 'Add quantity item'
+                      : 'Add individual asset'
+                    : 'Confirm save'
+                  : creating
+                    ? kind === 'quantity'
+                      ? 'Review quantity item'
+                      : 'Review individual asset'
+                    : 'Review details'}
+            </Button>
+          )}
           <Button
             ref={cancelRef}
             type="button"
@@ -3022,9 +3154,9 @@ export function MetadataForm({
             }
             onClick={cancel}
           >
-            Cancel
+            {noChanges ? 'Close' : 'Cancel'}
           </Button>
-          {review && (
+          {review && !noChanges && (
             <Button
               type="button"
               variant="outline"

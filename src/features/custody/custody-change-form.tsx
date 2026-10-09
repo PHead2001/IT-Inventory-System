@@ -16,6 +16,7 @@ import {
 } from '@/features/inventory/components/task-state';
 import type { Site, SiteHolding } from './queries.server';
 import type { CustodyState } from './contracts';
+import type { AssetReturnSuggestion } from './return-suggestion';
 import {
   RequiredMark,
   useFormValidation,
@@ -40,6 +41,8 @@ type Props = {
   siteHoldings?: SiteHolding[];
   currentLocation?: LocationRef | null;
   currentSite?: Site | null;
+  returnSuggestion?: AssetReturnSuggestion;
+  returnSuggestionError?: boolean;
 };
 const titles: Record<string, string> = {
   issue: 'Issue stock to a site',
@@ -55,6 +58,34 @@ const storageLabel = (location: LocationRef | undefined, fallback: string) =>
   location ? `${location.breadcrumb} (${location.code})` : fallback;
 const siteLabel = (site: Site | undefined, fallback: string) =>
   site ? `${site.name} (${site.code})` : fallback;
+
+function resolveReturnOrigin(snapshot: Props) {
+  const { kind, action, entityId, version, locations } = snapshot;
+  const suggestion = snapshot.returnSuggestion;
+  const unavailable = {
+    status: 'unavailable' as const,
+    locationId: null,
+    loadError: Boolean(snapshot.returnSuggestionError),
+  };
+  if (
+    kind !== 'asset' ||
+    action !== 'return' ||
+    suggestion?.assetId !== entityId ||
+    suggestion.assetVersion !== version
+  )
+    return unavailable;
+  if (suggestion.status !== 'suggested')
+    return { ...unavailable, status: suggestion.status };
+  if (!suggestion.locationId) return unavailable;
+  const eligible = pickerLocations(locations, 'destination').some(
+    (row) => row.id === suggestion.locationId,
+  );
+  return {
+    status: eligible ? ('suggested' as const) : ('ineligible' as const),
+    locationId: eligible ? suggestion.locationId : null,
+    loadError: false,
+  };
+}
 
 export function CustodyChangeForm(latest: Props) {
   const [iteration, setIteration] = useState(0);
@@ -93,12 +124,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     quantity: string;
     reference: string;
   } | null>(null);
+  const [returnOrigin, setReturnOrigin] = useState(() =>
+    resolveReturnOrigin(latest),
+  );
+  const [destinationTouched, setDestinationTouched] = useState(false);
   const [values, setValues] = useState({
     source_location_id:
       currentLocation?.id ??
       storageBalances.find((row) => row.quantity > 0)?.location.id ??
       '',
-    destination_location_id: '',
+    destination_location_id: returnOrigin.locationId ?? '',
     source_site_id:
       currentSite?.id ??
       siteHoldings.find((row) => row.quantity > 0)?.site_id ??
@@ -112,8 +147,9 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [initial] = useState(values);
+  const [initial, setInitial] = useState(values);
   const [uncertain, setUncertain] = useState(false);
+  const [rejectedVersion, setRejectedVersion] = useState<string | null>(null);
   const inFlight = useRef(false);
   const submitted = useRef<Parameters<typeof submitCustody>[0] | null>(null);
   const completed = state?.ok === true;
@@ -124,9 +160,61 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     uncertain,
     completed,
   });
-  const stale = latest.version !== version;
+  const newerSnapshot = latest.version !== version;
+  // A definitive stale rejection remains blocking even when input edits clear
+  // its message or a failed refresh leaves the old props in place.
+  const stale = newerSnapshot || rejectedVersion === version;
+  const fetchedReturnOrigin = resolveReturnOrigin(latest);
+  // A failed read is not a new assignment-origin fact. Retain the last
+  // verified suggestion, but mark it stale until a definitive read succeeds.
+  const nextReturnOrigin = fetchedReturnOrigin.loadError
+    ? { ...returnOrigin, loadError: true }
+    : fetchedReturnOrigin;
+  // Same-version reads can recover a failed lookup. Crossing versions still
+  // requires explicit baseline adoption, and unresolved commands stay frozen.
+  if (
+    kind === 'asset' &&
+    action === 'return' &&
+    !stale &&
+    !actorMismatch &&
+    !pending &&
+    !uncertain &&
+    !completed &&
+    (returnOrigin.status !== nextReturnOrigin.status ||
+      returnOrigin.locationId !== nextReturnOrigin.locationId ||
+      returnOrigin.loadError !== nextReturnOrigin.loadError)
+  ) {
+    setReturnOrigin(nextReturnOrigin);
+    if (!nextReturnOrigin.loadError && !destinationTouched) {
+      setValues((old) => ({
+        ...old,
+        destination_location_id: nextReturnOrigin.locationId ?? '',
+      }));
+      setInitial((old) => ({
+        ...old,
+        destination_location_id: nextReturnOrigin.locationId ?? '',
+      }));
+    }
+    setReviewed(null);
+  }
+  const refreshHoldings = () => {
+    try {
+      router.refresh();
+    } catch {
+      // Keep the rejected baseline blocked and let the user retry this read.
+    }
+  };
   const update = (key: keyof typeof values, value: string) => {
-    if (pending || uncertain || completed || inFlight.current) return;
+    if (
+      pending ||
+      uncertain ||
+      completed ||
+      stale ||
+      actorMismatch ||
+      inFlight.current
+    )
+      return;
+    if (key === 'destination_location_id') setDestinationTouched(true);
     setValues((old) => ({ ...old, [key]: value }));
     setReviewed(null);
     setState(null);
@@ -373,6 +461,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           setReviewed(null);
           submitted.current = null;
           setReceipt(null);
+          if (result.code === 'P1002') {
+            setRejectedVersion(version);
+            refreshHoldings();
+          }
         }
       } catch {
         setUncertain(true);
@@ -581,6 +673,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                   ? [currentLocation.id]
                   : []
             }
+            availability={
+              quantity
+                ? Object.fromEntries(
+                    storageBalances.map((row) => [
+                      row.location.id,
+                      row.quantity,
+                    ]),
+                  )
+                : undefined
+            }
             value={values.source_location_id}
             onValueChange={(value) => update('source_location_id', value)}
             required
@@ -591,20 +693,49 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           />
         )}
         {toStorage && (
-          <LocationPicker
-            id={`${kind}-${action}-destination`}
-            label="Return to storage"
-            locations={locations}
-            mode="destination"
-            value={values.destination_location_id}
-            onValueChange={(value) => update('destination_location_id', value)}
-            required
-            error={
-              validation.issues.find(
-                (issue) => issue.id === scope + '-destination',
-              )?.message
-            }
-          />
+          <>
+            <LocationPicker
+              id={`${kind}-${action}-destination`}
+              label="Return to storage"
+              locations={locations}
+              mode="destination"
+              value={values.destination_location_id}
+              onValueChange={(value) =>
+                update('destination_location_id', value)
+              }
+              required
+              error={
+                validation.issues.find(
+                  (issue) => issue.id === scope + '-destination',
+                )?.message
+              }
+            />
+            {!quantity && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => update('destination_location_id', '')}
+                  disabled={pending || uncertain || completed}
+                >
+                  Clear destination
+                </Button>
+                <p className="text-sm text-slate-400">
+                  {returnOrigin.loadError
+                    ? returnOrigin.status === 'suggested'
+                      ? 'The previous storage location could not be checked again. The last verified suggestion is retained. Choose a destination, or refresh to retry.'
+                      : 'The previous storage location could not be checked. Choose a destination, or refresh to retry.'
+                    : returnOrigin.status === 'suggested'
+                      ? 'Initially suggested from this asset’s site assignment. You can choose another destination.'
+                      : returnOrigin.status === 'no_storage_origin'
+                        ? 'This assignment began at a site, with no recorded storage origin. Choose a destination.'
+                        : returnOrigin.status === 'ineligible'
+                          ? 'The previous storage location is no longer available. Choose a destination.'
+                          : 'The storage origin for this assignment is unavailable. Choose a destination.'}
+                </p>
+              </>
+            )}
+          </>
         )}
         {fromSite && (
           <label className="block space-y-2">
@@ -757,19 +888,28 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       {stale && !uncertain && !completed && (
         <div role="alert">
           <p>
-            This record changed. Review the latest holdings before submitting;
-            your entries are retained.
+            {newerSnapshot
+              ? 'This record changed. Review the latest holdings before submitting; your entries are retained.'
+              : 'The latest holdings have not loaded. Refresh to try again; your entries are retained.'}
           </p>
           <Button
             type="button"
             variant="outline"
+            disabled={pending || actorMismatch}
             onClick={() => {
+              if (!newerSnapshot) {
+                refreshHoldings();
+                return;
+              }
               setBaseline(latest);
+              setRejectedVersion(null);
               setReviewed(null);
               setState(null);
             }}
           >
-            Review latest holdings
+            {newerSnapshot
+              ? 'Review latest holdings'
+              : 'Refresh latest holdings'}
           </Button>
         </div>
       )}
