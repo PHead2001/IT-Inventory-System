@@ -32,8 +32,9 @@ function Start-Sleep {
 }
 function New-Fixture {
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
-    $script:state = [pscustomobject]@{ vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root 'instance'; deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
+    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
+    $script:state.networkRecovery | Add-Member binding ([pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state })
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
 function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' } }
@@ -62,7 +63,7 @@ try {
         New-Fixture
         foreach ($name in @('networkRecovery', 'guardianPid', 'guardianStartUtc', 'guardianReady')) { $script:state.PSObject.Properties.Remove($name) }
         $script:state.instancePath = Join-Path (Join-Path $root 'instances') $script:state.vmName
-        foreach ($pair in @{ tag = $script:RunnerTag; supervisorPid = $PID; supervisorStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = ('a' * 64) }.GetEnumerator()) { $script:state | Add-Member -NotePropertyName $pair.Key -NotePropertyValue $pair.Value }
+        foreach ($pair in @{ tag = $script:RunnerTag; supervisorPid = $PID; supervisorStartUtc = $script:now.ToString('o'); guestMac = '02AABBCCDDEE'; networkFingerprint = ('a' * 64) }.GetEnumerator()) { $script:state | Add-Member -NotePropertyName $pair.Key -NotePropertyValue $pair.Value -Force }
         $rule = [pscustomobject]@{ Action = 'Deny'; Direction = 'Outbound'; Weight = 2; LocalIPAddress = ''; RemoteIPAddress = ''; LocalPort = ''; RemotePort = ''; Protocol = ''; Stateful = $false }
         $script:state | Add-Member -NotePropertyName networkRules -NotePropertyValue @($rule)
         $script:vm = [pscustomobject]@{ Id = [guid]$script:state.vmId; Name = $script:state.vmName; Notes = $script:RunnerTag; Path = Join-Path $script:state.instancePath $script:state.vmName; State = 'Off' }
@@ -93,23 +94,25 @@ try {
         Refuse { Assert-SessionAlive $script:state }
     }
     Check 'protected launch intent cannot be replaced or reused after ambiguity' {
-        New-Fixture; $journal = Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32)
+        New-Fixture; $admission = Get-RunnerJitAdmission $script:state
+        $journal = Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission $admission
         if ($journal.phase -cne 'registration-intent') { throw 'Intent was not journaled.' }
         [void](Save-RunnerLaunchEvent $script:state 'transport-lost')
-        Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('d' * 32) }
+        Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('d' * 32) -Admission $admission }
     }
     Check 'instance cancellation between liveness check and intent prevents registration intent' {
         New-Fixture; Assert-SessionAlive $script:state
+        $admission = Get-RunnerJitAdmission $script:state
         [void][IO.Directory]::CreateDirectory($script:state.instancePath)
         $marker = Join-Path $script:state.instancePath 'stop.requested'; [IO.File]::WriteAllText($marker, '')
         try {
-            Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) }
+            Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission $admission }
             if ($script:state.PSObject.Properties.Name -contains 'runnerLaunch') { throw 'Cancelled session journaled JIT intent.' }
         } finally { Remove-Item -LiteralPath $marker }
     }
     Check 'instance cancellation before dispatch preserves registered journal without launching' {
         New-Fixture
-        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
         $before = $script:state.runnerLaunch | ConvertTo-Json -Depth 8 -Compress
         Assert-SessionAlive $script:state
         [void][IO.Directory]::CreateDirectory($script:state.instancePath)
@@ -120,9 +123,28 @@ try {
         } finally { Remove-Item -LiteralPath $marker }
     }
     Check 'preparation purpose never grants JIT or guest launch admission' {
-        New-Fixture; $script:state | Add-Member purpose 'prepare'
-        Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) }
+        New-Fixture; $admission = Get-RunnerJitAdmission $script:state; $script:state.purpose = 'prepare'
+        Refuse { Get-RunnerJitAdmission $script:state }
+        Refuse { Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission $admission }
         if ($script:state.PSObject.Properties.Name -contains 'runnerLaunch') { throw 'Preparation journaled a guest job intent.' }
+    }
+    Check 'locked final intent admission rejects guardian changes after demand capture without waiting' {
+        foreach ($change in @('dead', 'not-ready', 'recovering', 'new-generation', 'expired', 'removed', 'changed-claim', 'changed-binding')) {
+            New-Fixture; $before = $script:state
+            $admission = Get-RunnerJitAdmission $before
+            switch ($change) {
+                'dead' { $script:alive = $false }
+                'not-ready' { $script:state.guardianReady = $false }
+                'recovering' { $script:state.networkRecovery.phase = 'isolated' }
+                'new-generation' { $script:state.networkRecovery.generation++ }
+                'expired' { $script:now = $script:now.AddMinutes(6) }
+                'removed' { $script:state = $null }
+                'changed-claim' { $script:state.networkRecovery.binding.claimHash = 'b' * 64 }
+                'changed-binding' { $script:state.networkRecovery.binding | Add-Member adapterId 'different-adapter' }
+            }
+            Refuse { Save-RunnerLaunchEvent $before 'intent' 0 ('c' * 32) -Admission $admission }
+            if (($null -ne $script:state -and $script:state.PSObject.Properties.Name -contains 'runnerLaunch') -or $script:sleeps -ne 0 -or $script:locked) { throw 'Obsolete demand caused intent, waiting or a leaked mutex.' }
+        }
     }
     Check 'actual Guard failure writes fixed safe diagnostic and performs owned cleanup' {
         New-Fixture; $script:failure = $null; $script:cleaned = $false
@@ -156,19 +178,19 @@ try {
     }
     Check 'SSH loss reattaches only receipt monitor to same launch and preserves result meaning' {
         New-Fixture; $script:exitCode = 0
-        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
         Wait-DetachedRunner $script:state ([pscustomobject]@{ guestIp = 'fixture' })
         if ($script:queries -ne 4 -or $script:state.runnerLaunch.phase -cne 'runner-exited' -or $script:state.runnerLaunch.runnerId -ne 123 -or $script:sleeps -ne 3) { throw 'Transport recovery lost the sole runner/session outcome.' }
     }
     Check 'nonzero detached exit remains abnormal rather than workflow success' {
         New-Fixture; $script:exitCode = 1
-        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
         Refuse { Wait-DetachedRunner $script:state ([pscustomobject]@{ guestIp = 'fixture' }) }
         if ($script:state.runnerLaunch.phase -cne 'runner-failed') { throw 'Nonzero exit was not retained.' }
     }
     Check 'successfully received different runner receipt fails instead of retrying identity' {
         New-Fixture; $script:exitCode = 0; $script:badReceipt = $true
-        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state)); [void](Save-RunnerLaunchEvent $script:state 'registered' 123); [void](Save-RunnerLaunchEvent $script:state 'dispatch')
         Refuse { Wait-DetachedRunner $script:state ([pscustomobject]@{ guestIp = 'fixture' }) }
         if ($script:queries -ne 4 -or $script:state.runnerLaunch.runnerId -ne 123) { throw 'Different guest runner was adopted.' }
     }

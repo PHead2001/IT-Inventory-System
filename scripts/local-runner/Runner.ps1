@@ -328,7 +328,34 @@ function Assert-CurrentRunnerNetworkRules($State) {
     } finally { Exit-RunnerLock $mutex }
 }
 
-function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0) {
+function Assert-RunnerJitAdmission($State, $Current, $Expected = $null) {
+    # Caller holds the session mutex. Never wait or perform remote demand IO
+    # here: evidence obtained before an intervening recovery is obsolete.
+    if ($null -eq $Current) { throw 'JIT admission session was removed.' }
+    Assert-StateIdentity $Current
+    if ($Current.vmName -cne $State.vmName -or [guid]$Current.vmId -ne [guid]$State.vmId -or $Current.instancePath -ine $State.instancePath -or
+        $Current.purpose -cne 'job' -or $Current.PSObject.Properties.Name -notcontains 'networkRecovery' -or
+        (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or (Test-RunnerSessionStopRequested $Current) -or
+        (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($Current.deadlineUtc).ToUniversalTime()) { throw 'JIT admission identity, purpose, Stop or deadline differs.' }
+    $recovery = $Current.networkRecovery
+    if ($recovery.phase -cne 'healthy' -or $Current.guardianReady -ne $true -or
+        -not (Test-RunnerProcessIdentity $Current.guardianPid $Current.guardianStartUtc) -or (Get-RunnerRecoveryExpiry $recovery (Get-RunnerRecoveryNow)) -or
+        [guid]$recovery.binding.vmId -ne [guid]$Current.vmId -or $recovery.binding.vmName -cne $Current.vmName -or
+        $recovery.binding.claimHash -cne (Get-RunnerRecoveryClaimHash $Current)) { throw 'JIT admission guardian is unbound, unhealthy, dead or expired.' }
+    $admission = [pscustomobject]@{ generation = [long]$recovery.generation; claimHash = $recovery.binding.claimHash; bindingHash = Get-RunnerRecoveryHash ($recovery.binding | ConvertTo-Json -Depth 8 -Compress); vmId = $Current.vmId; vmName = $Current.vmName; guardianPid = $Current.guardianPid; guardianStartUtc = $Current.guardianStartUtc }
+    if ($null -ne $Expected -and ($Expected.generation -ne $admission.generation -or $Expected.claimHash -cne $admission.claimHash -or $Expected.bindingHash -cne $admission.bindingHash -or
+        [guid]$Expected.vmId -ne [guid]$admission.vmId -or $Expected.vmName -cne $admission.vmName -or
+        $Expected.guardianPid -ne $admission.guardianPid -or $Expected.guardianStartUtc -cne $admission.guardianStartUtc)) { throw 'JIT demand evidence predates a guardian recovery or identity change.' }
+    return $admission
+}
+
+function Get-RunnerJitAdmission($State) {
+    $mutex = Enter-RunnerLock
+    try { return Assert-RunnerJitAdmission $State (Get-RunnerState) }
+    finally { Exit-RunnerLock $mutex }
+}
+
+function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null) {
     $mutex = Enter-RunnerLock
     try {
         $current = Get-RunnerState
@@ -336,6 +363,10 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
             ($current.PSObject.Properties.Name -contains 'purpose' -and $current.purpose -cne 'job') -or
             (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or
             (Test-RunnerSessionStopRequested $current) -or (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Runner launch session removed/stopped/expired.' }
+        if ($Event -ceq 'intent') {
+            if ($null -eq $Admission) { throw 'JIT intent requires admission captured before the demand lookup.' }
+            [void](Assert-RunnerJitAdmission $State $current $Admission)
+        }
         $journal = if ($current.PSObject.Properties.Name -contains 'runnerLaunch') { $current.runnerLaunch } else { $null }
         $next = Get-RunnerLaunchDecision $journal $Event $RunnerId $LaunchId $ExitCode
         $current | Add-Member runnerLaunch $next -Force
@@ -630,6 +661,10 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         $parts = $Config.repo.Split('/')
         $script:RunnerOperationStage = 'jit-registration'
         Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
+        # Recovery may wait for the whole outage episode. Demand evidence must
+        # be obtained after that wait, immediately before the one JIT intent.
+        Assert-SessionAlive $state
+        $admission = Get-RunnerJitAdmission $state
         if ($Config.activation -eq 'pilot') {
             $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
             $evidence = Get-PilotEvidence $Config $attempt $token
@@ -640,9 +675,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             $token = $null
             return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
         }
-        Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
         $launchId = [guid]::NewGuid().ToString('N')
-        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId)
+        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId -Admission $admission)
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
             name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
         } $token

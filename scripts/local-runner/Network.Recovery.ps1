@@ -140,7 +140,7 @@ function Get-RunnerRecoveryExpiry($Recovery, [DateTime] $NowUtc) {
 }
 
 function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowUtc, [string] $VmState,
-    $Outcome = $null, [switch] $Stop, [switch] $OwnerDead, [switch] $IdentityChanged) {
+    $Outcome = $null, [switch] $Stop, [switch] $OwnerDead, [switch] $IdentityChanged, [switch] $ConnectivityLost) {
     # Pure reducer: guardian publishes its result under the state lock before an
     # effect. Outcomes carry generation+operation; old completions never resume.
     $next = $Recovery | ConvertTo-Json -Depth 24 -Compress | ConvertFrom-Json
@@ -156,7 +156,19 @@ function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowU
         $Outcome = $null
     }
     $observed = $null -ne $Observation -and $Observation.fingerprint -cmatch '^[0-9a-f]{64}$'
-    $drift = -not $observed -or $Observation.fingerprint -cne $(if ($next.phase -ceq 'healthy') { $next.fingerprint } else { $next.candidateFingerprint })
+    $drift = $ConnectivityLost -or -not $observed -or $Observation.fingerprint -cne $(if ($next.phase -ceq 'healthy') { $next.fingerprint } else { $next.candidateFingerprint })
+    if ($ConnectivityLost -and $next.phase -cne 'healthy') {
+        # A successful old connect/resume/probe outcome cannot replace current
+        # provider connectivity. Requarantine within the original episode.
+        $next.generation++
+        if (-not $next.episodeDeadlineUtc) {
+            $next.phase = 'failed'; $next.operation = ''; $next.failure = 'connectivity-state-uncertain'
+            return [pscustomobject]@{ recovery = $next; action = 'cleanup' }
+        }
+        $next.phase = 'quarantining'; $next.operation = 'quarantine'; $next.operationStartedUtc = $NowUtc.ToUniversalTime().ToString('o'); $next.progressUtc = $next.operationStartedUtc
+        if ($VmState -ceq 'Running') { $next.resumeRequired = $true }
+        return [pscustomobject]@{ recovery = $next; action = 'quarantine' }
+    }
     if ($next.operation) {
         if ($null -eq $Outcome) {
             if ($next.operation -ceq 'probe' -and $drift) {
@@ -433,10 +445,14 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         $switch = Get-VMSwitch -Id ([guid]$recovery.binding.switchId) -ErrorAction Stop
         $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
         $identityChanged = $false
-        try { [void](Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch) } catch { $identityChanged = $true }
+        $adapter = $null
+        try { $adapter = Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch } catch { $identityChanged = $true }
+        $expectsConnected = $recovery.phase -cin @('healthy', 'resuming', 'probing') -or
+            ($recovery.phase -ceq 'connecting' -and $null -ne $Outcome -and $Outcome.generation -eq $recovery.generation -and $Outcome.operation -ceq 'connect' -and $Outcome.success)
+        $connectivityLost = -not $identityChanged -and $expectsConnected -and [string]::IsNullOrEmpty([string]$adapter.SwitchName)
         $stop = Test-RunnerSessionStopRequested $state
         $ownerDead = -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)
-        $plan = Get-RunnerNetworkRecoveryPlan $recovery $observation $now ([string]$vm.State) $Outcome -Stop:$stop -OwnerDead:$ownerDead -IdentityChanged:$identityChanged
+        $plan = Get-RunnerNetworkRecoveryPlan $recovery $observation $now ([string]$vm.State) $Outcome -Stop:$stop -OwnerDead:$ownerDead -IdentityChanged:$identityChanged -ConnectivityLost:$connectivityLost
         $state.networkRecovery = $plan.recovery
         if ($plan.recovery.phase -ceq 'healthy') { $state.networkFingerprint = $plan.recovery.fingerprint }
         Write-RunnerJson $script:RunnerStatePath $state

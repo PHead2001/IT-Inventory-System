@@ -91,8 +91,8 @@ function Invoke-RunnerTransitionCheckpoint {
 try {
     # Exact pre-recovery .7/.8 bundles can be read only at the protected installed
     # path. This permits the normal idle update without widening new-source rules.
-    foreach ($version in @('2026-10-06.7', '2026-10-06.8', '2026-10-06.9')) {
-        $source = New-Fixture ('pre-recovery-' + $version) $version '2026-10-09.1'
+    foreach ($version in @('2026-10-05.99', '2026-10-06.1', '2026-10-06.6', '2026-10-06.7', '2026-10-06.8', '2026-10-06.9', '2026-10-07.1')) {
+        $source = New-Fixture ('pre-recovery-' + $version) $version '2026-10-09.2'
         $bin = Join-Path $script:RunnerRoot 'bin'
         $files = foreach ($name in Get-RunnerPreRecoveryBundleNames) { [ordered]@{ name = $name; hash = (Get-FileHash -LiteralPath (Join-Path $bin $name) -Algorithm SHA256).Hash } }
         $old = [ordered]@{ schema = 1; tag = $script:RunnerTag; version = $version; files = @($files) }
@@ -100,7 +100,7 @@ try {
         foreach ($name in Get-RunnerBundleNames | Where-Object { $_ -cnotin @(Get-RunnerPreRecoveryBundleNames) }) { Remove-Item -LiteralPath (Join-Path $bin $name) }
         Write-RunnerJson (Join-Path $script:RunnerRoot 'installed-bundle.json') ([ordered]@{ tag = $script:RunnerTag; version = $version; manifestHash = (Get-FileHash -LiteralPath (Join-Path $bin 'Bundle.json')).Hash })
         Assert-Rejected { Get-RunnerBundle $bin } 'pre-recovery set used as new source'
-        if ($version -ceq '2026-10-06.9') { Assert-Rejected { Get-CoherentInstalledRunnerBundle } 'later version used historical dependency exception'; continue }
+        if ($version -cnotin @('2026-10-06.7', '2026-10-06.8')) { Assert-Rejected { Get-CoherentInstalledRunnerBundle } 'unreviewed eighteen-file version used historical dependency exception'; continue }
         [void](Get-CoherentInstalledRunnerBundle)
         $outside = Join-Path $base ('pre-recovery-outside-' + $version); [void][IO.Directory]::CreateDirectory($outside)
         foreach ($entry in @(Get-ChildItem -LiteralPath $bin -File)) { [IO.File]::Copy($entry.FullName, (Join-Path $outside $entry.Name)) }

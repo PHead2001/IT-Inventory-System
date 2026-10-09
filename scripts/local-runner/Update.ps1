@@ -36,9 +36,8 @@ function Get-RunnerBundle([string] $SourceRoot, [switch] $AllowLegacyInstalled) 
         [string]::Equals([IO.Path]::GetFullPath($SourceRoot), [IO.Path]::GetFullPath((Join-Path $script:RunnerRoot 'bin')), [StringComparison]::OrdinalIgnoreCase) -and
         $bundle.version -cmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$') {
         $version = Get-RunnerBundleVersion $bundle.version
-        $preRecoveryCutoff = Get-RunnerBundleVersion '2026-10-06.8'
         $preRecovery = Get-RunnerPreRecoveryBundleNames
-        if (($version.date -lt $preRecoveryCutoff.date -or ($version.date -eq $preRecoveryCutoff.date -and $version.revision -le $preRecoveryCutoff.revision)) -and
+        if ($bundle.version -cin @('2026-10-06.7', '2026-10-06.8') -and
             $bundle.files.Count -eq $preRecovery.Count -and -not (Compare-Object @($bundle.files.name | Sort-Object) @($preRecovery | Sort-Object))) { $names = $preRecovery }
         $cutoff = Get-RunnerBundleVersion '2026-10-06.1'
         $legacy = Get-RunnerLegacyBundleNames

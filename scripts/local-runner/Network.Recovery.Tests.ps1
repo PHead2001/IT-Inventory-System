@@ -265,6 +265,83 @@ try {
     }
     Check 'resume provider error is explicit and cannot fake running readback' { New-Fixture; $script:vm.State = 'Paused'; $script:state.networkRecovery.operation = 'resume'; $script:state.networkRecovery.resumeRequired = $true; Set-FixtureVerifiedRules; $script:fail = 'resume'; Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $script:state.networkRecovery 'resume' } 'Resume error accepted.'; Assert-Equal $script:effects @('resume') 'Resume error path not reached.'; Assert-Equal $script:vm.State 'Paused' 'Resume error guessed running.' }
     Check 'guardian tick observes outside mutex then quarantines exact provider' { New-Fixture; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}); Assert-Equal $p.outcome.operation 'quarantine' 'Tick did not quarantine.'; Assert-Equal $script:locked $false 'Tick retained mutex.'; Assert-Equal $script:effects @('pause', 'disconnect') 'Tick mutated beyond quarantine.' }
+    Check 'unchanged host fingerprint cannot leave detached bound adapter healthy' {
+        New-Fixture; $r = $script:state.networkRecovery; $r.fingerprint = (Get-RunnerNetworkObservation).fingerprint
+        $hard = $r.hardDeadlineUtc; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        Assert-Equal $p.outcome.operation 'quarantine' 'Detached adapter remained healthy.'
+        Assert-Equal $script:effects @('pause', 'disconnect') 'Detached running VM was not quarantined.'
+        Assert-Equal $script:state.networkRecovery.phase 'quarantining' 'Detached adapter retained healthy phase.'
+        Assert-Equal $script:state.networkRecovery.hardDeadlineUtc $hard 'Detachment extended hard deadline.'
+        Assert-Equal $script:state.networkRecovery.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Detachment lacked fixed outage episode.'
+    }
+    Check 'detachment rejects connecting resume and probe successful outcomes without extending episode' {
+        foreach ($phase in @('connecting', 'resuming', 'probing')) {
+            New-Fixture; $r = $script:state.networkRecovery; $r.candidateFingerprint = (Get-RunnerNetworkObservation).fingerprint
+            $r.phase = $phase; $r.operation = switch ($phase) { 'connecting' { 'connect' }; 'resuming' { 'resume' }; 'probing' { 'probe' } }
+            $r.resumeRequired = $true; $r.episodeDeadlineUtc = $script:now.AddSeconds(45).ToString('o'); $r.episodeStartedUtc = $script:now.AddSeconds(-75).ToString('o')
+            $deadline = $r.episodeDeadlineUtc; $hard = $r.hardDeadlineUtc
+            $outcome = [pscustomobject]@{ generation = $r.generation; operation = $r.operation; success = $true }
+            $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+            $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}) $outcome
+            Assert-Equal $p.outcome.operation 'quarantine' "Detached $phase accepted success."
+            Assert-Equal $script:state.networkRecovery.phase 'quarantining' "Detached $phase became healthy or advanced."
+            Assert-Equal $script:state.networkRecovery.episodeDeadlineUtc $deadline 'Detachment restarted outage deadline.'
+            Assert-Equal $script:state.networkRecovery.hardDeadlineUtc $hard 'Detachment extended hard deadline.'
+            Assert-Equal $script:effects @('pause', 'disconnect') 'Detachment dispatched resume/probe.'
+        }
+    }
+    Check 'detached bound adapter completes guarded recovery while preserving running or Off intent' {
+        foreach ($initialState in @('Running', 'Off')) {
+            New-Fixture; $script:vm.State = $initialState; $script:state.networkRecovery.fingerprint = (Get-RunnerNetworkObservation).fingerprint
+            $hard = $script:state.networkRecovery.hardDeadlineUtc; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+            $config = [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' }
+            $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName $config
+            $deadline = $script:state.networkRecovery.episodeDeadlineUtc
+            for ($tick = 0; $tick -lt 16 -and $script:state.networkRecovery.phase -cne 'healthy'; $tick++) {
+                if ($null -ne $script:RunnerRecoveryProbe) {
+                    [void][IO.Directory]::CreateDirectory($script:state.instancePath)
+                    $probe = $script:RunnerRecoveryProbe; $probe.job.Completed = $true
+                    [IO.File]::WriteAllText($probe.resultPath, ([ordered]@{ generation = $probe.generation; probeId = $probe.probeId; success = $true } | ConvertTo-Json -Compress))
+                }
+                $script:clock = $script:clock.AddSeconds(1)
+                $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName $config $p.outcome
+                Assert-Equal $script:state.networkRecovery.hardDeadlineUtc $hard 'Recovery extended hard deadline.'
+                if ($script:state.networkRecovery.phase -cne 'healthy') { Assert-Equal $script:state.networkRecovery.episodeDeadlineUtc $deadline 'Recovery extended detachment episode.' }
+            }
+            Assert-Equal $script:state.networkRecovery.phase 'healthy' 'Detached adapter did not complete guarded recovery.'
+            Assert-Equal $script:vm.State $initialState 'Recovery changed original Running/Off intent.'
+            Assert-Equal $script:adapter.SwitchName $script:switch.Name 'Recovery did not reconnect exact bound switch.'
+            Assert-Equal @($script:effects | Where-Object { $_ -ceq 'resume' }).Count $(if ($initialState -ceq 'Running') { 1 } else { 0 }) 'Recovery resumed an Off VM or repeated resume.'
+        }
+    }
+    Check 'intended isolated apply verified and preconnect phases allow detached adapter' {
+        foreach ($phase in @('isolated', 'applying', 'verified', 'connecting')) {
+            New-Fixture; $r = $script:state.networkRecovery; $r.phase = $phase; $r.candidateFingerprint = (Get-RunnerNetworkObservation).fingerprint
+            $r.operation = switch ($phase) { 'applying' { 'apply' }; 'connecting' { 'connect' }; default { '' } }
+            $r.episodeDeadlineUtc = $script:now.AddSeconds(60).ToString('o'); $script:vm.State = 'Paused'
+            $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+            $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+            Assert-Equal $p.continue $true "Intended detached $phase refused."
+            Assert-Equal $script:state.networkRecovery.phase $phase "Intended detached $phase changed incorrectly."
+            Assert-Equal $script:effects @() 'Intended isolation started another provider operation.'
+        }
+    }
+    Check 'probe detachment obsoletes and drains pending probe after quarantine' {
+        New-Fixture; $r = $script:state.networkRecovery; $r.phase = 'probing'; $r.operation = 'probe'; $r.candidateFingerprint = (Get-RunnerNetworkObservation).fingerprint
+        $r.episodeDeadlineUtc = $script:now.AddSeconds(45).ToString('o')
+        $script:RunnerRecoveryProbe = Start-RunnerRecoveryProbe $script:state ([pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' }) 0
+        $script:effects = @(); $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        [void](Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}))
+        Assert-Equal $script:effects @('pause', 'disconnect', 'probe-cancel', 'probe-remove') 'Detached probe continued or was not drained.'
+        Assert-Equal $script:RunnerRecoveryProbe $null 'Detached probe retained lifetime owner.'
+    }
+    Check 'wrong attached switch still performs canonical cleanup' {
+        New-Fixture; $script:adapter.SwitchName = 'Unowned'; $script:adapter.SwitchId = [guid]::NewGuid()
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        Assert-Equal $p.continue $false 'Wrong switch was recovered as ordinary detachment.'
+        Assert-Equal $script:effects @('cleanup') 'Wrong switch escaped canonical cleanup.'
+    }
     Check 'probe dispatch is outside mutex and obsolete result is cancelled' {
         New-Fixture; Isolate; $script:state.networkRecovery = $script:recovery; $script:state.networkRecovery.candidateFingerprint = (Get-RunnerNetworkObservation).fingerprint
         $script:state.networkRecovery.phase = 'resuming'; $script:state.networkRecovery.operation = 'resume'; $script:state.networkRecovery.progressUtc = $script:now.AddSeconds(-2).ToString('o')
