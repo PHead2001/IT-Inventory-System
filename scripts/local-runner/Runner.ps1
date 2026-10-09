@@ -1212,8 +1212,12 @@ function Invoke-Watchdog {
             Assert-StateIdentity $state
             $deadline = [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()
             $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
-            $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
-                -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
+            # Readiness becomes false during recovery; an established guardian
+            # must still be alive then. Only setup without any recorded identity
+            # has initialization grace. Partial identity is not that exemption.
+            $guardianRecorded = $state.PSObject.Properties.Name -contains 'guardianPid' -or $state.PSObject.Properties.Name -contains 'guardianStartUtc'
+            $guardianDead = $guardianRecorded -and ($state.PSObject.Properties.Name -notcontains 'guardianPid' -or
+                $state.PSObject.Properties.Name -notcontains 'guardianStartUtc' -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc))
             $recoveryExpired = $state.PSObject.Properties.Name -contains 'networkRecovery' -and (Get-RunnerRecoveryExpiry $state.networkRecovery (Get-RunnerRecoveryNow))
             $sealedInvalid = $false
             if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or

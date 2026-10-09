@@ -22,7 +22,7 @@ function Write-RunnerJson($Path, $Value) {
     if ($Path -ceq (Join-Path $script:RunnerRoot 'last-error.json')) { $script:failure = $Value }
     else { $script:state = $Value }
 }
-function Test-RunnerProcessIdentity { $script:alive }
+function Test-RunnerProcessIdentity($ProcessId, $StartUtc) { if ($script:deadGuardian -and $ProcessId -eq 42) { return $false }; $script:alive }
 function Get-RunnerRecoveryNow { $script:now }
 function Save-Heartbeat { if ($script:locked) { throw 'Wait held state mutex.' }; $script:heartbeats++ }
 function Start-Sleep {
@@ -31,9 +31,10 @@ function Start-Sleep {
     if ($script:state.networkRecovery.phase -cne 'healthy') { $script:state.networkRecovery.phase = 'healthy'; $script:state.guardianReady = $true }
 }
 function New-Fixture {
-    $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
+    $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
     $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
-        networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
+        supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
+        networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
     $script:state.networkRecovery | Add-Member binding ([pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state })
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
@@ -88,6 +89,32 @@ try {
     Check 'dead guardian and expired recovery reject supervisor continuation' {
         New-Fixture; $script:alive = $false; Refuse { Assert-SessionAlive $script:state }
         New-Fixture; $script:state.networkRecovery.phase = 'isolated'; $script:state.networkRecovery.episodeDeadlineUtc = $script:now.AddSeconds(-1).ToString('o'); Refuse { Assert-SessionAlive $script:state }
+    }
+    Check 'watchdog checks established guardian death in every recovery phase independently of readiness' {
+        $cleanup = (Get-Command Remove-RunnerInstance).ScriptBlock
+        function Assert-Administrator {}
+        function Assert-SecureRoot {}
+        function Invoke-RunnerSupervisorRecovery {}
+        function Remove-RunnerInstance($State) {
+            if ($State.vmName -cne $script:state.vmName -or [guid]$State.vmId -ne [guid]$script:state.vmId) { throw 'Watchdog cleanup escaped recorded identity.' }
+            $script:cleanups++; $script:state = $null
+        }
+        try {
+            foreach ($phase in @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing')) {
+                New-Fixture; $script:cleanups = 0; $script:deadGuardian = $true
+                $script:state.networkRecovery.phase = $phase; $script:state.guardianReady = $phase -ceq 'healthy'
+                Refuse { Assert-SessionAlive $script:state }
+                Invoke-Watchdog
+                if ($script:cleanups -ne 1 -or $null -ne $script:state -or $script:locked) { throw 'Watchdog retained dead established guardian before recovery expiry.' }
+            }
+            New-Fixture; $script:cleanups = 0
+            foreach ($property in @('guardianPid', 'guardianStartUtc', 'guardianReady', 'networkRecovery')) { $script:state.PSObject.Properties.Remove($property) }
+            Invoke-Watchdog
+            if ($script:cleanups -ne 0 -or $null -eq $script:state) { throw 'Watchdog removed valid pre-guardian initialization.' }
+            New-Fixture; $script:cleanups = 0; $script:state.guardianReady = $false; $script:state.PSObject.Properties.Remove('guardianStartUtc')
+            Invoke-Watchdog
+            if ($script:cleanups -ne 1 -or $null -ne $script:state) { throw 'Incomplete recorded guardian identity bypassed watchdog.' }
+        } finally { Set-Item Function:Remove-RunnerInstance $cleanup }
     }
     Check 'recorded guardian without recovery journal cannot use precreation exemption' {
         New-Fixture; $script:state.PSObject.Properties.Remove('networkRecovery')
