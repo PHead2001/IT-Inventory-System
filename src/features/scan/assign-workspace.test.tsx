@@ -747,6 +747,110 @@ it('drops a late candidate-page response after the batch destination changes', a
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['unavailable', 'context'],
+  ['unavailable', 'next'],
+  ['unavailable', 'finish'],
+  ['failed', 'context'],
+  ['failed', 'next'],
+  ['failed', 'finish'],
+] as const)(
+  'restores an unrequested confirmed receipt, then preserves the attempted %s read after %s without another assignment',
+  async (outcome, resetAction) => {
+    const saved = await mocks.submit();
+    mocks.submit.mockClear();
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    const raw = sessionStorage.getItem(batchKey(scope));
+    original.unmount();
+    mocks.find.mockClear();
+    mocks.inspect.mockClear();
+    let complete!: (value: null) => void;
+    let fail!: (reason: Error) => void;
+    mocks.receipt.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        complete = resolve;
+        fail = reject;
+      }),
+    );
+    render(<AssignmentWorkspace {...props} />);
+    const latest = await screen.findByRole('region', {
+      name: 'Latest assignment receipt',
+    });
+    expect(latest).toHaveTextContent('Assignment confirmed · Adapters');
+    expect(latest).toHaveTextContent('Receipt details have not been loaded.');
+    expect(latest).not.toHaveTextContent(/could not be loaded|unavailable/);
+    expect(mocks.receipt).not.toHaveBeenCalled();
+    expect(mocks.find).not.toHaveBeenCalled();
+    expect(mocks.inspect).not.toHaveBeenCalled();
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(
+      document.querySelectorAll(`a[href="/history/events/quantity/${id(8)}"]`),
+    ).toHaveLength(1);
+    const reload = screen.getByRole('button', {
+      name: 'Reload committed receipt',
+    });
+    fireEvent.click(reload);
+    expect(reload).toBeDisabled();
+    expect(latest).toHaveTextContent('Loading receipt details…');
+    expect(latest).not.toHaveTextContent('have not been loaded');
+    await act(async () => {
+      if (outcome === 'unavailable') complete(null);
+      else fail(new Error('receipt read failed'));
+    });
+    expect(latest).toHaveTextContent(
+      outcome === 'unavailable'
+        ? 'Receipt details are unavailable.'
+        : 'Receipt details could not be loaded.',
+    );
+    expect(latest).not.toHaveTextContent('have not been loaded');
+    expect(latest).toHaveTextContent('The assignment remains confirmed');
+    expect(reload).toBeEnabled();
+    expect(sessionStorage.getItem(batchKey(scope))).toBe(raw);
+    if (resetAction === 'context') {
+      fireEvent.change(
+        screen.getByLabelText('Ticket number reference (optional)'),
+        {
+          target: { value: 'TICKET-CHANGED' },
+        },
+      );
+    } else {
+      fireEvent.click(
+        screen.getByRole('button', {
+          name:
+            resetAction === 'next' ? 'Rescan / choose another' : 'Finish batch',
+        }),
+      );
+    }
+    expect(latest).toHaveTextContent('Assignment confirmed · Adapters');
+    expect(latest).toHaveTextContent(
+      'Event receipt details could not be loaded.',
+    );
+    expect(latest).not.toHaveTextContent('have not been loaded');
+    const afterReset = sessionStorage.getItem(batchKey(scope));
+    mocks.receipt.mockResolvedValueOnce(saved.custody);
+    fireEvent.click(reload);
+    await screen.findByRole('region', { name: 'Committed custody receipt' });
+    expect(mocks.receipt).toHaveBeenCalledTimes(2);
+    for (const call of [1, 2])
+      expect(mocks.receipt).toHaveBeenNthCalledWith(call, {
+        kind: 'quantity',
+        entityId: candidate.id,
+        eventId: id(8),
+        expectedActorId: props.actorId,
+      });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(batchKey(scope))).toBe(afterReset);
+    expect(readBatch(scope).value?.entries).toHaveLength(1);
+    expect(readBatch(scope).value?.entries[0]).toMatchObject({
+      status: 'success',
+      eventId: id(8),
+    });
+  },
+);
+
 it('keeps a known commit visible when receipt details fail and reloads only its exact authorized event', async () => {
   const saved = await mocks.submit();
   mocks.submit.mockClear();
@@ -756,6 +860,9 @@ it('keeps a known commit visible when receipt details fail and reloads only its 
   await inspect();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await screen.findByText('Assignment confirmed · Adapters');
+  expect(
+    screen.getByRole('region', { name: 'Latest assignment receipt' }),
+  ).toHaveTextContent('Event receipt details could not be loaded.');
   expect(screen.getByText(/Reviewed operation:/)).toHaveTextContent(
     'Closet / Red → Headquarters',
   );

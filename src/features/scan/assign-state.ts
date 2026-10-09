@@ -26,6 +26,7 @@ export type AssignState = {
   command: AssignmentCommand | null;
   receipt: {
     result: AssignmentSuccess;
+    detailsUnrequested?: boolean;
     name: string;
     sourceName: string;
     siteName: string;
@@ -76,6 +77,7 @@ export type AssignEvent =
   | { type: 'unknown'; message: string }
   | { type: 'rejected'; message: string }
   | { type: 'committed'; result: AssignmentSuccess }
+  | { type: 'receipt-read-started'; eventId: string }
   | {
       type: 'receipt';
       eventId: string;
@@ -115,6 +117,13 @@ export function assignReducer(
   if (event.type === 'unknown')
     return unresolved
       ? { ...state, phase: 'unknown', message: event.message }
+      : state;
+  if (event.type === 'receipt-read-started')
+    return state.receipt?.result.eventId === event.eventId
+      ? {
+          ...state,
+          receipt: { ...state.receipt, detailsUnrequested: false },
+        }
       : state;
   if (event.type === 'receipt')
     return state.receipt?.result.eventId === event.eventId

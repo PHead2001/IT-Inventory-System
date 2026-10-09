@@ -361,6 +361,7 @@ function AssignmentFields({
     const snapshot = initialAssignState(restored.context);
     if (last?.kind && last.entityId)
       snapshot.receipt = {
+        detailsUnrequested: true,
         result: {
           ok: true,
           changed: true,
@@ -1613,8 +1614,14 @@ function AssignmentFields({
                 .
               </p>
               <p>
-                Saved successfully. Event receipt details could not be loaded;
-                current holdings are not receipt balances.
+                {receiptLoading
+                  ? 'Saved successfully. Loading receipt details…'
+                  : receiptIssue
+                    ? 'Saved successfully.'
+                    : state.receipt.detailsUnrequested
+                      ? 'Saved successfully. Receipt details have not been loaded.'
+                      : 'Saved successfully. Event receipt details could not be loaded.'}{' '}
+                Current holdings are not receipt balances.
               </p>
 
               {state.receipt.result.eventId && (
@@ -1624,8 +1631,13 @@ function AssignmentFields({
                   disabled={receiptLoading}
                   onClick={async () => {
                     const receipt = state.receipt;
-                    if (!receipt?.result.eventId || receiptLoading) return;
+                    if (!alive() || !receipt?.result.eventId || receiptLoading)
+                      return;
                     const receiptToken = generation.current;
+                    dispatch({
+                      type: 'receipt-read-started',
+                      eventId: receipt.result.eventId,
+                    });
                     setReceiptLoading(true);
                     setReceiptIssue('');
                     try {
