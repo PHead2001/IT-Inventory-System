@@ -43,7 +43,11 @@ unchanged asset/quantity editors, real case-only asset tag edits, Receive defaul
 Move/Issue source counts and current-episode Return defaults with manual/cleared
 destinations and stale-form review. Unit/component tests cover malformed and
 ineligible origins, transport errors, unchanged grandfathered answers and exact
-microsecond comparison. Final UI acceptance also requires real populated screens
+microsecond comparison. Custody form regressions also reject resubmission after
+a definitive stale-version response before new props arrive, retain the draft
+through failed read refreshes, and require explicit latest-holdings adoption and
+renewed review before using a new version/request. Uncertain outcomes retain the
+original command for exact retry. Final UI acceptance also requires real populated screens
 at desktop and 390 px in Full/Reduced motion, with captures on the validated
 candidate. Local code/test additions do not establish that browser acceptance.
 

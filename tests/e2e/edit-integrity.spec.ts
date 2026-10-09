@@ -59,7 +59,7 @@ test('an unchanged individual asset offers Close, while a case-only tag edit cre
       page.getByRole('heading', { name: 'Inventory', exact: true }),
     ).toBeVisible();
     await page.goto('/inventory/assets/' + assetId);
-    const edit = await openRecordTask(page, 'Edit details');
+    const edit = await openRecordTask(page, 'Edit asset metadata');
     await expect(edit.getByText('Nothing to save.')).toBeVisible();
     await expect(
       edit.getByRole('button', { name: 'Confirm save' }),
@@ -79,7 +79,7 @@ test('an unchanged individual asset offers Close, while a case-only tag edit cre
           .single()
       ).data,
     ).toEqual(before.data);
-    const correction = await openRecordTask(page, 'Edit details');
+    const correction = await openRecordTask(page, 'Edit asset metadata');
     await correction
       .getByLabel('Asset tag', { exact: true })
       .fill(`00aB-${suffix}`);

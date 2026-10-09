@@ -143,6 +143,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   );
   const [initial] = useState(values);
   const [uncertain, setUncertain] = useState(false);
+  const [rejectedVersion, setRejectedVersion] = useState<string | null>(null);
   const inFlight = useRef(false);
   const submitted = useRef<Parameters<typeof submitCustody>[0] | null>(null);
   const completed = state?.ok === true;
@@ -153,7 +154,17 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     uncertain,
     completed,
   });
-  const stale = latest.version !== version;
+  const newerSnapshot = latest.version !== version;
+  // A definitive stale rejection remains blocking even when input edits clear
+  // its message or a failed refresh leaves the old props in place.
+  const stale = newerSnapshot || rejectedVersion === version;
+  const refreshHoldings = () => {
+    try {
+      router.refresh();
+    } catch {
+      // Keep the rejected baseline blocked and let the user retry this read.
+    }
+  };
   const update = (key: keyof typeof values, value: string) => {
     if (pending || uncertain || completed || inFlight.current) return;
     setValues((old) => ({ ...old, [key]: value }));
@@ -402,6 +413,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           setReviewed(null);
           submitted.current = null;
           setReceipt(null);
+          if (result.code === 'P1002') {
+            setRejectedVersion(version);
+            refreshHoldings();
+          }
         }
       } catch {
         setUncertain(true);
@@ -823,19 +838,28 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       {stale && !uncertain && !completed && (
         <div role="alert">
           <p>
-            This record changed. Review the latest holdings before submitting;
-            your entries are retained.
+            {newerSnapshot
+              ? 'This record changed. Review the latest holdings before submitting; your entries are retained.'
+              : 'The latest holdings have not loaded. Refresh to try again; your entries are retained.'}
           </p>
           <Button
             type="button"
             variant="outline"
+            disabled={pending || actorMismatch}
             onClick={() => {
+              if (!newerSnapshot) {
+                refreshHoldings();
+                return;
+              }
               setBaseline(latest);
+              setRejectedVersion(null);
               setReviewed(null);
               setState(null);
             }}
           >
-            Review latest holdings
+            {newerSnapshot
+              ? 'Review latest holdings'
+              : 'Refresh latest holdings'}
           </Button>
         </div>
       )}

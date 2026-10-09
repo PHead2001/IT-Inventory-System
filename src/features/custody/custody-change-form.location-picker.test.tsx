@@ -4,7 +4,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { CustodyChangeForm } from './custody-change-form';
 import { submitCustody } from './actions';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 vi.mock('./actions', () => ({ submitCustody: vi.fn() }));
 
 const id = (value: number) =>
@@ -34,7 +35,10 @@ const site = {
   version: '1',
 };
 
-beforeEach(() => vi.mocked(submitCustody).mockReset());
+beforeEach(() => {
+  vi.mocked(submitCustody).mockReset();
+  refresh.mockReset();
+});
 
 it('suggests a verified Return origin once, preserves a manual choice and explicit clear through refresh', async () => {
   const user = userEvent.setup();
@@ -221,6 +225,148 @@ it('invalidates a stale Return review and preserves explicit clearing when revie
   ).toHaveTextContent('Select a location');
   expect(submitCustody).not.toHaveBeenCalled();
 });
+
+it.each(['manual', 'cleared'] as const)(
+  'keeps a rejected Return blocked through failed refresh and preserves the %s destination until explicit latest review',
+  async (destination) => {
+    const user = userEvent.setup();
+    refresh.mockImplementationOnce(() => {
+      throw new Error('Refresh unavailable');
+    });
+    vi.mocked(submitCustody).mockResolvedValueOnce({
+      ok: false,
+      code: 'P1002',
+      message: 'This record changed.',
+    });
+    const props = {
+      actorId: id(9),
+      kind: 'asset' as const,
+      action: 'return' as const,
+      entityId: id(4),
+      version: '80',
+      locations: [rack, drawer],
+      sites: [site],
+      currentSite: site,
+      returnSuggestion: {
+        assetId: id(4),
+        assetVersion: '80',
+        sourceEventId: id(6),
+        locationId: rack.id,
+        status: 'suggested' as const,
+      },
+    };
+    const view = render(<CustodyChangeForm {...props} />);
+    const picker = screen.getByRole('combobox', { name: 'Return to storage' });
+    await user.click(picker);
+    await user.type(
+      screen.getByRole('combobox', { name: 'Search locations' }),
+      'ITC-D01',
+    );
+    await user.click(screen.getByRole('option', { name: /Drawer 1/ }));
+    await user.type(
+      screen.getByLabelText('Ticket number reference (optional)'),
+      'Keep draft',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm return to storage' }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Review latest holdings' }),
+    ).toBeNull();
+    expect(screen.getByText(/latest holdings have not loaded/i)).toBeVisible();
+    expect(picker).toHaveTextContent('Drawer 1');
+    const rejected = vi.mocked(submitCustody).mock.calls[0][0] as {
+      requestId: string;
+    };
+    expect(
+      screen.getByRole('button', { name: 'Clear destination' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByLabelText('Ticket number reference (optional)'),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    ).toBeDisabled();
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh latest holdings' }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    // An unchanged snapshot cannot authorize another attempt.
+    view.rerender(<CustodyChangeForm {...props} />);
+    expect(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    ).toBeDisabled();
+    const latest = {
+      ...props,
+      version: '81',
+      returnSuggestion: { ...props.returnSuggestion, assetVersion: '81' },
+    };
+    view.rerender(<CustodyChangeForm {...latest} />);
+    expect(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    ).toBeDisabled();
+    expect(picker).toHaveTextContent('Drawer 1');
+    await user.click(
+      screen.getByRole('button', { name: 'Review latest holdings' }),
+    );
+    expect(picker).toHaveTextContent('Drawer 1');
+    expect(
+      screen.getByLabelText('Ticket number reference (optional)'),
+    ).toHaveValue('Keep draft');
+    expect(
+      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    ).toBeNull();
+    if (destination === 'cleared') {
+      await user.click(
+        screen.getByRole('button', { name: 'Clear destination' }),
+      );
+      view.rerender(<CustodyChangeForm {...latest} version="82" />);
+      expect(picker).toHaveTextContent('Select a location');
+      await user.click(
+        screen.getByRole('button', { name: 'Review latest holdings' }),
+      );
+      expect(picker).toHaveTextContent('Select a location');
+      await user.click(picker);
+      await user.type(
+        screen.getByRole('combobox', { name: 'Search locations' }),
+        'ITC-D01',
+      );
+      await user.click(screen.getByRole('option', { name: /Drawer 1/ }));
+    }
+    vi.mocked(submitCustody).mockResolvedValueOnce({
+      ok: true,
+      entityId: id(4),
+      version: '83',
+      changed: true,
+    });
+    await user.click(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    );
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm return to storage' }),
+    );
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+    const renewed = vi.mocked(submitCustody).mock.calls[1][0] as {
+      requestId: string;
+      payload: Record<string, unknown>;
+    };
+    expect(renewed.requestId).not.toBe(rejected.requestId);
+    expect(renewed.payload).toMatchObject({
+      expected_version: destination === 'cleared' ? '82' : '81',
+      destination_location_id: drawer.id,
+      reference: 'Keep draft',
+    });
+  },
+);
 
 it('shows every Issue source balance before selection and updates amounts without selecting again', async () => {
   const user = userEvent.setup();
