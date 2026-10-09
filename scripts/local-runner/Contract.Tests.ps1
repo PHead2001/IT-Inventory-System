@@ -54,6 +54,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regres
 if ($LASTEXITCODE -ne 0) { throw 'Network.Recovery.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Integration.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Failure.Observation.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Failure.Observation.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Probe.Job.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Probe.Job.Tests.ps1 failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Guardian.Process.Tests.ps1')

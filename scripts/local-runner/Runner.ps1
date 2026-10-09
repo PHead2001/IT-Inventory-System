@@ -192,8 +192,12 @@ function Assert-SessionAlive($State) {
     # This wait is never called under the state mutex. Only the guardian repairs.
     while ($true) {
         $now = Get-RunnerRecoveryNow
-        if ($now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
-            (Test-RunnerSessionStopRequested $State)) { throw 'Session deadline or Stop reached.' }
+        $deadlineReached = $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
+        $stopReason = 'unavailable'
+        if ($deadlineReached -or (Test-RunnerSessionStopRequested $State ([ref]$stopReason))) {
+            $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
+            throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-initial' $reason $State $now $stopReason '' @{ deadlineReached = $deadlineReached }))
+        }
         Save-Heartbeat $State
         $current = Get-RunnerState
         if ($null -eq $current -or $current.vmName -cne $State.vmName -or
@@ -201,14 +205,25 @@ function Assert-SessionAlive($State) {
         # Heartbeat may wait for the mutex while the guardian advances progress.
         # Evaluate the freshly read journal against a later clock sample.
         $now = Get-RunnerRecoveryNow
-        if ($now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime() -or
-            (Test-RunnerSessionStopRequested $current)) { throw 'Session deadline or Stop reached.' }
+        $deadlineReached = $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
+        $stopReason = 'unavailable'
+        if ($deadlineReached -or (Test-RunnerSessionStopRequested $current ([ref]$stopReason))) {
+            $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
+            throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-current' $reason $current $now $stopReason '' @{ deadlineReached = $deadlineReached }))
+        }
         if ($current.PSObject.Properties.Name -notcontains 'networkRecovery') {
             if ($current.PSObject.Properties.Name -contains 'guardianPid') { throw 'Recorded guardian lacks its recovery journal.' }
             return # Pre-guardian setup only.
         }
-        if (-not (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc) -or
-            $current.networkRecovery.phase -ceq 'failed' -or (Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { throw 'Session network guardian failed or expired.' }
+        $guardianAlive = Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc
+        $expiry = ''
+        $failureReason = if (-not $guardianAlive) { 'guardian-identity' }
+            elseif ($current.networkRecovery.phase -ceq 'failed') { 'guardian-failed' }
+            elseif (($expiry = Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { 'recovery-expiry' }
+            else { '' }
+        if ($failureReason) {
+            throw (New-RunnerObservedFailure 'Session network guardian failed or expired.' (New-RunnerFailureObservation 'session-guardian' $failureReason $current $now '' $expiry @{ guardianAlive = [bool]$guardianAlive }))
+        }
         if (($current.PSObject.Properties.Name -contains 'phase' -and $current.phase -ceq 'sealed-off') -or $current.networkRecovery.phase -ceq 'sealed-preparation') {
             Assert-RunnerSealedPreparation $current $now
             return
@@ -1366,13 +1381,21 @@ function Invoke-Watchdog {
             $guardianRecorded = $state.PSObject.Properties.Name -contains 'guardianPid' -or $state.PSObject.Properties.Name -contains 'guardianStartUtc'
             $guardianDead = $guardianRecorded -and ($state.PSObject.Properties.Name -notcontains 'guardianPid' -or
                 $state.PSObject.Properties.Name -notcontains 'guardianStartUtc' -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc))
-            $recoveryExpired = $state.PSObject.Properties.Name -contains 'networkRecovery' -and (Get-RunnerRecoveryExpiry $state.networkRecovery (Get-RunnerRecoveryNow))
+            $expiry = ''
+            $recoveryExpired = $state.PSObject.Properties.Name -contains 'networkRecovery' -and ($expiry = Get-RunnerRecoveryExpiry $state.networkRecovery (Get-RunnerRecoveryNow))
             $sealedInvalid = $false
+            $sealedFailure = $null
             if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or
                 ($state.PSObject.Properties.Name -contains 'networkRecovery' -and $state.networkRecovery.phase -ceq 'sealed-preparation')) {
-                try { Assert-RunnerSealedPreparation $state (Get-RunnerRecoveryNow) } catch { $sealedInvalid = $true }
+                try { Assert-RunnerSealedPreparation $state (Get-RunnerRecoveryNow) } catch { $sealedInvalid = $true; $sealedFailure = $_ }
             }
-            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead -or $recoveryExpired -or $sealedInvalid) {
+            $decisionUtc = [DateTime]::UtcNow
+            $deadlineReached = $decisionUtc -ge $deadline
+            if ($deadlineReached -or -not $ownerAlive -or $guardianDead -or $recoveryExpired -or $sealedInvalid) {
+                Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $state $decisionUtc '' $expiry @{
+                    deadlineReached = $deadlineReached; ownerAlive = [bool]$ownerAlive; guardianRecorded = [bool]$guardianRecorded
+                    guardianDead = [bool]$guardianDead; recoveryExpired = [bool]$recoveryExpired; sealedInvalid = [bool]$sealedInvalid
+                } -Failure $sealedFailure
                 if ($state.PSObject.Properties.Name -contains 'networkRecovery') {
                     $state.networkRecovery.generation++; $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'watchdog-expired'
                     Write-RunnerJson $script:RunnerStatePath $state
@@ -1510,7 +1533,10 @@ try { switch ($Action) {
             $mutex = Enter-RunnerLock
             try {
                 $current = Get-RunnerState
-                if ($null -ne $current -and $current.vmName -ceq $SessionName) { Remove-RunnerInstance $current }
+                if ($null -ne $current -and $current.vmName -ceq $SessionName) {
+                    Write-RunnerCleanupObservation 'guardian-catch' 'guard-exception' $current ([DateTime]::UtcNow) -Failure $_
+                    Remove-RunnerInstance $current
+                }
             } finally { Exit-RunnerLock $mutex }
             throw
         } finally { Stop-RunnerRecoveryProbe }

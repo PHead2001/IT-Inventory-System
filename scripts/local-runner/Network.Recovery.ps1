@@ -396,7 +396,10 @@ function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateS
         if ($null -eq $state) { return [pscustomobject]@{ continue = $false; outcome = $null } }
         if (-not (Test-RunnerRecoveryGeneration $state $Binding $Generation $Action)) { return [pscustomobject]@{ continue = $true; outcome = $null } }
         $r = $state.networkRecovery
-        if (Get-RunnerRecoveryExpiry $r (Get-RunnerRecoveryNow)) {
+        $decisionUtc = Get-RunnerRecoveryNow
+        $expiry = Get-RunnerRecoveryExpiry $r $decisionUtc
+        if ($expiry) {
+            Write-RunnerCleanupObservation 'recovery-dispatch' 'dispatch-deadline' $state $decisionUtc '' $expiry
             $r.phase = 'failed'; $r.generation++; $r.failure = 'dispatch-deadline'; Write-RunnerJson $script:RunnerStatePath $state
             Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null }
         }
@@ -415,6 +418,7 @@ function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateS
                 Write-RunnerJson $script:RunnerStatePath $state
                 return [pscustomobject]@{ continue = $true; outcome = $null }
             }
+            Write-RunnerCleanupObservation 'recovery-dispatch' 'provider-uncertain' $state ([DateTime]::UtcNow)
             $r.phase = 'failed'; $r.generation++; $r.failure = 'provider-uncertain'; Write-RunnerJson $script:RunnerStatePath $state
             Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null }
         }
@@ -489,13 +493,17 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         $expectsConnected = $recovery.phase -cin @('healthy', 'resuming', 'probing') -or
             ($recovery.phase -ceq 'connecting' -and $null -ne $Outcome -and $Outcome.generation -eq $recovery.generation -and $Outcome.operation -ceq 'connect' -and $Outcome.success)
         $connectivityLost = -not $identityChanged -and $expectsConnected -and [string]::IsNullOrEmpty([string]$adapter.SwitchName)
-        $stop = Test-RunnerSessionStopRequested $state
+        $stopReason = 'unavailable'
+        $stop = Test-RunnerSessionStopRequested $state ([ref]$stopReason)
         $ownerDead = -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)
         $plan = Get-RunnerNetworkRecoveryPlan $recovery $observation $now ([string]$vm.State) $Outcome -Stop:$stop -OwnerDead:$ownerDead -IdentityChanged:$identityChanged -ConnectivityLost:$connectivityLost
         $state.networkRecovery = $plan.recovery
         if ($plan.recovery.phase -ceq 'healthy') { $state.networkFingerprint = $plan.recovery.fingerprint }
         Write-RunnerJson $script:RunnerStatePath $state
-        if ($plan.action -ceq 'cleanup') { Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null } }
+        if ($plan.action -ceq 'cleanup') {
+            Write-RunnerCleanupObservation 'recovery-plan' 'recovery-cleanup' $state $now $stopReason '' @{ ownerAlive = -not $ownerDead }
+            Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null }
+        }
         if ($plan.action -ceq 'probe') { $probe = $true; $probeState = $state }
         elseif ($plan.action -cin @('connect', 'resume')) {
             # No dispatch here: slow ACL preflight is followed by a new coherent
@@ -517,6 +525,7 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
                 }
                 # No provider cancellation/retry claim. Canonical cleanup can
                 # itself refuse; retain protected state/files in that case.
+                Write-RunnerCleanupObservation 'recovery-plan' 'provider-uncertain' $state ([DateTime]::UtcNow)
                 $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'provider-uncertain'; $state.networkRecovery.generation++
                 Write-RunnerJson $script:RunnerStatePath $state
                 Remove-RunnerInstance $state
