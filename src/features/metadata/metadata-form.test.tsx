@@ -19,7 +19,9 @@ import {
 } from './metadata-form';
 import type { MetadataForm as Form } from './contracts';
 import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
+import { TaskStateContext } from '@/features/inventory/components/task-state';
 import { readCreation, writeCreation } from './creation-recovery';
+import { readEdit } from './edit-recovery';
 
 const { push, refresh, replace } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -156,6 +158,564 @@ describe('published metadata form', () => {
       form: form(),
       draftForm: form(),
     });
+  });
+  it('closes an unchanged normalized edit without confirmation or a mutation', async () => {
+    const user = userEvent.setup();
+    render(
+      <MetadataForm
+        {...props}
+        item={{
+          ...item,
+          customValues: {
+            [fieldId]: { value: false, validated_revision_id: firstRevision },
+          },
+        }}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    const name = await screen.findByLabelText('Name');
+    await waitFor(() => expect(name).toBeEnabled());
+    expect(screen.getByText('Nothing to save.')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /Review details|Confirm save/ }),
+    ).toBeNull();
+    await user.clear(name);
+    await user.type(name, '  Cable  ');
+    expect(screen.getByText('Nothing to save.')).toBeVisible();
+    fireEvent.submit(screen.getByRole('form'));
+    expect(submitInventory).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+    expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it.each(['text', 'numeric', 'datetime'] as const)(
+    'reports equivalent %s input clean for navigation, unload and Close even when recovery storage fails',
+    async (variant) => {
+      const current = form();
+      if (variant === 'numeric')
+        current.published_definition.layout[0].controls.push({
+          id: otherCategory,
+          kind: 'builtin',
+          builtin: 'reorder_threshold',
+          width: 12,
+        });
+      if (variant === 'datetime')
+        current.published_definition.fields[0] = {
+          ...current.published_definition.fields[0],
+          type: 'datetime',
+          required: false,
+          label: 'Observed at',
+        };
+      const record = {
+        ...item,
+        reorderThreshold: variant === 'numeric' ? 5 : null,
+        customValues: {
+          [fieldId]: {
+            value: variant === 'datetime' ? '2026-10-09T07:00:00-05:00' : false,
+            validated_revision_id: firstRevision,
+          },
+        },
+      };
+      const report = vi.fn();
+      const navigation = vi.fn((event: React.MouseEvent<HTMLAnchorElement>) =>
+        event.preventDefault(),
+      );
+      const storage = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(() => {
+          throw new DOMException('quota');
+        });
+      try {
+        render(
+          <TaskStateContext.Provider value={report}>
+            <Link href="/sites" onClick={navigation}>
+              Sites
+            </Link>
+            <MetadataForm
+              {...props}
+              item={record}
+              forms={{ [categoryId]: current }}
+            />
+          </TaskStateContext.Provider>,
+        );
+        await waitFor(() =>
+          expect(screen.getByLabelText('Name')).toBeEnabled(),
+        );
+        if (variant === 'text')
+          fireEvent.change(screen.getByLabelText('Name'), {
+            target: { value: '  Cable  ' },
+          });
+        else if (variant === 'numeric')
+          fireEvent.change(
+            screen.getByLabelText('Reorder threshold (optional)'),
+            { target: { value: '05' } },
+          );
+        else {
+          fireEvent.change(screen.getByLabelText('Display timezone'), {
+            target: { value: 'UTC' },
+          });
+          fireEvent.change(screen.getByLabelText('Time'), {
+            target: { value: '12:00:00.000' },
+          });
+        }
+        expect(screen.getByText('Nothing to save.')).toBeVisible();
+        const unload = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(unload);
+        expect(unload.defaultPrevented).toBe(false);
+        expect(report).toHaveBeenLastCalledWith({
+          dirty: false,
+          pending: false,
+          uncertain: false,
+          completed: false,
+        });
+        fireEvent.click(screen.getByRole('link', { name: 'Sites' }));
+        expect(navigation).toHaveBeenCalledOnce();
+        expect(
+          screen.queryByRole('dialog', { name: 'Leave this edit?' }),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(screen.queryByText('Discard changes?')).toBeNull();
+        expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+        expect(submitInventory).not.toHaveBeenCalled();
+      } finally {
+        storage.mockRestore();
+      }
+    },
+  );
+  it('guards real edits and marks a reverted normalized form clean when switching tasks', async () => {
+    render(
+      <TaskWorkspace
+        choices={[
+          { id: 'edit', label: 'Edit equipment' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Cable"
+      >
+        {(id) =>
+          id === 'edit' ? (
+            <MetadataForm
+              {...props}
+              item={{
+                ...item,
+                customValues: {
+                  [fieldId]: {
+                    value: false,
+                    validated_revision_id: firstRevision,
+                  },
+                },
+              }}
+              forms={{ [categoryId]: form() }}
+            />
+          ) : (
+            <p>Other task content</p>
+          )
+        }
+      </TaskWorkspace>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Real change' },
+    });
+    const realUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(realUnload);
+    expect(realUnload.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+    expect(
+      screen.getByRole('alertdialog', { name: 'Discard task draft?' }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Stay with this task' }),
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: ' Cable ' },
+    });
+    expect(screen.getByText('Nothing to save.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+    expect(
+      screen.queryByRole('alertdialog', { name: 'Discard task draft?' }),
+    ).toBeNull();
+    expect(screen.getByText('Other task content')).toBeVisible();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it.each(['close', 'switch', 'reset'] as const)(
+    'finalizes normalized no-op recovery only on explicit task %s and reopens current record values',
+    async (exit) => {
+      const original = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const scope = {
+        origin: window.location.origin,
+        backend: props.recoveryBackend,
+        actor: props.actorId,
+        kind: props.kind,
+        entity: item.id,
+        task: 'metadata' as const,
+      };
+      const workspace = (record: typeof original) => (
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm
+                {...props}
+                item={record}
+                forms={{ [categoryId]: form() }}
+              />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>
+      );
+      const view = render(workspace(original));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: ' Cable ' },
+      });
+      expect(screen.getByText('Nothing to save.')).toBeVisible();
+      const retained = readEdit(scope).envelope;
+      expect(retained).toMatchObject({
+        status: 'editing',
+        baseline: { version: 1 },
+        inputs: { core: { name: ' Cable ' } },
+      });
+      const cleanUnload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(cleanUnload);
+      expect(cleanUnload.defaultPrevented).toBe(false);
+      expect(readEdit(scope).envelope).toEqual(retained);
+      fireEvent.click(
+        screen.getByRole('button', {
+          name:
+            exit === 'close'
+              ? 'Close task'
+              : exit === 'switch'
+                ? 'Other task'
+                : 'Close',
+        }),
+      );
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(screen.queryByLabelText('Name')).toBeNull();
+      expect(readEdit(scope).envelope).toMatchObject({
+        status: 'discarded',
+        instance: retained!.instance,
+        inputs: null,
+        command: null,
+      });
+      const latest = { ...original, name: 'Latest cable', version: 2 };
+      view.rerender(workspace(latest));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      expect(screen.getByLabelText('Name')).toHaveValue('Latest cable');
+      expect(screen.getByText('Nothing to save.')).toBeVisible();
+      // Reopening a terminal marker is pristine and does not allocate a new
+      // durable envelope. Its form Close still must tolerate repeated cleanup.
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByLabelText('Name')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      expect(screen.getByLabelText('Name')).toHaveValue('Latest cable');
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Real next edit' },
+      });
+      const renewed = readEdit(scope).envelope;
+      expect(renewed).toMatchObject({
+        status: 'editing',
+        baseline: { version: 2 },
+        inputs: { core: { name: 'Real next edit' } },
+      });
+      expect(renewed!.instance).not.toBe(retained!.instance);
+      expect(submitInventory).not.toHaveBeenCalled();
+    },
+  );
+  it('blocks a clean task switch when neither durable discard nor matching-envelope removal succeeds', async () => {
+    const record = {
+      ...item,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    render(
+      <TaskWorkspace
+        choices={[
+          { id: 'edit', label: 'Edit equipment' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Cable"
+      >
+        {(task) =>
+          task === 'edit' ? (
+            <MetadataForm
+              {...props}
+              item={record}
+              forms={{ [categoryId]: form() }}
+            />
+          ) : (
+            <p>Other task content</p>
+          )
+        }
+      </TaskWorkspace>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: ' Cable ' },
+    });
+    expect(sessionStorage.length).toBe(1);
+    const retained = sessionStorage.getItem(sessionStorage.key(0)!);
+    const write = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('quota');
+      });
+    const remove = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(() => {
+        throw new DOMException('storage blocked');
+      });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+      expect(screen.getByLabelText('Name')).toHaveValue(' Cable ');
+      expect(screen.queryByText('Other task content')).toBeNull();
+      expect(screen.getByText(/Discard could not be recorded/)).toBeVisible();
+      expect(sessionStorage.getItem(sessionStorage.key(0)!)).toBe(retained);
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    } finally {
+      write.mockRestore();
+      remove.mockRestore();
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+    expect(screen.getByText('Other task content')).toBeVisible();
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('uses matching-envelope removal for a clean form Close reset when terminal-marker storage fails', async () => {
+    const record = {
+      ...item,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    render(
+      <TaskWorkspace
+        choices={[{ id: 'edit', label: 'Edit equipment' }]}
+        context="Cable"
+      >
+        {() => (
+          <MetadataForm
+            {...props}
+            item={record}
+            forms={{ [categoryId]: form() }}
+          />
+        )}
+      </TaskWorkspace>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: ' Cable ' },
+    });
+    expect(sessionStorage.length).toBe(1);
+    const write = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('quota');
+      });
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByLabelText('Name')).toBeNull();
+      expect(sessionStorage.length).toBe(0);
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    } finally {
+      write.mockRestore();
+    }
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('refuses clean task cleanup when another writer replaced its editing recovery envelope', async () => {
+    const record = {
+      ...item,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    render(
+      <TaskWorkspace
+        choices={[
+          { id: 'edit', label: 'Edit equipment' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Cable"
+      >
+        {(task) =>
+          task === 'edit' ? (
+            <MetadataForm
+              {...props}
+              item={record}
+              forms={{ [categoryId]: form() }}
+            />
+          ) : (
+            <p>Other task content</p>
+          )
+        }
+      </TaskWorkspace>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: ' Cable ' },
+    });
+    const key = sessionStorage.key(0)!;
+    const replacement = JSON.parse(sessionStorage.getItem(key)!);
+    replacement.sequence++;
+    replacement.inputs.core.name = 'Newer writer entry';
+    const raw = JSON.stringify(replacement);
+    sessionStorage.setItem(key, raw);
+    fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+    expect(screen.getByLabelText('Name')).toHaveValue(' Cable ');
+    expect(screen.queryByText('Other task content')).toBeNull();
+    expect(screen.getByText(/Discard could not be recorded/)).toBeVisible();
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it('keeps pending and uncertain edit requests guarded when refreshed values match the submitted intent', async () => {
+    let settle!: (value: Awaited<ReturnType<typeof submitInventory>>) => void;
+    vi.mocked(submitInventory)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '2',
+        changed: false,
+      });
+    const original = {
+      ...item,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    const latest = { ...original, version: 2, name: 'Server now matches' };
+    const workspace = (record: typeof original) => (
+      <TaskWorkspace
+        choices={[
+          { id: 'edit', label: 'Edit equipment' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Cable"
+      >
+        {() => (
+          <MetadataForm
+            {...props}
+            item={record}
+            forms={{ [categoryId]: form() }}
+          />
+        )}
+      </TaskWorkspace>
+    );
+    const view = render(workspace(original));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+    await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: latest.name },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+    const command = vi.mocked(submitInventory).mock.calls[0][0];
+    expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Other task' })).toBeDisabled();
+    const pendingUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(pendingUnload);
+    expect(pendingUnload.defaultPrevented).toBe(true);
+    await act(async () =>
+      settle({
+        ok: false,
+        kind: 'unexpected',
+        code: 'unexpected',
+        message: 'Unknown outcome',
+      }),
+    );
+    view.rerender(workspace(latest));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same save' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.queryByText('Nothing to save.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Other task' })).toBeDisabled();
+    const uncertainUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(uncertainUnload);
+    expect(uncertainUnload.defaultPrevented).toBe(true);
+    const key = Object.keys(sessionStorage).find((key) =>
+      key.startsWith('inventory-metadata-edit-v1:'),
+    )!;
+    expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+      status: 'submitted',
+      command,
+    });
+    vi.mocked(refreshMetadataRecord).mockResolvedValue({
+      ok: true,
+      record: latest,
+      form: form(),
+      draftForm: form(),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+    await screen.findByText('Nothing changed.');
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(command);
+    const acknowledgedUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(acknowledgedUnload);
+    expect(acknowledgedUnload.defaultPrevented).toBe(false);
+  });
+  it('acknowledges a server no-op truthfully and completes its durable receipt without claiming an edit', async () => {
+    vi.mocked(submitInventory).mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '1',
+      changed: false,
+    });
+    render(
+      <MetadataForm
+        {...props}
+        item={{
+          ...item,
+          customValues: {
+            [fieldId]: { value: false, validated_revision_id: firstRevision },
+          },
+        }}
+        forms={{ [categoryId]: form() }}
+      />,
+    );
+    const name = await screen.findByLabelText('Name');
+    await waitFor(() => expect(name).toBeEnabled());
+    fireEvent.change(name, {
+      target: { value: 'Representation accepted unchanged' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await screen.findByText('Nothing changed.');
+    expect(screen.queryByText('Details saved.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeEnabled();
+    expect(submitInventory).toHaveBeenCalledOnce();
+    const keys = Object.keys(sessionStorage).filter((key) =>
+      key.startsWith('inventory-metadata-edit-v1:'),
+    );
+    expect(keys).toHaveLength(1);
+    expect(JSON.parse(sessionStorage.getItem(keys[0])!).status).toBe('saved');
   });
   it('focuses an empty creation Name with a persistent associated error while preserving false answers', async () => {
     render(
@@ -1789,6 +2349,284 @@ describe('published metadata form', () => {
     });
     await screen.findByText('Details saved.');
   });
+  it.each(['quantity', 'asset', 'boolean', 'datetime'] as const)(
+    'retains a definitive stale %s convergence until current details are explicitly reviewed',
+    async (variant) => {
+      const current = form();
+      const kind = variant === 'asset' ? 'asset' : 'quantity';
+      current.published_definition.fields[0].applies_to = [kind];
+      if (variant === 'datetime')
+        current.published_definition.fields[0] = {
+          ...current.published_definition.fields[0],
+          type: 'datetime',
+          label: 'Observed at',
+          required: false,
+        };
+      const record = {
+        ...item,
+        ...(kind === 'asset'
+          ? {
+              assetTag: 'Cable-A',
+              serialNumber: null,
+              status: 'active' as const,
+            }
+          : {}),
+        customValues: {
+          [fieldId]: {
+            value: variant === 'datetime' ? '2026-10-08T12:00:00Z' : false,
+            validated_revision_id: firstRevision,
+          },
+        },
+      };
+      const latest = {
+        ...record,
+        version: 2,
+        name: ['quantity', 'asset'].includes(variant)
+          ? 'Converged'
+          : record.name,
+        customValues: {
+          [fieldId]: {
+            value:
+              variant === 'datetime'
+                ? '2026-10-09T07:00:00-05:00'
+                : variant === 'boolean',
+            validated_revision_id: firstRevision,
+          },
+        },
+      };
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'The record changed. Review your save.',
+      });
+      vi.mocked(refreshMetadataRecord).mockResolvedValue({
+        ok: true,
+        record: latest,
+        form: current,
+        draftForm: current,
+      });
+      render(
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? record : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  status: 'active',
+                  assetTag: 'Cable-A',
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />,
+      );
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      if (variant === 'boolean')
+        fireEvent.click(screen.getByLabelText('Inspected (required)'));
+      else if (variant === 'datetime') {
+        fireEvent.change(screen.getByLabelText('Display timezone'), {
+          target: { value: 'UTC' },
+        });
+        fireEvent.change(screen.getByLabelText('Date'), {
+          target: { value: '2026-10-09' },
+        });
+        fireEvent.change(screen.getByLabelText('Time'), {
+          target: { value: '12:00:00' },
+        });
+      } else
+        fireEvent.change(screen.getByLabelText('Name'), {
+          target: { value: 'Converged' },
+        });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      const accept = await screen.findByRole('button', {
+        name: 'Review current details',
+      });
+      await waitFor(() => expect(accept).toBeEnabled());
+      expect(submitInventory).toHaveBeenCalledOnce();
+      expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+      expect(vi.mocked(submitInventory).mock.calls[0][0]).toMatchObject({
+        payload: { expected_version: 1 },
+      });
+      expect(
+        screen.getByText('The record changed. Review your save.'),
+      ).toBeVisible();
+      expect(screen.queryByText('Nothing changed.')).toBeNull();
+      expect(screen.queryByText('Nothing to save.')).toBeNull();
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      const retained = JSON.parse(sessionStorage.getItem(key)!);
+      expect(retained).toMatchObject({
+        status: 'editing',
+        baseline: { version: 1 },
+        command: null,
+        completedRequestId: null,
+      });
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(true);
+      fireEvent.submit(screen.getByRole('form'));
+      expect(submitInventory).toHaveBeenCalledOnce();
+      fireEvent.click(accept);
+      await screen.findByText('Nothing to save.');
+      expect(
+        screen.queryByText('The record changed. Review your save.'),
+      ).toBeNull();
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'editing',
+        baseline: { version: 2 },
+        instance: retained.instance,
+        command: null,
+      });
+      const reviewedUnload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(reviewedUnload);
+      expect(reviewedUnload.defaultPrevented).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByText('Discard changes?')).toBeNull();
+      expect(submitInventory).toHaveBeenCalledOnce();
+    },
+  );
+  it.each(['quantity', 'asset'] as const)(
+    'requires explicit review when refreshed %s props converge to the draft',
+    async (kind) => {
+      const current = form();
+      current.published_definition.fields[0].applies_to = [kind];
+      const record = {
+        ...item,
+        ...(kind === 'asset'
+          ? { assetTag: null, serialNumber: null, status: 'active' as const }
+          : {}),
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const editor = (version: number, name: string) => (
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? { ...record, version, name } : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  version,
+                  name,
+                  status: 'active',
+                  assetTag: null,
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />
+      );
+      const { rerender } = render(editor(1, 'Cable'));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Converged' },
+      });
+      rerender(editor(2, 'Converged'));
+      const accept = await screen.findByRole('button', {
+        name: 'Review current details',
+      });
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        baseline: { version: 1 },
+        inputs: { core: { name: 'Converged' } },
+      });
+      expect(screen.queryByText('Nothing to save.')).toBeNull();
+      fireEvent.click(accept);
+      await screen.findByText('Nothing to save.');
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        baseline: { version: 2 },
+      });
+      expect(submitInventory).not.toHaveBeenCalled();
+    },
+  );
+  it('rebases a case-only asset tag edit after an independent stale change', async () => {
+    const current = form();
+    current.published_definition.fields[0].applies_to = ['asset'];
+    current.published_definition.layout[0].controls.push({
+      id: otherCategory,
+      kind: 'builtin',
+      builtin: 'asset_tag',
+      width: 12,
+    });
+    const asset = {
+      ...item,
+      status: 'active' as const,
+      assetTag: 'Cable-A',
+      serialNumber: null,
+      customValues: {
+        [fieldId]: { value: false, validated_revision_id: firstRevision },
+      },
+    };
+    const latest = { ...asset, version: 2, model: 'Independent model' };
+    vi.mocked(submitInventory)
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'domain',
+        code: 'stale_version',
+        message: 'Stale',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: asset.id,
+        version: '3',
+        changed: true,
+      });
+    vi.mocked(refreshMetadataRecord)
+      .mockResolvedValueOnce({
+        ok: true,
+        record: latest,
+        form: current,
+        draftForm: current,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        record: { ...latest, version: 3, assetTag: 'cable-a' },
+        form: current,
+        draftForm: current,
+      });
+    render(
+      <MetadataForm
+        {...props}
+        item={undefined}
+        kind="asset"
+        asset={asset}
+        forms={{ [categoryId]: current }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Asset tag')).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText('Asset tag'), {
+      target: { value: 'cable-a' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+    await screen.findByText('Details saved.');
+    expect(submitInventory).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(submitInventory).mock.calls[1][0]).toMatchObject({
+      operation: 'asset_update_v3',
+      payload: {
+        expected_version: 2,
+        asset_tag: 'cable-a',
+        model: 'Independent model',
+      },
+    });
+    const [first, second] = vi
+      .mocked(submitInventory)
+      .mock.calls.map(([command]) => command as { requestId: string });
+    expect(second.requestId).not.toBe(first.requestId);
+  });
   it('stops after another intervening stale rejection instead of looping', async () => {
     vi.mocked(submitInventory).mockResolvedValue({
       ok: false,
@@ -1886,56 +2724,71 @@ describe('published metadata form', () => {
       vi.mocked(submitInventory).mock.calls[1][0],
     );
   });
-  it('shows saved-refresh retry without replaying a confirmed commit', async () => {
-    vi.mocked(submitInventory).mockResolvedValue({
-      ok: true,
-      entityId: item.id,
-      version: '2',
-      changed: true,
-    });
-    vi.mocked(refreshMetadataRecord)
-      .mockResolvedValueOnce({ ok: false, message: 'Record read failed' })
-      .mockResolvedValueOnce({
+  it.each([true, false])(
+    'shows truthful acknowledged-refresh retry (changed=%s) without replaying a confirmed result',
+    async (changed) => {
+      vi.mocked(submitInventory).mockResolvedValue({
         ok: true,
-        record: { ...item, name: 'Saved name', version: 2 },
-        form: form(),
-        draftForm: form(),
+        entityId: item.id,
+        version: changed ? '2' : '1',
+        changed,
       });
-    render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
-    fireEvent.change(screen.getByLabelText('Name'), {
-      target: { value: 'Saved name' },
-    });
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: /^Review (details|quantity item|individual asset)$/,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: /^(Confirm save|Add quantity item|Add individual asset)$/,
-      }),
-    );
-    await waitFor(() =>
+      vi.mocked(refreshMetadataRecord)
+        .mockResolvedValueOnce({ ok: false, message: 'Record read failed' })
+        .mockResolvedValueOnce({
+          ok: true,
+          record: { ...item, name: 'Saved name', version: changed ? 2 : 1 },
+          form: form(),
+          draftForm: form(),
+        });
+      render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Saved name' },
+      });
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^Review (details|quantity item|individual asset)$/,
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /^(Confirm save|Add quantity item|Add individual asset)$/,
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', {
+            name: changed
+              ? 'Retry saved record refresh'
+              : 'Retry record refresh',
+          }),
+        ).toBeEnabled(),
+      );
       expect(
-        screen.getByRole('button', { name: 'Retry saved record refresh' }),
-      ).toBeEnabled(),
-    );
-    expect(
-      screen.queryByRole('button', { name: 'Retry same save' }),
-    ).toBeNull();
-    expect(screen.getByLabelText('Name')).toBeDisabled();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Retry saved record refresh' }),
-    );
-    await waitFor(() =>
+        screen.getAllByText(
+          changed ? /Metadata saved\./ : /Nothing changed\./,
+        )[0],
+      ).toBeVisible();
+      if (!changed) expect(screen.queryByText(/Metadata saved\./)).toBeNull();
       expect(
-        screen.getByRole('button', { name: 'Edit details' }),
-      ).toBeEnabled(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
-    expect(submitInventory).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText('Name')).toHaveValue('Saved name');
-  });
+        screen.queryByRole('button', { name: 'Retry same save' }),
+      ).toBeNull();
+      expect(screen.getByLabelText('Name')).toBeDisabled();
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: changed ? 'Retry saved record refresh' : 'Retry record refresh',
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Edit details' }),
+        ).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+      expect(submitInventory).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText('Name')).toHaveValue('Saved name');
+    },
+  );
   it('does not reuse conflict choices after a newer concurrent edit', async () => {
     const current = form();
     current.published_definition.layout[0].controls.push({
@@ -2126,18 +2979,14 @@ describe('published metadata form', () => {
       expect(screen.getByLabelText('Name')).toHaveValue('Cable');
       expect(screen.getByLabelText('Count')).toHaveValue('0');
       expect(screen.queryByRole('alert')).toBeNull();
-      fireEvent.click(
-        screen.getByRole('button', {
-          name: /^Review (details|quantity item|individual asset)$/,
-        }),
-      );
+      expect(screen.getByText('Nothing to save.')).toBeVisible();
       expect(
-        screen.getByRole('button', {
+        screen.queryByRole('button', {
           name: /^(Confirm save|Add quantity item|Add individual asset)$/,
         }),
-      ).toBeEnabled();
-      // Pristine Cancel also closes and clears review state without a prompt.
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      ).toBeNull();
+      // Pristine Close leaves no review or mutation and closes without a prompt.
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       expect(summary.parentElement).not.toHaveAttribute('open');
       expect(screen.queryByRole('dialog')).toBeNull();
       summary.parentElement!.setAttribute('open', '');
@@ -2411,11 +3260,7 @@ describe('published metadata form', () => {
         forms={{ [categoryId]: current }}
       />,
     );
-    expect(
-      screen.getByRole('button', {
-        name: /^Review (details|quantity item|individual asset)$/,
-      }),
-    ).toBeEnabled();
+    expect(screen.getByText('Nothing to save.')).toBeVisible();
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
       target: { value: 'Different long note' },
     });
@@ -2435,11 +3280,8 @@ describe('published metadata form', () => {
     fireEvent.change(screen.getByLabelText('Old note (required)'), {
       target: { value: 'Legacy long note' },
     });
-    expect(
-      screen.getByRole('button', {
-        name: /^Review (details|quantity item|individual asset)$/,
-      }),
-    ).toBeEnabled();
+    expect(screen.getByText('Nothing to save.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Confirm save' })).toBeNull();
   });
   it.each(['forbidden', 'idempotency_conflict', 'actor_changed'])(
     'keeps an unknown prior save unresolved when retry returns %s before receipt confirmation',
@@ -2907,6 +3749,106 @@ describe('existing edit recovery and review', () => {
       draftForm: form(),
     });
   });
+  it.each(['Done', 'Close task', 'Receive stock'])(
+    'allows one %s action after durable acknowledgement while the record refresh is still pending',
+    async (exit) => {
+      let acknowledge!: (
+        result: Awaited<ReturnType<typeof submitInventory>>,
+      ) => void;
+      let finishRead!: (
+        result: Awaited<ReturnType<typeof refreshMetadataRecord>>,
+      ) => void;
+      vi.mocked(submitInventory).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            acknowledge = resolve;
+          }),
+      );
+      vi.mocked(refreshMetadataRecord).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRead = resolve;
+          }),
+      );
+      render(
+        <TaskWorkspace
+          choices={[
+            { id: 'metadata', label: 'Edit details' },
+            { id: 'receive', label: 'Receive stock' },
+          ]}
+          context="Cable"
+        >
+          {(selected) =>
+            selected === 'metadata' ? (
+              <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+            ) : (
+              <p>Receive task opened</p>
+            )
+          }
+        </TaskWorkspace>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Durably saved name' },
+      });
+      fireEvent.click(screen.getByRole('checkbox'));
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Receive stock' }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      expect(screen.getByRole('form')).toBeVisible();
+      const request = vi.mocked(submitInventory).mock.calls[0][0] as {
+        requestId: string;
+      };
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'submitted',
+        command: { requestId: request.requestId },
+      });
+      await act(async () =>
+        acknowledge({
+          ok: true,
+          entityId: item.id,
+          version: '2',
+          changed: true,
+        }),
+      );
+      await screen.findByText('Details saved.');
+      expect(refreshMetadataRecord).toHaveBeenCalledOnce();
+      expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+        status: 'saved',
+        inputs: null,
+        command: null,
+        completedRequestId: request.requestId,
+      });
+      expect(screen.getByRole('button', { name: exit })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: exit }));
+      try {
+        expect(screen.queryByRole('form')).toBeNull();
+        if (exit === 'Receive stock')
+          expect(screen.getByText('Receive task opened')).toBeVisible();
+        else
+          expect(
+            screen.getByRole('button', { name: 'Edit details' }),
+          ).toHaveFocus();
+        expect(submitInventory).toHaveBeenCalledOnce();
+        expect(JSON.parse(sessionStorage.getItem(key)!)).toMatchObject({
+          status: 'saved',
+          completedRequestId: request.requestId,
+        });
+      } finally {
+        await act(async () =>
+          finishRead({ ok: false, message: 'Read unavailable' }),
+        );
+      }
+    },
+  );
   it.each(['quantity', 'asset'] as const)(
     'recovers dirty %s metadata through task unmount without adopting a stale baseline',
     async (kind) => {
@@ -3204,6 +4146,273 @@ describe('existing edit recovery and review', () => {
     render(<MetadataForm {...props} forms={{ [categoryId]: form() }} />);
     expect(screen.getByLabelText('Name')).toHaveValue('Private original draft');
   });
+  it.each([
+    ['actor', 'close'],
+    ['actor', 'switch'],
+    ['backend', 'close'],
+    ['backend', 'switch'],
+  ] as const)(
+    'allows explicit %s-stale task %s without changing scoped recovery and reopens the current scope',
+    async (scopeChange, exit) => {
+      const original = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const workspace = (changed: boolean) => (
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm
+                {...props}
+                actorId={
+                  changed && scopeChange === 'actor'
+                    ? otherCategory
+                    : props.actorId
+                }
+                recoveryBackend={
+                  changed && scopeChange === 'backend'
+                    ? 'https://other-backend.test'
+                    : props.recoveryBackend
+                }
+                item={
+                  changed
+                    ? { ...original, name: 'Current scope record', version: 2 }
+                    : original
+                }
+                forms={{ [categoryId]: form() }}
+              />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>
+      );
+      const view = render(workspace(false));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Original scope draft' },
+      });
+      const key = sessionStorage.key(0)!;
+      const retained = sessionStorage.getItem(key);
+      view.rerender(workspace(true));
+      expect(screen.getByText(/This task is hidden/)).toBeVisible();
+      expect(screen.queryByLabelText('Name')).toBeNull();
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: exit === 'close' ? 'Close task' : 'Other task',
+        }),
+      );
+      expect(screen.queryByText(/This task is hidden/)).toBeNull();
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(sessionStorage.getItem(key)).toBe(retained);
+      expect(sessionStorage.length).toBe(1);
+      if (exit === 'switch')
+        expect(screen.getByText('Other task content')).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      expect(screen.getByLabelText('Name')).toHaveValue('Current scope record');
+      expect(screen.getByText('Nothing to save.')).toBeVisible();
+      expect(sessionStorage.getItem(key)).toBe(retained);
+      expect(sessionStorage.length).toBe(1);
+      expect(submitInventory).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['actor', 'backend'] as const)(
+    'keeps pending and uncertain task exits blocked after a %s change and retains the original command',
+    async (scopeChange) => {
+      let settle!: (value: Awaited<ReturnType<typeof submitInventory>>) => void;
+      vi.mocked(submitInventory).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      );
+      const record = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const workspace = (changed: boolean) => (
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm
+                {...props}
+                actorId={
+                  changed && scopeChange === 'actor'
+                    ? otherCategory
+                    : props.actorId
+                }
+                recoveryBackend={
+                  changed && scopeChange === 'backend'
+                    ? 'https://other-backend.test'
+                    : props.recoveryBackend
+                }
+                item={record}
+                forms={{ [categoryId]: form() }}
+              />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>
+      );
+      const view = render(workspace(false));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Submitted original scope edit' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      const key = sessionStorage.key(0)!;
+      const retained = sessionStorage.getItem(key);
+      const command = vi.mocked(submitInventory).mock.calls[0][0];
+      view.rerender(workspace(true));
+      expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Other task' })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+      expect(screen.getByText(/This task is hidden/)).toBeVisible();
+      expect(sessionStorage.getItem(key)).toBe(retained);
+      await act(async () =>
+        settle({
+          ok: false,
+          kind: 'unexpected',
+          code: 'unexpected',
+          message: 'Unknown original result',
+        }),
+      );
+      await screen.findByText(/The result is unconfirmed/);
+      fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+      expect(screen.getByText(/This task is hidden/)).toBeVisible();
+      expect(screen.queryByText('Other task content')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+      expect(sessionStorage.getItem(key)).toBe(retained);
+      expect(submitInventory).toHaveBeenCalledOnce();
+      view.rerender(workspace(false));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeEnabled(),
+      );
+      expect(JSON.parse(sessionStorage.getItem(key)!).command).toEqual(command);
+      expect(screen.getByRole('button', { name: 'Other task' })).toBeDisabled();
+      view.unmount();
+      render(workspace(false));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeEnabled(),
+      );
+      expect(JSON.parse(sessionStorage.getItem(key)!).command).toEqual(command);
+      vi.mocked(submitInventory).mockResolvedValueOnce({
+        ok: true,
+        entityId: item.id,
+        version: '2',
+        changed: true,
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+      await screen.findByText('Details saved.');
+      expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(command);
+    },
+  );
+  it.each(['committed', 'rejected'] as const)(
+    'permits stale-actor task exit after a definitive %s result without exposing its response or discarding scoped recovery',
+    async (outcome) => {
+      let settle!: (value: Awaited<ReturnType<typeof submitInventory>>) => void;
+      vi.mocked(submitInventory).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      );
+      const record = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const workspace = (changed: boolean) => (
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm
+                {...props}
+                actorId={changed ? otherCategory : props.actorId}
+                item={record}
+                forms={{ [categoryId]: form() }}
+              />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>
+      );
+      const view = render(workspace(false));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Original scope change' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() => expect(submitInventory).toHaveBeenCalledOnce());
+      const key = sessionStorage.key(0)!;
+      view.rerender(workspace(true));
+      await act(async () =>
+        settle(
+          outcome === 'committed'
+            ? { ok: true, entityId: item.id, version: '2', changed: true }
+            : {
+                ok: false,
+                kind: 'domain',
+                code: 'P1007',
+                message: 'Original private failure',
+              },
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Other task' }),
+        ).toBeEnabled(),
+      );
+      const retained = sessionStorage.getItem(key);
+      expect(JSON.parse(retained!)).toMatchObject({
+        status: outcome === 'committed' ? 'saved' : 'editing',
+        command: null,
+      });
+      expect(screen.queryByText('Details saved.')).toBeNull();
+      expect(screen.queryByText('Original private failure')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+      expect(screen.getByText('Other task content')).toBeVisible();
+      expect(sessionStorage.getItem(key)).toBe(retained);
+      expect(submitInventory).toHaveBeenCalledOnce();
+    },
+  );
   it('keeps in-memory work when recovery storage fails and resumes safe dispatch when it recovers', async () => {
     const storage = vi
       .spyOn(Storage.prototype, 'setItem')
@@ -3249,6 +4458,134 @@ describe('existing edit recovery and review', () => {
     }
     expect(sessionStorage.length).toBe(0);
     expect(submitInventory).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['quantity', 'Close task'],
+    ['quantity', 'Other task'],
+    ['quantity', 'Close'],
+    ['asset', 'Close task'],
+    ['asset', 'Other task'],
+    ['asset', 'Close'],
+  ] as const)(
+    'allows pristine %s exit through %s when hydration cannot read storage, preserving inaccessible recovery',
+    async (kind, exit) => {
+      const current = form();
+      current.published_definition.fields[0].applies_to = [kind];
+      const record = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const editor = (
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? record : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  status: 'active',
+                  assetTag: null,
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />
+      );
+      const prior = render(editor);
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Earlier retained draft' },
+      });
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      const retained = sessionStorage.getItem(key);
+      prior.unmount();
+      const read = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(() => {
+          throw new DOMException('storage unavailable');
+        });
+      const write = vi.spyOn(Storage.prototype, 'setItem');
+      const remove = vi.spyOn(Storage.prototype, 'removeItem');
+      try {
+        render(
+          <TaskWorkspace
+            choices={[
+              { id: 'edit', label: 'Edit equipment' },
+              { id: 'other', label: 'Other task' },
+            ]}
+            context="Cable"
+          >
+            {(task) => (task === 'edit' ? editor : <p>Other task content</p>)}
+          </TaskWorkspace>,
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+        await waitFor(() =>
+          expect(screen.getByLabelText('Name')).toBeEnabled(),
+        );
+        expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+        expect(screen.getByText('Nothing to save.')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: exit }));
+        expect(screen.queryByLabelText('Name')).toBeNull();
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+        if (exit === 'Other task')
+          expect(screen.getByText('Other task content')).toBeVisible();
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(submitInventory).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+        write.mockRestore();
+        remove.mockRestore();
+      }
+      expect(sessionStorage.getItem(key)).toBe(retained);
+    },
+  );
+  it('keeps a real non-durable draft guarded when storage hydration and discard reads fail', async () => {
+    const read = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new DOMException('storage unavailable');
+      });
+    try {
+      render(
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Keep this draft' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+      expect(screen.getByRole('alertdialog')).toBeVisible();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Discard and switch' }),
+      );
+      expect(screen.getByLabelText('Name')).toHaveValue('Keep this draft');
+      expect(screen.queryByText('Other task content')).toBeNull();
+      expect(submitInventory).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
   });
   it('guards client links after storage failure, preserves modifiers/new tabs, and allows explicit Stay or discard', () => {
     const storage = vi
@@ -3389,56 +4726,68 @@ describe('existing edit recovery and review', () => {
     expect(submitInventory).not.toHaveBeenCalled();
     storage.mockRestore();
   });
-  it('does not discard an uncertain exact command when the terminal receipt cannot be stored', async () => {
-    const original = Storage.prototype.setItem;
-    const storage = vi
-      .spyOn(Storage.prototype, 'setItem')
-      .mockImplementation(function (this: Storage, key, raw) {
-        if (JSON.parse(raw).status === 'saved') throw new DOMException('quota');
-        original.call(this, key, raw);
+  it.each([true, false])(
+    'does not discard an acknowledged exact command when its terminal receipt cannot be stored (changed=%s)',
+    async (changed) => {
+      const original = Storage.prototype.setItem;
+      const storage = vi
+        .spyOn(Storage.prototype, 'setItem')
+        .mockImplementation(function (this: Storage, key, raw) {
+          if (JSON.parse(raw).status === 'saved')
+            throw new DOMException('quota');
+          original.call(this, key, raw);
+        });
+      vi.mocked(submitInventory).mockResolvedValue({
+        ok: true,
+        entityId: item.id,
+        version: changed ? '2' : '1',
+        changed,
       });
-    vi.mocked(submitInventory).mockResolvedValue({
-      ok: true,
-      entityId: item.id,
-      version: '2',
-      changed: true,
-    });
-    render(
-      <>
-        <Link href="/sites" onClick={(event) => event.preventDefault()}>
-          Sites
-        </Link>
-        <MetadataForm {...props} forms={{ [categoryId]: form() }} />
-      </>,
-    );
-    fireEvent.change(screen.getByLabelText('Name'), {
-      target: { value: 'Possibly saved' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
-    await waitFor(() =>
+      render(
+        <>
+          <Link href="/sites" onClick={(event) => event.preventDefault()}>
+            Sites
+          </Link>
+          <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+        </>,
+      );
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Possibly saved' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review details' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm save' }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole('button', { name: 'Retry same save' }),
+        ).toBeEnabled(),
+      );
+      const command = vi.mocked(submitInventory).mock.calls[0][0];
       expect(
-        screen.getByRole('button', { name: 'Retry same save' }),
-      ).toBeEnabled(),
-    );
-    const command = vi.mocked(submitInventory).mock.calls[0][0];
-    fireEvent.click(screen.getByRole('link', { name: 'Sites' }));
-    expect(
-      screen.getByRole('dialog', { name: 'Leave this edit?' }),
-    ).toHaveTextContent('retry the same save');
-    expect(
-      screen.queryByRole('button', { name: 'Discard changes' }),
-    ).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
-    expect(push).not.toHaveBeenCalled();
-    expect(
-      JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!).status,
-    ).toBe('submitted');
-    storage.mockRestore();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
-    await screen.findByText('Details saved.');
-    expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(command);
-  });
+        screen.getByText(
+          changed
+            ? /Details were saved, but completion/
+            : /Nothing changed, but completion/,
+        ),
+      ).toBeVisible();
+      if (!changed) expect(screen.queryByText(/Details were saved/)).toBeNull();
+      fireEvent.click(screen.getByRole('link', { name: 'Sites' }));
+      expect(
+        screen.getByRole('dialog', { name: 'Leave this edit?' }),
+      ).toHaveTextContent('retry the same save');
+      expect(
+        screen.queryByRole('button', { name: 'Discard changes' }),
+      ).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!).status,
+      ).toBe('submitted');
+      storage.mockRestore();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry same save' }));
+      await screen.findByText(changed ? 'Details saved.' : 'Nothing changed.');
+      expect(vi.mocked(submitInventory).mock.calls[1][0]).toEqual(command);
+    },
+  );
   it('shows normalized changes, retains hidden untouched values, and invalidates review after editing', () => {
     const current = form();
     current.published_definition.layout[0].controls.push({

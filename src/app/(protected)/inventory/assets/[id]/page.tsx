@@ -11,7 +11,10 @@ import {
 import { DetailTasks } from '@/features/inventory/components/detail-tasks';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { CustomMetadataList } from '@/features/metadata/custom-metadata-list';
-import { getSites } from '@/features/custody/queries.server';
+import {
+  getSites,
+  getAssetReturnSuggestion,
+} from '@/features/custody/queries.server';
 import { FilesPanel } from '@/features/files/files-panel';
 import {
   HistoryList,
@@ -33,12 +36,18 @@ export default async function AssetPage({
   const detail = await getAssetDetail(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
-  const [categories, locations, sites, forms] = await Promise.all([
-    getCategories(),
-    getLocations(),
-    getSites(),
-    getPublishedForms([asset.categoryId]),
-  ]);
+  const [categories, locations, sites, forms, returnSuggestion] =
+    await Promise.all([
+      getCategories(),
+      getLocations(),
+      getSites(),
+      getPublishedForms([asset.categoryId]),
+      member.role === 'staff' && asset.status === 'active' && site
+        ? getAssetReturnSuggestion({ ...asset, siteId: site.id }).catch(
+            () => null,
+          )
+        : Promise.resolve(undefined),
+    ]);
   return (
     <>
       <section className={`experience-surface-bright ${styles.detailHero}`}>
@@ -119,6 +128,8 @@ export default async function AssetPage({
           locations={locations}
           sites={sites}
           forms={forms}
+          returnSuggestion={returnSuggestion ?? undefined}
+          returnSuggestionError={returnSuggestion === null}
         />
       )}
       <div className={styles.recordGrid}>

@@ -909,3 +909,4 @@ try {
   await Promise.all(connections.map((connection) => connection.end()));
   await owner.end();
 }
+await import('./audit-four-edit-integrity');

@@ -276,6 +276,17 @@ function MutationFormFields({
     locations: freshStart?.locations ?? latestLocations,
   }));
   const { item, asset, currentLocation, balances } = baseline;
+  const latestStockKey = JSON.stringify(latestBalances);
+  const [displayStock, setDisplayStock] = useState(() => ({
+    key: latestStockKey,
+    balances: freshStart?.balances ?? latestBalances,
+  }));
+  // Availability follows observed reads; editing/review still owns its original
+  // version. An explicit verified refresh may precede unchanged route props.
+  if (displayStock.key !== latestStockKey)
+    setDisplayStock({ key: latestStockKey, balances: latestBalances });
+  const sourceHoldings =
+    operation === 'quantity_move' ? (displayStock.balances ?? []) : balances;
   const locations =
     operation === 'quantity_move' ? baseline.locations : latestLocations;
   const latestCatalogKey = JSON.stringify(latestLocations);
@@ -438,6 +449,12 @@ function MutationFormFields({
   const sourceBalance = balances.find(
     (b) => b.location.id === values.source_location_id,
   );
+  const availableSources = sourceHoldings.filter((row) => row.quantity > 0);
+  const displayedSource = availableSources.find(
+    (row) =>
+      row.location.id === values.source_location_id &&
+      locations.some((location) => location.id === row.location.id),
+  );
   const snapshotKey = (
     record: QuantityItem | undefined,
     rows: Props['balances'],
@@ -559,7 +576,7 @@ function MutationFormFields({
         source ? 'source' : 'destination',
         {
           sourceIds: source
-            ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
+            ? availableSources.map((b) => b.location.id)
             : undefined,
           excludeIds: !source
             ? [
@@ -668,8 +685,13 @@ function MutationFormFields({
       value={values[name] ?? ''}
       onValueChange={(next) => update(name, next)}
       sourceIds={
+        source ? availableSources.map((b) => b.location.id) : undefined
+      }
+      availability={
         source
-          ? balances.filter((b) => b.quantity > 0).map((b) => b.location.id)
+          ? Object.fromEntries(
+              sourceHoldings.map((row) => [row.location.id, row.quantity]),
+            )
           : undefined
       }
       excludeIds={
@@ -1033,6 +1055,7 @@ function MutationFormFields({
           balances: fresh.balances,
           locations: fresh.locations,
         });
+        setDisplayStock({ key: latestStockKey, balances: fresh.balances });
         setRefreshRequested(false);
         setRefreshedVersion(null);
         setCompletedError('');
@@ -1267,11 +1290,13 @@ function MutationFormFields({
               className="text-sm text-slate-400"
             >
               Recorded source availability:{' '}
-              {latestBalances === undefined
+              {displayStock.balances === undefined
                 ? 'unavailable'
-                : sourceBalance
-                  ? countLabel(sourceBalance.quantity, 'unit')
-                  : 'choose a source'}
+                : displayedSource
+                  ? countLabel(displayedSource.quantity, 'unit')
+                  : values.source_location_id
+                    ? 'unavailable'
+                    : 'choose a source'}
               .
             </p>
             <label className="flex min-h-11 items-center gap-3">
