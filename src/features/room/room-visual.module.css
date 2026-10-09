@@ -404,7 +404,11 @@
   color: var(--muted);
   font-size: 12px;
 }
+.locationLabel[data-room-occupied='true']:not([data-label-compact='true']) {
+  padding-block: 3px;
+}
 .countBadge {
+  display: block;
   color: var(--room-selected-edge);
   font-variant-numeric: tabular-nums;
 }

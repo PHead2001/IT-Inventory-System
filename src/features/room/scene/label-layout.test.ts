@@ -1,3 +1,4 @@
+import capturedTransition from '../../../../tests/fixtures/room/selected-footprint-transition.json';
 import capturedActive from '../../../../tests/fixtures/room/more-active-labels.json';
 import capturedSelected from '../../../../tests/fixtures/room/more-selected-labels.json';
 import capturedMore from '../../../../tests/fixtures/room/more-labels.json';
@@ -113,6 +114,104 @@ describe('scene label placement', () => {
         dx: entry.previous!.dx,
         dy: entry.previous!.dy,
       });
+  });
+  it.each([
+    ['fits', 0],
+    ['fits', 0.5],
+    ['fits', 1],
+    ['overflows', 0],
+    ['overflows', 0.5],
+    ['overflows', 1],
+  ] as const)(
+    'repacks only the newly selected full footprint when its prior compact position %s and pointer fraction %s',
+    (variant, fraction) => {
+      const input: LabelRect[] = capturedTransition.map((entry) =>
+        entry.selected && variant === 'overflows'
+          ? {
+              ...entry,
+              previous: {
+                ...entry.previous!,
+                dx: 299 - entry.left,
+                compact: true,
+              },
+            }
+          : entry.hovered
+            ? {
+                ...entry,
+                pointer: {
+                  x:
+                    entry.left +
+                    entry.previous!.dx +
+                    1 +
+                    (entry.width - 2) * fraction,
+                  y: entry.top + entry.previous!.dy + 22,
+                  bounds: {
+                    left: entry.left + entry.previous!.dx,
+                    top: entry.top + entry.previous!.dy,
+                    right: entry.left + entry.previous!.dx + entry.width,
+                    bottom: entry.top + entry.previous!.dy + entry.height,
+                  },
+                },
+              }
+            : entry,
+      );
+      const result = layoutLabels(input, narrowViewport, morePanel);
+      expect(result.every((entry) => entry.visible)).toBe(true);
+      const selected = input.find((entry) => entry.selected)!;
+      const full = result.find((entry) => entry.id === selected.id)!;
+      expect(full.compact ?? false).toBe(false);
+      const hovered = input.find((entry) => entry.hovered)!;
+      const marker = result.find((entry) => entry.id === hovered.id)!;
+      expect(marker.yielded).toBe(true);
+      const box = {
+        left: hovered.left + marker.dx,
+        top: hovered.top + marker.dy,
+        right: hovered.left + marker.dx + 44,
+        bottom: hovered.top + marker.dy + 44,
+      };
+      expect(box.left).toBeGreaterThanOrEqual(hovered.pointer!.bounds.left);
+      expect(box.right).toBeLessThanOrEqual(hovered.pointer!.bounds.right);
+      expect(box.top).toBeGreaterThanOrEqual(hovered.pointer!.bounds.top);
+      expect(box.bottom).toBeLessThanOrEqual(hovered.pointer!.bounds.bottom);
+      expect(hovered.pointer!.x).toBeGreaterThanOrEqual(box.left);
+      expect(hovered.pointer!.x).toBeLessThan(box.right);
+      const settled = input.map((entry) => {
+        const placed = result.find((item) => item.id === entry.id)!;
+        return {
+          ...entry,
+          holdCompact: !!placed.yielded,
+          previous: { dx: placed.dx, dy: placed.dy, compact: !!placed.compact },
+        };
+      });
+      expect(layoutLabels(settled, narrowViewport, morePanel)).toEqual(result);
+      expect(settled.find((entry) => entry.id === selected.id)?.focused).toBe(
+        true,
+      );
+    },
+  );
+  it('keeps a prior full hovered action pinned without a valid pointer witness even if coverage is incomplete', () => {
+    const input: LabelRect[] = capturedTransition;
+    const hovered = input.find((entry) => entry.hovered)!;
+    for (const pointer of [
+      undefined,
+      { x: NaN, y: 0, bounds: morePanel[0] },
+      { x: 0, y: 0, bounds: morePanel[0] },
+    ]) {
+      const result = layoutLabels(
+        input.map((entry) =>
+          entry === hovered ? { ...entry, pointer } : entry,
+        ),
+        narrowViewport,
+        morePanel,
+      );
+      expect(result.find((entry) => entry.id === hovered.id)).toMatchObject({
+        visible: true,
+        compact: false,
+        dx: hovered.previous!.dx,
+        dy: hovered.previous!.dy,
+      });
+      expect(result.some((entry) => !entry.visible)).toBe(true);
+    }
   });
   it.each(['focused', 'hovered'] as const)(
     'honestly reports impossible capacity beside a %s selected action',

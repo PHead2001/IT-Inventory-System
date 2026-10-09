@@ -11,6 +11,8 @@ export type LabelRect = {
   preferFull?: boolean;
   focused?: boolean;
   hovered?: boolean;
+  pointer?: { x: number; y: number; bounds: LabelArea };
+  holdCompact?: boolean;
   compact?: { width: number; height: number };
   previous?: { dx: number; dy: number; compact: boolean };
 };
@@ -20,6 +22,7 @@ export type LabelPlacement = {
   dx: number;
   dy: number;
   compact?: boolean;
+  yielded?: boolean;
 };
 export type LabelArea = {
   left: number;
@@ -69,6 +72,13 @@ export function layoutLabels(
       (a.locationCode ?? a.id).localeCompare(b.locationCode ?? b.id) ||
       a.id.localeCompare(b.id),
   );
+  const labelById = new Map(labels.map((label) => [label.id, label]));
+  // Candidate coordinates depend on this measured frame, not on a trial's
+  // occupied slots. Reuse them across selected-position and hover-yield trials.
+  const candidateCache = new Map<
+    string,
+    { dx: number; dy: number; compact: boolean; area?: LabelArea }[]
+  >();
   const pack = (
     compactPacking: boolean,
     protectedPlacements: LabelPlacement[] = [],
@@ -77,7 +87,7 @@ export function layoutLabels(
   ) => {
     const occupied = [...reserved];
     for (const result of protectedPlacements) {
-      const label = labels.find((entry) => entry.id === result.id)!;
+      const label = labelById.get(result.id)!;
       const size = result.compact ? label.compact! : label;
       occupied.push({
         left: label.left + result.dx,
@@ -97,84 +107,122 @@ export function layoutLabels(
       }
       if (label.locationCode && placedCodes.has(label.locationCode))
         return { id: label.id, visible: false, dx: 0, dy: 0 };
-      const candidates: { dx: number; dy: number; compact: boolean }[] = [];
-      if (label.previous && (!compactPacking || label.focused || label.hovered))
-        candidates.push({
-          ...label.previous,
-          compact:
-            label.focused || label.hovered
-              ? label.previous.compact && !!label.compact
-              : !!label.compact,
-        });
-      // Selected/full mandatory text wins. Ordinary occupied markers use compact
-      // first so optional full text cannot consume another target's hit footprint.
-      const variants = label.compact ? [true] : [false];
-      for (const compact of variants) {
-        if (!compactPacking)
-          for (const [dx, dy] of offsets) candidates.push({ dx, dy, compact });
-        if (label.mandatory) {
-          const dimension = compact ? label.compact! : label;
-          // A finite deterministic viewport rail is allowed for mandatory labels.
-          // It never changes geometry, shrinks targets or steals optional slots.
-          const railLefts: number[] = [];
-          for (
-            let left = viewport.left + EDGE;
-            left + dimension.width <= viewport.right - EDGE;
-            left += dimension.width + GAP
-          )
-            railLefts.push(left);
-          const mirroredLefts = railLefts.map(
-            (left) =>
-              viewport.right -
-              EDGE -
-              dimension.width -
-              (left - viewport.left - EDGE),
-          );
-          const columns = compactPacking
-            ? rightFirst
-              ? [...mirroredLefts, ...railLefts]
-              : [...railLefts, ...mirroredLefts]
-            : railLefts;
-          for (
-            let top = viewport.top + EDGE;
-            top + dimension.height <= viewport.bottom - EDGE;
-            top += dimension.height + GAP
-          )
-            for (const left of columns)
-              candidates.push({
-                dx: left - label.left,
-                dy:
-                  (bottomFirst
-                    ? viewport.bottom -
-                      EDGE -
-                      dimension.height -
-                      (top - viewport.top - EDGE)
-                    : top) - label.top,
-                compact,
-              });
+      const key = JSON.stringify([
+        label.id,
+        compactPacking,
+        bottomFirst,
+        rightFirst,
+      ]);
+      let candidates = candidateCache.get(key);
+      if (!candidates) {
+        candidates = [];
+        if (
+          label.previous &&
+          (!compactPacking || label.focused || label.hovered)
+        )
+          candidates.push({
+            ...label.previous,
+            compact:
+              label.focused || label.hovered
+                ? label.previous.compact && !!label.compact
+                : !!label.compact,
+          });
+        // Selected/full mandatory text wins. Ordinary occupied markers use compact
+        // first so optional full text cannot consume another target's hit footprint.
+        const variants = label.compact ? [true] : [false];
+        for (const compact of variants) {
+          if (!compactPacking)
+            for (const [dx, dy] of offsets)
+              candidates.push({ dx, dy, compact });
+          if (label.mandatory) {
+            const dimension = compact ? label.compact! : label;
+            // A finite deterministic viewport rail is allowed for mandatory labels.
+            // It never changes geometry, shrinks targets or steals optional slots.
+            const railLefts: number[] = [];
+            for (
+              let left = viewport.left + EDGE;
+              left + dimension.width <= viewport.right - EDGE;
+              left += dimension.width + GAP
+            )
+              railLefts.push(left);
+            const mirroredLefts = railLefts.map(
+              (left) =>
+                viewport.right -
+                EDGE -
+                dimension.width -
+                (left - viewport.left - EDGE),
+            );
+            const columns = compactPacking
+              ? rightFirst
+                ? [...mirroredLefts, ...railLefts]
+                : [...railLefts, ...mirroredLefts]
+              : railLefts;
+            for (
+              let top = viewport.top + EDGE;
+              top + dimension.height <= viewport.bottom - EDGE;
+              top += dimension.height + GAP
+            )
+              for (const left of columns)
+                candidates.push({
+                  dx: left - label.left,
+                  dy:
+                    (bottomFirst
+                      ? viewport.bottom -
+                        EDGE -
+                        dimension.height -
+                        (top - viewport.top - EDGE)
+                      : top) - label.top,
+                  compact,
+                });
+          }
         }
+        if (compactPacking)
+          for (const compact of variants)
+            for (const [dx, dy] of offsets)
+              candidates.push({ dx, dy, compact });
+        if (compactPacking)
+          candidates = candidates
+            .map((candidate) => {
+              const size = candidate.compact ? label.compact! : label;
+              return {
+                ...candidate,
+                area: {
+                  left: label.left + candidate.dx,
+                  top: label.top + candidate.dy,
+                  right: label.left + candidate.dx + size.width,
+                  bottom: label.top + candidate.dy + size.height,
+                },
+              };
+            })
+            .filter(
+              ({ area }) =>
+                area.left >= viewport.left + EDGE &&
+                area.top >= viewport.top + EDGE &&
+                area.right <= viewport.right - EDGE &&
+                area.bottom <= viewport.bottom - EDGE &&
+                !reserved.some((other) => overlaps(area, other)),
+            );
+        candidateCache.set(key, candidates);
       }
-      if (compactPacking)
-        for (const compact of variants)
-          for (const [dx, dy] of offsets) candidates.push({ dx, dy, compact });
       // A live focused action keeps its current footprint and position. If it no
       // longer fits the viewport, normal constrained placement remains available.
-      for (const { dx, dy, compact } of candidates) {
-        const dimension = compact ? label.compact! : label;
-        const candidate = {
+      for (const { dx, dy, compact, area } of candidates) {
+        const size = compact ? label.compact! : label;
+        const candidate = area ?? {
           left: label.left + dx,
           top: label.top + dy,
-          right: label.left + dx + dimension.width,
-          bottom: label.top + dy + dimension.height,
+          right: label.left + dx + size.width,
+          bottom: label.top + dy + size.height,
         };
         if (
-          candidate.left < viewport.left + EDGE ||
-          candidate.top < viewport.top + EDGE ||
-          candidate.right > viewport.right - EDGE ||
-          candidate.bottom > viewport.bottom - EDGE ||
-          occupied.some((item) => overlaps(candidate, item))
+          !area &&
+          (candidate.left < viewport.left + EDGE ||
+            candidate.top < viewport.top + EDGE ||
+            candidate.right > viewport.right - EDGE ||
+            candidate.bottom > viewport.bottom - EDGE)
         )
           continue;
+        if (occupied.some((item) => overlaps(candidate, item))) continue;
         occupied.push(candidate);
         if (label.locationCode) placedCodes.add(label.locationCode);
         return {
@@ -189,13 +237,49 @@ export function layoutLabels(
     });
     return placements;
   };
-  let placements = pack(false);
+  const initialPins: LabelPlacement[] = [];
+  const pinnedAreas: LabelArea[] = [];
+  for (const label of ordered) {
+    if (
+      !(label.focused || label.hovered) ||
+      !label.previous ||
+      (label.selected && label.previous.compact && !label.compact)
+    )
+      continue;
+    const compact = label.previous.compact && !!label.compact,
+      size = compact ? label.compact! : label;
+    const { dx, dy } = label.previous,
+      area = {
+        left: label.left + dx,
+        top: label.top + dy,
+        right: label.left + dx + size.width,
+        bottom: label.top + dy + size.height,
+      };
+    if (
+      area.left < viewport.left + EDGE ||
+      area.top < viewport.top + EDGE ||
+      area.right > viewport.right - EDGE ||
+      area.bottom > viewport.bottom - EDGE ||
+      [...reserved, ...pinnedAreas].some((other) => overlaps(area, other))
+    )
+      continue;
+    initialPins.push({
+      id: label.id,
+      visible: true,
+      dx,
+      dy,
+      ...(label.compact ? { compact } : {}),
+      ...(label.holdCompact ? { yielded: true } : {}),
+    });
+    pinnedAreas.push(area);
+  }
+  let placements = pack(false, initialPins);
   const mandatoryCodes = new Set(
     labels
       .filter((label) => label.mandatory || label.selected)
       .map((label) => label.locationCode ?? label.id),
   );
-  const labelById = new Map(labels.map((label) => [label.id, label]));
+
   const coverage = (results: LabelPlacement[]) =>
     new Set(
       results
@@ -253,96 +337,172 @@ export function layoutLabels(
           }
         }
     };
-    consider(protectedPlacements);
-    // Inactive selected text can align with compact rows instead of consuming
-    // two rows between them. A live focus/hover action is never moved here.
-    const candidates: { placements: LabelPlacement[]; distance: number }[] = [];
-    for (const selected of bestCoverage === mandatoryCodes.size
-      ? []
-      : protectedPlacements) {
-      const label = sources.get(selected.id)!;
-      if (!label.selected || label.focused || label.hovered) continue;
-      const others = protectedPlacements.filter((entry) => entry !== selected);
-      const obstacles = [...reserved, ...others.map(areaOf)];
-      const xs = new Set([
-        label.left + selected.dx,
-        viewport.left + EDGE,
-        viewport.right - EDGE - label.width,
-      ]);
-      const ys = new Set([
-        label.top + selected.dy,
-        viewport.top + EDGE,
-        viewport.bottom - EDGE - label.height,
-      ]);
-      // The mandatory action grid is 44px, with the same collision gap.
-      for (
-        let offset = 0;
-        offset < viewport.right - viewport.left;
-        offset += 44 + GAP
-      ) {
-        xs.add(viewport.left + EDGE + offset);
-        xs.add(viewport.right - EDGE - label.width - offset);
-      }
-      for (
-        let offset = 0;
-        offset < viewport.bottom - viewport.top;
-        offset += 44 + GAP
-      ) {
-        ys.add(viewport.top + EDGE + offset);
-        ys.add(viewport.bottom - EDGE - label.height - offset);
-      }
-      for (const obstacle of obstacles) {
-        xs.add(obstacle.right + GAP);
-        xs.add(obstacle.left - GAP - label.width);
-        ys.add(obstacle.bottom + GAP);
-        ys.add(obstacle.top - GAP - label.height);
-      }
-      for (const left of xs)
-        for (const top of ys) {
-          const area = {
-            left,
-            top,
-            right: left + label.width,
-            bottom: top + label.height,
-          };
-          if (
-            left < viewport.left + EDGE ||
-            top < viewport.top + EDGE ||
-            area.right > viewport.right - EDGE ||
-            area.bottom > viewport.bottom - EDGE ||
-            obstacles.some((obstacle) => overlaps(area, obstacle))
-          )
-            continue;
-          candidates.push({
-            distance:
-              Math.abs(left - label.left - selected.dx) +
-              Math.abs(top - label.top - selected.dy),
-            placements: [
-              ...others,
-              {
-                ...selected,
-                dx: left - label.left,
-                dy: top - label.top,
-                ...(label.compact ? { compact: false } : {}),
-              },
-            ],
-          });
+    const optimize = (protectedPlacements: LabelPlacement[]) => {
+      consider(protectedPlacements);
+      // Inactive selected text can align with compact rows instead of consuming
+      // two rows between them. A live focus/hover action is never moved here.
+      const candidates: { placements: LabelPlacement[]; distance: number }[] =
+        [];
+      for (const selected of bestCoverage === mandatoryCodes.size
+        ? []
+        : protectedPlacements) {
+        const label = sources.get(selected.id)!;
+        // Selecting a compact action introduces a new required full footprint.
+        // Optimize that first placement even when focus remains on the same DOM
+        // action; the next measurement records compact:false and pins it again.
+        const becomingSelectedFull =
+          label.previous?.compact === true && !label.compact;
+        if (
+          !label.selected ||
+          ((label.focused || label.hovered) && !becomingSelectedFull)
+        )
+          continue;
+        const others = protectedPlacements.filter(
+          (entry) => entry !== selected,
+        );
+        const obstacles = [...reserved, ...others.map(areaOf)];
+        const xs = new Set([
+          label.left + selected.dx,
+          viewport.left + EDGE,
+          viewport.right - EDGE - label.width,
+        ]);
+        const ys = new Set([
+          label.top + selected.dy,
+          viewport.top + EDGE,
+          viewport.bottom - EDGE - label.height,
+        ]);
+        // The mandatory action grid is 44px, with the same collision gap.
+        for (
+          let offset = 0;
+          offset < viewport.right - viewport.left;
+          offset += 44 + GAP
+        ) {
+          xs.add(viewport.left + EDGE + offset);
+          xs.add(viewport.right - EDGE - label.width - offset);
         }
-    }
-    // Search nearest selected placements first. Once every mandatory location
-    // fits, farther candidates cannot improve coverage or displacement. Stable
-    // sorting retains the original candidate order for equal-distance ties.
-    candidates.sort((a, b) => a.distance - b.distance);
-    for (const candidate of candidates) {
-      if (bestCoverage === mandatoryCodes.size) break;
-      consider(candidate.placements);
-    }
+        for (
+          let offset = 0;
+          offset < viewport.bottom - viewport.top;
+          offset += 44 + GAP
+        ) {
+          ys.add(viewport.top + EDGE + offset);
+          ys.add(viewport.bottom - EDGE - label.height - offset);
+        }
+        for (const obstacle of obstacles) {
+          xs.add(obstacle.right + GAP);
+          xs.add(obstacle.left - GAP - label.width);
+          ys.add(obstacle.bottom + GAP);
+          ys.add(obstacle.top - GAP - label.height);
+        }
+        for (const left of xs)
+          for (const top of ys) {
+            const area = {
+              left,
+              top,
+              right: left + label.width,
+              bottom: top + label.height,
+            };
+            if (
+              left < viewport.left + EDGE ||
+              top < viewport.top + EDGE ||
+              area.right > viewport.right - EDGE ||
+              area.bottom > viewport.bottom - EDGE ||
+              obstacles.some((obstacle) => overlaps(area, obstacle))
+            )
+              continue;
+            candidates.push({
+              distance:
+                Math.abs(left - label.left - selected.dx) +
+                Math.abs(top - label.top - selected.dy),
+              placements: [
+                ...others,
+                {
+                  ...selected,
+                  dx: left - label.left,
+                  dy: top - label.top,
+                  ...(label.compact ? { compact: false } : {}),
+                },
+              ],
+            });
+          }
+      }
+      // Search nearest selected placements first. Once every mandatory location
+      // fits, farther candidates cannot improve coverage or displacement. Stable
+      // sorting retains the original candidate order for equal-distance ties.
+      candidates.sort((a, b) => a.distance - b.distance);
+      for (const candidate of candidates) {
+        if (bestCoverage === mandatoryCodes.size) break;
+        consider(candidate.placements);
+      }
+    };
+    optimize(protectedPlacements);
+    if (bestCoverage < mandatoryCodes.size)
+      for (const prior of protectedPlacements) {
+        const label = sources.get(prior.id)!;
+        if (
+          label.selected ||
+          label.focused ||
+          !label.hovered ||
+          prior.compact ||
+          !label.compact ||
+          !label.pointer
+        )
+          continue;
+        const old = label.pointer.bounds,
+          point = label.pointer,
+          size = label.compact;
+        if (
+          !old ||
+          prior.dx !== label.previous?.dx ||
+          prior.dy !== label.previous?.dy ||
+          !Number.isFinite(point.x) ||
+          !Number.isFinite(point.y) ||
+          point.x < old.left ||
+          point.x >= old.right ||
+          point.y < old.top ||
+          point.y >= old.bottom ||
+          size.width > old.right - old.left ||
+          size.height > old.bottom - old.top
+        )
+          continue;
+        const left = Math.max(
+          old.left,
+          Math.min(point.x - size.width / 2, old.right - size.width),
+        );
+        const top = Math.max(
+          old.top,
+          Math.min(point.y - size.height / 2, old.bottom - size.height),
+        );
+        const yielded = {
+          ...prior,
+          dx: left - label.left,
+          dy: top - label.top,
+          compact: true,
+          yielded: true,
+        };
+        // Yield optional full text only around a real pointer, preserving the
+        // same DOM action and a contained hit rectangle. The readable summary
+        // carries its name/counts until the pointer leaves this compact marker.
+        optimize(
+          protectedPlacements.map((entry) =>
+            entry === prior ? yielded : entry,
+          ),
+        );
+        if (bestCoverage === mandatoryCodes.size) break;
+      }
   }
   // Expand only after every mandatory footprint has its place. Keep the same
   // anchor and offset: no focus/hover expansion may move or displace a neighbor.
   for (const result of placements) {
     const label = labels.find((entry) => entry.id === result.id)!;
-    if (!result.visible || !result.compact || !label.preferFull) continue;
+    if (
+      !result.visible ||
+      !result.compact ||
+      !label.preferFull ||
+      result.yielded ||
+      label.holdCompact
+    )
+      continue;
     const area = {
       left: label.left + result.dx,
       top: label.top + result.dy,

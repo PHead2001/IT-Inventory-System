@@ -30,6 +30,7 @@ export function RoomLabel({
 }) {
   const element = useRef<HTMLButtonElement & HTMLSpanElement>(null);
   const leader = useRef<HTMLSpanElement>(null);
+  const pointer = useRef<{ x: number; y: number } | null>(null);
   const register = useRoomLabelLayout();
   const interactive = !!code && !!onSelect;
   const occupied = occupiedLocation(occupancy);
@@ -47,6 +48,7 @@ export function RoomLabel({
       compact: !!occupied && !selected,
       preferFull: expanded,
       inspection: focused ? 'focus' : hovered ? 'hover' : null,
+      pointer: () => pointer.current,
       readableSummary: `${label}${code ? ` (${code})` : ''}${counts ? ` · ${counts}` : ''}`,
       isVisible,
     });
@@ -68,9 +70,7 @@ export function RoomLabel({
   const content = (
     <span data-room-label-full="true" className={styles.labelFull}>
       {label}
-      {counts !== null && (
-        <span className={styles.countBadge}> · {counts}</span>
-      )}
+      {counts !== null && <span className={styles.countBadge}>{counts}</span>}
     </span>
   );
   return (
@@ -88,8 +88,19 @@ export function RoomLabel({
           data-room-occupied={!!occupied}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          onPointerEnter={() => setHovered(true)}
-          onPointerLeave={() => setHovered(false)}
+          onPointerEnter={(event) => {
+            if (event.nativeEvent.isTrusted)
+              pointer.current = { x: event.clientX, y: event.clientY };
+            setHovered(true);
+          }}
+          onPointerMove={(event) => {
+            if (event.nativeEvent.isTrusted)
+              pointer.current = { x: event.clientX, y: event.clientY };
+          }}
+          onPointerLeave={() => {
+            pointer.current = null;
+            setHovered(false);
+          }}
           onClick={(event) => {
             event.stopPropagation();
             onSelect?.(code!);

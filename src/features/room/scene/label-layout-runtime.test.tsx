@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as placement from './label-layout';
 import { createRoomLabelRegistry } from './label-layout-runtime';
 
 const viewport = {
@@ -277,6 +278,125 @@ describe('unified room label registry', () => {
     cleanup();
     expect(canvas.dataset.labelLayoutPending).toBeUndefined();
   });
+  it('passes only a native-hit-confirmed pointer witness with the actual physical action bounds', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      child = document.createElement('span');
+    item.element.append(child);
+    const layout = vi.spyOn(placement, 'layoutLabels');
+    const descriptor = Object.getOwnPropertyDescriptor(
+      document,
+      'elementFromPoint',
+    );
+    const hit = vi.fn(() => child as Element);
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: hit,
+    });
+    const registry = createRoomLabelRegistry(vi.fn()),
+      cleanup = registry.connect(canvas);
+    try {
+      registry.register('hover', item.element, item.leader, {
+        priority: 3,
+        mandatory: true,
+        inspection: 'hover',
+        pointer: () => ({ x: 60, y: 35 }),
+      });
+      flush();
+      expect(layout.mock.lastCall?.[0][0].pointer).toEqual({
+        x: 60,
+        y: 35,
+        bounds: { left: 50, top: 30, right: 95, bottom: 48 },
+      });
+      hit.mockReturnValue(document.body);
+      registry.schedule();
+      flush();
+      expect(layout.mock.lastCall?.[0][0].pointer).toBeUndefined();
+    } finally {
+      cleanup();
+      if (descriptor)
+        Object.defineProperty(document, 'elementFromPoint', descriptor);
+      else Reflect.deleteProperty(document, 'elementFromPoint');
+    }
+  });
+  it('fits a selected occupied name and count row into its measured 44px action', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      ...viewport,
+      height: 48,
+      bottom: 48,
+    });
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.dataset.roomOccupied = 'true';
+    item.element.append(full);
+    vi.spyOn(full, 'getBoundingClientRect').mockReturnValue({
+      ...viewport,
+      width: 122,
+      height: 36,
+    });
+    const registry = createRoomLabelRegistry(vi.fn()),
+      cleanup = registry.connect(canvas);
+    registry.register('selected-occupied', item.element, item.leader, {
+      priority: 4,
+      mandatory: true,
+    });
+    flush();
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    expect(item.element.dataset.labelCompact).toBe('false');
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    cleanup();
+  });
+  it.each([
+    { dimension: 'width', delta: 3 / 65536, settles: true },
+    { dimension: 'height', delta: 3 / 65536, settles: true },
+    { dimension: 'width', delta: 0.01, settles: false },
+    { dimension: 'height', delta: 18, settles: false },
+  ] as const)(
+    'bounds translation noise for $dimension delta $delta without accepting real reflow',
+    ({ dimension, delta, settles }) => {
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas');
+      host.append(canvas);
+      document.body.append(host);
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+      const item = label(host),
+        full = document.createElement('span');
+      full.dataset.roomLabelFull = 'true';
+      item.element.append(full);
+      let reads = 0;
+      vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => ({
+        ...viewport,
+        width: 40,
+        height: 32,
+        [dimension]:
+          (dimension === 'width' ? 40 : 32) + (++reads % 2 ? delta : 0),
+      }));
+      const registry = createRoomLabelRegistry(vi.fn()),
+        cleanup = registry.connect(canvas);
+      registry.register('fractional', item.element, item.leader, {
+        priority: 4,
+        mandatory: true,
+      });
+      flush();
+      expect(canvas.dataset.labelLayoutPending).toBe(String(!settles));
+      expect(reads).toBe(settles ? 2 : 8);
+      if (settles) expect(canvas.dataset.labelLayoutError).toBeUndefined();
+      else
+        expect(canvas.dataset.labelLayoutError).toMatch(
+          /four placement passes/,
+        );
+      cleanup();
+    },
+  );
   it('fails explicitly at the synchronous remeasurement bound instead of publishing unstable placement', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');

@@ -12,8 +12,14 @@ export type LabelOptions = {
   preferFull?: boolean;
   readableSummary?: string;
   inspection?: 'focus' | 'hover' | null;
+  pointer?: () => { x: number; y: number } | null;
   isVisible?: () => boolean;
 };
+// At Chromium device scale 1.5, translation alone changed measured widths by
+// up to 3/65536px. This comparison-only bound is 128 times smaller than a
+// 1/64px layout unit; actual packing still uses the unrounded measured sizes.
+const DIMENSION_NOISE = 1 / 8192;
+
 type Entry = {
   element: HTMLElement;
   leader: HTMLElement;
@@ -22,6 +28,7 @@ type Entry = {
   dy: number;
   placed: boolean;
   compact: boolean;
+  yielded: boolean;
 };
 
 function sceneLabelVisible(element: HTMLElement, host: HTMLElement) {
@@ -78,6 +85,30 @@ export function createRoomLabelRegistry(
           '[data-room-label-full]',
         );
         const fullRect = full?.getBoundingClientRect();
+        const pointer = entry.options.pointer?.();
+        const hovered = entry.options.inspection === 'hover';
+        const witnessedPointer =
+          hovered &&
+          pointer &&
+          Number.isFinite(pointer.x) &&
+          Number.isFinite(pointer.y) &&
+          pointer.x >= rect.left &&
+          pointer.x < rect.right &&
+          pointer.y >= rect.top &&
+          pointer.y < rect.bottom &&
+          entry.element.contains(
+            document.elementFromPoint(pointer.x, pointer.y),
+          )
+            ? {
+                ...pointer,
+                bounds: {
+                  left: rect.left,
+                  top: rect.top,
+                  right: rect.right,
+                  bottom: rect.bottom,
+                },
+              }
+            : undefined;
         labels.push({
           id,
           selected: entry.options.priority >= 4,
@@ -89,12 +120,18 @@ export function createRoomLabelRegistry(
             ? Math.max(44, fullRect.width + 18)
             : rect.width,
           height: fullRect?.height
-            ? Math.max(44, fullRect.height + 12)
+            ? Math.max(
+                44,
+                fullRect.height +
+                  (entry.element.dataset.roomOccupied === 'true' ? 8 : 12),
+              )
             : rect.height,
           mandatory: entry.options.mandatory,
           preferFull: entry.options.preferFull,
           focused: document.activeElement === entry.element,
-          hovered: entry.options.inspection === 'hover',
+          hovered,
+          pointer: witnessedPointer,
+          holdCompact: entry.yielded && hovered,
           compact: entry.options.compact
             ? { width: 44, height: 44 }
             : undefined,
@@ -134,6 +171,10 @@ export function createRoomLabelRegistry(
         entry.dy = result.dy;
         entry.placed = result.visible;
         entry.compact = result.compact ?? false;
+        entry.yielded =
+          !!result.yielded ||
+          (entry.yielded && options.inspection === 'hover' && entry.compact);
+        element.dataset.labelYielded = String(entry.yielded);
         const changed =
           (element.dataset.labelCompact === 'true') !== entry.compact;
         variantChanged ||= changed;
@@ -191,8 +232,8 @@ export function createRoomLabelRegistry(
         labels.length === after.length &&
         labels.every(
           (label, index) =>
-            label.width === after[index].width &&
-            label.height === after[index].height,
+            Math.abs(label.width - after[index].width) <= DIMENSION_NOISE &&
+            Math.abs(label.height - after[index].height) <= DIMENSION_NOISE,
         );
       if (!variantChanged && dimensionsStable) {
         settled = true;
@@ -245,6 +286,9 @@ export function createRoomLabelRegistry(
         placed:
           element.dataset.labelLayoutId === id &&
           element.dataset.labelSuppressed === 'false',
+        yielded:
+          element.dataset.labelLayoutId === id &&
+          element.dataset.labelYielded === 'true',
         compact:
           element.dataset.labelLayoutId === id &&
           element.dataset.labelCompact === 'true',
