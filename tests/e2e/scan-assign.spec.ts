@@ -1,3 +1,4 @@
+import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -206,6 +207,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await input.fill(`  ${quantityLabel}\r\n`);
     await input.press('Enter');
     await expect(review).toContainText(quantityName);
+    await expectScopedInteractiveTransitions(page);
     await expect(review.getByLabel('Units to assign')).toHaveValue('1');
     await expect(review.getByLabel('Storage source')).toHaveValue(
       inactiveSource.id,
@@ -241,6 +243,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
       name: 'Latest assignment receipt',
     });
     await expect(receipt).toContainText(quantityName);
+    await expectScopedInteractiveTransitions(page);
     await expect(receipt).toContainText(ticket);
     await expect(input).toBeEnabled();
     await expect(input).toHaveValue('');
