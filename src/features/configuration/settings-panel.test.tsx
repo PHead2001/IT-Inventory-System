@@ -494,3 +494,31 @@ it('names the category only after its creation commits', async () => {
   await act(async () => finish({ ok: true, result: { changed: true } }));
   expect(await screen.findByText('Category added: Adapters.')).toBeVisible();
 });
+
+it.each(['create', 'rename'] as const)(
+  'shows the normalized committed category name after %s without waiting for refresh',
+  async (operation) => {
+    mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
+    render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+    if (operation === 'rename')
+      fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+    fireEvent.change(
+      screen.getByLabelText(
+        operation === 'create' ? 'Display name' : 'New category name',
+      ),
+      { target: { value: '  USB   Adapters\t and   Cables  ' } },
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: operation === 'create' ? 'Add category' : 'Save name',
+      }),
+    );
+    const expected =
+      operation === 'create'
+        ? 'Category added: USB Adapters and Cables.'
+        : 'Category name saved: USB Adapters and Cables.';
+    // textContent preserves repeated spaces that accessible queries normalize.
+    expect((await screen.findByText(expected)).textContent).toBe(expected);
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  },
+);

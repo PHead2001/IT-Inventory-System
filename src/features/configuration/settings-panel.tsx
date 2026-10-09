@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
-import type { RemovalReview } from './contracts';
+import { normalizeCategoryName, type RemovalReview } from './contracts';
 import {
   labelSettingText,
   labelSizeOptions,
@@ -115,8 +115,8 @@ export function SettingsPanel({
       setMessage(
         result.result.changed
           ? {
-              category_create: `Category added: ${String(payload.name).trim()}.`,
-              category_rename: `Category name saved: ${String(payload.name).trim()}.`,
+              category_create: `Category added: ${normalizeCategoryName(String(payload.name))}.`,
+              category_rename: `Category name saved: ${normalizeCategoryName(String(payload.name))}.`,
               category_remove: `Category removed: ${categories?.find((category) => category.id === payload.category_id)?.name ?? 'Selected category'}.`,
               label_defaults_update: 'Label settings saved.',
             }[operation]

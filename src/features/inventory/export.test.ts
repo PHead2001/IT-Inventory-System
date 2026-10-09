@@ -40,6 +40,52 @@ const legacyLowStockHeaders = [
   'Environment',
 ];
 describe('inventory CSV', () => {
+  it.each([false, true])(
+    'distinguishes retired custody from missing assignments with custom fields %s',
+    (includeCustom) => {
+      const rows = ['retired', 'site', 'storage', null, undefined].map(
+        (custody_kind) => ({
+          entity_id: id,
+          kind: 'asset',
+          name: 'Switch',
+          category_name: 'Networking',
+          manufacturer: null,
+          model: null,
+          status: custody_kind === 'retired' ? 'retired' : 'active',
+          asset_tag: 'SW-1',
+          serial_number: null,
+          quantity: null,
+          location_name: null,
+          location_code: null,
+          breadcrumb: null,
+          custody_kind,
+        }),
+      );
+      const csv = exportCsv(
+        'inventory',
+        { rows, total: rows.length, exported_at: at },
+        'Preview',
+        includeCustom,
+      ).csv;
+      const [header, ...body] = csv.slice(1).trimEnd().split('\r\n');
+      const headers = header.split(',').map((value) => JSON.parse(value));
+      const machineIndex = headers.indexOf('Custody');
+      const labelIndex = headers.indexOf('Custody label');
+      expect(
+        body.map((line) => JSON.parse(line.split(',')[machineIndex])),
+      ).toEqual(['retired', 'site', 'storage', '', '']);
+      expect(labelIndex).toBe(headers.length - 1);
+      expect(
+        body.map((line) => JSON.parse(line.slice(line.lastIndexOf(',') + 1))),
+      ).toEqual([
+        'Retired',
+        'Assigned to site',
+        'In storage',
+        'No recorded assignment',
+        'No recorded assignment',
+      ]);
+    },
+  );
   it.each(['inventory', 'low_stock'] as const)(
     'appends display metadata after all existing %s fields, preserving UTC source and custom opt-in',
     (type) => {

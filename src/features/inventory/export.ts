@@ -208,7 +208,9 @@ export function exportCsv(
               ? 'Assigned to site'
               : row.custody_kind === 'storage'
                 ? 'In storage'
-                : 'No recorded assignment',
+                : row.custody_kind === 'retired'
+                  ? 'Retired'
+                  : 'No recorded assignment',
           ),
         );
         yield cells.join(',');

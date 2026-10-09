@@ -628,12 +628,14 @@ export function MetadataSettings({
   const [publishedBaseline, setPublishedBaseline] = useState(
     selected?.published_revision_id ?? '',
   );
-  const publishedSnapshot = useRef({
+  // Adopt committed publications immediately; refreshed props may still describe
+  // the prior revision and must not restore obsolete choice or field provenance.
+  const [publishedSnapshot, setPublishedSnapshot] = useState(() => ({
     id: selected?.published_revision_id ?? '',
     definition: copy(
       selected?.published_definition ?? { fields: [], layout: [] },
     ),
-  });
+  }));
   const [reviewSnapshot, setReviewSnapshot] =
     useState<PublicationReviewSnapshot | null>(null);
   const previewDetails = useRef<HTMLDetailsElement>(null);
@@ -892,7 +894,7 @@ export function MetadataSettings({
   const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
     ? [
-        ...designerIssues(definition, selected?.published_definition),
+        ...designerIssues(definition, publishedSnapshot.definition),
         ...Object.entries(configErrors)
           .filter(([id]) => definition.fields.some((field) => field.id === id))
           .map(([, message]) => message)
@@ -1086,10 +1088,10 @@ export function MetadataSettings({
     setDraftId(nextDraftId);
     setPublishedBaseline(publishedId);
     if (selected?.published_revision_id === publishedId)
-      publishedSnapshot.current = {
+      setPublishedSnapshot({
         id: publishedId,
         definition: copy(selected.published_definition),
-      };
+      });
     setReceipt(null);
     setSaveReview(null);
     setSavePayload(null);
@@ -1315,12 +1317,7 @@ export function MetadataSettings({
         } else if (operation === 'metadata_draft_discard') {
           clearDesignerRecovery(memberId, submittedCategory);
           setRecovery(null);
-          reset(
-            selected.published_definition,
-            '0',
-            selected.published_revision_id,
-            null,
-          );
+          reset(publishedSnapshot.definition, '0', publishedSnapshot.id, null);
           setMessage('Saved draft discarded.');
         } else {
           clearDesignerRecovery(memberId, submittedCategory);
@@ -1328,6 +1325,10 @@ export function MetadataSettings({
           setDraftVersion('0');
           setDraftId(null);
           setPublishedBaseline(String(response.data.published_revision_id));
+          setPublishedSnapshot({
+            id: String(response.data.published_revision_id),
+            definition: copy(definition as MetadataDefinition),
+          });
           setSaved(JSON.stringify(definition));
           setMessage(
             'Published form revision ' + String(response.data.version) + '.',
@@ -1425,9 +1426,9 @@ export function MetadataSettings({
     const submittedReview: PublicationReviewSnapshot = {
       proposal: copy(payload.definition as MetadataDefinition),
       baseline:
-        publishedSnapshot.current.id ===
+        publishedSnapshot.id ===
         String(payload.expected_published_revision_id ?? '')
-          ? copy(publishedSnapshot.current.definition)
+          ? copy(publishedSnapshot.definition)
           : null,
       expectedPublishedRevisionId: String(
         payload.expected_published_revision_id ?? '',
@@ -1489,10 +1490,10 @@ export function MetadataSettings({
         setDraftId(null);
         setDraftVersion('0');
         setPublishedBaseline(String(result.data.published_revision_id));
-        publishedSnapshot.current = {
+        setPublishedSnapshot({
           id: String(result.data.published_revision_id),
           definition: copy(payload.definition as MetadataDefinition),
-        };
+        });
         setSaved(JSON.stringify(definition));
         setHistory([]);
         setMessage(
@@ -1596,7 +1597,7 @@ export function MetadataSettings({
     if (
       definition &&
       window.confirm(
-        selected?.published_definition.fields.some((field) => field.id === id)
+        publishedSnapshot.definition.fields.some((field) => field.id === id)
           ? 'Retire this field from the new revision? Earlier revisions and stored values are preserved. Save changes will review the impact.'
           : 'Discard this unpublished field and its placement from your local edits?',
       )
@@ -2987,7 +2988,7 @@ export function MetadataSettings({
                           key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
                           publishedOptions={
-                            selected?.published_definition.fields.find(
+                            publishedSnapshot.definition.fields.find(
                               (item) => item.id === selectedField.id,
                             )?.options
                           }
@@ -2998,7 +2999,7 @@ export function MetadataSettings({
                           )}
                           change={updateField}
                           published={Boolean(
-                            selected?.published_definition.fields.some(
+                            publishedSnapshot.definition.fields.some(
                               (item) => item.id === selectedField.id,
                             ),
                           )}
@@ -3102,7 +3103,7 @@ export function MetadataSettings({
                               <FieldAdvanced
                                 field={selectedField}
                                 published={Boolean(
-                                  selected?.published_definition.fields.some(
+                                  publishedSnapshot.definition.fields.some(
                                     (item) => item.id === selectedField.id,
                                   ),
                                 )}
