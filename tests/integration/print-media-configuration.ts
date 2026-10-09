@@ -6,6 +6,19 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import fixtures from '../fixtures/print-media.json' with { type: 'json' };
 import { printLayoutSchema } from '../../src/features/labels/print-layout';
 
+// Supabase RPC builders are lazy thenables. Assimilate them immediately so the
+// independent lock observer runs while the request is actually in flight.
+export async function dispatchPrintMediaRpc(
+  client: SupabaseClient,
+  payload: Record<string, unknown>,
+  id: string = randomUUID(),
+) {
+  return client.rpc('label_defaults_update', {
+    p_request_id: id,
+    p_payload: payload,
+  });
+}
+
 export async function testPrintMediaConfiguration(
   owner: Client,
   client: SupabaseClient,
@@ -37,10 +50,7 @@ export async function testPrintMediaConfiguration(
     format: 'qr',
   });
   const rpc = (payload: Record<string, unknown>, id: string = randomUUID()) =>
-    client.rpc('label_defaults_update', {
-      p_request_id: id,
-      p_payload: payload,
-    });
+    dispatchPrintMediaRpc(client, payload, id);
   const success = async (payload: Record<string, unknown>, id?: string) => {
     const response = await rpc(payload, id);
     assert.equal(response.error, null, JSON.stringify(response.error));
@@ -161,7 +171,12 @@ export async function testPrintMediaConfiguration(
         "select query from pg_stat_activity where $1=any(pg_blocking_pids(pid)) and state='active'",
         [pid],
       );
-      if (rows.rows.length) return;
+      if (
+        rows.rows.some((row) =>
+          String(row.query).includes('label_defaults_update'),
+        )
+      )
+        return;
       await delay(25);
     }
     throw new Error(
