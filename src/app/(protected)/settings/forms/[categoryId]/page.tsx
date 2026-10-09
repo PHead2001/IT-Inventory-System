@@ -1,9 +1,23 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getConfigurationCategories } from '@/features/configuration/queries.server';
+import { readCategoryFormPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { MetadataSettings } from '@/features/metadata/metadata-settings';
 import { designerInstanceKey } from '@/features/metadata/designer-recovery';
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ categoryId: string }>;
+}) {
+  const { categoryId } = await params;
+  const configuration = await readCategoryFormPage(categoryId);
+  return recordTitle(
+    configuration ? `${configuration.category.name} form` : undefined,
+    'Settings',
+  );
+}
 
 export default async function CategoryFormPage({
   params,
@@ -11,12 +25,9 @@ export default async function CategoryFormPage({
   params: Promise<{ categoryId: string }>;
 }) {
   const { categoryId } = await params;
-  const { categories, canManage, memberId } =
-    await getConfigurationCategories();
-  const category = categories.find(
-    (entry) => entry.id === categoryId && entry.active && !entry.removed_at,
-  );
-  if (!category) notFound();
+  const configuration = await readCategoryFormPage(categoryId);
+  if (!configuration) notFound();
+  const { categories, canManage, memberId, category } = configuration;
   return (
     <div className="space-y-3">
       <Link href="/settings/forms" className="text-cyan-300 underline">

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireMember } from '@/lib/auth/session.server';
-import { getSite } from '@/features/custody/queries.server';
+import { readSiteOpeningPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import {
   getCategories,
   getLocations,
@@ -15,14 +15,19 @@ export async function generateMetadata({
 }: {
   params: Promise<{ code: string; kind: string }>;
 }) {
-  const { kind } = await params;
+  const { code, kind } = await params;
+  if (kind !== 'quantity' && kind !== 'asset') notFound();
+  const { member, site } = await readSiteOpeningPage(code);
+  if (!site) notFound();
   const title =
     kind === 'quantity'
       ? 'Record existing quantity item'
       : kind === 'asset'
         ? 'Record existing individual asset'
         : 'Record existing equipment';
-  return { title: { absolute: `${title} · IT Inventory` } };
+  return recordTitle(
+    member.role === 'staff' && site.active ? `${title} at ${site.name}` : title,
+  );
 }
 
 export default async function SiteOpeningPage({
@@ -35,9 +40,9 @@ export default async function SiteOpeningPage({
   const query = await searchParams;
   const draft = typeof query?.draft === 'string' ? query.draft : undefined;
   const instance = draft ?? crypto.randomUUID();
-  const { member } = await requireMember();
   const { code, kind } = await params;
-  const site = await getSite(code);
+  if (kind !== 'quantity' && kind !== 'asset') notFound();
+  const { member, site } = await readSiteOpeningPage(code);
   if (!site || (kind !== 'quantity' && kind !== 'asset')) notFound();
   if (member.role !== 'staff')
     return (

@@ -984,3 +984,116 @@ it('closes an untouched explicitly new move after Move more and returns launcher
   expect(mocks.submit).toHaveBeenCalledOnce();
   expect(sessionStorage.getItem(completionKey())).toBeNull();
 });
+it('opens an explicit record-page move from a fresh snapshot while retaining the historical authorized receipt', async () => {
+  render(
+    <TaskWorkspace
+      choices={[{ id: 'move', label: 'Move stock' }]}
+      context="This item"
+    >
+      {() => <MutationForm {...props} onRecordPage />}
+    </TaskWorkspace>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByText('This item: move completed.');
+  const original = mocks.submit.mock.calls[0][0];
+  const pointer = sessionStorage.getItem(completionKey());
+  mocks.snapshot.mockResolvedValue({
+    item: { ...item, name: 'Renamed current item', version: 8 },
+    locations: props.locations,
+    balances: [{ location: source, quantity: 9 }],
+  });
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  await screen.findByLabelText('Quantity to move');
+  expect(screen.getByLabelText('Quantity to move')).toHaveValue(null);
+  const previous = screen.getByText(/^Last move/).closest('details')!;
+  expect(previous).not.toHaveAttribute('open');
+  expect(sessionStorage.getItem(completionKey())).toBe(pointer);
+  await user.click(screen.getByText(/^Last move/));
+  expect(previous).toHaveTextContent('After this move: Red Container 1 unit');
+  expect(previous.querySelector('time')).toHaveAttribute(
+    'datetime',
+    committed.movement.createdAt,
+  );
+  await user.click(
+    screen.getByLabelText('Destination location', { selector: 'button' }),
+  );
+  await user.type(
+    screen.getByRole('combobox', { name: 'Search locations' }),
+    'Black',
+  );
+  await user.click(screen.getByRole('option', { name: /Black Container/ }));
+  fireEvent.change(screen.getByLabelText('Quantity to move'), {
+    target: { value: '2' },
+  });
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('9 → 7 units');
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0].requestId).not.toBe(original.requestId);
+  expect(mocks.submit.mock.calls[1][0].payload.expected_version).toBe(8);
+});
+
+it('retains a completed pointer and refuses a guessed fresh form when its current snapshot fails', async () => {
+  sessionStorage.setItem(
+    completionKey(),
+    JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+  );
+  mocks.snapshot.mockRejectedValueOnce(new Error('offline'));
+  render(<MutationForm {...props} onRecordPage />);
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('form')).toBeNull();
+  expect(sessionStorage.getItem(completionKey())).not.toBeNull();
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Retry loading move receipt' }));
+  await screen.findByLabelText('Quantity to move');
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(mocks.receipt).toHaveBeenCalledWith(
+    expect.objectContaining({ expectedActorId: actorId }),
+  );
+});
+it('preserves fresh draft inputs and their version when a newer page snapshot arrives during editing', async () => {
+  sessionStorage.setItem(
+    completionKey(),
+    JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+  );
+  mocks.snapshot.mockResolvedValue({
+    item: { ...item, version: 4 },
+    locations: props.locations,
+    balances: [{ location: source, quantity: 9 }],
+  });
+  const view = render(<MutationForm {...props} onRecordPage />);
+  const user = await prepare();
+  fireEvent.change(screen.getByLabelText('Quantity to move'), {
+    target: { value: '2' },
+  });
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('9 → 7 units');
+  view.rerender(
+    <MutationForm
+      {...props}
+      onRecordPage
+      item={{ ...item, version: 5 }}
+      balances={[{ location: source, quantity: 3 }]}
+    />,
+  );
+  expect(screen.getByLabelText('Quantity to move')).toHaveValue(2);
+  expect(screen.getByLabelText('Destination location')).toHaveTextContent(
+    'Black Container',
+  );
+  expect(
+    screen.queryByRole('button', { name: 'Confirm move stock' }),
+  ).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  expect(screen.queryByRole('region', { name: 'Review changes' })).toBeNull();
+  expect(screen.getByText(/Recorded stock changed/)).toBeVisible();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});

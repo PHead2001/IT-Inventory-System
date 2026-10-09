@@ -8,7 +8,13 @@ const choices = [
   { id: 'receive', label: 'Receive stock' },
   { id: 'move', label: 'Move stock' },
 ];
-function Draft({ id }: { id: string }) {
+function Draft({
+  id,
+  completedVersion,
+}: {
+  id: string;
+  completedVersion?: string;
+}) {
   const [value, setValue] = useState('');
   const [phase, setPhase] = useState('');
   const reset = useTaskReset();
@@ -17,6 +23,7 @@ function Draft({ id }: { id: string }) {
     pending: phase === 'pending' || phase === 'completed-pending',
     uncertain: phase === 'unknown',
     completed: phase === 'complete' || phase === 'completed-pending',
+    completedVersion: phase === 'complete' ? completedVersion : undefined,
   });
   return (
     <div>
@@ -238,4 +245,89 @@ it('keeps Close task next to the form actions in keyboard order', async () => {
   expect(screen.getAllByRole('heading', { name: 'Move stock' })).toHaveLength(
     1,
   );
+});
+it.each(['Receive stock', 'Move stock'])(
+  'explicit %s reentry starts a fresh completed task without a close detour',
+  async (label) => {
+    const user = userEvent.setup();
+    render(<Workspace />);
+    await user.click(screen.getByRole('button', { name: label }));
+    const entry = screen.getByRole('textbox');
+    await user.type(entry, 'completed draft');
+    await user.click(screen.getByRole('button', { name: 'complete' }));
+    await user.click(screen.getByRole('button', { name: label }));
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'New transaction' }),
+    ).toBeNull();
+    expect(screen.getByRole('heading', { name: label })).toHaveFocus();
+  },
+);
+it.each(['Receive stock', 'Move stock'])(
+  'fences an explicit %s form behind its known completion version and keeps later drafts intact',
+  async (label) => {
+    const user = userEvent.setup();
+    const refresh = vi.fn().mockImplementationOnce(() => {
+      throw new Error('offline');
+    });
+    const content = (version: string) => (
+      <TaskWorkspace
+        choices={choices}
+        context="This item"
+        recordVersion={version}
+        onRefresh={refresh}
+      >
+        {(id) => <Draft id={id} completedVersion="9007199254740993" />}
+      </TaskWorkspace>
+    );
+    const view = render(content('9007199254740992'));
+    await user.click(screen.getByRole('button', { name: 'Receive stock' }));
+    await user.type(screen.getByRole('textbox'), 'saved');
+    await user.click(screen.getByRole('button', { name: 'complete' }));
+    expect(screen.getByRole('textbox')).toHaveValue('saved');
+    await user.click(screen.getByRole('button', { name: label }));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'current record could not be loaded',
+    );
+    expect(refresh).toHaveBeenCalledOnce();
+    await user.click(
+      screen.getByRole('button', { name: 'Retry loading record' }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    view.rerender(content('9007199254740993'));
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    await user.type(screen.getByRole('textbox'), 'new draft');
+    view.rerender(content('9007199254740994'));
+    expect(screen.getByRole('textbox')).toHaveValue('new draft');
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+it('opens a same-version no-op completion immediately and keeps pending/uncertain forms on their original instance', () => {
+  const refresh = vi.fn();
+  render(
+    <TaskWorkspace
+      choices={choices}
+      context="This item"
+      recordVersion="4"
+      onRefresh={refresh}
+    >
+      {(id) => <Draft id={id} completedVersion="4" />}
+    </TaskWorkspace>,
+  );
+  const launcher = screen.getByRole('button', { name: 'Receive stock' });
+  fireEvent.click(launcher);
+  fireEvent.click(screen.getByRole('button', { name: 'complete' }));
+  fireEvent.click(launcher);
+  expect(screen.getByRole('textbox')).toHaveValue('');
+  expect(refresh).not.toHaveBeenCalled();
+  for (const phase of ['pending', 'unknown']) {
+    fireEvent.click(screen.getByRole('button', { name: phase }));
+    const input = screen.getByRole('textbox');
+    fireEvent.click(launcher);
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(launcher).toBeDisabled();
+  }
 });

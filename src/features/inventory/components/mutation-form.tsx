@@ -52,6 +52,7 @@ const labels: Record<string, string> = {
   asset_restore: 'Restore asset',
 };
 type Props = {
+  onRecordPage?: boolean;
   actorId?: string;
   backendScope?: string;
   operation: Operation;
@@ -153,7 +154,16 @@ function MoveRecovery(props: Props) {
           ...pointer,
           expectedActorId: props.actorId,
         });
+        const snapshot = props.onRecordPage
+          ? await loadMoveSnapshot({
+              entityId: itemId,
+              expectedActorId: props.actorId,
+            })
+          : null;
+        if (snapshot && snapshot.item.version < itemVersion)
+          throw new Error('Stale read');
         if (current) {
+          setFreshStart(snapshot);
           setRestored({
             ok: true,
             entityId: pointer.entityId,
@@ -169,14 +179,21 @@ function MoveRecovery(props: Props) {
       } catch {
         if (current)
           setError(
-            'The previous move receipt could not be verified. Retry loading it before starting another move.',
+            'The previous move receipt or current balances could not be verified. Retry loading them before starting another move.',
           );
       }
     });
     return () => {
       current = false;
     };
-  }, [attempt, props.actorId, props.backendScope, itemId, itemVersion]);
+  }, [
+    attempt,
+    props.actorId,
+    props.backendScope,
+    props.onRecordPage,
+    itemId,
+    itemVersion,
+  ]);
   const discardInvalidPointer = () => {
     if (!invalidPointer || !storageKey || recoveryPending) return;
     startRecovery(async () => {
@@ -238,7 +255,8 @@ function MoveRecovery(props: Props) {
   return (
     <MutationFormFields
       {...props}
-      initialCompletion={restored}
+      initialCompletion={props.onRecordPage ? null : restored}
+      historicalCompletion={props.onRecordPage ? restored : null}
       completionStorageKey={storageKey}
       initialStorageWarning={storageWarning}
       freshStart={freshStart}
@@ -246,6 +264,7 @@ function MoveRecovery(props: Props) {
   );
 }
 function MutationFormFields({
+  onRecordPage,
   actorId,
   operation,
   categories,
@@ -255,10 +274,12 @@ function MutationFormFields({
   currentLocation: latestLocation,
   balances: latestBalances,
   initialCompletion = null,
+  historicalCompletion = null,
   completionStorageKey = null,
   initialStorageWarning = '',
   freshStart = null,
 }: Props & {
+  historicalCompletion?: Extract<MutationState, { ok: true }> | null;
   initialCompletion?: Extract<MutationState, { ok: true }> | null;
   completionStorageKey?: string | null;
   initialStorageWarning?: string;
@@ -283,7 +304,12 @@ function MutationFormFields({
   }));
   // Availability follows observed reads; editing/review still owns its original
   // version. An explicit verified refresh may precede unchanged route props.
-  if (displayStock.key !== latestStockKey)
+  if (
+    displayStock.key !== latestStockKey &&
+    (!baseline.item ||
+      !latestItem ||
+      latestItem.version >= baseline.item.version)
+  )
     setDisplayStock({ key: latestStockKey, balances: latestBalances });
   const sourceHoldings =
     operation === 'quantity_move' ? (displayStock.balances ?? []) : balances;
@@ -298,7 +324,7 @@ function MutationFormFields({
   const [thresholdTouched, setThresholdTouched] = useState(false);
   const [refreshedVersion, setRefreshedVersion] = useState<number | null>(null);
   const eligibleDefaultLocations = new Set(
-    pickerLocations(latestLocations, 'destination').map((row) => row.id),
+    pickerLocations(locations, 'destination').map((row) => row.id),
   );
   const positiveDefaultHoldings = balances.filter(
     (row) => row.quantity > 0 && eligibleDefaultLocations.has(row.location.id),
@@ -341,6 +367,7 @@ function MutationFormFields({
   const [previousReceipt, setPreviousReceipt] = useState(
     Boolean(initialCompletion),
   );
+  const [lastMove, setLastMove] = useState(historicalCompletion);
   const [storageWarning, setStorageWarning] = useState(initialStorageWarning);
   const [locationError, setLocationError] = useState('');
   const [review, setReview] = useState(false);
@@ -380,10 +407,12 @@ function MutationFormFields({
       return true;
     }
   };
-  useTaskDiscard(() => {
+  useTaskDiscard((options) => {
     if (uncertain || (!completed && (pending || inFlight.current)))
       return false;
-    return clearCompletionPointer();
+    return completed && onRecordPage && options?.newIntent
+      ? true
+      : clearCompletionPointer();
   });
   const [initialValues, setInitialValues] = useState(values);
   const reportTask = useReportTaskState({
@@ -391,6 +420,7 @@ function MutationFormFields({
     pending: pending && !completed,
     uncertain,
     completed,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   useEffect(() => {
     if (completed) completionRef.current?.focus();
@@ -478,8 +508,14 @@ function MutationFormFields({
           ?.can_hold_inventory,
     });
   const baselineKey = snapshotKey(item, balances);
+  // An action snapshot can arrive before its RSC refresh. Older page props must
+  // not replace that authorized snapshot or make its fresh form unusable.
+  const pageBehindSnapshot = Boolean(
+    item && latestItem && latestItem.version < item.version,
+  );
   const moveSnapshotChanged =
     moving &&
+    !pageBehindSnapshot &&
     (latestBalances === undefined ||
       baselineKey !== snapshotKey(latestItem, latestBalances));
   const currentReviewKey = JSON.stringify({
@@ -990,6 +1026,7 @@ function MutationFormFields({
           }
         }
         if (result.ok) {
+          if (moving) setLastMove(null);
           validation.clear();
           setReview(false);
           if (moving && completionStorageKey && result.eventId) {
@@ -1061,7 +1098,8 @@ function MutationFormFields({
         setCompletedError('');
         setReview(false);
         if (startNew) {
-          if (!clearCompletionPointer()) return;
+          if (!onRecordPage && !clearCompletionPointer()) return;
+          if (state?.ok) setLastMove(state);
           const newValues = {
             ...values,
             quantity: '',
@@ -1127,6 +1165,51 @@ function MutationFormFields({
       className="space-y-4"
       noValidate
     >
+      {lastMove && (
+        <details className="text-sm">
+          <summary className="min-h-11 cursor-pointer py-2 font-semibold">
+            Last move
+            {lastMove.movement?.createdAt && (
+              <>
+                {' '}
+                · <OperationalTimestamp value={lastMove.movement.createdAt} />
+              </>
+            )}
+          </summary>
+          <p>
+            {onRecordPage
+              ? 'This item'
+              : (lastMove.movement?.itemName ?? item?.name)}
+            : move completed.
+          </p>
+          {lastMove.movement ? (
+            <>
+              <p>
+                Moved {countLabel(lastMove.movement.quantity, 'unit')} from{' '}
+                {lastMove.movement.source.name} to{' '}
+                {lastMove.movement.destination.name}.
+              </p>
+              <p>
+                After this move: {lastMove.movement.source.name}{' '}
+                {countLabel(lastMove.movement.source.after, 'unit')};{' '}
+                {lastMove.movement.destination.name}{' '}
+                {countLabel(lastMove.movement.destination.after, 'unit')}.
+              </p>
+              <p>Later transactions may change current balances.</p>
+              {lastMove.movement.createdAt && (
+                <OperationalTimestamp
+                  value={lastMove.movement.createdAt}
+                  relative
+                />
+              )}
+            </>
+          ) : (
+            <p>
+              The move is saved. Its committed receipt is currently unavailable.
+            </p>
+          )}
+        </details>
+      )}
       {['asset_move', 'asset_correct_location'].includes(operation) && (
         <p className="text-sm text-slate-300">
           Move physically relocates this asset. Correct updates its recorded
@@ -1380,7 +1463,9 @@ function MutationFormFields({
         <section aria-label="Review changes" className={panel}>
           <h3 id={reviewContextId} className="font-semibold">
             Review changes for{' '}
-            {item?.name ?? asset?.name ?? values.name ?? 'this record'}
+            {onRecordPage && !destructive
+              ? 'this item'
+              : (item?.name ?? asset?.name ?? values.name ?? 'this record')}
           </h3>
           {destructive && (
             <p className="text-sm text-[var(--warning)]">
@@ -1447,7 +1532,10 @@ function MutationFormFields({
             <>
               {previousReceipt && <p>Previous move receipt</p>}
               <p className="font-semibold">
-                {state.movement?.itemName ?? item?.name}: move completed.
+                {onRecordPage
+                  ? 'This item'
+                  : (state.movement?.itemName ?? item?.name)}
+                : move completed.
               </p>
               {state.movement ? (
                 <>
@@ -1529,6 +1617,7 @@ function MutationFormFields({
             type="button"
             disabled={pending}
             onClick={() => refreshMove(true)}
+            variant="outline"
             className="hover:translate-y-0 active:scale-100"
           >
             Move more

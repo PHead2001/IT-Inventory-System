@@ -5,6 +5,7 @@ export type TaskState = {
   pending: boolean;
   uncertain: boolean;
   completed: boolean;
+  completedVersion?: string;
 };
 export const TaskStateContext = createContext<
   ((state: TaskState) => void) | null
@@ -13,10 +14,11 @@ export const TaskResetContext = createContext<(() => void) | null>(null);
 export const TaskWarningContext = createContext<
   ((message: string) => void) | null
 >(null);
+export type TaskDiscard = (options?: { newIntent: boolean }) => boolean;
 export const TaskDiscardContext = createContext<
-  ((discard: (() => boolean) | null) => void) | null
+  ((discard: TaskDiscard | null) => void) | null
 >(null);
-export function useTaskDiscard(discard: () => boolean) {
+export function useTaskDiscard(discard: TaskDiscard) {
   const register = useContext(TaskDiscardContext);
   useLayoutEffect(() => {
     register?.(discard);
@@ -27,10 +29,18 @@ export const useTaskReset = () => useContext(TaskResetContext);
 export const useTaskWarning = () => useContext(TaskWarningContext);
 export function useReportTaskState(state: TaskState, enabled = true) {
   const report = useContext(TaskStateContext);
-  const { dirty, pending, uncertain, completed } = state;
+  const { dirty, pending, uncertain, completed, completedVersion } = state;
   useLayoutEffect(() => {
-    if (enabled) report?.({ dirty, pending, uncertain, completed });
-  }, [report, dirty, pending, uncertain, completed, enabled]);
+    if (enabled)
+      report?.({ dirty, pending, uncertain, completed, completedVersion });
+  }, [report, dirty, pending, uncertain, completed, completedVersion, enabled]);
   return (patch: Partial<TaskState>) =>
-    report?.({ dirty, pending, uncertain, completed, ...patch });
+    report?.({
+      dirty,
+      pending,
+      uncertain,
+      completed,
+      completedVersion,
+      ...patch,
+    });
 }

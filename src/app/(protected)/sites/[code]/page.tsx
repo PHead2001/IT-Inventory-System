@@ -1,3 +1,14 @@
+import { readSitePage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = await params;
+  const detail = await readSitePage(code);
+  return recordTitle(detail?.name, 'Sites');
+}
 import { custodyEventLabel } from '@/features/custody/vocabulary';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -5,7 +16,6 @@ import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
 import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
-  getSite,
   getSiteDetail,
   getSiteArchiveReview,
 } from '@/features/custody/queries.server';
@@ -34,7 +44,7 @@ export default async function SitePage({
 }) {
   const { member } = await requireMember();
   const { code } = await params;
-  const site = await getSite(code);
+  const site = await readSitePage(code);
   if (!site) notFound();
   const filters = await searchParams;
   const [detail, archiveReview] = await Promise.all([

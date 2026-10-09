@@ -13,6 +13,7 @@ import {
   TaskDiscardContext,
   TaskWarningContext,
   type TaskState,
+  type TaskDiscard,
 } from './task-state';
 import { Button } from '@/components/ui/button';
 export type TaskChoice = {
@@ -31,21 +32,35 @@ export function TaskWorkspace({
   choices,
   children,
   context,
+  recordVersion,
+  onRefresh,
 }: {
   choices: TaskChoice[];
   children: (id: string) => ReactNode;
   context: ReactNode;
+  recordVersion?: string | number;
+  onRefresh?: () => void;
 }) {
   const scope = useId();
   const [selected, setSelected] = useState<string | null>(null);
+  const [instance, setInstance] = useState(0);
+  const acknowledgedVersion = useRef<string | undefined>(undefined);
+  const [requiredVersion, setRequiredVersion] = useState<string | undefined>(
+    undefined,
+  );
+  const [refreshError, setRefreshError] = useState(false);
+  const waitingForRecord =
+    recordVersion !== undefined &&
+    requiredVersion !== undefined &&
+    BigInt(recordVersion) < BigInt(requiredVersion);
   const [requested, setRequested] = useState<string | null | undefined>(
     undefined,
   );
   const [state, setState] = useState(clean);
   const [warning, setWarning] = useState('');
   const stateRef = useRef(clean);
-  const discardTask = useRef<(() => boolean) | null>(null);
-  const registerDiscard = useCallback((discard: (() => boolean) | null) => {
+  const discardTask = useRef<TaskDiscard | null>(null);
+  const registerDiscard = useCallback((discard: TaskDiscard | null) => {
     discardTask.current = discard;
   }, []);
   const requestedLauncher = useRef<HTMLButtonElement | null>(null);
@@ -55,7 +70,7 @@ export function TaskWorkspace({
   const returnFocusRequested = useRef(false);
   useEffect(() => {
     if (selected) heading.current?.focus();
-  }, [selected]);
+  }, [selected, instance]);
   const launcher = useRef<HTMLButtonElement | null>(null);
   const locked = state.pending || state.uncertain;
   useEffect(() => {
@@ -76,6 +91,13 @@ export function TaskWorkspace({
       tasksHeading.current?.focus();
   }, [selected, state]);
   const report = useCallback((next: TaskState) => {
+    if (
+      next.completed &&
+      next.completedVersion &&
+      (!acknowledgedVersion.current ||
+        BigInt(next.completedVersion) > BigInt(acknowledgedVersion.current))
+    )
+      acknowledgedVersion.current = next.completedVersion;
     stateRef.current = next;
     setState(next);
     if (next.pending || next.uncertain || next.completed)
@@ -85,17 +107,34 @@ export function TaskWorkspace({
     if (
       stateRef.current.pending ||
       stateRef.current.uncertain ||
-      id === selected
+      (id === selected && !stateRef.current.completed)
     )
       return;
     if (
       (stateRef.current.completed || !stateRef.current.dirty) &&
       discardTask.current &&
-      !discardTask.current()
+      !discardTask.current({
+        newIntent: id !== null && stateRef.current.completed,
+      })
     )
       return;
     if (stateRef.current.dirty && !stateRef.current.completed) setRequested(id);
     else {
+      setInstance((value) => value + 1);
+      setRequiredVersion(id === null ? undefined : acknowledgedVersion.current);
+      setRefreshError(false);
+      if (
+        id !== null &&
+        recordVersion !== undefined &&
+        acknowledgedVersion.current &&
+        BigInt(recordVersion) < BigInt(acknowledgedVersion.current)
+      ) {
+        try {
+          onRefresh?.();
+        } catch {
+          setRefreshError(true);
+        }
+      }
       setActiveLabel(
         choices.find((choice) => choice.id === id)?.label ?? activeLabel,
       );
@@ -249,7 +288,7 @@ export function TaskWorkspace({
       )}
       {selected && (
         <div
-          key={selected}
+          key={`${selected}:${instance}`}
           inert={requested !== undefined}
           className="min-w-0 space-y-3"
         >
@@ -271,7 +310,31 @@ export function TaskWorkspace({
             <TaskDiscardContext.Provider value={registerDiscard}>
               <TaskStateContext.Provider value={report}>
                 <TaskWarningContext.Provider value={setWarning}>
-                  {children(selected)}
+                  {waitingForRecord ? (
+                    <div className="space-y-3">
+                      <p role={refreshError ? 'alert' : 'status'}>
+                        {refreshError
+                          ? 'The current record could not be loaded. Retry before starting another transaction.'
+                          : 'Loading the current record before starting another transaction…'}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setRefreshError(false);
+                          try {
+                            onRefresh?.();
+                          } catch {
+                            setRefreshError(true);
+                          }
+                        }}
+                      >
+                        Retry loading record
+                      </Button>
+                    </div>
+                  ) : (
+                    children(selected)
+                  )}
                 </TaskWarningContext.Provider>
               </TaskStateContext.Provider>
             </TaskDiscardContext.Provider>

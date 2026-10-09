@@ -1,3 +1,14 @@
+import { readLocationPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = await params;
+  const detail = await readLocationPage(code);
+  return recordTitle(detail?.name, 'Locations');
+}
 import { ShowInRoom } from '@/features/room/show-in-room';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -9,7 +20,6 @@ import {
   hasInventoryConstraints,
 } from '@/features/inventory/scope-presentation';
 import {
-  getLocation,
   getInventory,
   getLocations,
 } from '@/features/inventory/queries.server';
@@ -35,7 +45,7 @@ export default async function LocationPage({
       Array.isArray(value) ? value[0] : value,
     ]),
   );
-  const location = await getLocation(code);
+  const location = await readLocationPage(code);
   if (!location) notFound();
   const [result, locations] = await Promise.all([
     getInventory({ ...filters, location: code }),

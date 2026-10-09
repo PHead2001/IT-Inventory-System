@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type {
   AssetItem,
   CategoryRef,
@@ -33,6 +34,7 @@ export function DetailTasks(props: {
   returnSuggestion?: AssetReturnSuggestion;
   returnSuggestionError?: boolean;
 }) {
+  const router = useRouter();
   const [lastArchiveReview, setLastArchiveReview] = useState(
     props.archiveReview,
   );
@@ -116,10 +118,12 @@ export function DetailTasks(props: {
   return (
     <TaskWorkspace
       choices={choices}
+      recordVersion={entity.version}
+      onRefresh={() => router.refresh()}
       context={
         <div className="text-sm">
           <p className="font-semibold break-words">
-            {entity.name} · {quantity ? 'Quantity item' : 'Individual asset'}
+            This item · {quantity ? 'Quantity item' : 'Individual asset'}
           </p>
           {item ? (
             <p>
@@ -174,6 +178,7 @@ export function DetailTasks(props: {
         if (selected.startsWith('custody:'))
           return (
             <CustodyChangeForm
+              onRecordPage
               actorId={props.actorId}
               kind={quantity ? 'quantity' : 'asset'}
               action={
@@ -197,6 +202,7 @@ export function DetailTasks(props: {
           );
         return (
           <MutationForm
+            onRecordPage
             actorId={props.actorId}
             backendScope={props.backendScope}
             operation={

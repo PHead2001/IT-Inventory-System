@@ -1,15 +1,21 @@
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+const guard = vi.hoisted(() => ({ site: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  notFound: () => {
+    throw new Error('NOT_FOUND');
+  },
+}));
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({ member: { role: 'staff', user_id: 'actor' } }),
 }));
 vi.mock('@/features/custody/queries.server', () => ({
-  getSite: async () => ({
+  getSite: guard.site.mockImplementation(async () => ({
     id: 'site',
     name: 'Private office name',
     code: 'PRIVATE-CODE',
     active: true,
-  }),
+  })),
 }));
 vi.mock('@/features/inventory/queries.server', () => ({
   getCategories: async () => [],
@@ -46,20 +52,28 @@ it.each([
       params: Promise.resolve({ code: 'PRIVATE-CODE', kind }),
     });
     expect(metadata.title).toEqual({
-      absolute: `Record existing ${label} · IT Inventory`,
+      absolute: `Record existing ${label} at Private office name · IT Inventory`,
     });
     expect(metadata.title).not.toEqual(ancestorMetadata.title);
-    expect(JSON.stringify(metadata)).not.toMatch(
-      /Private office name|PRIVATE-CODE/,
-    );
+    expect(JSON.stringify(metadata)).not.toMatch(/PRIVATE-CODE/);
   },
 );
-it('uses a generic private-safe title for an unsupported opening kind', async () => {
-  const metadata = await opening.generateMetadata({
-    params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'unsupported' }),
-  });
-  expect(metadata.title).toEqual({
-    absolute: 'Record existing equipment · IT Inventory',
-  });
-  expect(JSON.stringify(metadata)).not.toMatch(/PRIVATE-CODE|unsupported/);
+it('rejects an unsupported opening kind before reading its private site', async () => {
+  guard.site.mockClear();
+  await expect(
+    opening.generateMetadata({
+      params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'unsupported' }),
+    }),
+  ).rejects.toThrow('NOT_FOUND');
+  expect(guard.site).not.toHaveBeenCalled();
 });
+it('propagates denied caller authorization instead of returning a private site title', async () => {
+  const denied = new Error('LOGIN_REDIRECT');
+  guard.site.mockRejectedValueOnce(denied);
+  await expect(
+    opening.generateMetadata({
+      params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'asset' }),
+    }),
+  ).rejects.toBe(denied);
+});
+vi.mock('server-only', () => ({}));

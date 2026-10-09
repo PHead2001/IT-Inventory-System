@@ -1,5 +1,21 @@
 # Application architecture
 
+Record and relevant settings/form metadata invoke the same caller-authorized
+read as their page through a page-specific server-only React cache wrapper.
+This memo is limited to the current server render; action readers and persistent
+caching remain unchanged. Missing records use not-found, and authorization
+redirects/read failures propagate before any record title is produced. Active
+viewers retain readable settings and archived-record names. Site-opening titles
+name a site only for staff at an active site, matching that route's form access.
+
+Explicit task selection after a known completion creates a new form instance.
+Its initial page snapshot must reach the acknowledged result version; until then
+the workspace offers a read-refresh retry rather than an older ready form. This
+version floor never rebases a mounted dirty, pending or uncertain draft. Record-page
+moves also verify current stock and the caller-authorized historical receipt;
+prior receipts remain collapsed, timestamped and immutable while the new intent
+uses a fresh coherent stock/version snapshot.
+
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 
 Operational timestamp rendering and the appended CSV display-zone metadata follow [shared time](shared-time.md). The protected layout supplies one browser-resolved zone after matching UTC server/initial hydration; canonical instants and datetime entry semantics remain unchanged.

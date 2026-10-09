@@ -1,3 +1,15 @@
+import { RecordName } from '@/components/record-name';
+import { readQuantityPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const detail = await readQuantityPage(id);
+  return recordTitle(detail?.item.name);
+}
 import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
@@ -7,7 +19,6 @@ import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
 import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
-  getQuantityDetail,
   getQuantityArchiveReview,
   getCategories,
   getLocations,
@@ -38,7 +49,7 @@ export default async function QuantityPage({
   const { id } = await params;
   const query = await searchParams;
   const returnTo = inventoryReturnPath(query?.returnTo);
-  const detail = await getQuantityDetail(id);
+  const detail = await readQuantityPage(id);
   if (!detail) notFound();
   const { item, balances, history, stockSummary } = detail;
   const [
@@ -72,7 +83,7 @@ export default async function QuantityPage({
             <p className="experience-eyebrow">
               {item.categoryName} · Quantity item
             </p>
-            <h1 className="experience-heading mt-2">{item.name}</h1>
+            <RecordName name={item.name} />
             <p className="experience-muted mt-2 text-sm">
               <RecordStatus status={item.archived ? 'archived' : 'active'} />
             </p>

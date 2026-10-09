@@ -1485,6 +1485,7 @@ export function MetadataForm({
     pending: pending && !state?.ok,
     uncertain,
     completed: state?.ok === true,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLAnchorElement | null>(null);

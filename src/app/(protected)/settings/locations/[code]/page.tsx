@@ -1,9 +1,20 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
-import { getManagedLocations } from '@/features/custody/queries.server';
+import { readManagedLocationPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import { LocationManagementForm } from '@/features/custody/management-form';
 import { panel } from '@/features/inventory/components/read-ui';
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ code: string }>;
+}) {
+  const { code } = await params;
+  const location = await readManagedLocationPage(code);
+  return recordTitle(location?.name, 'Location settings');
+}
 
 export default async function ManageLocationPage({
   params,
@@ -12,8 +23,7 @@ export default async function ManageLocationPage({
 }) {
   const { member } = await requireMember();
   const { code } = await params;
-  const locations = await getManagedLocations();
-  const location = locations.find((row) => row.code === code);
+  const location = await readManagedLocationPage(code);
   if (!location) notFound();
   return (
     <>

@@ -29,6 +29,7 @@ type QuantityAction =
 type AssetAction =
   'assign' | 'return' | 'transfer' | 'correct' | 'write_off' | 'retire';
 type Props = {
+  onRecordPage?: boolean;
   actorId?: string;
   kind: 'quantity' | 'asset';
   action: QuantityAction | AssetAction;
@@ -160,6 +161,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     pending: pending && !completed,
     uncertain,
     completed,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   const newerSnapshot = latest.version !== version;
   // A definitive stale rejection remains blocking even when input edits clear
@@ -490,7 +492,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           <>
             <CustodyReceiptView
               receipt={state.custody}
-              reviewedName={reviewed?.name}
+              reviewedName={latest.onRecordPage ? 'This item' : reviewed?.name}
             />
           </>
         ) : (
@@ -500,7 +502,11 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                 ? custodyEventLabel(action, kind)
                 : 'No change needed'}
             </h3>
-            {reviewed?.name && <p className="break-words">{reviewed.name}</p>}
+            {reviewed?.name && (
+              <p className="break-words">
+                {latest.onRecordPage ? 'This item' : reviewed.name}
+              </p>
+            )}
             <p>
               {quantity && correction
                 ? `Count correction at ${reviewed?.source}`
@@ -870,7 +876,9 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
         <section aria-label="Review changes" className={panel}>
           <h3 id={scope + '-review-context'} className="font-semibold">
             Review changes for{' '}
-            {reviewed.name ?? latest.entityName ?? 'this record'}
+            {latest.onRecordPage && !['write_off', 'retire'].includes(action)
+              ? 'this item'
+              : (reviewed.name ?? latest.entityName ?? 'this record')}
           </h3>
           {['write_off', 'retire'].includes(action) && (
             <p className="text-sm text-[var(--warning)]">
@@ -878,8 +886,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
             </p>
           )}
           <p>
-            {reviewed.name ?? 'This record'} ·{' '}
-            {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
+            {latest.onRecordPage
+              ? 'This item'
+              : (reviewed.name ?? 'This record')}{' '}
+            · {quantity ? `${reviewed.quantity} units` : '1 individual asset'}
           </p>
           <p>{reviewedRoute}</p>
           {reviewed.reference && (

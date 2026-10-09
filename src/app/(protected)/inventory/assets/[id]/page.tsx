@@ -1,10 +1,21 @@
+import { RecordName } from '@/components/record-name';
+import { readAssetPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const detail = await readAssetPage(id);
+  return recordTitle(detail?.asset.name);
+}
 import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
 import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
-  getAssetDetail,
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
@@ -33,7 +44,7 @@ export default async function AssetPage({
   const { id } = await params;
   const query = await searchParams;
   const returnTo = inventoryReturnPath(query?.returnTo);
-  const detail = await getAssetDetail(id);
+  const detail = await readAssetPage(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
   const [categories, locations, sites, forms, returnSuggestion] =
@@ -60,7 +71,7 @@ export default async function AssetPage({
             <p className="experience-eyebrow">
               {asset.categoryName} · Individual asset
             </p>
-            <h1 className="experience-heading mt-2">{asset.name}</h1>
+            <RecordName name={asset.name} />
             <p className="experience-muted mt-2 text-sm capitalize">
               <RecordStatus status={asset.status} />
             </p>

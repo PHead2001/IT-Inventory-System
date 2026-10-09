@@ -58,6 +58,7 @@ export function ArchiveQuantityForm({
     pending: pending && !done,
     uncertain,
     completed: done,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   const newerVersion = latestReview.version !== baseline.version;
 
