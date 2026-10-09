@@ -2,6 +2,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -101,6 +102,15 @@ function AssignmentFields({
   const mounted = useRef(true);
   const submitting = useRef(false);
   const [input, setInput] = useState('');
+  // A batch-wide preference does not know the next item's holdings. Include
+  // inventory-bearing evacuation sources; the inspection proves actual stock.
+  const preferredSourceIds = useMemo(
+    () =>
+      locations
+        .filter((location) => location.can_hold_inventory)
+        .map((location) => location.id),
+    [locations],
+  );
   const [mode, setMode] = useState<'identifier' | 'item_code' | 'search'>(
     'identifier',
   );
@@ -1083,7 +1093,8 @@ function AssignmentFields({
           </label>
           <LocationPicker
             locations={locations}
-            mode="destination"
+            mode="source"
+            sourceIds={preferredSourceIds}
             label="Preferred storage source (optional)"
             value={state.context?.sourceId ?? ''}
             allowAll

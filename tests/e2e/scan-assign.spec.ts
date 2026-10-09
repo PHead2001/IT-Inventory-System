@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
+import { Client } from 'pg';
 import { PNG } from 'pngjs';
 import { NotFoundException } from '@zxing/library';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -70,6 +71,48 @@ async function generatedLabel(
   }).getText();
 }
 
+/** Seed only owned legacy holdings on the disposable loopback database.
+ * Inactive balances can predate current destination guards; application writes
+ * still go through the existing caller-authorized custody action below. */
+async function seedInactiveScanSource(itemId: string, suffix: string) {
+  const target = new URL(process.env.LOCAL_DB_URL!);
+  expect(['localhost', '127.0.0.1', '[::1]']).toContain(target.hostname);
+  expect(target.port).toBe('54322');
+  expect(target.pathname).toBe('/postgres');
+  const parentId = randomUUID(),
+    sourceId = randomUUID();
+  const sourceCode = `SCAN-OLD-${suffix}`;
+  const db = new Client({
+    connectionString: target.href,
+    application_name: 'scan-owned-legacy-source-fixture',
+  });
+  await db.connect();
+  try {
+    await db.query('begin');
+    await db.query(
+      `insert into public.locations(id,code,name,kind,active,can_hold_inventory)
+      values($1,$2,$3,'room',false,false)`,
+      [parentId, `${sourceCode}-ROOM`, `Legacy scan room ${suffix}`],
+    );
+    await db.query(
+      `insert into public.locations(id,code,name,parent_id,kind,active,can_hold_inventory)
+      values($1,$2,$3,$4,'container',false,true)`,
+      [sourceId, sourceCode, `Legacy scan bin ${suffix}`, parentId],
+    );
+    await db.query(
+      `insert into public.stock_balances(item_id,location_id,quantity) values($1,$2,2)`,
+      [itemId, sourceId],
+    );
+    await db.query('commit');
+    return { id: sourceId, code: sourceCode };
+  } catch (error) {
+    await db.query('rollback');
+    throw error;
+  } finally {
+    await db.end();
+  }
+}
+
 test('generated labels inspect and explicitly assign a repeat quantity and an asset in one site batch', async ({
   page,
 }) => {
@@ -122,6 +165,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
 
   const client = await staffClient();
   try {
+    const inactiveSource = await seedInactiveScanSource(quantityId, suffix);
     const site = await client
       .from('sites')
       .select('id')
@@ -153,7 +197,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await chooseLocation(
       page.locator('body'),
       'Preferred storage source (optional)',
-      'ITC-RED',
+      inactiveSource.code,
     );
     const input = page.getByLabel('Scan, paste, or search inventory', {
       exact: true,
@@ -163,6 +207,12 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     await input.press('Enter');
     await expect(review).toContainText(quantityName);
     await expect(review.getByLabel('Units to assign')).toHaveValue('1');
+    await expect(review.getByLabel('Storage source')).toHaveValue(
+      inactiveSource.id,
+    );
+    await expect(review.getByLabel('Storage source')).toContainText(
+      'inactive source',
+    );
     expect(await eventCount()).toBe(0);
     await review.getByRole('link', { name: 'Open inventory record' }).click();
     await expect(page).toHaveURL(
@@ -177,7 +227,7 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     );
     await expect(
       page.getByLabel('Preferred storage source (optional)'),
-    ).toContainText('ITC-RED');
+    ).toContainText(inactiveSource.code);
     await expect(
       page.getByText(
         'Availability refreshed. Review the source and units before confirming.',
@@ -222,6 +272,22 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
     ).toContainText('2 units');
     await expect(input).toBeEnabled();
     expect(await eventCount()).toBe(2);
+    const remaining = await client
+      .from('stock_balances')
+      .select('quantity')
+      .eq('item_id', quantityId)
+      .eq('location_id', inactiveSource.id)
+      .single();
+    expect(remaining.error).toBeNull();
+    expect(remaining.data!.quantity).toBe(0);
+    const issued = await client
+      .from('assignment_events')
+      .select('from_location_id,quantity')
+      .eq('item_id', quantityId)
+      .eq('from_location_id', inactiveSource.id);
+    expect(issued.error).toBeNull();
+    expect(issued.data).toHaveLength(2);
+    expect(issued.data!.every((line) => line.quantity === 1)).toBe(true);
 
     await input.fill(assetLabel);
     await input.press('Enter');

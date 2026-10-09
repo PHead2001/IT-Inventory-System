@@ -1272,3 +1272,131 @@ it('counts one replayed asset event once and two deliberate assignments as two e
     mocks.submit.mock.calls[1][0].requestId,
   );
 });
+
+it('selects inactive inventory-bearing preferred sources through navigation-only ancestors and restores them without mutation', async () => {
+  const parent = {
+    ...props.locations[0],
+    id: id(20),
+    code: 'OLD-OFFICE',
+    name: 'Old office',
+    active: false,
+    can_hold_inventory: false,
+    parentId: null,
+  };
+  const inactive = {
+    ...props.locations[0],
+    parentId: parent.id,
+    active: false,
+  };
+  const localProps = { ...props, locations: [parent, inactive] };
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: {
+      ...candidate,
+      sources: [{ ...candidate.sources[0], active: false }],
+    },
+  });
+  const view = render(<AssignmentWorkspace {...localProps} />);
+  fireEvent.click(
+    screen.getByRole('combobox', {
+      name: 'Preferred storage source (optional)',
+    }),
+  );
+  expect(
+    screen.queryByRole('treeitem', { name: /Red, selectable location/ }),
+  ).toBeInTheDocument();
+  const navigation = screen.getByRole('treeitem', {
+    name: /Old office, navigation group/,
+  });
+  const beforeNavigation = readBatch(scope).raw;
+  fireEvent.click(navigation);
+  expect(readBatch(scope).raw).toBe(beforeNavigation);
+  expect(
+    screen.getByRole('button', { name: 'Preferred storage source (optional)' }),
+  ).toHaveTextContent('Choose for each item');
+  expect(
+    screen.getByRole('tree', { name: 'Preferred storage source (optional)' }),
+  ).toBeInTheDocument();
+  fireEvent.click(navigation);
+  fireEvent.click(
+    screen.getByRole('treeitem', { name: /Red, selectable location/ }),
+  );
+  expect(readBatch(scope).value?.context?.sourceId).toBe(inactive.id);
+  await inspect();
+  expect(screen.getByLabelText('Storage source')).toHaveValue(inactive.id);
+  expect(
+    screen.getByRole('option', { name: /inactive source/ }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeEnabled();
+  view.unmount();
+  render(<AssignmentWorkspace {...localProps} />);
+  await screen.findByText(/Availability refreshed/);
+  expect(
+    screen.getByRole('combobox', {
+      name: 'Preferred storage source (optional)',
+    }),
+  ).toHaveTextContent('Red');
+  expect(
+    screen.queryByText(
+      'Selected location is unavailable. Choose another location.',
+    ),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Storage source')).toHaveValue(inactive.id);
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
+  expect(mocks.submit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit.mock.calls[0][0].payload).toMatchObject({
+    source_location_id: inactive.id,
+    destination_site_id: site.id,
+  });
+});
+it('retains an inactive preferred source across refresh but blocks confirmation when its item holding disappears', async () => {
+  const inactive = { ...props.locations[0], active: false };
+  const alternate = {
+    ...props.locations[0],
+    id: id(21),
+    code: 'OTHER',
+    name: 'Other holding',
+  };
+  const localProps = { ...props, locations: [inactive, alternate] };
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: {
+      ...candidate,
+      sources: [{ ...candidate.sources[0], active: false }],
+    },
+  });
+  const view = render(<AssignmentWorkspace {...localProps} />);
+  fireEvent.click(
+    screen.getByRole('combobox', {
+      name: 'Preferred storage source (optional)',
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole('treeitem', { name: /Red, selectable location/ }),
+  );
+  await inspect();
+  view.unmount();
+  mocks.inspect.mockResolvedValue({
+    ok: true,
+    candidate: {
+      ...candidate,
+      version: '9',
+      sources: [
+        { id: alternate.id, name: alternate.name, active: true, quantity: 2 },
+      ],
+    },
+  });
+  render(<AssignmentWorkspace {...localProps} />);
+  await screen.findByText(/Availability refreshed/);
+  expect(readBatch(scope).value?.context?.sourceId).toBe(inactive.id);
+  expect(readBatch(scope).value?.historical?.sourceId).toBe(inactive.id);
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Storage source'), {
+    target: { value: alternate.id },
+  });
+  expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeEnabled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
