@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
 $script:realReceiptNative = (Get-Command Invoke-RunnerReceiptNative).ScriptBlock
+$script:realWriteRunnerJson = (Get-Command Write-RunnerJson).ScriptBlock
 $script:RunnerGuardOutcome = $null
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-integration-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
@@ -20,8 +21,10 @@ function Exit-RunnerLock { $script:locked = $false }
 function Get-RunnerState { $script:state }
 function Write-RunnerJson($Path, $Value) {
     if ($Path -ceq (Join-Path $script:RunnerRoot 'last-error.json')) { $script:failure = $Value }
-    else { $script:state = $Value }
+    elseif ($Path -ceq $script:RunnerStatePath) { $script:state = $Value }
+    else { & $script:realWriteRunnerJson $Path $Value }
 }
+function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
 function Test-RunnerProcessIdentity($ProcessId, $StartUtc) { if ($script:deadGuardian -and $ProcessId -eq 42) { return $false }; $script:alive }
 function Get-RunnerRecoveryNow { $script:now }
 function Save-Heartbeat { if ($script:locked) { throw 'Wait held state mutex.' }; $script:heartbeats++ }
@@ -31,14 +34,16 @@ function Start-Sleep {
     if ($script:state.networkRecovery.phase -cne 'healthy') { $script:state.networkRecovery.phase = 'healthy'; $script:state.guardianReady = $true }
 }
 function New-Fixture {
+    $registrationPath = Join-Path $root 'jit-registration.json'
+    if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
-    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
+    $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
     $script:state.networkRecovery | Add-Member binding ([pscustomobject]@{ vmId = $script:state.vmId; vmName = $script:state.vmName; claimHash = Get-RunnerRecoveryClaimHash $script:state })
 }
 function Get-HostNetworkFingerprint { throw 'Supervisor attempted competing network observation/repair.' }
-function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1' } }
+function Get-RunnerConfig { [pscustomobject]@{ guestIp = '172.30.240.2'; gatewayIp = '172.30.240.1'; repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 } }
 function Get-VM { $script:vm }
 function Get-VMSwitch { $script:switch }
 function Get-VMNetworkAdapter { $script:adapter }

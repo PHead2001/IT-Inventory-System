@@ -49,6 +49,46 @@ function New-Fixture {
     $script:state | Add-Member imageSealBinding (Get-RunnerJsonEvidence ([ordered]@{ schema = 1; generation = 3; bindingHash = 'A' * 64; recipeId = $guest.recipeId; bundleHash = 'F' * 64; scrubProofHash = $script:state.imageScrubProof.hash }))
 }
 try {
+    Check 'liveness evaluates fresh guardian progress after heartbeat and state read' {
+        New-Fixture
+        $script:originalHeartbeat = (Get-Command Save-Heartbeat).ScriptBlock
+        function Save-Heartbeat($State) {
+            & $script:originalHeartbeat $State
+            $script:state.networkRecovery.progressUtc = $script:now.AddMilliseconds(1).ToString('o')
+            $script:now = $script:now.AddMilliseconds(2)
+        }
+        try {
+            Assert-SessionAlive $script:state
+            if ($script:cleanups -ne 0 -or $script:locked) { throw 'Fresh sealed progress lost supervision.' }
+        } finally { Set-Item Function:Save-Heartbeat $script:originalHeartbeat }
+    }
+    Check 'fresh evaluation still refuses future progress expiry and cancellation during heartbeat' {
+        $script:originalHeartbeat = (Get-Command Save-Heartbeat).ScriptBlock
+        foreach ($failure in @('future', 'progress-expired', 'hard-deadline', 'fresh-deadline', 'stop', 'healthy-deadline', 'healthy-stop')) {
+            New-Fixture
+            if ($failure -clike 'healthy-*') { $script:state.phase = 'owned'; $script:state.networkRecovery.phase = 'healthy' }
+            $originalState = $script:state | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+            $script:heartbeatFailure = $failure
+            function Save-Heartbeat($State) {
+                & $script:originalHeartbeat $State
+                switch ($script:heartbeatFailure) {
+                    'future' { $script:state.networkRecovery.progressUtc = $script:now.AddMilliseconds(1).ToString('o') }
+                    'progress-expired' { $script:now = $script:now.AddSeconds(31) }
+                    { $_ -cin @('hard-deadline', 'healthy-deadline') } { $script:now = $script:now.AddMinutes(11) }
+                    'fresh-deadline' { $script:state.deadlineUtc = $script:now.AddMilliseconds(1).ToString('o'); $script:now = $script:now.AddMilliseconds(2) }
+                    { $_ -cin @('stop', 'healthy-stop') } { [IO.File]::WriteAllText((Join-Path $script:state.instancePath 'stop.requested'), '') }
+                }
+            }
+            try {
+                Refuse { Assert-SessionAlive $originalState }
+                if ($script:locked -or $script:vmQueries -ne 0 -or $script:observations -ne 0) { throw 'Rejected liveness entered ordinary recovery or retained mutex.' }
+            } finally {
+                Set-Item Function:Save-Heartbeat $script:originalHeartbeat
+                $marker = Join-Path $originalState.instancePath 'stop.requested'
+                if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
+            }
+        }
+    }
     Check 'repeated actual guardian ticks supervise absent sealed VM and refresh progress' {
         New-Fixture
         foreach ($unused in 1..4) {

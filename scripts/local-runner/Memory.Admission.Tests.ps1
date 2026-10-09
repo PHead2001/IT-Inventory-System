@@ -10,8 +10,14 @@ $script:RunnerRoot = $base
 $script:RunnerStatePath = Join-Path $base 'state.json'
 $script:probeFails = $false
 $script:probeResult = $null
+# Reconciliation now precedes capacity admission. Keep its state lock inside
+# this offline fixture, never the installed runner's protected Global mutex.
+$script:stateLocked = $false
+function Enter-RunnerLock { if ($script:stateLocked) { throw 'Nested fixture state mutex.' }; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock { $script:stateLocked = $false }
 function Get-CimInstance {
     param($ClassName, $OperationTimeoutSec, $ErrorAction)
+    if ($script:stateLocked) { throw 'Memory inspection held the reconciliation state mutex.' }
     if ($ClassName -cne 'Win32_OperatingSystem' -or $ErrorAction -cne 'Stop' -or $OperationTimeoutSec -ne 10) { throw 'Wrong memory probe.' }
     if ($script:probeFails) { throw 'SENTINEL_PRIVATE_DETAIL' }
     return $script:probeResult

@@ -11,7 +11,12 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     if (-not $rejected) { throw "Resource profiles accepted $Case." }
 }
 $script:freeKiB = 0
-function Get-CimInstance { return [pscustomobject]@{ FreePhysicalMemory = $script:freeKiB; TotalVisibleMemorySize = [uint64](32GB / 1KB) } }
+# Actual supervisor reconciliation uses only this synthetic offline state lock.
+$script:stateLocked = $false
+function Enter-RunnerLock { if ($script:stateLocked) { throw 'Nested fixture state mutex.' }; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock { $script:stateLocked = $false }
+function Assert-ProfileMemoryUnlocked { if ($script:stateLocked) { throw 'Profile memory inspection held the reconciliation state mutex.' } }
+function Get-CimInstance { Assert-ProfileMemoryUnlocked; return [pscustomobject]@{ FreePhysicalMemory = $script:freeKiB; TotalVisibleMemorySize = [uint64](32GB / 1KB) } }
 function New-VM {
     param($Name, $Generation, $VHDPath, $Path, $MemoryStartupBytes, $SwitchName)
     $script:vmStartup = $MemoryStartupBytes
@@ -109,6 +114,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $base 'stop.requested')
     $script:probes = 0
     function Get-CimInstance {
+        Assert-ProfileMemoryUnlocked
         $script:probes++
         return [pscustomobject]@{ FreePhysicalMemory = [uint64]($(if ($script:probes -eq 1) { 4GB } else { 3GB }) / 1KB); TotalVisibleMemorySize = [uint64](32GB / 1KB) }
     }

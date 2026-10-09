@@ -198,6 +198,11 @@ function Assert-SessionAlive($State) {
         $current = Get-RunnerState
         if ($null -eq $current -or $current.vmName -cne $State.vmName -or
             ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
+        # Heartbeat may wait for the mutex while the guardian advances progress.
+        # Evaluate the freshly read journal against a later clock sample.
+        $now = Get-RunnerRecoveryNow
+        if ($now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime() -or
+            (Test-RunnerSessionStopRequested $current)) { throw 'Session deadline or Stop reached.' }
         if ($current.PSObject.Properties.Name -notcontains 'networkRecovery') {
             if ($current.PSObject.Properties.Name -contains 'guardianPid') { throw 'Recorded guardian lacks its recovery journal.' }
             return # Pre-guardian setup only.
@@ -359,7 +364,7 @@ function Get-RunnerJitAdmission($State) {
     finally { Exit-RunnerLock $mutex }
 }
 
-function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null) {
+function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0, $Admission = $null, $Config = $null) {
     $mutex = Enter-RunnerLock
     try {
         $current = Get-RunnerState
@@ -373,8 +378,39 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
         }
         $journal = if ($current.PSObject.Properties.Name -contains 'runnerLaunch') { $current.runnerLaunch } else { $null }
         $next = Get-RunnerLaunchDecision $journal $Event $RunnerId $LaunchId $ExitCode
+        if ($Event -ceq 'intent') {
+            Assert-RunnerJitRegistrationClear
+            if ($null -eq $Config) { $Config = Get-RunnerConfig }
+            $registration = [pscustomobject][ordered]@{ schema = 1; tag = $script:RunnerTag; phase = 'intent'; operationId = $next.launchId
+                repo = $Config.repo; vmName = $current.vmName; vmId = $current.vmId; instancePath = $current.instancePath
+                supervisorPid = $current.supervisorPid; supervisorStartUtc = $current.supervisorStartUtc
+                labels = @(Get-RunnerJitLabels $Config $current.resourceLabel); runnerGroupId = $Config.runnerGroupId; runnerId = 0 }
+            # Atomic root-level barrier is committed before the POST can run.
+            Write-RunnerJitRegistration $registration
+            Invoke-RunnerTransitionCheckpoint 'jit-registration-intent'
+        } elseif ($Event -cin @('registered', 'dispatch')) {
+            $registration = Get-RunnerJitRegistration
+            if ($null -eq $registration -or $registration.operationId -cne $next.launchId -or
+                $registration.vmName -cne $current.vmName -or [guid]$registration.vmId -ne [guid]$current.vmId -or
+                $registration.instancePath -ine $current.instancePath -or $registration.supervisorPid -ne $current.supervisorPid -or
+                $registration.supervisorStartUtc -cne $current.supervisorStartUtc) { throw 'JIT response or handoff differs from its exact durable operation.' }
+            if ($Event -ceq 'registered') {
+                if ($registration.phase -cne 'intent') { throw 'JIT registration response cannot be adopted twice.' }
+                $registration.runnerId = $RunnerId; $registration.phase = 'registered'
+                Write-RunnerJitRegistration $registration
+                Invoke-RunnerTransitionCheckpoint 'jit-registration-registered'
+            } elseif ($registration.phase -cne 'registered' -or $registration.runnerId -ne $next.runnerId) { throw 'Guest dispatch lacks its sole validated registration.' }
+        }
         $current | Add-Member runnerLaunch $next -Force
         Write-RunnerJson $script:RunnerStatePath $current
+        if ($Event -ceq 'dispatch') {
+            Invoke-RunnerTransitionCheckpoint 'jit-dispatch-state'
+            # Only a fully committed cross-file handoff authorizes SSH. A write
+            # failure leaves the predispatch barrier and never sends JIT data.
+            $registration.phase = 'handed-off'
+            Write-RunnerJitRegistration $registration
+            Invoke-RunnerTransitionCheckpoint 'jit-handed-off'
+        }
         return $next
     } finally { Exit-RunnerLock $mutex }
 }
@@ -680,18 +716,18 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
         }
         $launchId = [guid]::NewGuid().ToString('N')
-        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId -Admission $admission)
+        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId -Admission $admission -Config $Config)
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
             name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
         } $token
         $token = $null
-        if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$' -or $jit.runner.name -ne $name -or
-            $null -eq $jit.runner.id -or $jit.runner.id -le 0) {
+        if ($jit.runner.name -cne $name -or $null -eq $jit.runner.id -or [string]$jit.runner.id -cnotmatch '^[1-9][0-9]*$') {
             throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
         }
         $runnerId = [long]$jit.runner.id
         Assert-RunnerJitLabels $Config $jit.runner $profile.label
         [void](Save-RunnerLaunchEvent $state 'registered' $runnerId)
+        if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$') { throw 'GitHub returned an invalid JIT runner configuration.' }
         Assert-SessionAlive $state
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
         # The fixed JIT runner launches exactly once in a guest service. SSH is
@@ -784,6 +820,111 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
         }
     }
     return $null
+}
+
+function Assert-RunnerJitAbandoned($Record) {
+    # Caller holds the state mutex. Owner death is never a substitute for
+    # authoritative local cleanup; a late POST reply cannot regain this state.
+    $current = Get-RunnerState
+    if ($null -ne $current) {
+        Assert-StateIdentity $current
+        if ($current.vmName -ceq $Record.vmName -or
+            ($current.PSObject.Properties.Name -contains 'vmId' -and [guid]$current.vmId -eq [guid]$Record.vmId) -or
+            $current.instancePath -ieq $Record.instancePath) { throw 'Original JIT session is still recorded.' }
+    }
+    $matching = @(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $Record.vmName -or [guid]$_.Id -eq [guid]$Record.vmId })
+    if ($matching.Count -ne 0) { throw 'Original JIT VM cleanup is not authoritative.' }
+    Assert-RunnerInstanceUnreferenced $Record
+}
+
+function Assert-RunnerJitReconciliation($Expected, $Config) {
+    $current = Get-RunnerJitRegistration
+    if ($null -eq $current -or (Get-RunnerJsonEvidence $current).hash -cne (Get-RunnerJsonEvidence $Expected).hash -or
+        $current.repo -cne $Config.repo -or $current.phase -cnotin @('intent', 'registered', 'removal-intent') -or
+        (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { throw 'JIT reconciliation operation, repository or Stop changed.' }
+    Assert-RunnerJitAbandoned $current
+    return $current
+}
+
+function Get-RunnerJitInventory($Record, [string] $Token) {
+    # One complete bounded repository snapshot. 404/transport errors never
+    # stand in for absence, and a truncated first page is not authoritative.
+    $response = Invoke-GitHub "https://api.github.com/repos/$($Record.repo)/actions/runners?per_page=100" 'GET' $null $Token
+    if ($null -eq $response -or [string]$response.total_count -cnotmatch '^(0|[1-9][0-9]*)$' -or
+        $response.total_count -gt 100 -or @($response.runners).Count -ne $response.total_count) { throw 'JIT runner inventory is incomplete.' }
+    $seen = @{}
+    foreach ($runner in @($response.runners)) {
+        if ([string]$runner.id -cnotmatch '^[1-9][0-9]*$' -or $seen.ContainsKey([string]$runner.id) -or
+            [string]::IsNullOrEmpty($runner.name) -or $runner.status -cnotin @('offline', 'online') -or $runner.busy -isnot [bool]) { throw 'JIT runner inventory identity is invalid.' }
+        $seen[[string]$runner.id] = $true
+    }
+    return @($response.runners)
+}
+
+function Invoke-RunnerJitReconciliation($Config) {
+    $stage = 'evidence'; $token = $null
+    try {
+        $mutex = Enter-RunnerLock
+        try {
+            $record = Get-RunnerJitRegistration
+            if ($null -eq $record -or $record.phase -cin @('handed-off', 'complete')) { return $true }
+            [void](Assert-RunnerJitReconciliation $record $Config)
+        } finally { Exit-RunnerLock $mutex }
+        $stage = 'transport'; $token = Get-OwnerToken
+        $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
+        $byName = @($inventory | Where-Object { $_.name -ceq $record.vmName })
+        $byId = @($inventory | Where-Object { $_.id -eq $record.runnerId })
+        if ($record.phase -ceq 'removal-intent' -and $byId.Count -eq 0 -and $byName.Count -eq 0) {
+            # A lost DELETE response is reconciled by authoritative absence.
+            $mutex = Enter-RunnerLock
+            try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+            finally { Exit-RunnerLock $mutex }
+            Write-Host 'JIT predispatch registration retirement completed.'
+            return $true
+        }
+        $runner = Assert-RunnerJitRetirementEligible $record $inventory
+        $mutex = Enter-RunnerLock
+        try {
+            $record = Assert-RunnerJitReconciliation $record $Config
+            $record.runnerId = [long]$runner.id; $record.phase = 'removal-intent'
+            Write-RunnerJitRegistration $record
+        } finally { Exit-RunnerLock $mutex }
+        # Local proof/provider work may be slow. Refresh remote eligibility for
+        # the persisted exact ID immediately before final local admission.
+        $stage = 'transport'
+        $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
+        [void](Assert-RunnerJitRetirementEligible $record $inventory)
+        # Native/API IO stays outside the state mutex. The supervisor lifetime
+        # mutex owns this bounded operation; the predispatch claim stays shut.
+        $mutex = Enter-RunnerLock
+        try { [void](Assert-RunnerJitReconciliation $record $Config) }
+        finally { Exit-RunnerLock $mutex }
+        $stage = 'transport'
+        [void](Invoke-GitHub "https://api.github.com/repos/$($record.repo)/actions/runners/$($record.runnerId)" 'DELETE' $null $token)
+        $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
+        if (@($inventory | Where-Object { $_.id -eq $record.runnerId -or $_.name -ceq $record.vmName }).Count -ne 0) { throw 'JIT retirement absence is not authoritative.' }
+        $mutex = Enter-RunnerLock
+        try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
+        finally { Exit-RunnerLock $mutex }
+        Write-Host 'JIT predispatch registration retirement completed.'
+        return $true
+    } catch {
+        # No API exception, PAT or JIT configuration is persisted or printed.
+        Write-Host "JIT registration reconciliation blocked: $stage. New claims remain refused."
+        return $false
+    } finally { $token = $null }
+}
+
+function Assert-RunnerJitRetirementEligible($Record, $Inventory) {
+    $byName = @($Inventory | Where-Object { $_.name -ceq $Record.vmName })
+    $byId = @($Inventory | Where-Object { $_.id -eq $Record.runnerId })
+    if ($byName.Count -ne 1 -or ($Record.runnerId -gt 0 -and ($byId.Count -ne 1 -or $byId[0].id -ne $byName[0].id))) { throw 'JIT runner identity is absent or ambiguous; late registration remains possible.' }
+    $runner = $byName[0]
+    $labels = @($runner.labels | ForEach-Object { $_.name })
+    if ($runner.status -cne 'offline' -or $runner.busy -ne $false -or $labels.Count -ne @($Record.labels).Count -or
+        @($labels | Select-Object -Unique).Count -ne $labels.Count -or
+        (($labels | Sort-Object) -join ',') -cne (($Record.labels | Sort-Object) -join ',')) { throw 'JIT runner is active, busy or has different labels.' }
+    return $runner
 }
 
 function Invoke-Supervisor {
@@ -892,6 +1033,7 @@ function Invoke-SupervisorLoop {
         }
         $pilotAttemptPath = Join-Path $script:RunnerRoot 'pilot-attempt.json'
         if (Get-RunnerState) { return } # A failed initial claim/cleanup requires recovery before further queue inspection.
+        if (-not (Invoke-RunnerJitReconciliation $config)) { Start-Sleep -Seconds 30; continue }
         if ($config.activation -eq 'pilot' -and (Test-Path -LiteralPath $pilotAttemptPath)) {
             # A crashed or restarted supervisor must not take a second pilot job.
             return
@@ -968,7 +1110,8 @@ function Invoke-SupervisorLoop {
                 }
             }
         } catch {
-            # API/guest failures never register a fallback runner. The next bounded poll may retry.
+            # The next bounded poll may retry inspection. An unresolved durable
+            # registration barrier refuses a new JIT after API/guest failure.
             $completedSession = $false
             $existing = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
             if ($null -eq $existing -or $null -eq $script:RunnerSessionName -or $existing.sessionName -cne $script:RunnerSessionName) {
@@ -1003,6 +1146,7 @@ function Stop-SupervisorCore {
 }
 
 function Complete-PilotRetry($Plan) {
+    Assert-RunnerJitRegistrationClear
     if ($Plan.tag -cne $script:RunnerTag -or $Plan.retryId -cnotmatch '^[0-9a-f]{32}$' -or $Plan.phase -cne 'pending') {
         throw 'Retry journal identity/phase is invalid.'
     }
@@ -1074,6 +1218,7 @@ function Enable-RunnerPilotCore([string] $Sha, [string] $Reason = '', [switch] $
             $config = Get-RunnerConfig
             [void](Get-OwnerToken)
             Assert-RunnerControlIdle
+            Assert-RunnerJitRegistrationClear
             foreach ($name in @('update-journal.json', 'setup-publication.json')) {
                 $update = Read-RunnerJson (Join-Path $script:RunnerRoot $name)
                 if ($null -ne $update -and ($update.tag -cne $script:RunnerTag -or $update.phase -cne 'complete')) { throw 'Resume the pending setup/update before pilot control.' }
@@ -1158,6 +1303,7 @@ function Enable-RunnerActiveCore {
     Assert-RunnerTransitionClear
     $mutex = Enter-RunnerLock
     try {
+        Assert-RunnerJitRegistrationClear
         $config = Get-RunnerConfig
         Assert-PilotConfig $config
         $result = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-result.json')
@@ -1193,10 +1339,12 @@ function Start-RunnerSupervisorCore {
     $mutex = Enter-RunnerLock
     try {
         Assert-RunnerTransitionClear
+        [void](Get-RunnerJitRegistration) # Validate before explicit Start clears Stop.
         $config = Get-RunnerConfig
         if ($config.activation -eq 'disabled') { throw 'Job pickup is disabled. Open Setup and choose Enable one-job pilot after review.' }
         $marker = Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested')
         if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        Assert-RunnerControllerOpen
         Start-ScheduledTask -TaskName $script:RunnerSupervisorTask
     } finally { Exit-RunnerLock $mutex }
     Write-Host 'Persistent SYSTEM supervisor started; it waits for a matching queued job.'
@@ -1260,7 +1408,7 @@ function Invoke-RunnerSupervisorRecovery {
                 [Convert]::FromBase64String($record.ciphertext).Length -eq 0) { throw 'Credential record is invalid.' }
             # No token decryption, VM creation or API request belongs to recovery.
             if (@(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -ne 0) { throw 'Unexpected owned-prefix VM blocks recovery.' }
-            Assert-RunnerClaimOpen # Recheck explicit Stop/journals immediately before start.
+            Assert-RunnerControllerOpen # Recheck Stop/journals; restart the sole reconciler, not a VM claim.
             if ((Get-RunnerConfig).activation -cne 'active' -or (Get-RunnerState) -or
                 (Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop).State -cne 'Ready') { return }
             Start-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction Stop

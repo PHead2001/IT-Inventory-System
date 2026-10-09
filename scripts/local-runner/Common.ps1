@@ -628,10 +628,62 @@ function Assert-RunnerTransitionClear {
 }
 
 function Assert-RunnerClaimOpen {
+    Assert-RunnerControllerOpen
+    Assert-RunnerJitRegistrationClear
+}
+
+function Assert-RunnerControllerOpen {
     Assert-RunnerTransitionClear
+    # Restarting the reconciler is not admission of a new VM or JIT request.
+    # A valid unresolved barrier may be reconciled; malformed evidence refuses.
+    [void](Get-RunnerJitRegistration)
     if (Test-Path -LiteralPath (Assert-OwnedPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
         throw 'Pickup suspension requested; no new job may be consumed or created.'
     }
+}
+
+# This root-level, nonsecret barrier survives deletion of an ephemeral session.
+# It records only the sole registration operation; it is not a job queue.
+function Assert-RunnerJitRegistration($Record) {
+    $fields = @('schema', 'tag', 'phase', 'operationId', 'repo', 'vmName', 'vmId', 'instancePath', 'supervisorPid', 'supervisorStartUtc', 'labels', 'runnerGroupId', 'runnerId')
+    if ($null -eq $Record -or @($Record.PSObject.Properties.Name).Count -ne $fields.Count -or
+        @($fields | Where-Object { $Record.PSObject.Properties.Name -notcontains $_ }).Count -ne 0 -or
+        $Record.schema -ne 1 -or $Record.tag -cne $script:RunnerTag -or
+        $Record.phase -cnotin @('intent', 'registered', 'handed-off', 'removal-intent', 'complete') -or
+        $Record.operationId -cnotmatch '^[0-9a-f]{32}$' -or $Record.repo -cnotmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' -or
+        [string]$Record.supervisorPid -cnotmatch '^[1-9][0-9]*$' -or [string]$Record.runnerGroupId -cnotmatch '^[1-9][0-9]*$' -or
+        [string]$Record.runnerId -cnotmatch '^(0|[1-9][0-9]*)$' -or
+        ($Record.phase -ceq 'intent' -and $Record.runnerId -ne 0) -or ($Record.phase -cne 'intent' -and $Record.runnerId -le 0)) { throw 'JIT registration barrier identity is invalid.' }
+    Assert-StateIdentity $Record
+    [void][DateTime]::Parse($Record.supervisorStartUtc).ToUniversalTime()
+    $labels = @($Record.labels)
+    if ($labels.Count -ne 4 -or @($labels | Select-Object -Unique).Count -ne 4 -or
+        @('self-hosted', 'Linux', 'X64' | Where-Object { $labels -cnotcontains $_ }).Count -ne 0 -or
+        @($labels | Where-Object { $_ -cmatch '^it-inventory-(light|mid|heavy|ephemeral|pilot-[0-9a-f]{40})$' }).Count -ne 1) { throw 'JIT registration barrier labels are invalid.' }
+}
+
+function Get-RunnerJitRegistration {
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    Assert-RunnerProtectedPath $path
+    $record = Read-RunnerJson $path
+    Assert-RunnerJitRegistration $record
+    return $record
+}
+
+function Assert-RunnerJitRegistrationClear {
+    $record = Get-RunnerJitRegistration
+    if ($null -ne $record -and $record.phase -cnotin @('handed-off', 'complete')) {
+        throw 'Unresolved JIT registration blocks new claims and pilot retry; supervisor reconciliation is required.'
+    }
+}
+
+function Write-RunnerJitRegistration($Record) {
+    Assert-RunnerJitRegistration $Record
+    $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'jit-registration.json')
+    Write-RunnerJson $path $Record
+    $actual = Get-RunnerJitRegistration
+    if ((Get-RunnerJsonEvidence $actual).hash -cne (Get-RunnerJsonEvidence $Record).hash) { throw 'JIT registration barrier readback differs.' }
 }
 
 function Get-RunnerVmInventory {

@@ -1,15 +1,18 @@
 # Offline actual-session regression: all host/API operations are fixture stubs.
+param([string] $CandidateRoot = $PSScriptRoot)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $CandidateRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
-$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
 $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-demand-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($base)
 $script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
 $config = [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral'; repo = 'example/fixture'; maxMinutes = 120; baseVhdx = 'fixture'; guestIp = 'fixture'; runnerGroupId = 1 }
 function Assert-Rejected([scriptblock] $Work) { $rejected = $false; try { & $Work } catch { $rejected = $true }; if (-not $rejected) { throw 'Demand fixture unexpectedly accepted unsafe input.' } }
+$script:actualClaimOpen = (Get-Command Assert-RunnerClaimOpen).ScriptBlock
+function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
 # Stub every host touch while retaining the actual session control flow/finally.
 foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-RunnerTransitionCheckpoint', 'Copy-Item', 'Assert-SessionAlive', 'Set-VM', 'Assert-RunnerVmLifecycle', 'Set-VMProcessor', 'Set-VMMemory', 'Assert-RunnerVmResources', 'Set-VMFirmware', 'Disable-VMIntegrationService', 'New-SeedDisk', 'Add-VMHardDiskDrive', 'Start-SessionGuardian', 'Assert-RunnerGuestMac', 'Start-GuardedVm', 'Wait-Guest', 'Assert-AdapterRules', 'Assert-CurrentRunnerNetworkRules', 'Test-GuestIsolation')) { Set-Item -Path "Function:$name" -Value {} }
 function Enter-RunnerLock { return $null }
@@ -99,6 +102,7 @@ function Invoke-GitHub($Uri, $Method, $Body, $Token) {
     }
     if ($Uri -match '/generate-jitconfig$') {
         $script:jits++
+        if ($script:case -ceq 'post-lost') { throw 'SENTINEL_SECRET: registration response lost after remote side effect.' }
         if (($Body.labels -join ',') -cne 'self-hosted,Linux,X64,it-inventory-heavy') { throw 'Session advertised another resource profile at JIT submission.' }
         $labels = @($Body.labels)
         if ($script:badReadback) { $labels += 'it-inventory-ephemeral' }
@@ -152,6 +156,19 @@ try {
         if ($case -ceq 'recovery-cancelled' -and $script:recoveryWaits -ne 1) { throw 'Cancellation did not occur at the pre-JIT recovery wait.' }
         if ($case -match 'lookup$' -and ($script:lookupChanges -ne 1 -or $script:jits -ne 0 -or $script:intentPresent -or $script:nativeCalls -ne 2)) { throw 'Changed guardian during queued evidence admitted JIT intent or launch.' }
     }
+    # Actual session POST ambiguity survives its finally cleanup. Simulate the
+    # next admission/restart without resetting the protected registration file.
+    $registrationPath = Join-Path $base 'jit-registration.json'
+    if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
+    $script:case = 'post-lost'; $script:jobs = @((New-Job 1 'it-inventory-heavy')); $script:jobCount = 1
+    $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0; $script:badReadback = $false
+    Set-Item Function:Assert-RunnerClaimOpen $script:actualClaimOpen
+    Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' }
+    Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' }
+    if ($script:jits -ne 1 -or $script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Lost JIT POST response allowed a second registration after cleanup.' }
+    $barrier = Read-RunnerJson $registrationPath
+    if ($barrier.phase -cne 'intent' -or $barrier.runnerId -ne 0 -or (Get-Content -LiteralPath $registrationPath -Raw).Contains('SENTINEL_SECRET')) { throw 'Ambiguous registration lost its durable nonsecret barrier.' }
+    Remove-Item -LiteralPath $registrationPath
     # Exercise the actual pilot registration segment: only the external evidence
     # read is mocked. A completed bound job after the recovery wait must fail
     # before the real launch journal helper can record an intent.

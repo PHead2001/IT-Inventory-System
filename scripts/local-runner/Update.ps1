@@ -225,7 +225,7 @@ function Wait-RunnerUpdateIdle([int] $TimeoutSeconds = 35) {
 
 function Get-UpdatePreservedHashes {
     $records = [ordered]@{}
-    foreach ($name in @('credential.dpapi', 'pilot-attempt.json', 'pilot-result.json', 'last-error.json', 'pilot-retry.json')) {
+    foreach ($name in @('credential.dpapi', 'pilot-attempt.json', 'pilot-result.json', 'last-error.json', 'pilot-retry.json', 'jit-registration.json')) {
         $path = Assert-OwnedPath (Join-Path $script:RunnerRoot $name)
         $records[$name] = if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash } else { 'absent' }
     }

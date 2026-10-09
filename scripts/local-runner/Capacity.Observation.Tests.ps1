@@ -10,12 +10,16 @@ $script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.jso
 $script:freeBytes = [decimal]6.5 * 1GB
 $script:messages = [Collections.Generic.List[string]]::new()
 $script:sleeps = 0; $script:sessions = 0; $script:blocked = $null
+# Reconciliation must not acquire the installed runner's Global state mutex.
+$script:stateLocked = $false
+function Enter-RunnerLock { if ($script:stateLocked) { throw 'Nested fixture state mutex.' }; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock { $script:stateLocked = $false }
 $config = [pscustomobject]@{activation='active';label='it-inventory-ephemeral';repo='example/fixture';memoryBytes=99GB;hostReserveBytes=0}
 function Assert-RunnerTransitionClear {}
 function Get-RunnerConfig { return $config }
 function Get-RunnerState { return $null }
 function Get-OwnerToken { return 'dummy' }
-function Get-CimInstance { return [pscustomobject]@{FreePhysicalMemory=[uint64]($script:freeBytes/1KB);TotalVisibleMemorySize=[uint64](32GB/1KB)} }
+function Get-CimInstance { if ($script:stateLocked) { throw 'Capacity inspection held the reconciliation state mutex.' }; return [pscustomobject]@{FreePhysicalMemory=[uint64]($script:freeBytes/1KB);TotalVisibleMemorySize=[uint64](32GB/1KB)} }
 function Invoke-GitHub {
     param($Uri,$Method,$Body,$Token)
     if ($Uri -match '/runs\?status=queued') { return [pscustomobject]@{total_count=1;workflow_runs=@([pscustomobject]@{id=12})} }

@@ -169,11 +169,23 @@ try {
     }
     Assert-Rejected { Get-RunnerGuestPrerequisites 'unknown' } 'unknown prerequisite profile'
 
+    # Archive publication assertions above keep their dedicated lock contract.
+    # Supervisor reconciliation uses an isolated state lock, never the installed mutex.
+    $script:loopStateLocked = $false
+    function Enter-RunnerLock {
+        if ($script:loopStateLocked) { throw 'Supervisor fixture state lock was reentered.' }
+        $script:loopStateLocked = $true
+        return 'latency-state-fixture'
+    }
+    function Exit-RunnerLock { $script:loopStateLocked = $false }
     function Assert-RunnerTransitionClear {}
     function Get-RunnerConfig { return [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral' } }
     function Get-RunnerState { return $null }
     function Get-OwnerToken { return 'fixture' }
-    function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 10GB } }
+    function Get-RunnerMemoryAdmission {
+        if ($script:loopStateLocked) { throw 'Supervisor memory observation ran under its state lock.' }
+        return [pscustomobject]@{ ready = $true; availableBytes = 10GB }
+    }
     function Write-EventLog {}
     function Get-QueuedRunnerJob {
         $script:queueCalls++
