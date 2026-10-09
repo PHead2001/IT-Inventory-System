@@ -111,6 +111,16 @@ The full `npm run test:e2e` runs exclusive files first with one worker, then the
 
 Focused commands such as `npm run test:e2e -- tests/e2e/room.spec.ts` use the original single `chromium` project without dependency expansion. Any explicit Playwright arguments select this ordinary mode, including a full serial comparison with `npm run test:e2e -- --workers=1`. For discovery alone, `E2E_FULL_SUITE=1 npm run test:e2e:list` lists the scheduled partition; omit that environment flag for ordinary discovery. The scheduling regression checks compare the actual full discovered test identities in both modes, reject duplicates, verify project placement and preserve focused room selection. They run in `npm run test`.
 
+Separately authenticated SDK fixture clients in parallel specs must end only their
+own session with `auth.signOut({ scope: 'local' })`. The installed Auth client
+defaults to global sign-out, which can invalidate the same staff account's browser
+session and another worker's session. The scheduling regression checks direct SDK
+cleanup calls in the reviewed parallel specs for explicit local scope. It does not
+change production sign-out or make new files eligible for parallel execution.
+Unchanged metadata edits expose Close and Nothing to save; browser readiness waits
+target enabled editable fields, then retain Review/Confirm assertions after actual
+changes. Real parallel CI remains the verification of fixture-session isolation.
+
 Ordinary CI captures traces and videos on the first retry; ordinary local runs retain failure traces and disable video. Both retain failure screenshots. Set `E2E_CAPTURE_EVIDENCE=1` explicitly to capture traces and videos on every attempt, including successful tests, through the same `npm run test:e2e` backend-specific build. The flag changes diagnostic capture only: test selection, assertions, ordering and retry counts remain intact. Both `experience-recordings.spec.ts` journeys always run; explicit evidence mode additionally requires their recorders and saves `navigation-designer-gesture-save.webm` and `room-camera-label-print-preview.webm` under ignored `.local-tools/experience-visual/recordings`. Normal runs still close their pages but do not save named recordings. The dedicated Checkpoint 2 acceptance config retains its explicit trace capture. Unit policy checks and actual Playwright discovery compare both capture modes in ordinary and scheduled selection.
 
 For a focused evidence run in PowerShell, set `$env:E2E_CAPTURE_EVIDENCE='1'`, run `npm run test:e2e -- tests/e2e/experience-recordings.spec.ts`, then remove the flag with `Remove-Item Env:E2E_CAPTURE_EVIDENCE`. Inspect both newly written WebM outputs before reporting visual evidence. Capture comparisons must use the same candidate, hardware and test selection and report browser duration separately from build time; a Windows comparison does not establish Linux capacity or whole-suite speed.

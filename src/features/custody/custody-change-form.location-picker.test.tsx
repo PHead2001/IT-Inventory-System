@@ -1,8 +1,15 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CustodyChangeForm } from './custody-change-form';
 import { submitCustody } from './actions';
+import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -59,6 +66,67 @@ const returnProps = {
 };
 const returnPicker = () =>
   screen.getByRole('combobox', { name: 'Return to storage' });
+
+it.each(['close', 'switch', 'reason'] as const)(
+  'keeps an automatically recovered default pristine while guarding actual edits on %s',
+  (exit) => {
+    const workspace = (recovered: boolean) => (
+      <TaskWorkspace
+        choices={[
+          { id: 'return', label: 'Return asset' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Laptop"
+      >
+        {(task) =>
+          task === 'return' ? (
+            <CustodyChangeForm
+              {...returnProps}
+              returnSuggestion={
+                recovered ? returnProps.returnSuggestion : undefined
+              }
+              returnSuggestionError={!recovered}
+            />
+          ) : (
+            <p>Other task content</p>
+          )
+        }
+      </TaskWorkspace>
+    );
+    const view = render(workspace(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Return asset' }));
+    if (exit === 'reason')
+      fireEvent.change(screen.getByLabelText('Reason (optional)'), {
+        target: { value: 'Keep my reason' },
+      });
+    view.rerender(workspace(true));
+    expect(returnPicker()).toHaveTextContent('Server Rack');
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: exit === 'close' ? 'Close task' : 'Other task',
+      }),
+    );
+    if (exit === 'reason') {
+      expect(
+        screen.getByRole('alertdialog', { name: 'Discard task draft?' }),
+      ).toBeVisible();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Stay with this task' }),
+      );
+      expect(screen.getByLabelText('Reason (optional)')).toHaveValue(
+        'Keep my reason',
+      );
+    } else {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(
+        screen.queryByRole('form', { name: 'Return to storage' }),
+      ).toBeNull();
+      if (exit === 'switch')
+        expect(screen.getByText('Other task content')).toBeVisible();
+    }
+    expect(submitCustody).not.toHaveBeenCalled();
+  },
+);
 
 it('reconciles a failed origin read after same-version refresh only for the original actor', () => {
   const failed = {

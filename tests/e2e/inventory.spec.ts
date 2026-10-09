@@ -198,7 +198,9 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       issue.getByRole('option', { name: /1B.*13 units available/ }),
     ).toBeVisible();
   } finally {
-    await client.auth.signOut();
+    // This SDK client owns a separate session from the browser and parallel
+    // fixtures sharing the staff account. End only its own fixture session.
+    await client.auth.signOut({ scope: 'local' });
     await archiveFixture(page, detailUrl);
   }
 });
@@ -780,7 +782,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 5);
   await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit quantity metadata');
-  await expect(metadataReviewButton(form)).toBeEnabled();
+  await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
@@ -954,7 +956,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await version(page, 3);
   await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit asset metadata');
-  await expect(metadataReviewButton(form)).toBeEnabled();
+  await expect(form.getByLabel('Model')).toBeEnabled();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);

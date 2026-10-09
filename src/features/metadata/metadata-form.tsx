@@ -1449,10 +1449,25 @@ export function MetadataForm({
   });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
+  const discardedEdit = useRef<{
+    envelope: EditEnvelope;
+    stored: EditEnvelope | null;
+  } | null>(null);
   const discardEdit = () => {
-    if (pending || uncertain || dispatched.current || actorStale) return false;
+    if (pending || uncertain || dispatched.current) return false;
+    // A hidden stale mount may leave, but cannot finalize either scope's data.
+    if (actorStale) return true;
     if (!editRecoveryEnabled || state?.ok || editBlocked) return true;
     const active = editRecovery.current;
+    // Close can finalize this edit before TaskWorkspace's reset runs cleanup.
+    // Accept that repeat only for our exact terminal envelope and current CAS
+    // session; a replacement writer must still block the exit.
+    if (active?.status === 'discarded')
+      return Boolean(
+        discardedEdit.current?.envelope === active &&
+        editSession.current &&
+        removeEdit(discardedEdit.current.stored, editSession.current),
+      );
     if (!active || active.status !== 'editing') return false;
     const next: EditEnvelope = {
       ...active,
@@ -1461,16 +1476,13 @@ export function MetadataForm({
       inputs: null,
       command: null,
     };
-    if (
-      !(editDurable.current && storeEdit(next, active)) &&
-      !(
-        editSession.current &&
-        removeEdit(
-          editDurable.current ? active : editPrevious.current,
-          editSession.current,
-        )
-      )
-    ) {
+    const stored = editDurable.current && storeEdit(next, active);
+    const previous = editDurable.current ? active : editPrevious.current;
+    const removed =
+      !stored &&
+      editSession.current &&
+      removeEdit(previous, editSession.current);
+    if (!stored && !removed) {
       setRecoveryError(
         recoveryLimitation +
           ' Discard could not be recorded; keep this task open and retry.',
@@ -1478,6 +1490,11 @@ export function MetadataForm({
       return false;
     }
     editRecovery.current = next;
+    discardedEdit.current = {
+      envelope: next,
+      // Removal preserves a pre-existing terminal marker on pristine reopen.
+      stored: stored ? next : previous?.status === 'editing' ? null : previous,
+    };
     return true;
   };
   useTaskDiscard(discardEdit);
@@ -2198,7 +2215,10 @@ export function MetadataForm({
           }
         }
       }
-      if (!liveMount.current || mountedActor.current !== formActor) return;
+      if (!liveMount.current) return;
+      // Recovery above determines whether the exact command is resolved. Keep
+      // the task locked for an unknown result even when account changes hide
+      // its response; the new actor must not turn submitted recovery clean.
       setUncertain(
         !result.ok &&
           (result.code === 'unexpected' ||
@@ -2211,6 +2231,7 @@ export function MetadataForm({
                 'actor_changed',
               ].includes(result.code))),
       );
+      if (mountedActor.current !== formActor) return;
       setState(result);
       if (result.ok) {
         setReview(false);

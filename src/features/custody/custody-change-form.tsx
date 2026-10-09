@@ -147,7 +147,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [initial] = useState(values);
+  const [initial, setInitial] = useState(values);
   const [uncertain, setUncertain] = useState(false);
   const [rejectedVersion, setRejectedVersion] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -180,11 +180,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       returnOrigin.loadError !== nextReturnOrigin.loadError)
   ) {
     setReturnOrigin(nextReturnOrigin);
-    if (!destinationTouched)
+    if (!destinationTouched) {
       setValues((old) => ({
         ...old,
         destination_location_id: nextReturnOrigin.locationId ?? '',
       }));
+      setInitial((old) => ({
+        ...old,
+        destination_location_id: nextReturnOrigin.locationId ?? '',
+      }));
+    }
     setReviewed(null);
   }
   const refreshHoldings = () => {

@@ -250,7 +250,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expect(page.getByText('world', { exact: true })).toBeVisible();
 
   await expect(editForm.getByLabel(/Tracking note/)).toHaveValue('world');
-  await expect(metadataReviewButton(editForm)).toBeEnabled();
+  await expect(editForm.getByLabel(/Tracking note/)).toBeEnabled();
   await expect(editForm.getByText(/changed from version/)).toHaveCount(0);
   await expect(
     editForm.getByRole('button', { name: /Use reviewed .* version/ }),
@@ -335,7 +335,7 @@ test('published custom fields preserve independent concurrent edits, refresh own
   await expectRecordVersion(page, 8);
   await finishMetadata(page);
   await openRecordTask(page, 'Edit quantity metadata');
-  await expect(metadataReviewButton(editForm)).toBeEnabled();
+  await expect(editForm.getByLabel('Name', { exact: true })).toBeEnabled();
   await editForm
     .getByLabel('Name', { exact: true })
     .fill('After category ' + suffix);
