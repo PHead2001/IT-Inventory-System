@@ -198,6 +198,32 @@ function AssignmentFields({
       ),
     });
   };
+  const retainInspection = (
+    inspection: NonNullable<AssignmentBatch['historical']>,
+  ) => {
+    const row = batchRef.current?.entries.find(
+      (entry) => entry.id === entryId.current,
+    );
+    // Reads may revive an unsubmitted lookup failure. Submitted outcomes keep
+    // their immutable row; manual refresh allocates a new inspection for them.
+    if (
+      !row ||
+      row.requestId !== null ||
+      !['pending', 'failed'].includes(row.status)
+    )
+      return false;
+    return updateEntry(
+      {
+        status: 'pending',
+        message: '',
+        name: inspection.candidate.name,
+        kind: inspection.candidate.kind,
+        entityId: inspection.candidate.id,
+        identifier: inspection.candidate.identifier,
+      },
+      { historical: inspection },
+    );
+  };
   /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     let environment: string;
@@ -385,18 +411,7 @@ function AssignmentFields({
             return;
           }
           // Preserve the chosen source/units; a missing holding needs an explicit choice.
-          if (
-            !updateEntry(
-              {
-                name: result.candidate.name,
-                kind: result.candidate.kind,
-                entityId: result.candidate.id,
-                identifier: result.candidate.identifier,
-                requestId: null,
-              },
-              { historical: { ...historical, candidate: result.candidate } },
-            )
-          )
+          if (!retainInspection({ ...historical, candidate: result.candidate }))
             return;
           dispatch({ type: 'lookup', generation: token });
           dispatch({
@@ -522,17 +537,7 @@ function AssignmentFields({
           units: '1',
           entryId: entryId.current!,
         };
-        if (
-          !updateEntry(
-            {
-              name: result.candidate.name,
-              kind: result.candidate.kind,
-              entityId: result.candidate.id,
-              identifier: result.candidate.identifier,
-            },
-            { historical: inspection },
-          )
-        ) {
+        if (!retainInspection(inspection)) {
           dispatch({
             type: 'error',
             generation: token,

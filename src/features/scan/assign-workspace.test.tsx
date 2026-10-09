@@ -385,6 +385,62 @@ it('pages distinct search candidates without losing destination/ticket and inspe
   });
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+it('restores an empty search-page failure to one pending review when returning to populated candidates without writes', async () => {
+  const populated = {
+    ok: true,
+    status: 'ambiguous',
+    matches: [match],
+    searchPage: { query: 'Adapter', page: 1, pageSize: 25, total: 26 },
+  };
+  mocks.find
+    .mockResolvedValueOnce(populated)
+    .mockResolvedValueOnce({
+      ...populated,
+      matches: [],
+      searchPage: { ...populated.searchPage, page: 2 },
+    })
+    .mockResolvedValueOnce(populated);
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Lookup method'), {
+    target: { value: 'search' },
+  });
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'Adapter' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Next candidates' }),
+  );
+  await screen.findByText(/No records remain on this candidate page/);
+  const failed = readBatch(scope).value!.entries[0];
+  expect(failed.status).toBe('failed');
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('1 failed');
+  fireEvent.click(screen.getByRole('button', { name: 'Previous candidates' }));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Adapters · quantity · active' }),
+  );
+  await screen.findByRole('region', { name: 'Review assignment' });
+  const reviewed = readBatch(scope).value!.entries;
+  expect(reviewed).toHaveLength(1);
+  expect(reviewed[0]).toMatchObject({
+    id: failed.id,
+    status: 'pending',
+    message: '',
+    requestId: null,
+  });
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('0 failed');
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('1 pending');
+  expect(
+    screen.queryByText('No matching inventory record.'),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
 it('drops a late candidate-page response after the batch destination changes', async () => {
   let finish!: (value: unknown) => void;
   mocks.find
@@ -498,6 +554,9 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
   await inspect();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await screen.findByRole('button', { name: 'Inspect current state' });
+  const rejected = readBatch(scope).value!.entries[0];
+  expect(rejected.status).toBe('failed');
+  expect(rejected.requestId).not.toBeNull();
   expect(mocks.inspect).toHaveBeenCalledTimes(1);
   expect(mocks.submit.mock.calls[0][0].payload.expected_version).toBe('7');
   expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
@@ -509,6 +568,20 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
     screen.getByRole('button', { name: 'Inspect current state' }),
   );
   await screen.findByText(/Version 9/);
+  const refreshed = readBatch(scope).value!.entries;
+  expect(refreshed).toHaveLength(2);
+  expect(refreshed[0]).toEqual(rejected);
+  expect(refreshed[1]).toMatchObject({
+    status: 'pending',
+    message: '',
+    requestId: null,
+  });
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('1 failed');
+  expect(
+    screen.getByRole('region', { name: 'Batch checklist' }),
+  ).toHaveTextContent('1 pending');
   expect(mocks.submit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
