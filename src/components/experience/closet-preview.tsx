@@ -94,8 +94,8 @@ export function ClosetPreview() {
       </desc>
       <defs>
         <linearGradient id="closet-floor" x2="1" y2="1">
-          <stop stopColor="#193f55" />
-          <stop offset="1" stopColor="#0a1b2d" />
+          <stop stopColor="var(--preview-floor-start)" />
+          <stop offset="1" stopColor="var(--preview-floor-end)" />
         </linearGradient>
       </defs>
       <polygon
@@ -106,7 +106,7 @@ export function ClosetPreview() {
           point(0, depth, 0),
         ].join(' ')}
         fill="url(#closet-floor)"
-        stroke="#50def2"
+        stroke="var(--accent)"
         strokeOpacity=".5"
         strokeWidth="1.3"
       />
@@ -118,28 +118,52 @@ export function ClosetPreview() {
           <g
             key={node.id}
             data-fixture={node.id}
-            stroke="#9bebfa"
+            stroke="var(--preview-edge)"
             strokeOpacity={rack ? '.9' : '.6'}
             strokeWidth={rack ? '1' : '.55'}
             strokeLinejoin="round"
           >
             <polygon
               points={shape.front.join(' ')}
-              fill={rack ? '#14516b' : drawer ? '#143c54' : '#245c74'}
+              fill={
+                rack
+                  ? 'var(--preview-rack-front)'
+                  : drawer
+                    ? 'var(--preview-drawer-front)'
+                    : 'var(--preview-shelf-front)'
+              }
             />
             <polygon
               points={shape.side.join(' ')}
-              fill={rack ? '#0b3048' : drawer ? '#0d2d44' : '#17445d'}
+              fill={
+                rack
+                  ? 'var(--preview-rack-side)'
+                  : drawer
+                    ? 'var(--preview-drawer-side)'
+                    : 'var(--preview-shelf-side)'
+              }
             />
             <polygon
               points={shape.top.join(' ')}
-              fill={rack ? '#3db9d0' : drawer ? '#2d7992' : '#57abc0'}
+              fill={
+                rack
+                  ? 'var(--preview-rack-top)'
+                  : drawer
+                    ? 'var(--preview-drawer-top)'
+                    : 'var(--preview-shelf-top)'
+              }
             />
           </g>
         );
       })}
-      <path d="M26 167h40" stroke="#50def2" strokeWidth="1.5" />
-      <text x="26" y="161" fill="#b7d2e0" fontSize="8" letterSpacing="1.4">
+      <path d="M26 167h40" stroke="var(--accent)" strokeWidth="1.5" />
+      <text
+        x="26"
+        y="161"
+        fill="var(--preview-caption)"
+        fontSize="8"
+        letterSpacing="1.4"
+      >
         IT CLOSET
       </text>
     </svg>
