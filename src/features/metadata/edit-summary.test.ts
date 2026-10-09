@@ -54,6 +54,62 @@ const definition: MetadataDefinition = {
   layout: [],
 };
 describe('metadata changed-value summary', () => {
+  it('preserves omitted threshold/SKU, distinguishes explicit clear and exact SKU case', () => {
+    const item = { ...baseline, reorderThreshold: 5, itemCode: '00Ab/C' };
+    const intent = normalizeEditIntent('quantity', {
+      item_id: item.id,
+      expected_version: 1,
+      name: ' Cable ',
+      category_id: item.categoryId,
+      manufacturer: ' Maker ',
+      expected_published_revision_id: id(3),
+      custom_patch: {},
+    })!;
+    const summarize = (changes: Record<string, unknown>) =>
+      editSummary({
+        baseline: item,
+        intent: { ...intent, ...changes },
+        definition,
+        categories: [],
+        timeZone: { timeZone: 'UTC', fallback: false },
+      });
+    expect(summarize({})).toEqual([]);
+    expect(
+      summarize({ reorder_threshold: null, item_code: null }).map(
+        (row) => row.key,
+      ),
+    ).toEqual(['reorder_threshold', 'item_code']);
+    expect(summarize({ item_code: '00ab/C' }).map((row) => row.key)).toEqual([
+      'item_code',
+    ]);
+  });
+  it('treats datetime offset equivalence at exact microseconds as unchanged, without unsafe precision or type coercion', () => {
+    const item = {
+      ...baseline,
+      customValues: {
+        [id(6)]: {
+          value: '2026-10-09T12:00:00.123456Z',
+          validated_revision_id: id(3),
+        },
+      },
+    };
+    const dateDefinition = {
+      ...definition,
+      fields: [{ ...definition.fields[2], type: 'datetime' as const }],
+    };
+    const summarize = (value: unknown) =>
+      editSummary({
+        baseline: item,
+        intent: { custom_patch: { set: { [id(6)]: value }, unset: [] } },
+        definition: dateDefinition,
+        categories: [],
+        timeZone: { timeZone: 'UTC', fallback: false },
+      });
+    expect(summarize('2026-10-09T07:00:00.123456-05:00')).toEqual([]);
+    expect(summarize('2026-10-09T12:00:00.123457Z')).toHaveLength(1);
+    expect(summarize('2026-10-09T12:00:00.1234561Z')).toHaveLength(1);
+    expect(summarize(1791547200123)).toHaveLength(1);
+  });
   it('treats a case-only asset tag correction as a real display edit', () => {
     const shared = {
       id: baseline.id,
