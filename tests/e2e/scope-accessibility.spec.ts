@@ -378,11 +378,15 @@ test('record history binds kind and name, preserves other filters on clear and r
     await signIn(page, 'viewer');
     await page.goto('/inventory/quantity/' + setup.splitId);
     await page.getByRole('link', { name: 'View all item history' }).click();
-    const type = page.getByRole('combobox', { name: 'Tracking type' });
+    const filter = page.getByRole('form', {
+      name: 'Filter history',
+      exact: true,
+    });
+    const type = filter.getByRole('combobox', { name: 'Tracking type' });
     await expect(type).toBeDisabled();
     await expect(type).toHaveValue('quantity');
     await expect(
-      page.getByRole('link', { name: setup.splitName, exact: true }).first(),
+      filter.getByRole('link', { name: setup.splitName, exact: true }),
     ).toBeVisible();
     await page.goto(
       '/history?entityId=' + setup.splitId + '&type=asset&location=ITC-BLACK',
@@ -409,7 +413,8 @@ test('record history binds kind and name, preserves other filters on clear and r
       .getByRole('button', { name: 'Filter history', exact: true })
       .click();
     await expect(type).toHaveValue('asset');
-    await expect(page.getByText(/Record:/)).toHaveCount(0);
+    await expect(filter.getByText(/^Record:/)).toHaveCount(0);
+    await expect(filter.locator('input[name="entityId"]')).toHaveCount(0);
     await page.goBack();
     await page.goBack();
     await expect(type).toBeDisabled();

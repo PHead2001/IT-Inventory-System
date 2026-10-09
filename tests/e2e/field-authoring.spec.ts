@@ -97,7 +97,10 @@ async function followHistoryLink(page: Page, name: string) {
     .getByRole('link', { name, exact: true, includeHidden: true })
     .first();
   if (!(await link.isVisible()))
-    await link.locator('xpath=ancestor::details[1]').locator('summary').click();
+    await link
+      .locator('xpath=ancestor::details[1]')
+      .locator(':scope > summary')
+      .click();
   const destination = new URL((await link.getAttribute('href'))!, page.url());
   await link.click();
   await expect(page).toHaveURL(destination.href);

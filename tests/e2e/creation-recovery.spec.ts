@@ -31,20 +31,25 @@ async function inventory(page: Page) {
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
 }
-async function restoreCreationIfOffered(form: Locator) {
+async function restoreCreationIfOffered(form: Locator, expectedName: string) {
   const restore = form.getByRole('button', {
     name: 'Restore draft',
     exact: true,
   });
   const name = form.getByLabel('Name', { exact: true });
   await expect
-    .poll(async () => (await restore.isVisible()) || (await name.isEnabled()))
+    .poll(
+      async () =>
+        (await restore.isVisible()) ||
+        (await name.inputValue()) === expectedName,
+    )
     .toBe(true);
   if (await restore.isVisible()) {
     await expect(name).toHaveValue('');
     await expect(name).toBeDisabled();
     await restore.click();
   }
+  await expect(name).toHaveValue(expectedName);
 }
 /** Hold real canonical RSC navigation while ordinary controls remain interactive. */
 async function holdCreationBinding(page: Page) {
@@ -363,15 +368,15 @@ test('creation recovery retains serialized input across Back/Forward, internal n
     page.getByRole('heading', { name: 'Inventory', exact: true }),
   ).toBeVisible();
   await page.goForward();
-  await restoreCreationIfOffered(form);
+  await restoreCreationIfOffered(form, name);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await inventory(page);
   await page.goBack();
-  await restoreCreationIfOffered(form);
+  await restoreCreationIfOffered(form, name);
   await expect(form.getByLabel('Asset tag')).toHaveValue(tag);
   const warningsBefore = warnings.length;
   await page.reload();
-  await restoreCreationIfOffered(form);
+  await restoreCreationIfOffered(form, name);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await expect(form.getByLabel('Serial number')).toHaveValue(serial);
   await expect(form.getByLabel('Manufacturer')).toHaveValue(
@@ -468,7 +473,7 @@ test('quantity creation preserves stock input; explicit discard survives return 
   const draftURL = page.url();
   await inventory(page);
   await page.goBack();
-  await restoreCreationIfOffered(form);
+  await restoreCreationIfOffered(form, name);
   await expect(form.getByLabel('Name', { exact: true })).toHaveValue(name);
   await expect(form.getByLabel('Item code (SKU)')).toHaveValue('RECOVERY-SKU');
   await expect(form.getByLabel('Initial quantity')).toHaveValue('3');
