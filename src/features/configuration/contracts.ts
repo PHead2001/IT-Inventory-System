@@ -9,12 +9,10 @@ const total = z.union([
   z.string().regex(/^(0|[1-9]\d*)$/),
   z.number().int().nonnegative().safe().transform(String),
 ]);
-const name = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .transform((value) => value.replace(/\s+/g, ' '));
+export function normalizeCategoryName(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
+}
+const name = z.string().trim().min(1).max(200).transform(normalizeCategoryName);
 const schemas = {
   category_create: z.strictObject({
     code: z
