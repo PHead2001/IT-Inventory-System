@@ -185,7 +185,7 @@ try {
         if ($script:loopCase -eq 'error') { throw 'Fixture session or cleanup failure.' }
         if ($script:loopCase -eq 'completed') {
             if ($script:sessions -eq 2) { [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
-            return [pscustomobject]@{ outcome = 'job-completed' }
+            return [pscustomobject]@{ outcome = 'runner-exited' }
         }
         return [pscustomobject]@{ outcome = 'demand-withdrawn' }
     }

@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Start-GuardedVm' }, $true)
@@ -63,7 +64,7 @@ try {
         $instance = Join-Path (Join-Path $root 'instances') $name
         [void][IO.Directory]::CreateDirectory($instance)
         [IO.File]::WriteAllText((Join-Path $instance 'guest.vhdx'), 'owned fresh disk')
-        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true }
+        $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance; guardianReady = $true; networkRecovery = [pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = [DateTime]::UtcNow.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') } }
         $vm = [pscustomobject]@{ Id = $state.vmId; Name = $name; Notes = $script:RunnerTag; Path = Join-Path $instance $name
             State = 'Off'; AutomaticStartAction = 'Nothing'; AutomaticStopAction = 'TurnOff' }
         if ($scenario -ceq 'wrong-guid') { $vm.Id = [guid]::NewGuid().ToString() }

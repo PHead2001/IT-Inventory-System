@@ -2,6 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
 $base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-demand-' + [guid]::NewGuid().ToString('N'))
@@ -10,7 +11,7 @@ $script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.jso
 $config = [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral'; repo = 'example/fixture'; maxMinutes = 120; baseVhdx = 'fixture'; guestIp = 'fixture'; runnerGroupId = 1 }
 function Assert-Rejected([scriptblock] $Work) { $rejected = $false; try { & $Work } catch { $rejected = $true }; if (-not $rejected) { throw 'Demand fixture unexpectedly accepted unsafe input.' } }
 # Stub every host touch while retaining the actual session control flow/finally.
-foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-RunnerTransitionCheckpoint', 'Copy-Item', 'Assert-SessionAlive', 'Set-VM', 'Assert-RunnerVmLifecycle', 'Set-VMProcessor', 'Set-VMMemory', 'Assert-RunnerVmResources', 'Set-VMFirmware', 'Disable-VMIntegrationService', 'New-SeedDisk', 'Add-VMHardDiskDrive', 'Start-SessionGuardian', 'Assert-RunnerGuestMac', 'Start-GuardedVm', 'Wait-Guest', 'Assert-AdapterRules', 'Test-GuestIsolation')) { Set-Item -Path "Function:$name" -Value {} }
+foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-RunnerTransitionCheckpoint', 'Copy-Item', 'Assert-SessionAlive', 'Set-VM', 'Assert-RunnerVmLifecycle', 'Set-VMProcessor', 'Set-VMMemory', 'Assert-RunnerVmResources', 'Set-VMFirmware', 'Disable-VMIntegrationService', 'New-SeedDisk', 'Add-VMHardDiskDrive', 'Start-SessionGuardian', 'Assert-RunnerGuestMac', 'Start-GuardedVm', 'Wait-Guest', 'Assert-AdapterRules', 'Assert-CurrentRunnerNetworkRules', 'Test-GuestIsolation')) { Set-Item -Path "Function:$name" -Value {} }
 function Enter-RunnerLock { return $null }
 function Exit-RunnerLock {}
 function Get-OwnerToken { return 'fixture' }
@@ -35,17 +36,23 @@ function Set-VM {
 function Get-VM { return [pscustomobject]@{ Notes = $script:RunnerTag } }
 function Get-VMIntegrationService { return @() }
 function Set-RunnerGuestMac { return [pscustomobject]@{ rawMac = 'fixture'; seedMac = 'fixture' } }
-function Get-HostNetworkFingerprint { return 'fixture' }
+function Get-RunnerNetworkObservation { return [pscustomobject]@{ fingerprint = ('a' * 64); rules = @(); observedUtc = [DateTime]::UtcNow.ToString('o') } }
 function Set-IsolatedAdapter { return @() }
 function Get-RunnerArchive { return 'fixture' }
 function Get-SshArgs { return @() }
-function Invoke-RunnerNative($Executable, $Arguments, $InputText = $null) {
+function Invoke-RunnerNative($Executable, $Arguments, $InputText = $null, $TimeoutSeconds = 0) {
     $script:nativeCalls++
     if ($null -ne $InputText) {
         $command = $Arguments[-1]
-        if (($command -match 'RUNNER_TOOL_CACHE=/opt/hostedtoolcache') -ne ($script:case -ceq 'prepared')) { throw 'Generic fallback lost writable runner-default toolcache, or prepared cache was not exposed.' }
+        if ($command -cnotmatch 'printf ''%s'' ([A-Za-z0-9+/=]+) \| base64 -d') { throw 'Detached fixed wrapper missing.' }
+        $wrapper = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Matches[1]))
+        if (($wrapper -match 'RUNNER_TOOL_CACHE=/opt/hostedtoolcache') -ne ($script:case -ceq 'prepared')) { throw 'Generic fallback lost writable runner-default toolcache, or prepared cache was not exposed.' }
     }
     return 0
+}
+function Invoke-RunnerReceiptNative {
+    $launch = (Get-RunnerState).runnerLaunch
+    return [pscustomobject]@{ ExitCode = 0; Output = $launch.launchId + '|' + $launch.runnerId + '|exited|0' }
 }
 function Remove-RunnerInstance($State) { $script:cleanups++; Remove-Item -LiteralPath $script:RunnerStatePath }
 function New-Job([int] $Id, [string] $Label, [string] $Status = 'queued') { return [pscustomobject]@{ id = $Id; status = $Status; runner_id = 0; labels = @('self-hosted', $Label) } }
@@ -98,7 +105,7 @@ try {
         if ($case -in @('unexpected-readback', 'overflow')) { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
         else {
             $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
-            if ($case -in @('same', 'prepared')) { if ($result.id -ne 42 -or $result.outcome -cne 'job-completed' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
+            if ($case -in @('same', 'prepared')) { if ($result.id -ne 42 -or $result.outcome -cne 'runner-exited' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
             elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne 2) { throw 'Withdrawn demand registered or executed an idle JIT.' }
         }
         if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }

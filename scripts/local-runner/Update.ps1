@@ -13,8 +13,12 @@ function Get-RunnerBundleVersion([string] $Version) {
 }
 
 function Get-RunnerBundleNames {
-    return @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
+    return @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'Probe.Job.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
         'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
+}
+
+function Get-RunnerPreRecoveryBundleNames {
+    return @(Get-RunnerBundleNames | Where-Object { $_ -cnotin @('Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'Probe.Job.ps1') })
 }
 
 function Get-RunnerLegacyBundleNames {
@@ -32,6 +36,10 @@ function Get-RunnerBundle([string] $SourceRoot, [switch] $AllowLegacyInstalled) 
         [string]::Equals([IO.Path]::GetFullPath($SourceRoot), [IO.Path]::GetFullPath((Join-Path $script:RunnerRoot 'bin')), [StringComparison]::OrdinalIgnoreCase) -and
         $bundle.version -cmatch '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$') {
         $version = Get-RunnerBundleVersion $bundle.version
+        $preRecoveryCutoff = Get-RunnerBundleVersion '2026-10-06.8'
+        $preRecovery = Get-RunnerPreRecoveryBundleNames
+        if (($version.date -lt $preRecoveryCutoff.date -or ($version.date -eq $preRecoveryCutoff.date -and $version.revision -le $preRecoveryCutoff.revision)) -and
+            $bundle.files.Count -eq $preRecovery.Count -and -not (Compare-Object @($bundle.files.name | Sort-Object) @($preRecovery | Sort-Object))) { $names = $preRecovery }
         $cutoff = Get-RunnerBundleVersion '2026-10-06.1'
         $legacy = Get-RunnerLegacyBundleNames
         if (($version.date -lt $cutoff.date -or ($version.date -eq $cutoff.date -and $version.revision -le $cutoff.revision)) -and

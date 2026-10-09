@@ -48,6 +48,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Runner.Latency.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regression failed.' }
 
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Recovery.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Network.Recovery.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Integration.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Network.Integration.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Probe.Job.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Probe.Job.Tests.ps1 failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Guardian.Process.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Network.Guardian.Process.Tests.ps1 failed.' }
+
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
@@ -500,174 +509,9 @@ public class ArgvSink {
     Set-Item -Path Function:\New-SeedDisk -Value $realSeedWriter
     Remove-Item -LiteralPath $script:RunnerStatePath -Force
 
-    # Route/address drift is fatal even during work blocked in another process.
-    $script:fakeAddresses = @(
-        [pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = '192.0.2.1'; PrefixLength = 24; InterfaceIndex = 7 },
-        [pscustomobject]@{ AddressFamily = 'IPv6'; IPAddress = '2001:db8::1'; PrefixLength = 64; InterfaceIndex = 7 }
-    )
-    $script:fakeRoutes = @(
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/0'; NextHop = '192.0.2.2'; InterfaceIndex = 7 },
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/24'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '0.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '128.0.0.0/1'; NextHop = '10.20.0.1'; InterfaceIndex = 8 },
-        [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/24'; NextHop = '10.20.0.2'; InterfaceIndex = 9 }
-    )
-    $script:inspectionFailure = $false
-    function Get-NetIPAddress { param($AddressFamily) if ($script:inspectionFailure) { throw 'synthetic inspection failure' }; return @($script:fakeAddresses | Where-Object { -not $AddressFamily -or $_.AddressFamily -eq $AddressFamily }) }
-    function Get-NetRoute { param($AddressFamily) return @($script:fakeRoutes | Where-Object { -not $AddressFamily -or $_.AddressFamily -eq $AddressFamily }) }
-    $script:aclRules = @()
-    function Add-VMNetworkAdapterExtendedAcl {
-        param($VMName, $Action, $Direction, $Weight, [switch]$Passthru, $RemoteIPAddress = '', $RemotePort = '', $Protocol = '', $Stateful = '', $LocalPort = '')
-        if (@($script:aclRules | Where-Object { $_.Weight -eq $Weight }).Count -gt 0) { throw 'Synthetic Hyper-V duplicate weight rejection.' }
-        $rule = [pscustomobject]@{
-            Action = $Action; Direction = $Direction; Weight = $Weight; RemoteIPAddress = $RemoteIPAddress
-            RemotePort = $RemotePort; Protocol = $Protocol; Stateful = $Stateful; LocalPort = $LocalPort; LocalIPAddress = ''
-        }
-        $script:aclRules += $rule
-        return $rule
-    }
-    function Get-VMNetworkAdapterExtendedAcl { param($VMName) return $script:aclRules }
-    [void](Set-IsolatedAdapter $validName)
-    foreach ($port in @(80, 443, 5432)) {
-        if (@($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Outbound' -and $_.Protocol -eq 'TCP' -and $_.RemotePort -eq $port -and $_.Weight -ge 100 -and $_.Weight -le 102 }).Count -ne 1) {
-            throw "Expected public TCP $port rule is missing."
-        }
-    }
-    if (@($script:aclRules | Where-Object { $_.RemotePort -eq 6543 }).Count -ne 0 -or
-        @($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.RemoteIPAddress -eq '192.0.2.1/32' -and $_.Weight -gt 100 }).Count -ne 1 -or
-        @($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.RemoteIPAddress -eq '::/0' -and $_.Weight -gt 100 }).Count -ne 1) {
-        throw 'Public database routing weakened host/IPv6 denial or opened unused 6543.'
-    }
-    foreach ($prefix in @('203.0.113.0/24', '0.0.0.0/1', '128.0.0.0/1')) {
-        if (@($script:aclRules | Where-Object { $_.Action -eq 'Deny' -and $_.Direction -eq 'Outbound' -and $_.RemoteIPAddress -ceq $prefix -and $_.Weight -gt 110 }).Count -ne 1) {
-            throw "Gateway/VPN route $prefix could bypass isolation using public HTTP/DNS/database allows."
-        }
-    }
-    if (@($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '0.0.0.0/0' -and $_.Action -eq 'Deny' }).Count -ne 0 -or
-        @($script:aclRules | Where-Object { $_.Action -eq 'Allow' -and $_.Direction -eq 'Inbound' -and $_.RemoteIPAddress -eq '172.30.240.1' -and $_.LocalPort -eq 22 -and $_.Stateful -eq $true }).Count -ne 1) {
-        throw 'Route isolation changed the default Internet route or required stateful host SSH rule.'
-    }
-    $privateMaximum = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '224.0.0.0/4' }).Weight
-    $routeWeights = @($script:aclRules | Where-Object { $_.RemoteIPAddress -in @('203.0.113.0/24', '0.0.0.0/1', '128.0.0.0/1') } | Select-Object -ExpandProperty Weight)
-    $hostWeight = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '192.0.2.1/32' }).Weight
-    $ipv6Weight = ($script:aclRules | Where-Object { $_.RemoteIPAddress -eq '::/0' }).Weight
-    if (@($routeWeights | Where-Object { $_ -le $privateMaximum -or $_ -ge $hostWeight }).Count -ne 0 -or $hostWeight -ge $ipv6Weight) {
-        throw 'Distinct ACL weights changed the private/route/host/IPv6 deny priority order.'
-    }
-    $savedRoutes = $script:fakeRoutes; $savedAddresses = $script:fakeAddresses; $savedRules = $script:aclRules
-    $script:fakeRoutes = @($savedRoutes)
-    [Array]::Reverse($script:fakeRoutes)
-    $script:aclRules = @()
-    [void](Set-IsolatedAdapter $validName)
-    if (Compare-Object @($savedRules | ForEach-Object { Get-RuleFingerprint $_ }) @($script:aclRules | ForEach-Object { Get-RuleFingerprint $_ })) {
-        throw 'ACL weight assignment depends on route enumeration order.'
-    }
-    foreach ($case in @('capacity', 'invalid-route', 'invalid-address')) {
-        $script:fakeRoutes = $savedRoutes; $script:fakeAddresses = $savedAddresses; $script:aclRules = @()
-        switch ($case) {
-            'capacity' { $script:fakeRoutes = @(0..4096 | ForEach-Object { [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = "10.$([int][Math]::Floor($_ / 256)).$($_ % 256).0/24" } }) }
-            'invalid-route' { $script:fakeRoutes = @([pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '203.0.113.0/33' }) }
-            'invalid-address' { $script:fakeAddresses = @([pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = '999.0.0.1' }) }
-        }
-        $rejected = $false
-        try { [void](Set-IsolatedAdapter $validName) } catch { $rejected = $true }
-        if (-not $rejected -or $script:aclRules.Count -ne 0) { throw "ACL $case did not fail closed before modification." }
-    }
-    $script:fakeRoutes = $savedRoutes; $script:fakeAddresses = $savedAddresses; $script:aclRules = $savedRules
-    $fingerprint = Get-HostNetworkFingerprint
-    [Array]::Reverse($script:fakeAddresses)
-    if ((Get-HostNetworkFingerprint) -cne $fingerprint) { throw 'Network fingerprint depends on enumeration order.' }
-    $networkState = [pscustomobject]@{
-        tag = $script:RunnerTag; vmName = $validName; vmId = $script:fakeVm.Id.ToString(); instancePath = $validInstance
-        networkFingerprint = $fingerprint; supervisorPid = $PID
-        heartbeatUtc = [DateTime]::UtcNow.ToString('o')
-        supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
-        deadlineUtc = [DateTime]::UtcNow.AddMinutes(1).ToString('o')
-    }
-    Write-RunnerJson $script:RunnerStatePath $networkState
-    $guardReady = Invoke-GuardCheck $validName
-    if (-not $guardReady -or $null -eq (Get-RunnerState) -or (Get-RunnerState).guardianReady -ne $true) {
-        $guardError = Read-RunnerJson (Join-Path $testRoot 'last-error.json')
-        throw "Stable network guardian failed readiness: $($guardError | ConvertTo-Json -Compress)."
-    }
-    foreach ($change in @('route', 'ipv4', 'ipv6', 'inspection')) {
-        $script:fakeVmRemoved = $false
-        Write-RunnerJson $script:RunnerStatePath $networkState
-        switch ($change) {
-            'route' { $script:fakeRoutes[0].NextHop = '192.0.2.3' }
-            'ipv4' { $script:fakeAddresses[1].IPAddress = '192.0.2.4' }
-            'ipv6' { $script:fakeAddresses[0].IPAddress = '2001:db8::2' }
-            'inspection' { $script:inspectionFailure = $true }
-        }
-        $before = $script:deletions
-        if ((Invoke-GuardCheck $validName) -ne $false -or $script:deletions -ne $before + 1 -or (Get-RunnerState)) {
-            throw "Guardian did not cancel and clean a session on $change drift."
-        }
-        $failure = Read-RunnerJson (Join-Path $testRoot 'last-error.json')
-        $expectedCode = if ($change -eq 'inspection') { 'NETWORK_INSPECTION_FAILED' } else { 'NETWORK_CHANGED' }
-        if ($failure.code -cne $expectedCode -or $failure.stage -cne 'network-guard') { throw 'Guardian lost its fixed safe failure diagnosis.' }
-        $script:fakeRoutes[0].NextHop = '192.0.2.2'
-        $script:fakeAddresses[1].IPAddress = '192.0.2.1'; $script:fakeAddresses[0].IPAddress = '2001:db8::1'
-        $script:inspectionFailure = $false
-    }
-    $script:starts = 0
-    function Start-VM { param($VM, [switch] $AsJob) $script:starts++; $script:fakeVm.State = 'Running'; $job = Start-Job {}; [void](Wait-Job $job); return $job }
-    $rejected = $false
-    try { Start-GuardedVm $networkState } catch { $rejected = $true }
-    if (-not $rejected -or $script:starts -ne 0) { throw 'Cancelled session booted after guardian removed its state.' }
-    $script:fakeVmRemoved = $false
-    Write-RunnerJson $script:RunnerStatePath $networkState
-    [void](Invoke-GuardCheck $validName)
-    Start-GuardedVm $networkState
-    if ($script:starts -ne 1) { throw 'Stable session could not boot with its ready guardian.' }
-    $script:fakeRoutes[0].InterfaceIndex = 8
-    $rejected = $false
-    try { Assert-SessionAlive $networkState } catch { $rejected = $true }
-    if (-not $rejected) { throw 'Fresh pre-JIT session check accepted route drift.' }
-    $script:fakeRoutes[0].InterfaceIndex = 7
-    Remove-Item -LiteralPath $script:RunnerStatePath -Force
-
-    # The guardian executes in another process while the supervisor is inside
-    # a blocking native call, rather than relying on supervisor polling.
-    Write-RunnerJson $script:RunnerStatePath $networkState
-    $readyName = 'Local\ITIR-guard-test-' + [guid]::NewGuid().ToString('N')
-    $ready = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $readyName)
-    $guardJob = Start-Job -ArgumentList $PSScriptRoot, $testRoot, $validName, $readyName, $script:contractLockPrefix -ScriptBlock {
-        param($source, $root, $name, $eventName, $lockPrefix)
-        . (Join-Path $source 'Common.ps1')
-            . (Join-Path $source 'Test.Mutex.ps1')
-        $script:guardEnterLock = (Get-Command Enter-RunnerLock).ScriptBlock
-        $script:guardLockName = $lockPrefix + '-state'
-        function Enter-RunnerLock { return & $script:guardEnterLock $script:guardLockName }
-        $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
-        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'Runner.ps1'), [ref]$null, [ref]$null)
-        $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-GuardCheck' }, $true)
-        Invoke-Expression $definition.Extent.Text
-        function Get-HostNetworkFingerprint { return 'synthetic changed fingerprint' }
-        function Remove-RunnerInstance {
-            param($State)
-            Assert-StateIdentity $State
-            Remove-Item -LiteralPath $script:RunnerStatePath -Force
-            [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'guard-cancelled'), 'cancelled')
-        }
-        $signal = [Threading.EventWaitHandle]::OpenExisting($eventName)
-        try { [void]$signal.Set() } finally { $signal.Dispose() }
-        Start-Sleep -Milliseconds 250
-        Invoke-GuardCheck $name
-    }
-    try {
-        if (-not $ready.WaitOne([TimeSpan]::FromSeconds(10))) { throw 'Independent test guardian did not initialize.' }
-        [void](Invoke-RunnerNative $sink @('--block', (Join-Path $testRoot 'blocked-work')))
-        [void](Wait-Job $guardJob -Timeout 10)
-        if ($guardJob.State -ne 'Completed' -or (Receive-Job $guardJob) -ne $false -or
-            -not (Test-Path -LiteralPath (Join-Path $testRoot 'guard-cancelled')) -or (Get-RunnerState)) {
-            throw 'Independent guardian did not cancel during blocking native work.'
-        }
-    } finally {
-        if ($guardJob.State -eq 'Running') { Stop-Job $guardJob }
-        Remove-Job $guardJob -Force
-        $ready.Dispose()
-    }
+    # Recovery denial/readback/Stop/death/freshness and independent-guardian
+    # behavior now lives in the focused permanent suites above; drift requests
+    # verified quarantine rather than the removed fatal-baseline implementation.
 
     # Execute the actual setup menu clauses against an inert installed-script
     # sink, proving activation happens before Start and failures stop the chain.
@@ -705,7 +549,8 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
         schema = 1; tag = $script:RunnerTag; repo = 'example/runner-test'; maxMinutes = 120; activation = 'pilot'
         pilotExpectedSha = ('a' * 40); pilotWorkflowPath = '.github/workflows/local-runner-pilot.yml'; pilotLabel = 'it-inventory-pilot-' + ('a' * 40)
     })
-    Remove-Item -LiteralPath (Join-Path $testRoot 'last-error.json') -Force
+    $previousFailure = Join-Path $testRoot 'last-error.json'
+    if (Test-Path -LiteralPath $previousFailure) { Remove-Item -LiteralPath $previousFailure -Force }
     function Get-RunnerMemoryAdmission { return [pscustomobject]@{ ready = $true; availableBytes = 32GB } }
     function Get-OwnerToken { return 'SENTINEL_SECRET' }
     function Get-QueuedRunnerJob { param($Config, $Token) return [pscustomobject]@{ id = 123; labels = @('self-hosted', $Config.pilotLabel); pilotBinding = [pscustomobject]@{ runId = 456; workflowId = 789; workflowPath = '.github/workflows/local-runner-pilot.yml'; headSha = ('a' * 40); runAttempt = 1; pilotLabel = 'it-inventory-pilot-' + ('a' * 40) } } }

@@ -1,0 +1,509 @@
+# Guardian-only recovery primitives. Loading compiles the lifetime helper; it
+# performs no VM/network/control mutation or probe dispatch.
+# Provider calls are synchronous and serialized by the integration's state lock.
+# A provider hang is NOT cancellable proof: retain uncertain state and never resume.
+$script:RunnerRecoveryProbe = $null
+. (Join-Path $PSScriptRoot 'Probe.Job.ps1') # Compile before guardian/VM execution, never after resume.
+function Get-RunnerRecoveryNow { return [DateTime]::UtcNow }
+function Get-RunnerRecoveryHash([string] $Text) {
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
+    finally { $hash.Dispose() }
+}
+
+function Get-RunnerNetworkCapture {
+    # No mutex here. Fingerprint and policy MUST consume this same capture.
+    $observedUtc = (Get-RunnerRecoveryNow).ToString('o')
+    $addresses = @(Get-NetIPAddress -ErrorAction Stop)
+    $routes = @(Get-NetRoute -ErrorAction Stop)
+    $records = @(
+        foreach ($ip in $addresses) {
+            'address|{0}|{1}|{2}|{3}' -f $ip.AddressFamily, $ip.IPAddress, $ip.PrefixLength, $ip.InterfaceIndex
+        }
+        foreach ($route in $routes) {
+            'route|{0}|{1}|{2}|{3}' -f $route.AddressFamily, $route.DestinationPrefix, $route.NextHop, $route.InterfaceIndex
+        }
+    )
+    if ($addresses.Count -eq 0 -or $routes.Count -eq 0) { throw 'Network observation is incomplete.' }
+    return [pscustomobject]@{
+        addresses = $addresses; routes = $routes; observedUtc = $observedUtc
+        fingerprint = Get-RunnerRecoveryHash (@($records | Sort-Object -Unique) -join "`n")
+    }
+}
+
+function New-RunnerNetworkPolicy($Capture) {
+    $privatePrefixes = @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')
+    $hostIps = @($Capture.addresses | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') } | ForEach-Object { [string]$_.IPAddress } | Sort-Object -Unique)
+    $routes = @($Capture.routes | Where-Object { [string]$_.AddressFamily -in @('IPv4', 'InterNetwork', '2') -and $_.DestinationPrefix -cne '0.0.0.0/0' } | ForEach-Object { [string]$_.DestinationPrefix } | Sort-Object -Unique)
+    if ($hostIps.Count -eq 0) { throw 'Network observation has no host IPv4 addresses.' }
+    foreach ($ip in $hostIps) {
+        $parsed = $null
+        if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or -not [Net.IPAddress]::TryParse($ip, [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'Network policy contains an invalid host IPv4 address.' }
+    }
+    foreach ($prefix in $routes) {
+        $parsed = $null
+        if ($prefix -notmatch '^(\d{1,3}(\.\d{1,3}){3})/(\d{1,2})$' -or [int]$Matches[3] -gt 32 -or -not [Net.IPAddress]::TryParse($Matches[1], [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'Network policy contains an invalid route.' }
+    }
+    if (($privatePrefixes.Count + $hostIps.Count + $routes.Count + 1) -gt 4096) { throw 'Network policy exceeds the existing deny capacity.' }
+    $rules = @(
+        [pscustomobject]@{ Action = 'Deny'; Direction = 'Inbound'; Weight = 1 }
+        [pscustomobject]@{ Action = 'Deny'; Direction = 'Outbound'; Weight = 2 }
+    )
+    $weight = 200
+    foreach ($prefix in @($privatePrefixes) + @($routes) + @($hostIps | ForEach-Object { "$_/32" }) + @('::/0')) {
+        $rules += [pscustomobject]@{ Action = 'Deny'; Direction = 'Outbound'; RemoteIPAddress = $prefix; Weight = $weight }
+        $weight++
+    }
+    $weight = 100
+    foreach ($port in @(80, 443, 5432)) {
+        $rules += [pscustomobject]@{ Action = 'Allow'; Direction = 'Outbound'; Protocol = 'TCP'; RemotePort = [string]$port; Weight = $weight; Stateful = $true }
+        $weight++
+    }
+    $weight = 110
+    foreach ($dns in @('1.1.1.1', '8.8.8.8')) {
+        foreach ($protocol in @('UDP', 'TCP')) {
+            $rules += [pscustomobject]@{ Action = 'Allow'; Direction = 'Outbound'; RemoteIPAddress = $dns; RemotePort = '53'; Protocol = $protocol; Weight = $weight; Stateful = $true }
+            $weight++
+        }
+    }
+    $rules += [pscustomobject]@{ Action = 'Allow'; Direction = 'Inbound'; RemoteIPAddress = '172.30.240.1'; LocalPort = '22'; Protocol = 'TCP'; Weight = 150; Stateful = $true }
+    return $rules
+}
+
+function Get-RunnerNetworkObservation {
+    # Windows does not expose an atomic address+route snapshot. Reject a changing
+    # pair, then retain the second matching capture as the sole policy input.
+    $before = Get-RunnerNetworkCapture
+    $after = Get-RunnerNetworkCapture
+    if ($before.fingerprint -cne $after.fingerprint) { throw 'Network changed during observation.' }
+    # Timestamp the oldest read in the retained capture, not the end of policy
+    # derivation. Slow inspection cannot manufacture a fresh admission lease.
+    return [pscustomobject]@{ fingerprint = $after.fingerprint; rules = @(New-RunnerNetworkPolicy $after); observedUtc = $after.observedUtc }
+}
+
+function Get-RunnerRecoveryClaimHash($State) {
+    $claim = [ordered]@{}
+    foreach ($name in @('tag', 'vmName', 'vmId', 'instancePath', 'purpose', 'resourceLabel', 'claimMode', 'pilotClaim', 'createdUtc', 'deadlineUtc', 'supervisorPid', 'supervisorStartUtc', 'guardianPid', 'guardianStartUtc', 'guestMac')) {
+        if ($State.PSObject.Properties.Name -contains $name) { $claim[$name] = $State.$name }
+    }
+    return Get-RunnerRecoveryHash ($claim | ConvertTo-Json -Depth 20 -Compress)
+}
+
+function New-RunnerNetworkBinding($State, $Vm, $Adapter, $Switch) {
+    Assert-StateIdentity $State
+    if ([guid]$Vm.Id -ne [guid]$State.vmId -or $Vm.Name -cne $State.vmName -or $Vm.Notes -cne $State.tag -or
+        [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM ownership differs.' }
+    if ([string]$State.guestMac -cnotmatch '^02[0-9a-fA-F]{10}$' -or [string]::IsNullOrEmpty([string]$Adapter.Id) -or [guid]$Adapter.VMId -ne [guid]$State.vmId -or $Adapter.VMName -cne $State.vmName -or
+        $Adapter.DynamicMacAddressEnabled -ne $false -or [string]$Adapter.MacAddress -ine $State.guestMac -or
+        $Switch.Name -cne $script:RunnerSwitch -or [string]$Switch.SwitchType -cne 'Internal' -or [guid]$Switch.Id -eq [guid]::Empty -or [guid]$Adapter.SwitchId -ne [guid]$Switch.Id) { throw 'Network recovery adapter/switch/MAC ownership differs.' }
+    return [pscustomobject]@{
+        claimHash = Get-RunnerRecoveryClaimHash $State
+        vmId = [string]$State.vmId; vmName = $State.vmName; adapterId = [string]$Adapter.Id
+        mac = ([string]$State.guestMac).ToUpperInvariant(); switchId = [string]$Switch.Id; switchName = $Switch.Name
+    }
+}
+
+function Assert-RunnerNetworkBinding($State, $Binding, $Vm, $Adapters, $Switch, [switch] $RequireDisconnected) {
+    Assert-StateIdentity $State
+    if ((Get-RunnerRecoveryClaimHash $State) -cne $Binding.claimHash -or [guid]$State.vmId -ne [guid]$Binding.vmId -or $State.vmName -cne $Binding.vmName) { throw 'Network recovery session/claim/process identity changed.' }
+    if (-not (Test-RunnerProcessIdentity $State.supervisorPid $State.supervisorStartUtc) -or -not (Test-RunnerProcessIdentity $State.guardianPid $State.guardianStartUtc)) { throw 'Network recovery owner/guardian is dead.' }
+    if ([guid]$Vm.Id -ne [guid]$Binding.vmId -or $Vm.Name -cne $Binding.vmName -or $Vm.Notes -cne $State.tag -or [IO.Path]::GetFullPath($Vm.Path) -ine (Join-Path $State.instancePath $State.vmName)) { throw 'Network recovery VM was replaced.' }
+    if (@($Adapters).Count -ne 1) { throw 'Network recovery requires exactly one owned adapter.' }
+    $adapter = @($Adapters)[0]
+    if ([string]$adapter.Id -cne $Binding.adapterId -or [guid]$adapter.VMId -ne [guid]$Binding.vmId -or $adapter.VMName -cne $Binding.vmName -or
+        $adapter.DynamicMacAddressEnabled -ne $false -or [string]$adapter.MacAddress -ine $Binding.mac -or
+        [guid]$Switch.Id -ne [guid]$Binding.switchId -or $Switch.Name -cne $Binding.switchName -or [string]$Switch.SwitchType -cne 'Internal') { throw 'Network recovery adapter/switch identity changed.' }
+    $disconnected = [string]::IsNullOrEmpty([string]$adapter.SwitchName) -and ([string]::IsNullOrEmpty([string]$adapter.SwitchId) -or [guid]$adapter.SwitchId -eq [guid]::Empty)
+    if ($RequireDisconnected) {
+        if (-not $disconnected -or [string]$Vm.State -cnotin @('Paused', 'Off')) { throw 'Network recovery quarantine readback failed.' }
+    } elseif (-not $disconnected -and ([guid]$adapter.SwitchId -ne [guid]$Binding.switchId -or $adapter.SwitchName -cne $Binding.switchName)) { throw 'Network recovery adapter attached to a different switch.' }
+    return $adapter
+}
+
+function New-RunnerNetworkRecovery($Binding, [string] $Fingerprint, [DateTime] $HardDeadlineUtc, [DateTime] $NowUtc) {
+    if ($Fingerprint -cnotmatch '^[0-9a-f]{64}$' -or $HardDeadlineUtc -le $NowUtc) { throw 'Network recovery baseline/deadline is invalid.' }
+    return [pscustomobject]@{
+        schema = 1; binding = $Binding; generation = 0; phase = 'healthy'; fingerprint = $Fingerprint
+        hardDeadlineUtc = $HardDeadlineUtc.ToUniversalTime().ToString('o'); episodeDeadlineUtc = ''; episodeStartedUtc = ''
+        candidateFingerprint = ''; candidateRules = @(); verifiedRules = @(); stableObservations = 0; lastStableUtc = ''
+        resumeRequired = $false; operation = ''; operationStartedUtc = ''; observationUtc = $NowUtc.ToUniversalTime().ToString('o'); progressUtc = $NowUtc.ToUniversalTime().ToString('o'); failure = ''
+    }
+}
+
+function Get-RunnerRecoveryExpiry($Recovery, [DateTime] $NowUtc) {
+    if ($NowUtc -ge [DateTime]::Parse($Recovery.hardDeadlineUtc).ToUniversalTime()) { return 'hard-deadline' }
+    if ($Recovery.phase -cne 'healthy') {
+        if ($Recovery.episodeDeadlineUtc -and $NowUtc -ge [DateTime]::Parse($Recovery.episodeDeadlineUtc).ToUniversalTime()) { return 'outage-deadline' }
+    }
+    if (($NowUtc - [DateTime]::Parse($Recovery.progressUtc).ToUniversalTime()).TotalSeconds -ge 30) { return 'guardian-progress-expired' }
+    return ''
+}
+
+function Get-RunnerNetworkRecoveryPlan($Recovery, $Observation, [DateTime] $NowUtc, [string] $VmState,
+    $Outcome = $null, [switch] $Stop, [switch] $OwnerDead, [switch] $IdentityChanged) {
+    # Pure reducer: guardian publishes its result under the state lock before an
+    # effect. Outcomes carry generation+operation; old completions never resume.
+    $next = $Recovery | ConvertTo-Json -Depth 24 -Compress | ConvertFrom-Json
+    $action = 'none'
+    $expired = Get-RunnerRecoveryExpiry $next $NowUtc
+    if ($Stop -or $OwnerDead -or $IdentityChanged -or $expired -or $NowUtc -lt [DateTime]::Parse($next.progressUtc).ToUniversalTime()) {
+        $next.generation++; $next.phase = 'failed'; $next.operation = ''
+        $next.failure = if ($Stop) { 'stop' } elseif ($OwnerDead) { 'owner-dead' } elseif ($IdentityChanged) { 'identity-changed' } elseif ($expired) { $expired } else { 'clock-regressed' }
+        return [pscustomobject]@{ recovery = $next; action = 'cleanup' }
+    }
+    if ($next.phase -ceq 'failed') { return [pscustomobject]@{ recovery = $next; action = 'cleanup' } }
+    if ($null -ne $Outcome -and ($Outcome.generation -ne $next.generation -or $Outcome.operation -cne $next.operation)) {
+        $Outcome = $null
+    }
+    $observed = $null -ne $Observation -and $Observation.fingerprint -cmatch '^[0-9a-f]{64}$'
+    $drift = -not $observed -or $Observation.fingerprint -cne $(if ($next.phase -ceq 'healthy') { $next.fingerprint } else { $next.candidateFingerprint })
+    if ($next.operation) {
+        if ($null -eq $Outcome) {
+            if ($next.operation -ceq 'probe' -and $drift) {
+                $next.generation++; $next.phase = 'quarantining'; $next.operation = 'quarantine'; $next.operationStartedUtc = $NowUtc.ToUniversalTime().ToString('o'); $next.progressUtc = $NowUtc.ToUniversalTime().ToString('o')
+                return [pscustomobject]@{ recovery = $next; action = 'quarantine' }
+            }
+            return [pscustomobject]@{ recovery = $next; action = 'none' }
+        }
+        if (-not $Outcome.success -and $next.operation -cne 'probe') {
+            $next.phase = 'failed'; $next.failure = 'operation-uncertain'; $next.generation++; $next.operation = ''
+            return [pscustomobject]@{ recovery = $next; action = 'cleanup' }
+        }
+        $completed = $next.operation; $next.operation = ''; $next.operationStartedUtc = ''
+        if ($completed -ceq 'quarantine') { $next.phase = 'isolated'; $next.candidateFingerprint = ''; $next.candidateRules = @(); $next.stableObservations = 0 }
+        elseif ($completed -ceq 'apply') { $next.phase = 'verified'; $next.stableObservations = 0; $next.lastStableUtc = '' }
+        elseif ($completed -ceq 'connect') {
+            if (-not $drift) {
+                if ($next.resumeRequired) { $next.phase = 'resuming'; $action = 'resume' }
+                else { $next.phase = 'healthy'; $next.fingerprint = $next.candidateFingerprint; $next.episodeDeadlineUtc = ''; $next.episodeStartedUtc = '' }
+            }
+        } elseif ($completed -ceq 'resume') { if (-not $drift) { $next.phase = 'probing'; $action = 'probe' } }
+        elseif ($completed -ceq 'probe' -and $Outcome.success -and -not $drift) {
+            $next.phase = 'healthy'; $next.fingerprint = $next.candidateFingerprint; $next.episodeDeadlineUtc = ''; $next.episodeStartedUtc = ''
+        }
+        if ($completed -cne 'quarantine' -and ($drift -or -not $Outcome.success)) { $action = 'quarantine'; $next.phase = 'quarantining'; $next.generation++ }
+    } elseif ($next.phase -ceq 'healthy') {
+        if ($drift) {
+            if ($VmState -cnotin @('Running', 'Paused', 'Off')) { $next.phase = 'failed'; $next.failure = 'vm-state-uncertain'; return [pscustomobject]@{ recovery = $next; action = 'cleanup' } }
+            $next.episodeStartedUtc = $NowUtc.ToUniversalTime().ToString('o')
+            $deadline = $NowUtc.AddSeconds(120)
+            $hard = [DateTime]::Parse($next.hardDeadlineUtc).ToUniversalTime()
+            if ($deadline -gt $hard) { $deadline = $hard }
+            $next.episodeDeadlineUtc = $deadline.ToUniversalTime().ToString('o')
+            $next.resumeRequired = $VmState -ceq 'Running'; $next.phase = 'quarantining'; $next.generation++; $action = 'quarantine'
+        }
+    } elseif ($next.phase -cin @('isolated', 'verified')) {
+        if (-not $observed) { $next.candidateFingerprint = ''; $next.candidateRules = @(); $next.stableObservations = 0; $next.lastStableUtc = '' }
+        else {
+            if ($next.candidateFingerprint -cne $Observation.fingerprint) {
+                $next.candidateFingerprint = $Observation.fingerprint; $next.candidateRules = @($Observation.rules); $next.stableObservations = 0; $next.lastStableUtc = ''
+                if ($next.phase -ceq 'verified') { $next.phase = 'isolated' }
+            }
+            if (-not $next.lastStableUtc -or ($NowUtc - [DateTime]::Parse($next.lastStableUtc).ToUniversalTime()).TotalSeconds -ge 1) {
+                $next.stableObservations++; $next.lastStableUtc = $NowUtc.ToUniversalTime().ToString('o')
+            }
+            if ($next.stableObservations -ge 3) {
+                if ($next.phase -ceq 'isolated') { $next.phase = 'applying'; $action = 'apply' }
+                else { $next.phase = 'connecting'; $action = 'connect' }
+            }
+        }
+    }
+    if ($action -cne 'none') {
+        $next.operation = $action; $next.operationStartedUtc = $NowUtc.ToUniversalTime().ToString('o')
+        $next.observationUtc = if ($observed -and $Observation.PSObject.Properties.Name -contains 'observedUtc') { $Observation.observedUtc } else { $NowUtc.ToUniversalTime().ToString('o') }
+    }
+    $next.progressUtc = $NowUtc.ToUniversalTime().ToString('o')
+    return [pscustomobject]@{ recovery = $next; action = $action }
+}
+
+function Get-RunnerRecoveryRuleKey($Rule) {
+    $values = foreach ($field in @('Action', 'Direction', 'LocalIPAddress', 'RemoteIPAddress', 'LocalPort', 'RemotePort', 'Protocol', 'Weight', 'Stateful')) {
+        if ($Rule.PSObject.Properties.Name -contains $field) { [string]$Rule.$field } else { '' }
+    }
+    return $values -join '|'
+}
+
+function Assert-RunnerRecoveryRules($Adapter, $Expected) {
+    if (@($Expected).Count -eq 0) { throw 'Recovery has no verified ACL baseline.' }
+    $actual = @(Get-VMNetworkAdapterExtendedAcl -VMNetworkAdapter $Adapter -ErrorAction Stop)
+    $left = @($Expected | ForEach-Object { Get-RunnerRecoveryRuleKey $_ } | Sort-Object)
+    $right = @($actual | ForEach-Object { Get-RunnerRecoveryRuleKey $_ } | Sort-Object)
+    if ($left.Count -ne $right.Count -or (Compare-Object $left $right)) { throw 'Recovery ACL exact readback failed.' }
+}
+
+function Install-RunnerRecoveryRules($Adapter, $Rules) {
+    # Caller has already proven the exact VM paused/off and its vNIC disconnected
+    # (or the initial never-booted Off lifecycle). Never called on a live vNIC.
+    if (@($Rules).Count -eq 0) { throw 'Recovery cannot install an empty policy.' }
+    Remove-VMNetworkAdapterExtendedAcl -VMNetworkAdapter $Adapter -ErrorAction Stop
+    $installed = @()
+    foreach ($rule in @($Rules)) {
+        $arguments = @{ VMNetworkAdapter = $Adapter; ErrorAction = 'Stop' }
+        foreach ($field in $rule.PSObject.Properties) { $arguments[$field.Name] = $field.Value }
+        $returned = @(Add-VMNetworkAdapterExtendedAcl @arguments -Passthru)
+        if ($returned.Count -ne 1) { throw 'Recovery ACL installation returned an ambiguous rule.' }
+        foreach ($field in $rule.PSObject.Properties) {
+            if ([string]$returned[0].($field.Name) -ine [string]$field.Value) { throw 'Recovery ACL installation changed the requested policy.' }
+        }
+        $canonical = [ordered]@{}
+        foreach ($field in @('Action', 'Direction', 'LocalIPAddress', 'RemoteIPAddress', 'LocalPort', 'RemotePort', 'Protocol', 'Weight', 'Stateful')) { $canonical[$field] = [string]$returned[0].$field }
+        $installed += [pscustomobject]$canonical
+    }
+    Assert-RunnerRecoveryRules $Adapter $installed
+    return $installed
+}
+
+function Assert-RunnerRecoveryDispatch($State, $Recovery, $Vm, $Adapter) {
+    # Called AFTER slow provider identity/ACL reads, immediately before the
+    # reconnect/resume command. A stale observation never grants live access.
+    $now = Get-RunnerRecoveryNow
+    if ((Get-RunnerRecoveryExpiry $Recovery $now) -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Recovery deadline reached before dispatch.' }
+    $age = ($now - [DateTime]::Parse($Recovery.observationUtc).ToUniversalTime()).TotalSeconds
+    if ($age -lt 0 -or $age -gt 2) {
+        if ([string]$Vm.State -cnotin @('Paused', 'Off')) { throw 'Stale recovery observation has uncertain VM state.' }
+        Disconnect-VMNetworkAdapter -VMNetworkAdapter $Adapter -ErrorAction Stop
+        $readback = Get-VM -Id ([guid]$Recovery.binding.vmId) -ErrorAction Stop
+        $switch = Get-VMSwitch -Id ([guid]$Recovery.binding.switchId) -ErrorAction Stop
+        [void](Assert-RunnerNetworkBinding $State $Recovery.binding $readback @(Get-VMNetworkAdapter -VM $readback -ErrorAction Stop) $switch -RequireDisconnected)
+        throw 'Recovery observation stale; isolated reinspection required.'
+    }
+    $current = Get-RunnerState
+    if (-not (Test-RunnerRecoveryGeneration $current $Recovery.binding $Recovery.generation $Recovery.operation) -or
+        (Test-RunnerSessionStopRequested $State)) { throw 'Recovery dispatch cancelled.' }
+}
+
+function Invoke-RunnerRecoveryAdapterEffect($State, $Recovery, [ValidateSet('quarantine', 'apply', 'connect', 'resume')][string] $Action) {
+    # Caller MUST hold the checked session mutex. No sleeps/network probes here.
+    # These provider calls are synchronous, not bounded cancellation promises.
+    $binding = $Recovery.binding
+    $current = Get-RunnerState
+    if (-not (Test-RunnerRecoveryGeneration $current $binding $Recovery.generation $Action) -or $current.guardianPid -ne $PID -or
+        (Test-RunnerSessionStopRequested $State)) { throw 'Recovery generation cancelled before provider mutation.' }
+    $vm = Get-VM -Id ([guid]$binding.vmId) -ErrorAction Stop
+    $switch = Get-VMSwitch -Id ([guid]$binding.switchId) -ErrorAction Stop
+    $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+    $adapter = Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch
+    if ($Action -ceq 'quarantine') {
+        if ([string]$vm.State -ceq 'Running') {
+            Suspend-VM -VM $vm -ErrorAction Stop
+            $vm = Get-VM -Id ([guid]$binding.vmId) -ErrorAction Stop
+            if ([string]$vm.State -cne 'Paused') { throw 'Recovery pause was not verified.' }
+        } elseif ([string]$vm.State -cnotin @('Off', 'Paused')) { throw 'Recovery cannot quarantine an uncertain VM state.' }
+        Disconnect-VMNetworkAdapter -VMNetworkAdapter $adapter -ErrorAction Stop
+    } elseif ($Action -ceq 'apply') {
+        [void](Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch -RequireDisconnected)
+        $installed = @(Install-RunnerRecoveryRules $adapter $Recovery.candidateRules)
+    } elseif ($Action -ceq 'connect') {
+        [void](Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch -RequireDisconnected)
+        Assert-RunnerRecoveryRules $adapter $Recovery.verifiedRules
+        Assert-RunnerRecoveryDispatch $State $Recovery $vm $adapter
+        Connect-VMNetworkAdapter -VMNetworkAdapter $adapter -SwitchName $binding.switchName -ErrorAction Stop
+    } else {
+        if (-not $Recovery.resumeRequired -or [string]$vm.State -cne 'Paused' -or [guid]$adapter.SwitchId -ne [guid]$binding.switchId) { throw 'Recovery resume requires its own paused, connected VM.' }
+        Assert-RunnerRecoveryRules $adapter $Recovery.verifiedRules
+        Assert-RunnerRecoveryDispatch $State $Recovery $vm $adapter
+        Resume-VM -VM $vm -ErrorAction Stop
+    }
+    $vm = Get-VM -Id ([guid]$binding.vmId) -ErrorAction Stop
+    $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+    $adapter = Assert-RunnerNetworkBinding $State $binding $vm $adapters $switch -RequireDisconnected:($Action -cin @('quarantine', 'apply'))
+    if ($Action -ceq 'connect' -and ([guid]$adapter.SwitchId -ne [guid]$binding.switchId -or [string]$vm.State -cnotin @('Paused', 'Off'))) { throw 'Recovery connect readback failed.' }
+    if ($Action -ceq 'resume' -and [string]$vm.State -cne 'Running') { throw 'Recovery resume readback failed.' }
+    if ($Action -ceq 'apply') { return $installed }
+}
+
+function New-RunnerProbeProcess([string] $Executable, [string] $Arguments) {
+    return [ITIR.ProbeJob]::new($Executable, $Arguments)
+}
+
+function Start-RunnerRecoveryProbe($State, $Config, [long] $Generation) {
+    if ($Config.guestIp -cne '172.30.240.2' -or $Config.gatewayIp -cne '172.30.240.1') { throw 'Recovery probe network identity differs.' }
+    $current = Get-RunnerState
+    if (-not (Test-RunnerRecoveryGeneration $current $State.networkRecovery.binding $Generation 'probe') -or
+        (Get-RunnerRecoveryExpiry $current.networkRecovery (Get-RunnerRecoveryNow)) -or
+        (Test-RunnerSessionStopRequested $State)) { throw 'Recovery probe admission was cancelled.' }
+    $probeId = [guid]::NewGuid().ToString('N')
+    $resultPath = Assert-OwnedPath (Join-Path $State.instancePath ("probe-$probeId.json"))
+    $executable = Join-Path $PSHOME 'powershell.exe'
+    $arguments = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'Network.Recovery.Probe.ps1'),
+        '-InstancePath', $State.instancePath, '-ProbeId', $probeId, '-Generation', [string]$Generation)
+    # Fixed worker is assigned while suspended before it can spawn SSH. The sole
+    # noninherited guardian Job handle owns its complete native descendant tree.
+    $job = New-RunnerProbeProcess $executable (($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
+    return [pscustomobject]@{ job = $job; probeId = $probeId; resultPath = $resultPath; generation = $Generation; operation = 'probe'; startedUtc = (Get-RunnerRecoveryNow).ToString('o'); binding = $State.networkRecovery.binding }
+}
+
+function Stop-RunnerRecoveryProbe {
+    if ($null -eq $script:RunnerRecoveryProbe) { return }
+    $probe = $script:RunnerRecoveryProbe
+    try { $probe.job.CancelAndDrain() } finally { $script:RunnerRecoveryProbe = $null }
+    if (Test-Path -LiteralPath $probe.resultPath) {
+        Assert-RunnerProtectedPath $probe.resultPath
+        Remove-Item -LiteralPath $probe.resultPath -Force -ErrorAction Stop
+    }
+}
+
+function Get-RunnerRecoveryProbeOutcome {
+    if ($null -eq $script:RunnerRecoveryProbe) { return $null }
+    $probe = $script:RunnerRecoveryProbe
+    $current = Get-RunnerState
+    if (-not (Test-RunnerRecoveryGeneration $current $probe.binding $probe.generation 'probe')) { Stop-RunnerRecoveryProbe; return $null }
+    $expired = ((Get-RunnerRecoveryNow) - [DateTime]::Parse($probe.startedUtc).ToUniversalTime()).TotalSeconds -ge 25
+    if (-not $expired -and -not $probe.job.Completed) { return $null }
+    $success = $false
+    if (-not $expired -and $probe.job.ExitCode -eq 0 -and (Test-Path -LiteralPath $probe.resultPath -PathType Leaf)) {
+        try {
+            Assert-RunnerProtectedPath $probe.resultPath
+            if ((Get-Item -LiteralPath $probe.resultPath).Length -gt 256) { throw 'Probe result exceeded protocol bound.' }
+            $received = Read-RunnerJson $probe.resultPath
+            $success = $received.generation -eq $probe.generation -and $received.probeId -ceq $probe.probeId -and $received.success -is [bool] -and $received.success -eq $true
+        } catch { $success = $false }
+    }
+    $outcome = [pscustomobject]@{ generation = $probe.generation; operation = 'probe'; success = $success }
+    Stop-RunnerRecoveryProbe
+    return $outcome
+}
+
+
+function Invoke-RunnerRecoveryReconnect($Binding, [long] $Generation, [ValidateSet('connect', 'resume')][string] $Action) {
+    # The tick completed identity/ACL preflight before releasing its mutex.
+    # Capture again now, then reacquire/fence before synchronous dispatch. No
+    # provider mutation is pending/running while the mutex is released.
+    $observation = $null
+    try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
+    $mutex = Enter-RunnerLock
+    try {
+        $state = Get-RunnerState
+        if ($null -eq $state) { return [pscustomobject]@{ continue = $false; outcome = $null } }
+        if (-not (Test-RunnerRecoveryGeneration $state $Binding $Generation $Action)) { return [pscustomobject]@{ continue = $true; outcome = $null } }
+        $r = $state.networkRecovery
+        if (Get-RunnerRecoveryExpiry $r (Get-RunnerRecoveryNow)) {
+            $r.phase = 'failed'; $r.generation++; $r.failure = 'dispatch-deadline'; Write-RunnerJson $script:RunnerStatePath $state
+            Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null }
+        }
+        $effect = $Action
+        if ($null -eq $observation -or $observation.fingerprint -cne $r.candidateFingerprint) {
+            $r.generation++; $r.phase = 'quarantining'; $r.operation = 'quarantine'; $r.progressUtc = (Get-RunnerRecoveryNow).ToString('o'); $r.operationStartedUtc = $r.progressUtc
+            $effect = 'quarantine'
+        } else { $r.observationUtc = $observation.observedUtc }
+        Write-RunnerJson $script:RunnerStatePath $state
+        try {
+            [void](Invoke-RunnerRecoveryAdapterEffect $state $r $effect)
+            return [pscustomobject]@{ continue = $true; outcome = [pscustomobject]@{ generation = $r.generation; operation = $effect; success = $true } }
+        } catch {
+            if ($_.Exception.Message -ceq 'Recovery observation stale; isolated reinspection required.') {
+                $r.generation++; $r.phase = 'isolated'; $r.operation = ''; $r.stableObservations = 0; $r.lastStableUtc = ''; $r.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
+                Write-RunnerJson $script:RunnerStatePath $state
+                return [pscustomobject]@{ continue = $true; outcome = $null }
+            }
+            $r.phase = 'failed'; $r.generation++; $r.failure = 'provider-uncertain'; Write-RunnerJson $script:RunnerStatePath $state
+            Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null }
+        }
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Test-RunnerRecoveryGeneration($State, $Binding, [long] $Generation, [string] $Operation) {
+    return $null -ne $State -and $State.PSObject.Properties.Name -contains 'networkRecovery' -and
+        (Get-RunnerRecoveryClaimHash $State) -ceq $Binding.claimHash -and
+        $State.networkRecovery.generation -eq $Generation -and $State.networkRecovery.operation -ceq $Operation -and
+        $State.networkRecovery.phase -cne 'failed'
+}
+
+function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outcome = $null) {
+    # Only the exact guardian invokes this function. Observation/probe IO occurs
+    # outside the mutex; provider mutations retain the existing serialization.
+    $probeOutcome = Get-RunnerRecoveryProbeOutcome
+    if ($null -ne $probeOutcome) { $Outcome = $probeOutcome }
+    $observation = $null
+    try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
+    $observedUtc = if ($null -ne $observation) { [DateTime]::Parse($observation.observedUtc).ToUniversalTime() } else { Get-RunnerRecoveryNow }
+    $probe = $false; $probeState = $null; $result = $null; $reconnect = $null
+    $mutex = Enter-RunnerLock
+    try {
+        $state = Get-RunnerState
+        if ($null -eq $state -or $state.vmName -cne $SessionName) { return [pscustomobject]@{ continue = $false; outcome = $null } }
+        Assert-StateIdentity $state
+        if ($state.guardianPid -ne $PID -or -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)) { throw 'Recovery tick belongs to a different guardian.' }
+        if ($state.PSObject.Properties.Name -notcontains 'networkRecovery') { throw 'Recovery tick requires its initialized protected journal.' }
+        $recovery = $state.networkRecovery
+        $now = Get-RunnerRecoveryNow
+        # Do not authorize a connection from an observation that waited for a lock.
+        if (($now - $observedUtc).TotalSeconds -gt 2 -or ($now - $observedUtc).TotalSeconds -lt 0) { $observation = $null }
+        $vm = Get-VM -Id ([guid]$recovery.binding.vmId) -ErrorAction Stop
+        $switch = Get-VMSwitch -Id ([guid]$recovery.binding.switchId) -ErrorAction Stop
+        $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+        $identityChanged = $false
+        try { [void](Assert-RunnerNetworkBinding $state $recovery.binding $vm $adapters $switch) } catch { $identityChanged = $true }
+        $stop = Test-RunnerSessionStopRequested $state
+        $ownerDead = -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)
+        $plan = Get-RunnerNetworkRecoveryPlan $recovery $observation $now ([string]$vm.State) $Outcome -Stop:$stop -OwnerDead:$ownerDead -IdentityChanged:$identityChanged
+        $state.networkRecovery = $plan.recovery
+        if ($plan.recovery.phase -ceq 'healthy') { $state.networkFingerprint = $plan.recovery.fingerprint }
+        Write-RunnerJson $script:RunnerStatePath $state
+        if ($plan.action -ceq 'cleanup') { Remove-RunnerInstance $state; return [pscustomobject]@{ continue = $false; outcome = $null } }
+        if ($plan.action -ceq 'probe') { $probe = $true; $probeState = $state }
+        elseif ($plan.action -cin @('connect', 'resume')) {
+            # No dispatch here: slow ACL preflight is followed by a new coherent
+            # observation outside the lock, then final serialized admission.
+            $preflightAdapter = @($adapters)[0]
+            Assert-RunnerRecoveryRules $preflightAdapter $plan.recovery.verifiedRules
+            $reconnect = $plan
+        }
+        elseif ($plan.action -cne 'none') {
+            try {
+                $installed = @(Invoke-RunnerRecoveryAdapterEffect $state $plan.recovery $plan.action)
+                if ($plan.action -ceq 'apply') { $state.networkRecovery.verifiedRules = $installed; Write-RunnerJson $script:RunnerStatePath $state }
+                $result = [pscustomobject]@{ generation = $plan.recovery.generation; operation = $plan.action; success = $true }
+            } catch {
+                if ($_.Exception.Message -ceq 'Recovery observation stale; isolated reinspection required.') {
+                    $state.networkRecovery.generation++; $state.networkRecovery.phase = 'isolated'; $state.networkRecovery.operation = ''; $state.networkRecovery.stableObservations = 0; $state.networkRecovery.lastStableUtc = ''; $state.networkRecovery.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
+                    Write-RunnerJson $script:RunnerStatePath $state
+                    return [pscustomobject]@{ continue = $true; outcome = $null }
+                }
+                # No provider cancellation/retry claim. Canonical cleanup can
+                # itself refuse; retain protected state/files in that case.
+                $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'provider-uncertain'; $state.networkRecovery.generation++
+                Write-RunnerJson $script:RunnerStatePath $state
+                Remove-RunnerInstance $state
+                return [pscustomobject]@{ continue = $false; outcome = $null }
+            }
+        }
+    } finally { Exit-RunnerLock $mutex }
+    if ($null -ne $script:RunnerRecoveryProbe -and -not (Test-RunnerRecoveryGeneration (Get-RunnerState) $script:RunnerRecoveryProbe.binding $script:RunnerRecoveryProbe.generation 'probe')) { Stop-RunnerRecoveryProbe }
+    if ($null -ne $reconnect) { return Invoke-RunnerRecoveryReconnect $reconnect.recovery.binding $reconnect.recovery.generation $reconnect.action }
+    if ($probe) {
+        if ($null -ne $script:RunnerRecoveryProbe) { throw 'Recovery already owns a probe.' }
+        $script:RunnerRecoveryProbe = Start-RunnerRecoveryProbe $probeState $Config $probeState.networkRecovery.generation
+        # No wait: this same guardian continues observation/quarantine each tick.
+    }
+    return [pscustomobject]@{ continue = $true; outcome = $result }
+}
+
+function Get-RunnerLaunchDecision($Journal, [ValidateSet('intent', 'registered', 'dispatch', 'transport-lost', 'receipt', 'runner-exited')][string] $Event,
+    [long] $RunnerId = 0, [string] $LaunchId = '', [ValidateRange(0, 255)][int] $ExitCode = 0) {
+    # Guest receipt/SSH success is liveness only. No event authorizes a new JIT,
+    # duplicate launch or workflow replay after registration/dispatch ambiguity.
+    if ($null -eq $Journal) {
+        if ($Event -cne 'intent' -or $LaunchId -cnotmatch '^[0-9a-f]{32}$') { throw 'Launch requires one fresh protected intent.' }
+        return [pscustomobject]@{ phase = 'registration-intent'; launchId = $LaunchId; runnerId = 0; action = 'register-once' }
+    }
+    $next = $Journal | ConvertTo-Json -Compress | ConvertFrom-Json
+    $next.action = 'monitor'
+    if ($Event -ceq 'registered') {
+        if ($next.phase -cne 'registration-intent' -or $RunnerId -le 0) { throw 'Registration outcome cannot replace a runner identity.' }
+        $next.runnerId = $RunnerId; $next.phase = 'registered'
+    } elseif ($Event -ceq 'dispatch') {
+        if ($next.phase -cne 'registered') { throw 'Runner launch cannot be dispatched twice.' }
+        $next.phase = 'launch-intent'; $next.action = 'launch-once'
+    } elseif ($Event -ceq 'transport-lost') {
+        if ($next.phase -ceq 'registration-intent') { $next.phase = 'registration-uncertain'; $next.action = 'cleanup' }
+        elseif ($next.phase -cin @('launch-intent', 'running', 'transport-uncertain')) { $next.phase = 'transport-uncertain' }
+    } elseif ($Event -ceq 'receipt') {
+        if ($LaunchId -cne $next.launchId -or $RunnerId -ne $next.runnerId -or $next.phase -cnotin @('launch-intent', 'running', 'transport-uncertain')) { throw 'Guest liveness receipt does not match the sole launch.' }
+        $next.phase = 'running'
+    } elseif ($Event -ceq 'runner-exited') {
+        if ($RunnerId -ne $next.runnerId -or $LaunchId -cne $next.launchId -or $next.runnerId -le 0 -or $next.phase -cnotin @('launch-intent', 'running', 'transport-uncertain')) { throw 'Guest exit receipt does not match the sole launch.' }
+        $next.phase = if ($ExitCode -eq 0) { 'runner-exited' } else { 'runner-failed' }; $next.action = 'cleanup'
+    } else { throw 'Existing runner intent cannot be recreated.' }
+    return $next
+}

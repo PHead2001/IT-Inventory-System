@@ -35,7 +35,7 @@ function Invoke-RunnerSession {
     if ($ProfileLabel -cne 'it-inventory-heavy' -or $null -ne $PilotAttempt -or (Get-RunnerSessionProfile $Config $ProfileLabel).memoryBytes -ne 6GB) { throw 'Heavy selection lost its fixed candidate allocation.' }
     $script:sessions++
     [IO.File]::WriteAllText((Join-Path $base 'stop.requested'),'stop')
-    return [pscustomobject]@{name='fixture';id=1;outcome='job-completed'}
+    return [pscustomobject]@{name='fixture';id=1;outcome='runner-exited'}
 }
 function Write-Host { param($Object) $script:messages.Add([string]$Object) }
 function Write-EventLog { throw 'Capacity waiting fabricated a failure.' }

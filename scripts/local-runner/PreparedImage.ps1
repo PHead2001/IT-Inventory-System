@@ -333,7 +333,7 @@ function Publish-RunnerPreparedImage($Candidate, $Config, $Verification) {
     Assert-RunnerControlIdle
     $receipt = Assert-RunnerImageCandidate $Candidate $Config
     Assert-RunnerImageCloneProof $receipt $Verification
-    if ((Get-HostNetworkFingerprint) -cne $Verification.networkFingerprint) { throw 'Host network changed after clone verification; publication refused.' }
+    if ((Get-RunnerNetworkObservation).fingerprint -cne $Verification.networkFingerprint) { throw 'Host network changed after clone verification; publication refused.' }
     $receipt | Add-Member -NotePropertyName cloneVerification -NotePropertyValue $Verification -Force
     Write-RunnerJson $Candidate.receiptPath $receipt
     Invoke-RunnerTransitionCheckpoint 'image-verified-receipt'
@@ -381,4 +381,49 @@ function Remove-RunnerOldImages($Selector) {
         if (Test-Path -LiteralPath $disk) { Assert-RunnerImageDiskUnreferenced $disk }
         Remove-Item -LiteralPath $entry.FullName -Force -ErrorAction Stop
     }
+}
+
+function Get-RunnerDetachedCommand([bool] $Prepared, [string] $LaunchId, [long] $RunnerId) {
+    if ($LaunchId -cnotmatch '^[0-9a-f]{32}$' -or $RunnerId -le 0) { throw 'Detached runner requires its one recorded launch identity.' }
+    $directory = "/home/runner/.itir-session/$LaunchId"
+    $job = Get-RunnerJobCommand $Prepared
+    # Same fixed run.sh and prepared environment. The private JIT file exists
+    # only until the service reads it; no JIT enters receipt/stdout/journal.
+    $wrapper = @'
+#!/bin/bash
+set -u
+umask 077
+cd __DIRECTORY__ || exit 125
+trap 'code=$?; unset JIT; printf "__LAUNCH__|__RUNNER__|exited|%s\n" "$code" >receipt.tmp && mv receipt.tmp receipt' EXIT
+printf '__LAUNCH__|__RUNNER__|running|-\n' >receipt.tmp && mv receipt.tmp receipt
+IFS= read -r JIT <jit || exit 125
+rm -f jit
+printf '%s\n' "$JIT" | bash -c '__JOB__'
+code=$?
+unset JIT
+exit "$code"
+'@
+    $wrapper = $wrapper.Replace('__DIRECTORY__', $directory).Replace('__LAUNCH__', $LaunchId).Replace('__RUNNER__', [string]$RunnerId).Replace('__JOB__', $job)
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wrapper.Replace("`r`n", "`n") + "`n"))
+    # mkdir is the deliberate no-relaunch guard. Never retry this command after
+    # any transport ambiguity; reconnect only to the separate receipt command.
+    return 'set -eu; umask 077; IFS= read -r JIT; mkdir -p /home/runner/.itir-session; chmod 700 /home/runner/.itir-session; mkdir ' + $directory +
+        '; printf ''%s\n'' "$JIT" >' + $directory + '/jit; unset JIT; printf ''%s'' ' + $encoded + ' | base64 -d >' + $directory +
+        '/run; chmod 700 ' + $directory + '/run; sudo -n systemd-run --quiet --unit=itir-' + $LaunchId +
+        ' --uid=runner --setenv=HOME=/home/runner --working-directory=/home/runner/actions-runner --property=Type=exec --property=Restart=no --property=KillMode=control-group --property=StandardOutput=null --property=StandardError=null /bin/bash ' + $directory + '/run'
+}
+
+function Get-RunnerReceiptCommand([string] $LaunchId) {
+    if ($LaunchId -cnotmatch '^[0-9a-f]{32}$') { throw 'Receipt query requires the sole launch identity.' }
+    return 'test -f /home/runner/.itir-session/' + $LaunchId + '/receipt && head -c 256 /home/runner/.itir-session/' + $LaunchId + '/receipt'
+}
+
+function ConvertFrom-RunnerGuestReceipt([string] $Text, $Journal) {
+    if ($Text -cmatch '^([0-9a-f]{32})\|([1-9][0-9]*)\|(running|exited)\|(-|[0-9]{1,3})\r?\n?$') {
+        $launch = $Matches[1]; $runner = $Matches[2]; $phase = $Matches[3]; $code = $Matches[4]
+        if ($launch -cne $Journal.launchId -or $runner -cne [string]$Journal.runnerId -or
+            ($phase -ceq 'running' -and $code -cne '-') -or ($phase -ceq 'exited' -and ($code -ceq '-' -or [int]$code -gt 255))) { throw 'Guest receipt does not match the sole runner launch.' }
+        return [pscustomobject]@{ phase = $phase; exitCode = if ($phase -ceq 'exited') { [int]$code } else { $null } }
+    }
+    throw 'Guest receipt is malformed; workflow results remain GitHub authoritative.'
 }

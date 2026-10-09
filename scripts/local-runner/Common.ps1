@@ -20,7 +20,7 @@ function Initialize-RunnerDpapi {
     Add-Type -AssemblyName System.Security -ErrorAction Stop
 }
 
-function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
+function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETWORK_CHANGED', 'NETWORK_INSPECTION_FAILED', 'RECOVERY_FAILED', 'OWNER_EXITED', 'DEADLINE_REACHED')][string] $Code, [string] $SessionName = '') {
     Write-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json') ([ordered]@{
         atUtc = [DateTime]::UtcNow.ToString('o'); stage = $Stage; code = $Code; sessionName = $SessionName
     })
@@ -546,6 +546,23 @@ function Assert-SecureRoot {
 
 function Get-RunnerState { return Read-RunnerJson $script:RunnerStatePath }
 
+function Test-RunnerSessionStopRequested($State) {
+    # An instance marker always cancels. The root marker also suspends pickup
+    # during explicit owner image preparation; never infer that exemption from
+    # a stale caller snapshot or a process-local preparation flag.
+    if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) { return $true }
+    if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { return $false }
+    Assert-RunnerProtectedPath $script:RunnerStatePath
+    $current = Get-RunnerState
+    if ($null -eq $current) { return $true }
+    Assert-StateIdentity $current
+    if ($current.vmName -cne $State.vmName -or $current.instancePath -ine $State.instancePath -or
+        ($State.PSObject.Properties.Name -contains 'vmId' -and
+            ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { return $true }
+    if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) { return $true }
+    return (Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested'))
+}
+
 function Get-RunnerBytesHash([byte[]] $Bytes) {
     $hash = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($hash.ComputeHash($Bytes))).Replace('-', '') }
@@ -793,3 +810,42 @@ function Remove-RunnerInstance($State) {
 }
 
 . (Join-Path $PSScriptRoot 'PreparedImage.ps1')
+
+function Invoke-RunnerReceiptNative([string] $Executable, [string[]] $Arguments, [ValidateRange(1, 30)][int] $TimeoutSeconds = 12) {
+    # Only a fixed non-secret guest receipt is captured. Limit memory before
+    # appending, discard stderr, and bound the SSH process independently.
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true; $start.RedirectStandardInput = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $process = [Diagnostics.Process]::Start($start)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $process.StandardInput.Close()
+        $discard = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $buffer = New-Object char[] 512
+        $output = [Text.StringBuilder]::new()
+        while ($true) {
+            $read = $process.StandardOutput.ReadAsync($buffer, 0, $buffer.Length)
+            while (-not $read.IsCompleted) {
+                if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
+                [void]$read.Wait(100)
+            }
+            $length = $read.GetAwaiter().GetResult()
+            if ($length -eq 0) { break }
+            if ($output.Length + $length -gt 4096) { throw 'Guest receipt exceeded its bounded protocol.' }
+            [void]$output.Append($buffer, 0, $length)
+            if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Receipt transport timed out.' }
+        }
+        $remaining = [Math]::Max(1, [int](($TimeoutSeconds - $clock.Elapsed.TotalSeconds) * 1000))
+        if (-not $process.WaitForExit($remaining)) { throw 'Receipt transport timed out.' }
+        [void]$discard.GetAwaiter().GetResult()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output.ToString() }
+    } finally {
+        # This kills only the host SSH monitor, never the detached guest service.
+        if (-not $process.HasExited) { $process.Kill() }
+        $process.Dispose()
+    }
+}

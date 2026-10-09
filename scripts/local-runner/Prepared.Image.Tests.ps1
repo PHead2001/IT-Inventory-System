@@ -3,6 +3,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 foreach ($file in @('Runner.ps1', 'Update.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
@@ -48,12 +49,13 @@ function Invoke-RunnerTransitionCheckpoint([string] $Name) {
     }
 }
 function Assert-RunnerControlIdle {}
-function Get-HostNetworkFingerprint { return 'fixture' }
+$script:observationFingerprint = 'a' * 64
+function Get-RunnerNetworkObservation { return [pscustomobject]@{ fingerprint = $script:observationFingerprint; rules = @(); observedUtc = [DateTime]::UtcNow.ToString('o') } }
 function New-FixtureVerification($Candidate) {
     $receipt = Read-RunnerJson $Candidate.receiptPath
     return [pscustomobject]@{ schema = 1; candidateId = $Candidate.id; diskHash = $receipt.diskHash; bindingHash = $receipt.bindingHash; recipeId = $receipt.recipeId; bundleHash = $receipt.bundleHash
         purpose = 'verify-image'; cleanupVerified = $true; vmName = ('ITIR-' + [guid]::NewGuid().ToString('N')); vmId = [guid]::NewGuid().ToString(); guestMac = '02FFFFFFFFFF'
-        sshPublicKeyHash = ('9' * 64); networkFingerprint = 'fixture'; readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
+        sshPublicKeyHash = ('9' * 64); networkFingerprint = ('a' * 64); readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = 1 }
 }
 function Publish-FixtureImage($State, $Config, $Binding, $Guest) {
     $candidate = $null
@@ -136,6 +138,9 @@ try {
     $state.phase = 'owned'; Write-RunnerJson $script:RunnerStatePath $state
     Assert-Rejected { Publish-FixtureImage $state $config $script:binding $script:guest } 'no committed off/scrub proof'
     $state.phase = 'sealed-off'; Write-RunnerJson $script:RunnerStatePath $state
+    $script:observationFingerprint = 'b' * 64
+    Assert-Rejected { Publish-FixtureImage $state $config $script:binding $script:guest } 'network change after clone verification'
+    $script:observationFingerprint = 'a' * 64
     Publish-FixtureImage $state $config $script:binding $script:guest
     $initial = Get-RunnerImageRecord
     if ((Get-RunnerImageSelection $config).prepared -ne $true) { throw 'Matching sealed image was not selected.' }
@@ -256,7 +261,7 @@ try {
     function Get-VMIntegrationService { return @() }
     $script:macSequence = 1
     function Set-RunnerGuestMac { $script:macSequence++; return [pscustomobject]@{ rawMac = ('02' + $script:macSequence.ToString('X10')); seedMac = '02:00:00:00:00:01' } }
-    function Get-HostNetworkFingerprint { return 'fixture' }
+    function Assert-CurrentRunnerNetworkRules {}
     function Set-IsolatedAdapter { $script:isolation++; return @() }
     function Start-SessionGuardian {
         $script:guardians++
@@ -264,6 +269,7 @@ try {
         $fresh | Add-Member -NotePropertyName guardianReady -NotePropertyValue $true -Force
         $fresh | Add-Member -NotePropertyName guardianPid -NotePropertyValue $PID -Force
         $fresh | Add-Member -NotePropertyName guardianStartUtc -NotePropertyValue ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')) -Force
+        $fresh | Add-Member -NotePropertyName networkRecovery -NotePropertyValue ([pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = $fresh.deadlineUtc; episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') }) -Force
         Write-RunnerJson $script:RunnerStatePath $fresh
     }
     function Start-GuardedVm($State) { (Get-VM $State.vmName).State = 'Running' }

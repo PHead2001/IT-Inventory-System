@@ -9,8 +9,10 @@ param(
 
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Guest.Network.ps1')
+. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
 . (Join-Path $PSScriptRoot 'Update.ps1') # Definitions only; dot sourcing never installs a bundle.
 . (Join-Path $PSScriptRoot 'PreparedImage.ps1')
+$script:RunnerGuardOutcome = $null
 
 function Invoke-GitHub([string] $Uri, [string] $Method = 'GET', $Body = $null, [string] $Token = '') {
     $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2026-03-10'; 'User-Agent' = 'ITInventoryLocalRunner' }
@@ -133,66 +135,16 @@ ethernets:
     }
 }
 
-function Set-IsolatedAdapter([string] $VmName) {
-    # Collect and bound the entire deny policy before modifying the switch.
-    $privatePrefixes = @('0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4')
-    $hostIps = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Select-Object -ExpandProperty IPAddress |
-        Sort-Object -Unique)
-    # Corporate/VPN destinations can have public prefixes behind a gateway.
-    # Deny every non-default route, including split-default VPN /1 prefixes.
-    $routePrefixes = @(Get-NetRoute -AddressFamily IPv4 -ErrorAction Stop | Select-Object -ExpandProperty DestinationPrefix |
-        Where-Object { $_ -ne '0.0.0.0/0' } | Sort-Object -Unique)
-    foreach ($ip in $hostIps) {
-        $parsed = $null
-        if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$' -or -not [Net.IPAddress]::TryParse($ip, [ref]$parsed) -or
-            $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-            throw 'Host IPv4 address inspection returned an invalid address; ACL installation refused.'
-        }
-    }
-    foreach ($prefix in $routePrefixes) {
-        $parsed = $null
-        if ($prefix -notmatch '^(\d{1,3}(\.\d{1,3}){3})/(\d{1,2})$' -or [int]$Matches[3] -gt 32 -or
-            -not [Net.IPAddress]::TryParse($Matches[1], [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-            throw 'Host IPv4 route inspection returned an invalid prefix; ACL installation refused.'
-        }
-    }
-    if (($privatePrefixes.Count + $routePrefixes.Count + $hostIps.Count + 1) -gt 4096) {
-        throw 'Host network deny policy exceeds the 4096-rule capacity; ACL installation refused.'
-    }
-    # Higher weights win. Each weight is distinct, including across directions.
-    # Preserve private < route < host < IPv6 priority without fixed-size tier overlap.
-    $installed = @()
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Inbound -Weight 1 -Passthru
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -Weight 2 -Passthru
-    $denyWeight = 200
-    foreach ($prefix in $privatePrefixes) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $prefix -Weight $denyWeight -Passthru
-        $denyWeight++
-    }
-    foreach ($prefix in $routePrefixes) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress $prefix -Weight $denyWeight -Passthru
-        $denyWeight++
-    }
-    foreach ($ip in $hostIps) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress "$ip/32" -Weight $denyWeight -Passthru
-        $denyWeight++
-    }
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Deny -Direction Outbound -RemoteIPAddress '::/0' -Weight $denyWeight -Passthru
-    $allowWeight = 100
-    foreach ($port in @(80, 443, 5432)) {
-        $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -Protocol TCP -RemotePort $port -Weight $allowWeight -Stateful $true -Passthru
-        $allowWeight++
-    }
-    $dnsWeight = 110
-    foreach ($dns in @('1.1.1.1', '8.8.8.8')) {
-        foreach ($protocol in @('UDP', 'TCP')) {
-            $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Outbound -RemoteIPAddress $dns -RemotePort 53 -Protocol $protocol -Weight $dnsWeight -Stateful $true -Passthru
-            $dnsWeight++
-        }
-    }
-    $installed += Add-VMNetworkAdapterExtendedAcl -VMName $VmName -Action Allow -Direction Inbound -RemoteIPAddress '172.30.240.1' -LocalPort 22 -Protocol TCP -Weight 150 -Stateful $true -Passthru
-    Assert-AdapterRules $VmName $installed
-    return ,$installed
+function Set-IsolatedAdapter($State, $Observation) {
+    # Initial configuration only, while the owned VM is Off. Recovery uses the
+    # guardian's isolated exact-adapter path instead of this startup function.
+    Assert-StateIdentity $State
+    $vm = Get-VM -Id ([guid]$State.vmId) -ErrorAction Stop
+    $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+    if ($adapters.Count -ne 1 -or $vm.State -cne 'Off') { throw 'Initial isolation requires the sole owned Off VM adapter.' }
+    $switch = Get-VMSwitch -Name $script:RunnerSwitch -ErrorAction Stop
+    [void](New-RunnerNetworkBinding $State $vm $adapters[0] $switch)
+    return @(Install-RunnerRecoveryRules $adapters[0] $Observation.rules)
 }
 
 function Get-RuleFingerprint($Rule) {
@@ -236,16 +188,24 @@ function Save-Heartbeat($State) {
 }
 
 function Assert-SessionAlive($State) {
-    if ([DateTime]::UtcNow -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Host hard deadline reached.' }
-    if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) { throw 'Stop requested.' }
-    Save-Heartbeat $State
-    $current = Get-RunnerState
-    if ($current.PSObject.Properties.Name -contains 'networkFingerprint') {
-        if ((Get-HostNetworkFingerprint) -cne $current.networkFingerprint) { throw 'Host network changed; session cannot continue.' }
-    }
-    if ($current.PSObject.Properties.Name -contains 'guardianReady' -and $current.guardianReady -eq $true -and
-        -not (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc)) {
-        throw 'Session network guardian exited; refusing further operations.'
+    $State = [pscustomobject]$State
+    # This wait is never called under the state mutex. Only the guardian repairs.
+    while ($true) {
+        $now = Get-RunnerRecoveryNow
+        if ($now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or
+            (Test-RunnerSessionStopRequested $State)) { throw 'Session deadline or Stop reached.' }
+        Save-Heartbeat $State
+        $current = Get-RunnerState
+        if ($null -eq $current -or $current.vmName -cne $State.vmName -or
+            ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
+        if ($current.PSObject.Properties.Name -notcontains 'networkRecovery') {
+            if ($current.PSObject.Properties.Name -contains 'guardianPid') { throw 'Recorded guardian lacks its recovery journal.' }
+            return # Pre-guardian setup only.
+        }
+        if (-not (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc) -or
+            $current.networkRecovery.phase -ceq 'failed' -or (Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { throw 'Session network guardian failed or expired.' }
+        if ($current.networkRecovery.phase -ceq 'healthy' -and $current.guardianReady) { return }
+        Start-Sleep -Milliseconds 250
     }
 }
 
@@ -255,23 +215,35 @@ function Invoke-GuardCheck([string] $Name) {
         $state = Get-RunnerState
         if ($null -eq $state -or $state.vmName -cne $Name) { return $false }
         Assert-StateIdentity $state
-        $code = $null
-        try {
-            if ((Get-HostNetworkFingerprint) -cne $state.networkFingerprint) { $code = 'NETWORK_CHANGED' }
-        } catch { $code = 'NETWORK_INSPECTION_FAILED' }
-        if ($null -eq $code -and -not (Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc)) { $code = 'OWNER_EXITED' }
-        if ([DateTime]::UtcNow -ge [DateTime]::Parse($state.deadlineUtc).ToUniversalTime()) { $code = 'DEADLINE_REACHED' }
-        if ($null -ne $code) {
-            Write-RunnerFailure 'network-guard' $code $Name
-            Remove-RunnerInstance $state
-            return $false
+        if ($state.PSObject.Properties.Name -notcontains 'networkRecovery') {
+            if ($state.PSObject.Properties.Name -contains 'guardianPid') { throw 'Guardian identity may not be adopted.' }
+            $state | Add-Member guardianPid $PID
+            $state | Add-Member guardianStartUtc ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'))
+            $state | Add-Member guardianReady $false
+            $vm = Get-VM -Id ([guid]$state.vmId) -ErrorAction Stop
+            $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+            if ($adapters.Count -ne 1 -or $vm.State -cne 'Off') { throw 'Guardian initialization requires the sole owned Off VM.' }
+            $switch = Get-VMSwitch -Name $script:RunnerSwitch -ErrorAction Stop
+            $binding = New-RunnerNetworkBinding $state $vm $adapters[0] $switch
+            Assert-RunnerRecoveryRules $adapters[0] $state.networkRules
+            $recovery = New-RunnerNetworkRecovery $binding $state.networkFingerprint ([DateTime]::Parse($state.deadlineUtc).ToUniversalTime()) (Get-RunnerRecoveryNow)
+            $recovery.verifiedRules = $state.networkRules
+            $state | Add-Member networkRecovery $recovery
+            Write-RunnerJson $script:RunnerStatePath $state
         }
-        $state | Add-Member -NotePropertyName guardianPid -NotePropertyValue $PID -Force
-        $state | Add-Member -NotePropertyName guardianStartUtc -NotePropertyValue ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')) -Force
-        $state | Add-Member -NotePropertyName guardianReady -NotePropertyValue $true -Force
-        Write-RunnerJson $script:RunnerStatePath $state
-        return $true
     } finally { Exit-RunnerLock $mutex }
+    $tick = Invoke-RunnerNetworkRecoveryTick $Name (Get-RunnerConfig) $script:RunnerGuardOutcome
+    $script:RunnerGuardOutcome = $tick.outcome
+    if ($tick.continue) {
+        $mutex = Enter-RunnerLock
+        try {
+            $state = Get-RunnerState
+            if ($null -eq $state -or $state.vmName -cne $Name -or $state.guardianPid -ne $PID) { return $false }
+            $state.guardianReady = $state.networkRecovery.phase -ceq 'healthy'
+            Write-RunnerJson $script:RunnerStatePath $state
+        } finally { Exit-RunnerLock $mutex }
+    }
+    return $tick.continue
 }
 
 function Start-SessionGuardian($State) {
@@ -279,7 +251,7 @@ function Start-SessionGuardian($State) {
     $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$installed`" -Action Guard -SessionName $($State.vmName)"
     $guardian = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru
     try {
-        $limit = [DateTime]::UtcNow.AddSeconds(10)
+        $limit = [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
         do {
             $current = Get-RunnerState
             if ($null -eq $current -or $current.vmName -cne $State.vmName) { throw 'Guardian cancelled the session before boot.' }
@@ -293,13 +265,15 @@ function Start-SessionGuardian($State) {
 }
 
 function Start-GuardedVm($State) {
+    Assert-SessionAlive $State
     $boot = $null
     $mutex = Enter-RunnerLock
     try {
-        Assert-SessionAlive $State
         $current = Get-RunnerState
         if ($null -eq $current -or $current.vmName -cne $State.vmName -or $current.guardianReady -ne $true -or
-            $current.PSObject.Properties.Name -notcontains 'vmId') { throw 'VM boot requires its recorded identity and ready guardian.' }
+            $current.PSObject.Properties.Name -notcontains 'vmId' -or $current.networkRecovery.phase -cne 'healthy' -or
+            (Get-RunnerRecoveryExpiry $current.networkRecovery (Get-RunnerRecoveryNow)) -or
+            (Test-RunnerSessionStopRequested $current)) { throw 'VM boot requires its recorded identity and ready guardian.' }
         Assert-RunnerVmLifecycle $State.vmName
         $vmId = [guid]$current.vmId
         $vm = Get-VM -Id $vmId -ErrorAction Stop
@@ -336,6 +310,63 @@ function Start-GuardedVm($State) {
         # Stop-Job is not proof of provider cancellation. Canonical cleanup owns
         # exact-GUID removal and retains state/files if provider readback fails.
         if ($null -ne $boot -and $boot.State -in @('Completed', 'Failed', 'Stopped')) { Remove-Job -Job $boot -ErrorAction Stop }
+    }
+}
+
+
+function Assert-CurrentRunnerNetworkRules($State) {
+    Assert-SessionAlive $State
+    $mutex = Enter-RunnerLock
+    try {
+        $current = Get-RunnerState
+        if ($null -eq $current -or $current.vmName -cne $State.vmName -or $current.networkRecovery.phase -cne 'healthy') { throw 'Network changed before current ACL verification.' }
+        $vm = Get-VM -Id ([guid]$current.vmId) -ErrorAction Stop
+        $adapters = @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)
+        $switch = Get-VMSwitch -Id ([guid]$current.networkRecovery.binding.switchId) -ErrorAction Stop
+        [void](Assert-RunnerNetworkBinding $current $current.networkRecovery.binding $vm $adapters $switch)
+        Assert-RunnerRecoveryRules $adapters[0] $current.networkRecovery.verifiedRules
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [string] $LaunchId = '', [int] $ExitCode = 0) {
+    $mutex = Enter-RunnerLock
+    try {
+        $current = Get-RunnerState
+        if ($null -eq $current -or $current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or
+            ($current.PSObject.Properties.Name -contains 'purpose' -and $current.purpose -cne 'job') -or
+            (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) -or
+            (Test-RunnerSessionStopRequested $current) -or (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Runner launch session removed/stopped/expired.' }
+        $journal = if ($current.PSObject.Properties.Name -contains 'runnerLaunch') { $current.runnerLaunch } else { $null }
+        $next = Get-RunnerLaunchDecision $journal $Event $RunnerId $LaunchId $ExitCode
+        $current | Add-Member runnerLaunch $next -Force
+        Write-RunnerJson $script:RunnerStatePath $current
+        return $next
+    } finally { Exit-RunnerLock $mutex }
+}
+
+function Wait-DetachedRunner($State, $Config) {
+    # One dispatch already occurred. All retries below are read-only receipt
+    # monitor attachment; no registration or launch API/command belongs here.
+    while ($true) {
+        Assert-SessionAlive $State
+        $current = Get-RunnerState
+        $journal = $current.runnerLaunch
+        $receipt = $null
+        $result = $null
+        try {
+            $result = Invoke-RunnerReceiptNative 'ssh.exe' ((Get-SshArgs $State) + @("runner@$($Config.guestIp)", (Get-RunnerReceiptCommand $journal.launchId)))
+        } catch { $result = $null }
+        # A transport outage may be retried read-only. A successfully received
+        # malformed/different receipt is an integrity failure, never adopted.
+        if ($null -ne $result -and $result.ExitCode -eq 0) { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
+        if ($null -eq $receipt) {
+            [void](Save-RunnerLaunchEvent $State 'transport-lost')
+        } elseif ($receipt.phase -ceq 'exited') {
+            [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode)
+            if ($receipt.exitCode -ne 0) { throw 'Detached runner ended abnormally; check GitHub Actions job state.' }
+            return
+        } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId) }
+        Start-Sleep -Seconds 1
     }
 }
 
@@ -529,14 +560,19 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
         Add-VMHardDiskDrive -VMName $name -Path $seed
         $script:RunnerOperationStage = 'network-isolation'
+        $observation = Get-RunnerNetworkObservation # Probe IO outside mutex.
         $mutex = Enter-RunnerLock
         try {
             $current = Get-RunnerState
-            if ($null -eq $current -or $current.vmName -cne $name) { throw 'Session removed before network isolation.' }
-            $current | Add-Member -NotePropertyName networkFingerprint -NotePropertyValue (Get-HostNetworkFingerprint) -Force
+            if ($null -eq $current -or $current.vmName -cne $name -or
+                (Test-RunnerSessionStopRequested $current) -or
+                (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Session removed/stopped before network isolation.' }
+            $rules = @(Set-IsolatedAdapter $current $observation)
+            $current | Add-Member networkFingerprint $observation.fingerprint -Force
+            $current | Add-Member networkRules $rules -Force
             Write-RunnerJson $script:RunnerStatePath $current
+            $state = [pscustomobject]$current # Freeze the verified VM/MAC identity for later supervisor checks.
         } finally { Exit-RunnerLock $mutex }
-        $expectedRules = Set-IsolatedAdapter $name
         Start-SessionGuardian $state
         Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
         $script:RunnerOperationStage = 'vm-boot'
@@ -547,7 +583,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Wait-Guest $state $Config $profile.label
         Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
         Assert-SessionAlive $state
-        Assert-AdapterRules $name $expectedRules
+        Assert-CurrentRunnerNetworkRules $state
         Test-GuestIsolation $state $Config
 
         if ($Purpose -ceq 'verify-image') {
@@ -587,7 +623,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         if ($exitCode -ne 0) { throw 'Runner archive extraction failed.' }
         Write-Host ('Verified runner archive retrieval, transfer and extraction finished in {0:N1}s.' -f $archiveWatch.Elapsed.TotalSeconds)
         Assert-SessionAlive $state
-        Assert-AdapterRules $name $expectedRules
+        Assert-CurrentRunnerNetworkRules $state
 
         # The repository-scoped PAT remains on Windows. Only the one-job JIT value enters the guest.
         $token = Get-OwnerToken
@@ -605,6 +641,8 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
         }
         Assert-SessionAlive $state # Fresh snapshot immediately before the JIT API call.
+        $launchId = [guid]::NewGuid().ToString('N')
+        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId)
         $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
             name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
         } $token
@@ -615,23 +653,30 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         }
         $runnerId = [long]$jit.runner.id
         Assert-RunnerJitLabels $Config $jit.runner $profile.label
+        [void](Save-RunnerLaunchEvent $state 'registered' $runnerId)
         Assert-SessionAlive $state
         Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
-        # A JIT runner exits after one job. No guest output or secret-bearing config is logged on the host.
+        # The fixed JIT runner launches exactly once in a guest service. SSH is
+        # only dispatch/monitor transport; its loss never reruns the command.
         $script:RunnerOperationStage = 'job-execution'
-        $jobCommand = Get-RunnerJobCommand $image.prepared
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $jobCommand)) $jit.encoded_jit_config
-        if ($exitCode -ne 0) { throw 'JIT runner process ended abnormally; check GitHub Actions job state.' }
+        [void](Save-RunnerLaunchEvent $state 'dispatch')
+        $command = Get-RunnerDetachedCommand $image.prepared $launchId $runnerId
+        try {
+            $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $command)) $jit.encoded_jit_config -TimeoutSeconds 15
+            if ($exitCode -ne 0) { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
+        } catch { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
+        finally { $jit = $null }
+        Wait-DetachedRunner $state $Config
         Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
-        return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'job-completed' }
+        return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
     } finally {
+        $verificationFailure = $null
+        if ($verificationReady) { try { Assert-SessionAlive $state } catch { $verificationFailure = $_ } }
         $mutex = Enter-RunnerLock
         try {
             $current = Get-RunnerState
-            $verificationFailure = $null
             if ($verificationReady) {
                 if ($null -eq $current -or $current.vmName -cne $name -or [guid]$current.vmId -ne [guid]$vm.Id) { throw 'Verifier ownership was cancelled before cleanup.' }
-                try { Assert-SessionAlive $state } catch { $verificationFailure = $_ }
             }
             if ($null -ne $current -and $current.vmName -eq $name) { Remove-RunnerInstance $current }
             if ($null -ne $verificationFailure) { throw $verificationFailure }
@@ -814,7 +859,7 @@ function Invoke-SupervisorLoop {
             return
         }
         try {
-            $completedJob = $false
+            $completedSession = $false
             $script:RunnerQueueObservation = $null
             $script:RunnerSessionName = $null
             $script:RunnerOperationStage = 'memory-admission'
@@ -856,7 +901,7 @@ function Invoke-SupervisorLoop {
                 } else { $pilotAttempt = $null }
                 $token = $null
                 $allocatedRunner = Invoke-RunnerSession $config $pilotAttempt $profile.label
-                $completedJob = $allocatedRunner.PSObject.Properties.Name -contains 'outcome' -and $allocatedRunner.outcome -ceq 'job-completed'
+                $completedSession = $allocatedRunner.PSObject.Properties.Name -contains 'outcome' -and $allocatedRunner.outcome -ceq 'runner-exited'
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-verification'
                     $token = Get-OwnerToken
@@ -886,7 +931,7 @@ function Invoke-SupervisorLoop {
             }
         } catch {
             # API/guest failures never register a fallback runner. The next bounded poll may retry.
-            $completedJob = $false
+            $completedSession = $false
             $existing = Read-RunnerJson (Join-Path $script:RunnerRoot 'last-error.json')
             if ($null -eq $existing -or $null -eq $script:RunnerSessionName -or $existing.sessionName -cne $script:RunnerSessionName) {
                 Write-RunnerFailure $script:RunnerOperationStage 'STAGE_FAILED' $script:RunnerSessionName
@@ -894,7 +939,7 @@ function Invoke-SupervisorLoop {
             Write-EventLog -LogName Application -Source 'Windows PowerShell' -EntryType Error -EventId 500 -Message "IT Inventory runner stage failed: $script:RunnerOperationStage" -ErrorAction SilentlyContinue
             Write-RunnerObservation 'inspection-failed' $config
         } finally { $token = $null }
-        if ($completedJob) { continue } # Session's finally completed owned cleanup.
+        if ($completedSession) { continue } # Session's finally completed owned cleanup.
         Start-Sleep -Seconds 30
     }
 }
@@ -1131,7 +1176,12 @@ function Invoke-Watchdog {
             $ownerAlive = Test-RunnerProcessIdentity $state.supervisorPid $state.supervisorStartUtc
             $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
                 -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
-            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead) {
+            $recoveryExpired = $state.PSObject.Properties.Name -contains 'networkRecovery' -and (Get-RunnerRecoveryExpiry $state.networkRecovery (Get-RunnerRecoveryNow))
+            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead -or $recoveryExpired) {
+                if ($state.PSObject.Properties.Name -contains 'networkRecovery') {
+                    $state.networkRecovery.generation++; $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'watchdog-expired'
+                    Write-RunnerJson $script:RunnerStatePath $state
+                }
                 Remove-RunnerInstance $state
             }
         }
@@ -1259,7 +1309,16 @@ try { switch ($Action) {
         Assert-Administrator
         Assert-SecureRoot
         if (-not $SessionName) { throw 'Network guard requires one exact session identity.' }
-        while (Invoke-GuardCheck $SessionName) { Start-Sleep -Seconds 1 }
+        try { while (Invoke-GuardCheck $SessionName) { Start-Sleep -Seconds 1 } }
+        catch {
+            Write-RunnerFailure 'network-guard' 'RECOVERY_FAILED' $SessionName
+            $mutex = Enter-RunnerLock
+            try {
+                $current = Get-RunnerState
+                if ($null -ne $current -and $current.vmName -ceq $SessionName) { Remove-RunnerInstance $current }
+            } finally { Exit-RunnerLock $mutex }
+            throw
+        } finally { Stop-RunnerRecoveryProbe }
     }
     'Supervise' { Invoke-Supervisor }
     'EnablePilot' {

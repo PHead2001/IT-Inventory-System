@@ -9,7 +9,7 @@ try {
     & node (Join-Path $repository 'scripts/runner-image-inputs.mjs')
     if ($LASTEXITCODE -ne 0) { throw 'Trusted image snapshot generation failed; bundle was not published.' }
 } finally { Pop-Location }
-$names = @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
+$names = @('Common.ps1', 'Runner.ps1', 'Guest.Network.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'Probe.Job.ps1', 'PreparedImage.ps1', 'Image.Prepare.sh', 'Image.Inputs.json', 'Image.Package.json', 'Image.PackageLock.json', 'Image.Supabase.toml', 'SetupMenu.ps1', 'Setup.ps1', 'Setup.Download.ps1', 'Update.ps1',
     'Setup.cmd', 'Start.cmd', 'Restart.cmd', 'Stop.cmd', 'Status.cmd')
 $files = foreach ($name in $names) {
     $path = Join-Path $PSScriptRoot $name
