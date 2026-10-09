@@ -44,15 +44,46 @@ function Suspend-VM($VM) { Assert-FixtureTarget $VM 'vm'; $script:effects += 'pa
 function Disconnect-VMNetworkAdapter($VMNetworkAdapter) { Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:effects += 'disconnect'; if ($script:fail -ceq 'disconnect') { throw 'disconnect failed' }; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty }
 function Connect-VMNetworkAdapter($VMNetworkAdapter, $SwitchName) { Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:effects += 'connect'; if ($script:fail -ceq 'connect') { throw 'connect failed' }; $script:adapter.SwitchName = $SwitchName; $script:adapter.SwitchId = $script:switch.Id }
 function Resume-VM($VM) { Assert-FixtureTarget $VM 'vm'; $script:effects += 'resume'; if ($script:fail -ceq 'resume') { throw 'resume failed' }; $script:vm.State = 'Running' }
-function Remove-VMNetworkAdapterExtendedAcl($VMNetworkAdapter) { Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:effects += 'remove-acl'; $script:rules = @() }
-function Add-VMNetworkAdapterExtendedAcl($VMNetworkAdapter, $Action, $Direction, $Weight, $RemoteIPAddress = '', $LocalIPAddress = '', $LocalPort = '', $RemotePort = '', $Protocol = '', $Stateful = $false, [switch] $Passthru) {
+function Remove-VMNetworkAdapterExtendedAcl {
+    [CmdletBinding(DefaultParameterSetName = 'InputObjectParameter')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'InputObjectParameter')][ValidateNotNullOrEmpty()][object[]] $InputObject,
+        [Parameter(Mandatory, ParameterSetName = 'ResourceObject')][object] $VMNetworkAdapter,
+        [Parameter(Mandatory, ParameterSetName = 'ResourceObject')][int] $Weight,
+        [Parameter(Mandatory, ParameterSetName = 'ResourceObject')][ValidateSet('Inbound', 'Outbound')][string] $Direction
+    )
+    # Mirrors native mandatory parameter sets. Production must use the exact
+    # queried ACL object, never a reconstructed direction/weight selector.
+    if ($PSCmdlet.ParameterSetName -cne 'InputObjectParameter' -or $InputObject.Count -ne 1) { throw 'Fixture requires one queried ACL InputObject.' }
+    $rule = $InputObject[0]
+    if (@($script:queriedRules | Where-Object { [object]::ReferenceEquals($_, $rule) }).Count -ne 1) { throw 'Removal did not use the exact queried provider object.' }
+    $script:effects += 'remove-acl'; $script:removeCount++
+    if ($script:fail -ceq 'remove-acl') { throw 'ACL removal failed' }
+    if ($script:fail -cne 'stale-acl') { $script:rules = @($script:rules | Where-Object { -not [object]::ReferenceEquals($_, $rule) }) }
+}
+function Add-VMNetworkAdapterExtendedAcl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object] $VMNetworkAdapter,
+        [Parameter(Mandatory)][ValidateSet('Allow', 'Deny')][string] $Action,
+        [Parameter(Mandatory)][ValidateSet('Inbound', 'Outbound')][string] $Direction,
+        [Parameter(Mandatory)][int] $Weight,
+        $RemoteIPAddress = '', $LocalIPAddress = '', $LocalPort = '', $RemotePort = '', $Protocol = '', $Stateful = $false, [switch] $Passthru
+    )
     Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:addCount++; $script:effects += 'add-acl'
     if ($script:fail -ceq 'partial-acl' -and $script:addCount -eq 3) { throw 'partial ACL failure' }
     $rule = [pscustomobject]@{ Action = $Action; Direction = $Direction; Weight = $Weight; LocalIPAddress = $LocalIPAddress; RemoteIPAddress = $RemoteIPAddress; LocalPort = $LocalPort; RemotePort = $RemotePort; Protocol = $Protocol; Stateful = $Stateful }
     $script:rules += $rule
     if ($Passthru) { return $rule }
 }
-function Get-VMNetworkAdapterExtendedAcl($VMNetworkAdapter) { Assert-FixtureTarget $VMNetworkAdapter 'adapter'; if ($script:fail -ceq 'readback') { return }; if ($script:fail -ceq 'slow-readback') { $script:clock = $script:clock.AddSeconds(3) }; return $script:rules }
+function Get-VMNetworkAdapterExtendedAcl($VMNetworkAdapter) {
+    Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:aclQueries++
+    if ($script:fail -ceq 'acl-query') { throw 'ACL query failed' }
+    if ($script:fail -ceq 'readback') { return }
+    if ($script:fail -ceq 'slow-readback') { $script:clock = $script:clock.AddSeconds(3) }
+    $script:queriedRules = @($script:rules)
+    return $script:rules
+}
 function Remove-RunnerInstance($State) { $script:effects += 'cleanup'; $script:cleanups++; if ($script:fail -ceq 'cleanup') { throw 'cleanup refused' }; $script:state = $null }
 function New-RunnerProbeProcess($Executable, $Arguments) {
     if ($script:locked) { throw 'Probe dispatch held state mutex.' }
@@ -67,7 +98,7 @@ function Get-RunnerNetworkObservation { if ($script:locked) { throw 'Network obs
 function New-Fixture {
     $script:now = [DateTime]::UtcNow
     $script:clock = $script:now; $script:RunnerRecoveryProbe = $null
-    $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:rules = @()
+    $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()
     $script:captures = @(New-Capture); $script:readIndex = -1
     $script:state = [pscustomobject]@{
         tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'
@@ -173,7 +204,53 @@ try {
             Assert-Refused { Assert-RunnerNetworkBinding $script:state $script:binding $script:vm @($script:adapter) $script:switch } 'Identity was adopted.'
         }
     }
-    Check 'partial ACL installation never connects or resumes' { New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty; $script:state.networkRecovery.operation = 'apply'; $script:state.networkRecovery.phase = 'applying'; $script:state.networkRecovery.candidateRules = $script:observation.rules; $script:fail = 'partial-acl'; Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $script:state.networkRecovery 'apply' } 'Partial ACL accepted.'; Assert-Equal $script:adapter.SwitchName '' 'Partial ACL reconnected.'; if ($script:effects -contains 'resume') { throw 'Partial ACL resumed.' } }
+    Check 'fresh zero-ACL Off adapter skips removal and installs exact policy' {
+        New-Fixture; $script:vm.State = 'Off'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        $r = $script:state.networkRecovery; $r.phase = 'applying'; $r.operation = 'apply'; $r.candidateRules = $script:observation.rules
+        $installed = @(Invoke-RunnerRecoveryAdapterEffect $script:state $r 'apply')
+        Assert-Equal $script:removeCount 0 'Fresh adapter dispatched unnecessary Remove.'
+        Assert-Equal $installed.Count $script:observation.rules.Count 'Fresh adapter did not install exact rules.'
+        Assert-Equal $script:vm.State 'Off' 'Initial policy application booted the VM.'
+        Assert-Equal $script:aclQueries 3 'Policy replacement skipped pre-query, empty check or final readback.'
+    }
+    Check 'populated paused adapter removes each exact queried rule before replacement' {
+        New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        Set-FixtureVerifiedRules; $previousCount = $script:rules.Count
+        $r = $script:state.networkRecovery; $r.phase = 'applying'; $r.operation = 'apply'; $r.candidateRules = $script:observation.rules
+        [void](Invoke-RunnerRecoveryAdapterEffect $script:state $r 'apply')
+        Assert-Equal $script:removeCount $previousCount 'Replacement did not remove each exact old object.'
+        Assert-Equal @($script:effects | Select-Object -First $previousCount) @((1..$previousCount) | ForEach-Object { 'remove-acl' }) 'Addition preceded old-policy removal.'
+        Assert-Equal $script:aclQueries 3 'Old policy removal was not requeried before Add.'
+    }
+    Check 'ACL query removal error and surviving stale rules cannot add reconnect or resume' {
+        foreach ($failure in @('acl-query', 'remove-acl', 'stale-acl')) {
+            New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+            Set-FixtureVerifiedRules
+            $r = $script:state.networkRecovery; $r.phase = 'applying'; $r.operation = 'apply'; $r.candidateRules = $script:observation.rules
+            $script:fail = $failure
+            Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $r 'apply' } 'Uncertain old-policy removal accepted.'
+            Assert-Equal $script:addCount 0 'Uncertain old-policy removal added replacement rules.'
+            Assert-Equal $script:adapter.SwitchName '' 'Uncertain old-policy removal reconnected.'
+            Assert-Equal $script:vm.State 'Paused' 'Uncertain old-policy removal resumed.'
+        }
+    }
+    Check 'guardian fails closed and cleans up after uncertain ACL removal' {
+        foreach ($failure in @('remove-acl', 'stale-acl')) {
+            New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+            Set-FixtureVerifiedRules
+            $observation = Get-RunnerNetworkObservation
+            $r = $script:state.networkRecovery; $r.phase = 'isolated'; $r.resumeRequired = $true
+            $r.episodeDeadlineUtc = $script:now.AddSeconds(120).ToString('o'); $r.candidateFingerprint = $observation.fingerprint; $r.candidateRules = $observation.rules
+            $r.stableObservations = 2; $r.lastStableUtc = $script:now.AddSeconds(-2).ToString('o')
+            $script:fail = $failure
+            $result = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+            Assert-Equal $result.continue $false 'Uncertain removal remained recoverable.'
+            Assert-Equal $script:cleanups 1 'Uncertain removal did not request exact owned cleanup.'
+            Assert-Equal $script:addCount 0 'Guardian added replacement after uncertain removal.'
+            if ($script:effects -contains 'connect' -or $script:effects -contains 'resume') { throw 'Guardian resumed after uncertain removal.' }
+        }
+    }
+    Check 'partial ACL installation never connects or resumes' { New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty; $script:state.networkRecovery.operation = 'apply'; $script:state.networkRecovery.phase = 'applying'; $script:state.networkRecovery.candidateRules = $script:observation.rules; $script:fail = 'partial-acl'; Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $script:state.networkRecovery 'apply' } 'Partial ACL accepted.'; Assert-Equal $script:addCount 3 'Partial ACL fixture did not reach failed Add.'; Assert-Equal $script:adapter.SwitchName '' 'Partial ACL reconnected.'; if ($script:effects -contains 'resume') { throw 'Partial ACL resumed.' } }
     Check 'successful exact readback connects before resuming the same VM' {
         New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
         $r = $script:state.networkRecovery; $r.phase = 'applying'; $r.operation = 'apply'; $r.candidateRules = $script:observation.rules; $r.resumeRequired = $true

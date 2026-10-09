@@ -247,7 +247,14 @@ function Install-RunnerRecoveryRules($Adapter, $Rules) {
     # Caller has already proven the exact VM paused/off and its vNIC disconnected
     # (or the initial never-booted Off lifecycle). Never called on a live vNIC.
     if (@($Rules).Count -eq 0) { throw 'Recovery cannot install an empty policy.' }
-    Remove-VMNetworkAdapterExtendedAcl -VMNetworkAdapter $Adapter -ErrorAction Stop
+    # Remove the provider's actual ACL objects for this already verified adapter.
+    # The adapter parameter set also requires Weight/Direction; it is not a
+    # remove-all operation and must never be used as a broad selector here.
+    $existing = @(Get-VMNetworkAdapterExtendedAcl -VMNetworkAdapter $Adapter -ErrorAction Stop)
+    foreach ($existingRule in $existing) {
+        Remove-VMNetworkAdapterExtendedAcl -InputObject $existingRule -ErrorAction Stop
+    }
+    if (@(Get-VMNetworkAdapterExtendedAcl -VMNetworkAdapter $Adapter -ErrorAction Stop).Count -ne 0) { throw 'Recovery old ACL removal was not verified empty.' }
     $installed = @()
     foreach ($rule in @($Rules)) {
         $arguments = @{ VMNetworkAdapter = $Adapter; ErrorAction = 'Stop' }
