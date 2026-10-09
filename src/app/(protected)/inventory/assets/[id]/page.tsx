@@ -182,8 +182,15 @@ export default async function AssetPage({
                       className="underline"
                       href={'/inventory/assets/' + match.id}
                     >
-                      {match.name} ({match.assetTag || 'untagged'},{' '}
-                      <RecordStatus status={match.status} />)
+                      {match.name} (
+                      <span
+                        className={
+                          match.assetTag ? 'experience-code' : undefined
+                        }
+                      >
+                        {match.assetTag || 'untagged'}
+                      </span>
+                      , <RecordStatus status={match.status} />)
                     </Link>
                   </li>
                 ))}

@@ -678,6 +678,11 @@ function MutationFormFields({
       </label>
       <Input
         id={operation + '-' + name}
+        className={
+          ['asset_tag', 'serial_number', 'item_code'].includes(name)
+            ? 'experience-code'
+            : undefined
+        }
         aria-label={label}
         name={name}
         value={values[name] ?? ''}
@@ -923,6 +928,19 @@ function MutationFormFields({
             ? null
             : String(item.reorderThreshold),
       };
+      if (['asset_tag', 'serial_number'].includes(key))
+        return (
+          <>
+            {key.replaceAll('_', ' ')}:{' '}
+            <span className={old[key] ? 'experience-code' : undefined}>
+              {old[key] || 'Not set'}
+            </span>{' '}
+            →{' '}
+            <span className={values[key] ? 'experience-code' : undefined}>
+              {values[key] || 'Not set'}
+            </span>
+          </>
+        );
       return (
         key.replaceAll('_', ' ') +
         ': ' +
@@ -1325,17 +1343,18 @@ function MutationFormFields({
                     className="rounded border border-amber-700 p-3 text-sm text-amber-200"
                   >
                     Serial also recorded on:{' '}
-                    {duplicates
-                      .map(
-                        (d) =>
-                          d.name +
-                          ' (' +
-                          (d.assetTag || 'untagged') +
-                          ', ' +
-                          d.status +
-                          ')',
-                      )
-                      .join('; ')}
+                    {duplicates.map((d, index) => (
+                      <span key={d.id}>
+                        {index > 0 && '; '}
+                        {d.name} (
+                        <span
+                          className={d.assetTag ? 'experience-code' : undefined}
+                        >
+                          {d.assetTag || 'untagged'}
+                        </span>
+                        , {d.status})
+                      </span>
+                    ))}
                     . You can still save.
                   </div>
                 )}

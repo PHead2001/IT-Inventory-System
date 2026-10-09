@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TaskResetContext } from '@/features/inventory/components/task-state';
 import { CustodyChangeForm } from './custody-change-form';
@@ -236,6 +242,14 @@ it.each(['transfer', 'assign', 'return'] as const)(
     fireEvent.click(screen.getByRole('button', { name: /^Review / }));
     const review = screen.getByRole('region', { name: 'Review changes' });
     expect(review).toHaveTextContent(`${sourceLabel} → ${destinationLabel}`);
+    if (action === 'assign' || action === 'return') {
+      const storageCode = action === 'assign' ? right.code : left.code;
+      const code = within(review).getByText(storageCode, { exact: true });
+      expect(code).toHaveClass('experience-code');
+      expect(code.parentElement).toHaveTextContent(
+        `${action === 'assign' ? sourceLabel : destinationLabel}`,
+      );
+    }
     expect(submitCustody).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', {

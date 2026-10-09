@@ -259,8 +259,19 @@ export default async function SitePage({
                 </p>
                 {row.inventory_kind === 'asset' && (
                   <p className="mt-1 break-all text-sm text-slate-300">
-                    {row.asset_tag || 'Untagged'} ·{' '}
-                    {row.serial_number || 'No serial'}
+                    <span
+                      className={row.asset_tag ? 'experience-code' : undefined}
+                    >
+                      {row.asset_tag || 'Untagged'}
+                    </span>{' '}
+                    ·{' '}
+                    <span
+                      className={
+                        row.serial_number ? 'experience-code' : undefined
+                      }
+                    >
+                      {row.serial_number || 'No serial'}
+                    </span>
                   </p>
                 )}
               </li>

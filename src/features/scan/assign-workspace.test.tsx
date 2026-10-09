@@ -568,12 +568,12 @@ it('masks the previous actor batch and discards late pending results on account 
 });
 
 it('inspects with a capitalized shared status and mono identifier, hiding the record version', async () => {
-  const { container } = render(<AssignmentWorkspace {...props} />);
+  render(<AssignmentWorkspace {...props} />);
   await inspect();
   const review = screen.getByRole('region', { name: 'Review assignment' });
   expect(review).toHaveTextContent('Active');
   expect(review).not.toHaveTextContent('Version');
-  expect(container.querySelector('.experience-code')).toHaveTextContent(
+  expect(review.querySelector('.experience-code')).toHaveTextContent(
     candidate.identifier,
   );
   expect(mocks.submit).not.toHaveBeenCalled();

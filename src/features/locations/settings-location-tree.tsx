@@ -179,7 +179,7 @@ export function SettingsLocationTree({
                 {row.location.breadcrumb}
               </span>
               <span className="block break-words text-xs text-slate-300">
-                {row.location.code} ·{' '}
+                <span className="experience-code">{row.location.code}</span> ·{' '}
                 {row.location.active ? 'Active' : 'Inactive'}
               </span>
             </Link>

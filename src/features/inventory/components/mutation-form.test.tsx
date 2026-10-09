@@ -938,9 +938,9 @@ it('automatically warns about duplicate serials before saving without blocking c
   await user.click(
     screen.getByRole('button', { name: 'Review add individual asset' }),
   );
-  expect(
-    await screen.findByText(/Other switch \(SW-2, retired\)/),
-  ).toBeVisible();
+  expect(await screen.findByText(/Other switch \(/)).toHaveTextContent(
+    'Other switch (SW-2, retired)',
+  );
   expect(mocks.submit).not.toHaveBeenCalled();
   await user.click(
     await screen.findByRole('button', {

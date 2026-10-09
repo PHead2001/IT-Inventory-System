@@ -1,4 +1,5 @@
 'use client';
+import { ScanMatchLabel } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
   useEffect,
@@ -515,6 +516,7 @@ function AssignmentFields({
           Scan, paste, or search inventory
           <Input
             ref={inputRef}
+            className={mode !== 'search' ? 'experience-code' : undefined}
             aria-label="Scan, paste, or search inventory"
             autoComplete="off"
             maxLength={1024}
@@ -576,7 +578,7 @@ function AssignmentFields({
                   });
                 }}
               >
-                {match.label} ·{' '}
+                <ScanMatchLabel match={match} /> ·{' '}
                 {match.kind === 'quantity'
                   ? 'Quantity item'
                   : 'Individual asset'}{' '}

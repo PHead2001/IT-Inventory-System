@@ -210,6 +210,11 @@ describe('exact creation summary', () => {
         touched: [],
         openingSite: { id: location, name: 'Example site' },
       });
+      expect(
+        result.rows
+          .filter((row) => row.presentation === 'code')
+          .map((row) => row.value),
+      ).toEqual(kind === 'asset' ? ['TAG-UPPER', 'SerialCase'] : [' CODE ']);
       expect(result.rows).toContainEqual({
         label: 'Site',
         value: 'Example site',

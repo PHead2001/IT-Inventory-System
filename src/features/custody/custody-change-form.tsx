@@ -58,6 +58,20 @@ const titles: Record<string, string> = {
 };
 const storageLabel = (location: LocationRef | undefined, fallback: string) =>
   location ? `${location.breadcrumb} (${location.code})` : fallback;
+const storagePresentation = (location: LocationRef | undefined) =>
+  location ? { name: location.breadcrumb, code: location.code } : undefined;
+function reviewedEndpoint(
+  label: string | undefined,
+  storage: { name: string; code: string } | undefined,
+) {
+  return storage ? (
+    <>
+      {storage.name} (<span className="experience-code">{storage.code}</span>)
+    </>
+  ) : (
+    label
+  );
+}
 const siteLabel = (site: Site | undefined, fallback: string) =>
   site ? `${site.name} (${site.code})` : fallback;
 
@@ -123,6 +137,8 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     name?: string;
     source: string;
     destination: string;
+    sourceStorage?: { name: string; code: string };
+    destinationStorage?: { name: string; code: string };
     quantity: string;
     reference: string;
   } | null>(null);
@@ -236,11 +252,18 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   );
   const quantity = kind === 'quantity';
   const correction = action === 'correct';
-  const reviewedRoute = reviewed
-    ? quantity && correction
-      ? `At ${reviewed.source}`
-      : `${reviewed.source} → ${reviewed.destination}`
-    : '';
+  const reviewedRoute = reviewed ? (
+    quantity && correction ? (
+      <>At {reviewedEndpoint(reviewed.source, reviewed.sourceStorage)}</>
+    ) : (
+      <>
+        {reviewedEndpoint(reviewed.source, reviewed.sourceStorage)} →{' '}
+        {reviewedEndpoint(reviewed.destination, reviewed.destinationStorage)}
+      </>
+    )
+  ) : (
+    ''
+  );
   const requiresReason =
     correction || action === 'write_off' || action === 'retire';
   const positiveSites = new Set(
@@ -387,6 +410,18 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       setReviewed({
         key: reviewKey,
         name: latest.entityName,
+        sourceStorage: fromStorage
+          ? storagePresentation(
+              locations.find((row) => row.id === values.source_location_id),
+            )
+          : undefined,
+        destinationStorage: toStorage
+          ? storagePresentation(
+              locations.find(
+                (row) => row.id === values.destination_location_id,
+              ),
+            )
+          : undefined,
         source: fromStorage
           ? storageLabel(
               locations.find((row) => row.id === values.source_location_id),
@@ -508,9 +543,21 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               </p>
             )}
             <p>
-              {quantity && correction
-                ? `Count correction at ${reviewed?.source}`
-                : `${reviewed?.source} → ${reviewed?.destination}`}
+              {quantity && correction ? (
+                <>
+                  Count correction at{' '}
+                  {reviewedEndpoint(reviewed?.source, reviewed?.sourceStorage)}
+                </>
+              ) : (
+                <>
+                  {reviewedEndpoint(reviewed?.source, reviewed?.sourceStorage)}{' '}
+                  →{' '}
+                  {reviewedEndpoint(
+                    reviewed?.destination,
+                    reviewed?.destinationStorage,
+                  )}
+                </>
+              )}
             </p>
             <p>
               {quantity

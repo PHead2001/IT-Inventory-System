@@ -3,7 +3,9 @@ import {
   auditCategory,
   auditCreateRecord,
   auditLogin,
+  auditOpenMetadataTask,
 } from './audit-two-controls';
+import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { openRecordTask } from './record-task-controls';
 import { chooseLocation } from './location-picker';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -129,6 +131,34 @@ for (const kind of ['quantity', 'asset'] as const) {
         page.getByRole('button', { name: 'Show full name' }),
       ).toBeFocused();
       await expect(heading).toHaveText(name);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.evaluate(() => document.fonts.ready);
+      await expect
+        .poll(async () => {
+          const over = await heading.evaluate(
+            (element) =>
+              element.scrollHeight > element.clientHeight + 1 ||
+              element.scrollWidth > element.clientWidth + 1,
+          );
+          return (
+            (await page
+              .getByRole('button', { name: 'Show full name' })
+              .count()) === Number(over)
+          );
+        })
+        .toBe(true);
+      await page.setViewportSize({ width: 375, height: 812 });
+      const form = await auditOpenMetadataTask(page, `Edit ${kind} metadata`);
+      await form.getByLabel('Name', { exact: true }).fill('Switch');
+      await metadataReviewButton(form).click();
+      await metadataSaveButton(form).click();
+      await expect(
+        page.getByRole('heading', { name: 'Switch', exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Show full name' }),
+      ).toHaveCount(0);
+      await expect(page).toHaveTitle('Switch · IT Inventory');
     },
   );
 }

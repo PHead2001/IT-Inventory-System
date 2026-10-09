@@ -5,6 +5,7 @@ import {
   expect,
   test,
   type Page,
+  type Locator,
   type Route,
   type TestInfo,
 } from '@playwright/test';
@@ -1172,6 +1173,7 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
   test.setTimeout(120_000);
   const owned = await acceptanceFixtures();
   const tag = `00aZ-._/${owned.suffix.slice(0, 6).toLowerCase()}`;
+  const serial = `Sn-0O-1l/${owned.suffix.slice(0, 6)}`;
   const name = `Display spelling ${owned.suffix}`;
   let id: string | undefined;
   try {
@@ -1186,6 +1188,23 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
       .getByLabel('Category', { exact: true })
       .selectOption(owned.categoryId);
     await form.getByLabel('Asset tag', { exact: true }).fill(` ${tag} `);
+    await form.getByLabel('Serial number', { exact: true }).fill(serial);
+    const expectCodeFont = async (value: Locator) => {
+      const font = await value.evaluate((element) => {
+        const first = (families: string) =>
+          families.split(',')[0].replaceAll('"', '').replaceAll("'", '').trim();
+        return {
+          actual: first(getComputedStyle(element).fontFamily),
+          declared: first(
+            getComputedStyle(document.body).getPropertyValue('--font-code'),
+          ),
+        };
+      });
+      expect(font.actual).toBe(font.declared);
+      expect(font.declared).not.toBe('');
+    };
+    await expectCodeFont(form.getByLabel('Asset tag', { exact: true }));
+    await expectCodeFont(form.getByLabel('Serial number', { exact: true }));
     await chooseLocation(form, 'Current location', 'ITC-RED');
     await metadataReviewButton(form).click();
     await metadataSaveButton(form).click();
@@ -1194,6 +1213,9 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
     owned.assets.add(id);
     await page.reload();
     await expect(page.getByText(tag, { exact: true })).toBeVisible();
+    await expect(page.getByText(serial, { exact: true })).toBeVisible();
+    await expectCodeFont(page.getByText(tag, { exact: true }));
+    await expectCodeFont(page.getByText(serial, { exact: true }));
     await page.goto('/scan');
     await page
       .getByLabel('Paste a label URL, barcode text, or exact identifier')
@@ -1215,6 +1237,9 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
     await readyPreview(page, 1);
     const card = page.locator('.label-card');
     await expect(card).toContainText(`Asset tag: ${tag}`);
+    await expect(card).toContainText(`Serial: ${serial}`);
+    await expectCodeFont(card.getByText(tag, { exact: true }));
+    await expectCodeFont(card.getByText(serial, { exact: true }));
     const barcode = card.getByRole('img', {
       name: `Code 128 AST:${tag}`,
       exact: true,

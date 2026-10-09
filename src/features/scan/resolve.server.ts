@@ -12,6 +12,8 @@ export type ScanMatch = {
   kind: 'location' | 'asset' | 'quantity';
   path: string;
   label: string;
+  name?: string;
+  identifier?: string | null;
   state: 'active' | 'inactive' | 'retired' | 'archived';
 };
 export type ScanResolution =
@@ -50,6 +52,8 @@ async function lookupItemCode(value: string): Promise<ScanResolution> {
         kind: 'quantity',
         path: '/inventory/quantity/' + item.id,
         label: quantityLabel(item),
+        name: item.name,
+        identifier: item.item_code,
         state: item.archived ? 'archived' : 'active',
       },
     ],
@@ -92,6 +96,8 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
         kind: 'location',
         path: '/locations/' + data.code,
         label: `${data.name} (${data.code})`,
+        name: String(data.name),
+        identifier: String(data.code),
         state: data.active ? 'active' : 'inactive',
       });
   }
@@ -124,6 +130,8 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
         kind: 'quantity',
         path: '/inventory/quantity/' + data.id,
         label: quantityLabel(data),
+        name: data.name,
+        identifier: data.item_code,
         state: data.archived ? 'archived' : 'active',
       });
   }
@@ -171,6 +179,8 @@ function assetMatch(data: {
     kind: 'asset',
     path: '/inventory/assets/' + data.id,
     label: `${data.name}${data.asset_tag ? ` (${data.asset_tag})` : ''}`,
+    name: data.name,
+    identifier: data.asset_tag,
     state: data.status === 'retired' ? 'retired' : 'active',
   };
 }

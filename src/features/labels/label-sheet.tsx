@@ -408,17 +408,37 @@ function LabelCard({
           </strong>
           <span
             data-fit-text
-            className={`mt-[0.5mm] line-clamp-2 block break-words font-mono leading-tight ${compact ? 'text-[7pt]' : 'text-[8pt]'}`}
+            className={`mt-[0.5mm] line-clamp-2 block break-words leading-tight ${compact ? 'text-[7pt]' : 'text-[8pt]'}`}
             title={printable.identifier}
           >
-            {printable.identifier}
+            {record.kind === 'location' ? (
+              <span className="experience-code">{record.key}</span>
+            ) : record.kind === 'quantity' && record.humanId ? (
+              <>
+                Item code:{' '}
+                <span className="experience-code">{record.humanId}</span>
+              </>
+            ) : record.kind === 'asset' && record.barcode ? (
+              <>
+                Asset tag:{' '}
+                <span className="experience-code">{record.barcode}</span>
+              </>
+            ) : record.kind === 'asset' && record.serialNumber ? (
+              <>
+                Serial:{' '}
+                <span className="experience-code">{record.serialNumber}</span>
+              </>
+            ) : (
+              printable.identifier
+            )}
           </span>
           {printable.serial && (
             <span
               data-fit-text
               className="mt-[0.5mm] line-clamp-1 block break-words text-[7pt] leading-tight"
             >
-              {printable.serial}
+              Serial:{' '}
+              <span className="experience-code">{record.serialNumber}</span>
             </span>
           )}
           {printable.details && (
