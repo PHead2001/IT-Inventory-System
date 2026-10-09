@@ -12,21 +12,29 @@
 .card {
   min-width: 0;
   padding: clamp(18px, 3vw, 26px);
-  border: 1px solid #63829766;
+  border: 1px solid var(--scan-card-border);
   border-radius: 15px;
-  background: #101e30ed;
+  background: var(--scan-card-background);
   box-shadow:
-    inset 0 1px #d1f4ff0d,
-    0 18px 32px #0208102e;
+    inset 0 1px var(--scan-card-shadow),
+    0 18px 32px var(--scan-card-shadow-layer-2);
 }
 .cameraCard {
   background:
-    radial-gradient(circle at 86% 4%, #50def225, transparent 38%),
-    linear-gradient(145deg, #16344a, #101e30 68%);
-  border-color: #50def263;
+    radial-gradient(
+      circle at 86% 4%,
+      var(--scan-camera-card-background),
+      transparent 38%
+    ),
+    linear-gradient(
+      145deg,
+      var(--scan-camera-card-background-layer-2),
+      var(--surface) 68%
+    );
+  border-color: var(--scan-camera-card-border);
 }
 .eyebrow {
-  color: #67e0ef;
+  color: var(--scan-eyebrow-text);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.17em;
@@ -34,14 +42,14 @@
 }
 .title {
   margin-top: 7px;
-  color: #f0faff;
+  color: var(--scan-title-text);
   font-size: 21px;
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 .description {
   margin-top: 8px;
-  color: #acc5d7;
+  color: var(--scan-description-text);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -50,9 +58,9 @@
   width: 100%;
   max-height: 330px;
   margin-top: 17px;
-  border: 1px solid #74a9b98c;
+  border: 1px solid var(--scan-preview-border);
   border-radius: 10px;
-  background: #020810;
+  background: var(--scan-preview-background);
   object-fit: contain;
 }
 .preview[hidden] {
@@ -68,16 +76,16 @@
 .primaryButton {
   min-height: 44px;
   padding: 0 17px;
-  border: 1px solid #91f2fa;
+  border: 1px solid var(--scan-primary-button-border);
   border-radius: 9px;
-  background: #75e2ec;
-  color: #06131d;
+  background: var(--scan-primary-button-background);
+  color: var(--scan-primary-button-text);
   font-size: 13px;
   font-weight: 800;
   cursor: pointer;
 }
 .primaryButton:hover {
-  background: #a1f4fa;
+  background: var(--scan-primary-button-hover-background);
 }
 .primaryButton:disabled {
   opacity: 0.65;
@@ -86,16 +94,16 @@
 .secondaryButton {
   min-height: 44px;
   padding: 0 17px;
-  border: 1px solid #6995a8a8;
+  border: 1px solid var(--scan-secondary-button-border);
   border-radius: 9px;
-  background: #12283a;
-  color: #f0faff;
+  background: var(--scan-secondary-button-background);
+  color: var(--scan-secondary-button-text);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
 .hint {
-  color: #9cafc4;
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -106,7 +114,7 @@
 }
 .legend {
   margin-bottom: 6px;
-  color: #dff3fb;
+  color: var(--scan-legend-text);
   font-size: 12px;
   font-weight: 700;
 }
@@ -116,26 +124,26 @@
   gap: 9px;
   min-height: 44px;
   padding: 8px 10px;
-  border: 1px solid #5a7c8d66;
+  border: 1px solid var(--scan-radio-choice-border);
   border-radius: 8px;
-  color: #cedfe9;
+  color: var(--scan-radio-choice-text);
   font-size: 12px;
   cursor: pointer;
 }
 .radioChoice:has(input:checked) {
-  border-color: #50def2a8;
-  background: #50def214;
-  color: #effcff;
+  border-color: var(--scan-radio-selected-border);
+  background: var(--scan-radio-choice-background);
+  color: var(--scan-radio-selected-text);
 }
 .radioChoice input {
   width: 16px;
   height: 16px;
-  accent-color: #67e0ef;
+  accent-color: var(--scan-radio-choice-accent);
 }
 .fieldLabel {
   display: block;
   margin-top: 16px;
-  color: #e6f4fa;
+  color: var(--scan-field-label-text);
   font-size: 12px;
   font-weight: 700;
 }
@@ -144,10 +152,10 @@
   min-height: 46px;
   margin-top: 7px;
   padding: 10px 12px;
-  border: 1px solid #7294a6a8;
+  border: 1px solid var(--scan-input-border);
   border-radius: 9px;
-  background: #081724;
-  color: #f0faff;
+  background: var(--scan-input-background);
+  color: var(--scan-input-text);
 }
 .submitRow {
   display: flex;
@@ -157,10 +165,10 @@
 }
 .message {
   padding: 13px 15px;
-  border: 1px solid #dbaa6880;
+  border: 1px solid var(--scan-message-border);
   border-radius: 10px;
-  background: #3a2b29;
-  color: #ffe4bf;
+  background: var(--scan-message-background);
+  color: var(--scan-message-text);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -177,23 +185,23 @@
   justify-content: space-between;
   gap: 8px;
   padding: 13px 15px;
-  border: 1px solid #63829766;
+  border: 1px solid var(--scan-result-border);
   border-radius: 9px;
-  background: #10283a;
+  background: var(--scan-result-background);
 }
 .result a {
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  color: #8bedf7;
+  color: var(--scan-result-text);
   font-weight: 700;
   overflow-wrap: anywhere;
 }
 .state {
   padding: 4px 8px;
   border-radius: 999px;
-  background: #4b76984a;
-  color: #d9ecf5;
+  background: var(--scan-state-background);
+  color: var(--scan-state-text);
   font-size: 13px;
   line-height: 1.45;
   text-transform: capitalize;

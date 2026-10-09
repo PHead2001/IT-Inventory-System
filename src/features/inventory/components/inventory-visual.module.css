@@ -7,16 +7,16 @@
   container-type: inline-size;
   min-width: 0;
   padding: 14px 17px;
-  border-top: 1px solid #6595a629;
-  background: #101e30f2;
-  transition: background 160ms var(--ease-workspace);
+  border-top: 1px solid var(--inventory-row-border);
+  background: var(--inventory-row-background);
+  transition: background-color var(--motion-feedback) var(--ease-workspace);
 }
 .row:first-child {
   border-top: 0;
 }
 .row:hover,
 .row:focus-within {
-  background: #172b40;
+  background: var(--inventory-row-hover-background);
 }
 .rowGrid {
   display: grid;
@@ -43,10 +43,10 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #6595a64d;
+  border: 1px solid var(--inventory-thumbnail-border);
   border-radius: 9px;
-  background: #0b1929;
-  color: #86a5b7;
+  background: var(--inventory-thumbnail-background);
+  color: var(--inventory-thumbnail-text);
 }
 .thumbnail > span {
   width: 100%;
@@ -110,7 +110,7 @@
   line-height: 1.45;
 }
 .footer a {
-  color: #83e6f3;
+  color: var(--inventory-footer-text);
 }
 .summary {
   display: -webkit-box;
@@ -127,10 +127,10 @@
 }
 .status {
   display: inline-block;
-  border: 1px solid #6595a64d;
+  border: 1px solid var(--inventory-status-border);
   border-radius: 999px;
   padding: 2px 7px;
-  color: #b8cfdf;
+  color: var(--inventory-status-text);
   font-size: 12px;
   text-transform: capitalize;
 }
@@ -159,15 +159,15 @@
   min-height: 44px;
   align-items: center;
   padding: 9px 13px;
-  border: 1px solid #50def26b;
+  border: 1px solid var(--inventory-detail-actions-border);
   border-radius: 8px;
-  color: #aaf0fa;
+  color: var(--inventory-detail-actions-text);
   text-decoration: none;
   font-size: 13px;
   font-weight: 600;
 }
 .detailActions a:hover {
-  background: #50def21a;
+  background: var(--inventory-detail-actions-hover-background);
 }
 .facts {
   display: grid;
@@ -178,9 +178,9 @@
 .fact {
   min-width: 0;
   padding: 11px 13px;
-  border: 1px solid #6595a633;
+  border: 1px solid var(--inventory-fact-border);
   border-radius: 8px;
-  background: #07172670;
+  background: var(--inventory-fact-background);
 }
 .fact dt {
   color: var(--muted);
@@ -231,9 +231,9 @@
   display: grid;
   gap: 1px;
   overflow: hidden;
-  border: 1px solid #6595a637;
+  border: 1px solid var(--inventory-history-border);
   border-radius: 12px;
-  background: #6595a637;
+  background: var(--inventory-history-background);
 }
 .history > ol > li {
   border: 0;

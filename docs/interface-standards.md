@@ -38,13 +38,15 @@ The quality bar is that a new user's first reaction is "this is well made." That
 
 ## 3. Color and emphasis
 
-Use the existing tokens (`--background`, `--surface`, `--foreground`, `--muted`, `--accent`, `--warning`, `--danger`) and the motion tokens in `globals.css`. Do not add raw hex values in components; extend the tokens instead.
+Use the existing tokens (`--background`, `--surface`, `--foreground`, `--muted`, `--accent`, `--warning`, `--danger`) and the motion tokens in `globals.css`. Do not add raw hex values in components; extend the tokens instead. Semantic screen tokens in `globals.css` cover the workspace shell, shared Button/Input, Labels, Scan, inventory rows, form designer and closet illustration while retaining their original dark values. These are a foundation, not a completed Light theme. Shared controls use semantic aliases to the existing Tailwind color values and alpha color-mix expressions, preserving their original color space. Framework palette utilities on other surfaces remain a later D402 audit.
 
 - **One primary action per region.** The cyan filled button marks the single most likely next step. Peer choices use the outline style.
 - **Destructive and lifecycle confirmations** (retire, archive, remove, discard) use `--danger` (or `--warning` for reversible states) and name the record, for example "Retire CLAUDE-REVIEW Dell Latitude 5450".
 - **Status is visible.** Retired, archived, low-stock and pending states get a badge or banner, not only muted text.
 - **Atmosphere is earned.** Glow, grid texture and ambient effects belong to Overview, sign-in and Spaces. Working forms and tables use calm, opaque surfaces. Avoid nesting cards more than two levels deep.
 - Verify contrast for muted text on surface tokens at the actual size used (WCAG AA: 4.5:1 below 18 px).
+
+Screen palette exceptions are narrowly scoped: opaque black alpha-mask ink in the shell gradient; transparent/currentColor paint; black-on-white printed label CSS, QR/barcode pixels, PDF/export output and original print overrides. Room JSON physical material colors and the current room-scene floor/rails/opening trim/rack decorations/default material literals stay unchanged in this foundation; they are not an exemption for room UI feedback. The later Light pass must visually review those physical defaults against the room context. Graphics UI tokens consumed by `readScenePalette` remain hex3/hex6 or comma-separated RGB and are captured once at the Canvas boundary, without idle-frame work.
 
 ---
 
@@ -122,7 +124,7 @@ Use motion where it explains a change:
 
 Rules:
 
-- Transition only the properties that change. No `transition: all`.
+- Transition only the properties that change. No computed `transition-property: all`, including controls with zero duration. The shared `--transition-interactive-properties` covers background-color, border-color, color, box-shadow, opacity and transform. Minimal interactive defaults in the base cascade layer set only that property list; they never start motion or override narrower utilities. The opt-in utility lives in the components layer so caller utilities retain control. Existing animated buttons use `experience-interactive` with `--motion-feedback` (130 ms) and `--ease-workspace`; narrower existing property lists remain narrow.
 - Settings exposes **Reduce motion in this browser** as a labeled switch. Its checked state is the saved browser choice; adjacent help explains effective motion and any OS requirement. Turning it off cannot override system reduced motion.
 - Until the browser preference is loaded, the motion control is a disabled ordinary button with loading help and no switch role or checked state. Once loaded, it exposes the saved choice as an enabled switch. The first styled paint remains reduced; an initial server value must not be treated as the saved choice.
 - Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
