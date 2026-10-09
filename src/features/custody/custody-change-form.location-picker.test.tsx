@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CustodyChangeForm } from './custody-change-form';
@@ -40,7 +40,247 @@ beforeEach(() => {
   refresh.mockReset();
 });
 
-it('suggests a verified Return origin once, preserves a manual choice and explicit clear through refresh', async () => {
+const returnProps = {
+  actorId: id(9),
+  kind: 'asset' as const,
+  action: 'return' as const,
+  entityId: id(4),
+  version: '80',
+  locations: [rack, drawer],
+  sites: [site],
+  currentSite: site,
+  returnSuggestion: {
+    assetId: id(4),
+    assetVersion: '80',
+    sourceEventId: id(6),
+    locationId: rack.id,
+    status: 'suggested' as const,
+  },
+};
+const returnPicker = () =>
+  screen.getByRole('combobox', { name: 'Return to storage' });
+
+it('reconciles a failed origin read after same-version refresh only for the original actor', () => {
+  const failed = {
+    ...returnProps,
+    returnSuggestion: undefined,
+    returnSuggestionError: true,
+  };
+  const view = render(<CustodyChangeForm {...failed} />);
+  expect(returnPicker()).toHaveTextContent('Select a location');
+  expect(screen.getByText(/could not be checked/)).toBeVisible();
+  view.rerender(<CustodyChangeForm {...returnProps} actorId={id(10)} />);
+  expect(returnPicker()).toHaveTextContent('Select a location');
+  expect(screen.getByText(/could not be checked/)).toBeVisible();
+  view.rerender(<CustodyChangeForm {...returnProps} />);
+  expect(returnPicker()).toHaveTextContent('Server Rack');
+  expect(screen.queryByText(/could not be checked/)).toBeNull();
+  expect(screen.getByText(/Initially suggested/)).toBeVisible();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it.each(['manual', 'cleared'] as const)(
+  'preserves a %s destination when a failed same-version origin read succeeds',
+  async (choice) => {
+    const user = userEvent.setup();
+    const view = render(
+      <CustodyChangeForm
+        {...returnProps}
+        returnSuggestion={undefined}
+        returnSuggestionError
+      />,
+    );
+    if (choice === 'manual') {
+      await user.click(returnPicker());
+      await user.type(
+        screen.getByRole('combobox', { name: 'Search locations' }),
+        'ITC-D01',
+      );
+      await user.click(screen.getByRole('option', { name: /Drawer 1/ }));
+    } else {
+      await user.click(
+        screen.getByRole('button', { name: 'Clear destination' }),
+      );
+    }
+    view.rerender(<CustodyChangeForm {...returnProps} />);
+    expect(returnPicker()).toHaveTextContent(
+      choice === 'manual' ? 'Drawer 1' : 'Select a location',
+    );
+    expect(screen.queryByText(/could not be checked/)).toBeNull();
+    expect(screen.getByText(/Initially suggested/)).toBeVisible();
+    expect(submitCustody).not.toHaveBeenCalled();
+  },
+);
+
+it('invalidates an existing confirmation before a same-version suggestion changes its untouched destination', async () => {
+  const user = userEvent.setup();
+  const view = render(<CustodyChangeForm {...returnProps} />);
+  await user.click(
+    screen.getByRole('button', { name: 'Review return to storage' }),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('Server Rack');
+  view.rerender(
+    <CustodyChangeForm
+      {...returnProps}
+      returnSuggestion={{
+        ...returnProps.returnSuggestion,
+        locationId: drawer.id,
+      }}
+    />,
+  );
+  expect(returnPicker()).toHaveTextContent('Drawer 1');
+  expect(
+    screen.queryByRole('button', { name: 'Confirm return to storage' }),
+  ).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['suggested', 'Drawer 1', /Initially suggested/],
+  ['no_storage_origin', 'Select a location', /began at a site/],
+  ['ineligible', 'Select a location', /no longer available/],
+  ['unavailable', 'Select a location', /origin.*unavailable/],
+] as const)(
+  'reconciles a %s origin only after explicit adoption following a stale rejection',
+  async (status, destination, explanation) => {
+    const user = userEvent.setup();
+    vi.mocked(submitCustody).mockResolvedValueOnce({
+      ok: false,
+      code: 'P1002',
+      message: 'Record changed.',
+    });
+    const view = render(<CustodyChangeForm {...returnProps} />);
+    await user.type(
+      screen.getByLabelText('Ticket number reference (optional)'),
+      'Keep draft',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm return to storage' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Refresh latest holdings' }),
+      ).toBeEnabled(),
+    );
+    const latest = {
+      ...returnProps,
+      version: '81',
+      returnSuggestion: {
+        ...returnProps.returnSuggestion,
+        assetVersion: '81',
+        status,
+        locationId: status === 'suggested' ? drawer.id : null,
+      },
+    };
+    view.rerender(<CustodyChangeForm {...latest} />);
+    expect(returnPicker()).toHaveTextContent('Server Rack');
+    expect(screen.getByText(/Initially suggested/)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    ).toBeDisabled();
+    await user.click(
+      screen.getByRole('button', { name: 'Review latest holdings' }),
+    );
+    expect(returnPicker()).toHaveTextContent(destination);
+    expect(screen.getByText(explanation)).toBeVisible();
+    expect(
+      screen.getByLabelText('Ticket number reference (optional)'),
+    ).toHaveValue('Keep draft');
+    expect(
+      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    ).toBeNull();
+    if (status === 'suggested') {
+      vi.mocked(submitCustody).mockResolvedValueOnce({
+        ok: true,
+        entityId: id(4),
+        version: '82',
+        changed: true,
+      });
+      await user.click(
+        screen.getByRole('button', { name: 'Review return to storage' }),
+      );
+      await user.click(
+        screen.getByRole('button', { name: 'Confirm return to storage' }),
+      );
+      await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+      const [first, renewed] = vi
+        .mocked(submitCustody)
+        .mock.calls.map(([command]) => command as { requestId: string });
+      expect(renewed).toMatchObject({
+        expectedActorId: id(9),
+        payload: {
+          expected_version: '81',
+          destination_location_id: drawer.id,
+          reference: 'Keep draft',
+        },
+      });
+      expect(renewed.requestId).not.toBe(first.requestId);
+    } else expect(submitCustody).toHaveBeenCalledOnce();
+  },
+);
+
+it('freezes the suggested destination during pending and uncertain returns and replays only the original actor command', async () => {
+  const user = userEvent.setup();
+  let reject!: (error: Error) => void;
+  vi.mocked(submitCustody).mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const view = render(<CustodyChangeForm {...returnProps} />);
+  await user.click(
+    screen.getByRole('button', { name: 'Review return to storage' }),
+  );
+  await user.click(
+    screen.getByRole('button', { name: 'Confirm return to storage' }),
+  );
+  const original = vi.mocked(submitCustody).mock.calls[0][0];
+  const refreshed = {
+    ...returnProps,
+    returnSuggestion: {
+      ...returnProps.returnSuggestion,
+      locationId: drawer.id,
+    },
+  };
+  view.rerender(<CustodyChangeForm {...refreshed} />);
+  expect(returnPicker()).toHaveTextContent('Server Rack');
+  await act(async () => reject(new Error('Lost response')));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Retry same custody transaction' }),
+    ).toBeEnabled(),
+  );
+  view.rerender(<CustodyChangeForm {...refreshed} actorId={id(10)} />);
+  expect(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  ).toBeDisabled();
+  expect(returnPicker()).toHaveTextContent('Server Rack');
+  view.rerender(<CustodyChangeForm {...refreshed} />);
+  expect(returnPicker()).toHaveTextContent('Server Rack');
+  vi.mocked(submitCustody).mockResolvedValueOnce({
+    ok: true,
+    entityId: id(4),
+    version: '81',
+    changed: true,
+  });
+  await user.click(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  );
+  await screen.findByRole('button', { name: 'Done' });
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(original);
+  expect(original).toMatchObject({
+    expectedActorId: id(9),
+    payload: { expected_version: '80', destination_location_id: rack.id },
+  });
+});
+
+it('suggests a verified Return origin and preserves a manual choice and explicit clear through refresh', async () => {
   const user = userEvent.setup();
   const props = {
     kind: 'asset' as const,
@@ -307,7 +547,12 @@ it.each(['manual', 'cleared'] as const)(
     const latest = {
       ...props,
       version: '81',
-      returnSuggestion: { ...props.returnSuggestion, assetVersion: '81' },
+      returnSuggestion: {
+        ...props.returnSuggestion,
+        assetVersion: '81',
+        status: 'no_storage_origin' as const,
+        locationId: null,
+      },
     };
     view.rerender(<CustodyChangeForm {...latest} />);
     expect(
@@ -318,6 +563,7 @@ it.each(['manual', 'cleared'] as const)(
       screen.getByRole('button', { name: 'Review latest holdings' }),
     );
     expect(picker).toHaveTextContent('Drawer 1');
+    expect(screen.getByText(/began at a site/)).toBeVisible();
     expect(
       screen.getByLabelText('Ticket number reference (optional)'),
     ).toHaveValue('Keep draft');
@@ -328,12 +574,19 @@ it.each(['manual', 'cleared'] as const)(
       await user.click(
         screen.getByRole('button', { name: 'Clear destination' }),
       );
-      view.rerender(<CustodyChangeForm {...latest} version="82" />);
+      view.rerender(
+        <CustodyChangeForm
+          {...latest}
+          version="82"
+          returnSuggestion={{ ...props.returnSuggestion, assetVersion: '82' }}
+        />,
+      );
       expect(picker).toHaveTextContent('Select a location');
       await user.click(
         screen.getByRole('button', { name: 'Review latest holdings' }),
       );
       expect(picker).toHaveTextContent('Select a location');
+      expect(screen.getByText(/Initially suggested/)).toBeVisible();
       await user.click(picker);
       await user.type(
         screen.getByRole('combobox', { name: 'Search locations' }),

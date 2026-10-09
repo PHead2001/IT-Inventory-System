@@ -59,6 +59,34 @@ const storageLabel = (location: LocationRef | undefined, fallback: string) =>
 const siteLabel = (site: Site | undefined, fallback: string) =>
   site ? `${site.name} (${site.code})` : fallback;
 
+function resolveReturnOrigin(snapshot: Props) {
+  const { kind, action, entityId, version, locations } = snapshot;
+  const suggestion = snapshot.returnSuggestion;
+  const unavailable = {
+    status: 'unavailable' as const,
+    locationId: null,
+    loadError: Boolean(snapshot.returnSuggestionError),
+  };
+  if (
+    kind !== 'asset' ||
+    action !== 'return' ||
+    suggestion?.assetId !== entityId ||
+    suggestion.assetVersion !== version
+  )
+    return unavailable;
+  if (suggestion.status !== 'suggested')
+    return { ...unavailable, status: suggestion.status };
+  if (!suggestion.locationId) return unavailable;
+  const eligible = pickerLocations(locations, 'destination').some(
+    (row) => row.id === suggestion.locationId,
+  );
+  return {
+    status: eligible ? ('suggested' as const) : ('ineligible' as const),
+    locationId: eligible ? suggestion.locationId : null,
+    loadError: false,
+  };
+}
+
 export function CustodyChangeForm(latest: Props) {
   const [iteration, setIteration] = useState(0);
   return (
@@ -96,32 +124,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     quantity: string;
     reference: string;
   } | null>(null);
-  const [returnOrigin] = useState(() => {
-    const suggestion = latest.returnSuggestion;
-    const unavailable = {
-      status: 'unavailable' as const,
-      locationId: null,
-      loadError: Boolean(latest.returnSuggestionError),
-    };
-    if (
-      kind !== 'asset' ||
-      action !== 'return' ||
-      suggestion?.assetId !== entityId ||
-      suggestion.assetVersion !== version
-    )
-      return unavailable;
-    if (suggestion.status !== 'suggested')
-      return { ...unavailable, status: suggestion.status };
-    if (!suggestion.locationId) return unavailable;
-    const eligible = pickerLocations(locations, 'destination').some(
-      (row) => row.id === suggestion.locationId,
-    );
-    return {
-      status: eligible ? ('suggested' as const) : ('ineligible' as const),
-      locationId: eligible ? suggestion.locationId : null,
-      loadError: false,
-    };
-  });
+  const [returnOrigin, setReturnOrigin] = useState(() =>
+    resolveReturnOrigin(latest),
+  );
+  const [destinationTouched, setDestinationTouched] = useState(false);
   const [values, setValues] = useState({
     source_location_id:
       currentLocation?.id ??
@@ -158,6 +164,29 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   // A definitive stale rejection remains blocking even when input edits clear
   // its message or a failed refresh leaves the old props in place.
   const stale = newerSnapshot || rejectedVersion === version;
+  const nextReturnOrigin = resolveReturnOrigin(latest);
+  // Same-version reads can recover a failed lookup. Crossing versions still
+  // requires explicit baseline adoption, and unresolved commands stay frozen.
+  if (
+    kind === 'asset' &&
+    action === 'return' &&
+    !stale &&
+    !actorMismatch &&
+    !pending &&
+    !uncertain &&
+    !completed &&
+    (returnOrigin.status !== nextReturnOrigin.status ||
+      returnOrigin.locationId !== nextReturnOrigin.locationId ||
+      returnOrigin.loadError !== nextReturnOrigin.loadError)
+  ) {
+    setReturnOrigin(nextReturnOrigin);
+    if (!destinationTouched)
+      setValues((old) => ({
+        ...old,
+        destination_location_id: nextReturnOrigin.locationId ?? '',
+      }));
+    setReviewed(null);
+  }
   const refreshHoldings = () => {
     try {
       router.refresh();
@@ -166,7 +195,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     }
   };
   const update = (key: keyof typeof values, value: string) => {
-    if (pending || uncertain || completed || inFlight.current) return;
+    if (
+      pending ||
+      uncertain ||
+      completed ||
+      stale ||
+      actorMismatch ||
+      inFlight.current
+    )
+      return;
+    if (key === 'destination_location_id') setDestinationTouched(true);
     setValues((old) => ({ ...old, [key]: value }));
     setReviewed(null);
     setState(null);

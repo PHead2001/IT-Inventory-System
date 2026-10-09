@@ -18,13 +18,20 @@ falling back to an older episode. Ineligible origins and transport failures have
 separate explanations. The suggestion records asset UUID/version, source event
 UUID, destination UUID and status. These identifiers remain internal.
 
-The Return form verifies that identity, version and current picker eligibility
-before applying a suggestion once for each new task. Manual choices and Clear
-destination survive refresh and explicit stale-form review. A refreshed version
-invalidates confirmation without inventing a new destination. Initial-suggestion
-copy describes the original default even after a staff member chooses another
-destination. Move stock and Issue stock source options show that item's current
-available units in both tree and search views before selection; refreshed amounts
+The Return form verifies identity, version and current picker eligibility when
+reconciling refreshed suggestions. A successful same-version origin read can
+recover an initial read failure and fill an untouched destination. Manual choices
+and Clear destination survive refresh and explicit stale-form review, including
+an explicit clear while the origin read was unavailable. A refreshed record
+version blocks submission until explicit Review latest holdings adopts that
+baseline; only then does its suggestion update the explanation and untouched
+destination. A changed suggestion invalidates any existing confirmation before
+submission. Pending, uncertain and completed operations retain their original
+suggestion, and another actor's refresh cannot reconcile the draft. The origin
+explanation describes the suggestion for the adopted baseline even after a staff
+member chooses another destination. Move stock and Issue stock source options
+show that item's current available units in both tree and search views before
+selection; refreshed amounts
 do not select a different source. Existing authoritative stock/version checks
 remain the mutation boundary.
 Move availability follows current reads while the entered move retains its
