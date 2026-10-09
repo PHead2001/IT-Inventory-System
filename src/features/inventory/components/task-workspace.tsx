@@ -89,12 +89,12 @@ export function TaskWorkspace({
     )
       return;
     if (
-      stateRef.current.completed &&
+      (stateRef.current.completed || !stateRef.current.dirty) &&
       discardTask.current &&
       !discardTask.current()
     )
       return;
-    if (state.dirty && !state.completed) setRequested(id);
+    if (stateRef.current.dirty && !stateRef.current.completed) setRequested(id);
     else {
       setActiveLabel(
         choices.find((choice) => choice.id === id)?.label ?? activeLabel,
@@ -261,6 +261,7 @@ export function TaskWorkspace({
             value={() => {
               if (stateRef.current.pending || stateRef.current.uncertain)
                 return;
+              if (discardTask.current && !discardTask.current()) return;
               stateRef.current = clean;
               setSelected(null);
               setState(clean);

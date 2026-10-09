@@ -278,3 +278,79 @@ export async function getEntityAssignments(
   if (error) throw new Error('Assignment history could not be loaded.');
   return z.array(assignment).parse(data);
 }
+
+export async function getAssetReturnSuggestion(asset: {
+  id: string;
+  version: number;
+  status: 'active' | 'retired';
+  siteId: string | null;
+}): Promise<import('./return-suggestion').AssetReturnSuggestion> {
+  const suggestion: import('./return-suggestion').AssetReturnSuggestion = {
+    assetId: asset.id,
+    assetVersion: String(asset.version),
+    sourceEventId: null,
+    locationId: null,
+    status: 'unavailable',
+  };
+  if (
+    !id.safeParse(asset.id).success ||
+    !Number.isSafeInteger(asset.version) ||
+    asset.version < 1 ||
+    asset.version > 2147483647 ||
+    asset.status !== 'active' ||
+    !id.safeParse(asset.siteId).success
+  )
+    return suggestion;
+  const { supabase } = await requireMember();
+  // Metadata and site-to-site changes remain in the same custody episode.
+  // The first other boundary stops the search even if its origin is unknown.
+  const { data, error } = await supabase
+    .from('asset_events')
+    .select('id,asset_id,version,kind,from_location_id')
+    .eq('asset_id', asset.id)
+    .lte('version', asset.version)
+    .not('kind', 'in', '(metadata_updated,site_transferred,site_corrected)')
+    .order('version', { ascending: false })
+    .limit(1);
+  if (error)
+    throw new Error('The previous storage location could not be loaded.');
+  const boundary = z
+    .array(
+      z.object({
+        id,
+        asset_id: id,
+        version: z.number().int().min(1).max(asset.version),
+        kind: z.string(),
+        from_location_id: id.nullable(),
+      }),
+    )
+    .max(1)
+    .safeParse(data);
+  if (!boundary.success || !boundary.data[0]) return suggestion;
+  const event = boundary.data[0];
+  if (event.asset_id !== asset.id) return suggestion;
+  suggestion.sourceEventId = event.id;
+  if (event.kind === 'site_opened')
+    return { ...suggestion, status: 'no_storage_origin' };
+  if (event.kind !== 'site_assigned' || !event.from_location_id)
+    return suggestion;
+  const locationResult = await supabase
+    .from('locations')
+    .select('id,active,can_hold_inventory')
+    .eq('id', event.from_location_id)
+    .maybeSingle();
+  if (locationResult.error)
+    throw new Error('The previous storage location could not be checked.');
+  const destination = z
+    .object({ id, active: z.boolean(), can_hold_inventory: z.boolean() })
+    .safeParse(locationResult.data);
+  if (!destination.success || destination.data.id !== event.from_location_id)
+    return suggestion;
+  if (!destination.data.active || !destination.data.can_hold_inventory)
+    return { ...suggestion, status: 'ineligible' };
+  return {
+    ...suggestion,
+    status: 'suggested',
+    locationId: destination.data.id,
+  };
+}

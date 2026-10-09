@@ -1,5 +1,52 @@
 # Managed locations and site custody
 
+Receive initializes its destination only when exactly one positive holding is
+eligible under the current destination picker. Zero or multiple eligible holdings
+leave it blank. Restore retains its separate eligible recorded-location default.
+These defaults are initial task values; refreshed balances never overwrite a
+manual destination or clear it by choosing a replacement.
+
+An active site-assigned asset's Return task can suggest storage from its current
+assignment episode. The server uses the caller's membership/session and RLS to
+read one `asset_events` boundary for that asset at or before its current version,
+ordered by version descending, excluding metadata updates, site transfers and
+site corrections. It does not search the last 25 assignment events. The latest
+`site_assigned` boundary supplies its recorded source location after an authorized
+eligibility lookup (`active && can_hold_inventory`). `site_opened` has no storage
+origin; missing, malformed or other boundaries stay unavailable rather than
+falling back to an older episode. Ineligible origins and transport failures have
+separate explanations. The suggestion records asset UUID/version, source event
+UUID, destination UUID and status. These identifiers remain internal.
+
+The Return form verifies identity, version and current picker eligibility when
+reconciling refreshed suggestions. A successful same-version origin read can
+recover an initial read failure and fill an untouched destination.
+If a later same-version origin read fails, the last verified suggestion,
+destination and clean baseline remain intact, with an explicit read-error
+explanation and no retained confirmation. Only a definitive successful read can
+replace that suggestion, including a verified absence of an eligible origin.
+The recovered destination also updates only that field's clean task baseline,
+so an automatic default leaves a pristine task clean while entered reasons,
+references and other manual changes remain dirty. Manual choices
+and Clear destination survive refresh and explicit stale-form review, including
+an explicit clear while the origin read was unavailable. A refreshed record
+version blocks submission until explicit Review latest holdings adopts that
+baseline; only then does its suggestion update the explanation and untouched
+destination. A changed suggestion invalidates any existing confirmation before
+submission. Pending, uncertain and completed operations retain their original
+suggestion, and another actor's refresh cannot reconcile the draft. The origin
+explanation describes the suggestion for the adopted baseline even after a staff
+member chooses another destination. Move stock and Issue stock source options
+show that item's current available units in both tree and search views before
+selection; refreshed amounts
+do not select a different source. Existing authoritative stock/version checks
+remain the mutation boundary.
+Move availability follows current reads while the entered move retains its
+original version and review context. Changed stock invalidates confirmation;
+only an explicit verified refresh followed by review adopts a new baseline.
+A depleted or missing source stays selected and unavailable rather than being
+replaced. Positive holdings at inactive storage remain valid evacuation sources.
+
 `locations` are logical IT storage. `sites` identify deployed equipment custody;
 they have no 2.5D room geometry. The office seed codes `ITO` and `ITO-GENERAL`
 mean **IT Office** and provisional **General Storage / Unsorted**. These are

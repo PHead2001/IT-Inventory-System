@@ -49,6 +49,123 @@ const otherSite = {
 };
 beforeEach(() => vi.mocked(submitCustody).mockReset());
 
+it.each([
+  ['quantity', 'issue'],
+  ['quantity', 'return'],
+  ['quantity', 'transfer'],
+  ['asset', 'assign'],
+  ['asset', 'transfer'],
+] as const)(
+  'requires an explicitly adopted fresh snapshot after a %s %s stale rejection',
+  async (kind, action) => {
+    const confirmLabel = {
+      issue: 'Issue to site',
+      return: 'Return to storage',
+      transfer: 'Transfer between sites',
+      assign: 'Assign to site',
+    }[action];
+    vi.mocked(submitCustody)
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'P1002',
+        message: 'Record changed.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        entityId: id(1),
+        version: '9',
+        changed: true,
+      });
+    const props = {
+      kind,
+      action,
+      entityId: id(1),
+      version: '7',
+      locations: [location],
+      sites: [site, otherSite],
+      currentLocation: action === 'assign' ? location : null,
+      currentSite: kind === 'asset' && action === 'transfer' ? site : null,
+      storageBalances: [{ location, quantity: 4 }],
+      siteHoldings: [
+        {
+          site_id: site.id,
+          site_code: site.code,
+          site_name: site.name,
+          site_active: true,
+          inventory_kind: 'quantity' as const,
+          entity_id: id(1),
+          name: 'Adapters',
+          category_name: 'Parts',
+          manufacturer: null,
+          model: null,
+          quantity: 4,
+          asset_tag: null,
+          serial_number: null,
+        },
+      ],
+    };
+    const view = render(<CustodyChangeForm {...props} />);
+    if (action === 'return')
+      fireEvent.click(screen.getByRole('button', { name: 'Storage location' }));
+    else
+      fireEvent.change(screen.getByLabelText('Destination site'), {
+        target: { value: otherSite.id },
+      });
+    if (kind === 'quantity')
+      fireEvent.change(screen.getByLabelText('Units'), {
+        target: { value: '2' },
+      });
+    fireEvent.change(
+      screen.getByLabelText('Ticket number reference (optional)'),
+      { target: { value: 'Ticket 42' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Review / }));
+    fireEvent.click(screen.getByRole('button', { name: confirmLabel }));
+    await screen.findByText('Record changed.');
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Refresh latest holdings' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByRole('button', { name: /^Review / })).toBeDisabled();
+    const rejected = vi.mocked(submitCustody).mock.calls[0][0] as {
+      requestId: string;
+      payload: Record<string, unknown>;
+    };
+    view.rerender(<CustodyChangeForm {...props} version="8" />);
+    expect(
+      screen.getByRole('button', { name: /^Review (?!latest)/ }),
+    ).toBeDisabled();
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review latest holdings' }),
+    );
+    expect(
+      screen.getByLabelText('Ticket number reference (optional)'),
+    ).toHaveValue('Ticket 42');
+    if (kind === 'quantity')
+      expect(screen.getByLabelText('Units')).toHaveValue(2);
+    expect(screen.queryByRole('button', { name: confirmLabel })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Review / }));
+    expect(submitCustody).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: confirmLabel }));
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+    const renewed = vi.mocked(submitCustody).mock.calls[1][0] as {
+      requestId: string;
+      operation: string;
+      payload: Record<string, unknown>;
+    };
+    expect(renewed.requestId).not.toBe(rejected.requestId);
+    expect(renewed.operation).toBe(
+      kind === 'quantity' ? 'quantity_site_change' : 'asset_site_change',
+    );
+    expect(renewed.payload).toEqual({
+      ...rejected.payload,
+      expected_version: '8',
+    });
+  },
+);
+
 it.each(['transfer', 'assign', 'return'] as const)(
   'captures disambiguated %s endpoints through review, commit and later catalog renames',
   async (action) => {

@@ -99,7 +99,7 @@ for (const kind of ['quantity', 'asset'] as const) {
     await expect(
       form
         .getByRole('alert')
-        .filter({ hasText: 'record changed while this draft was away' }),
+        .filter({ hasText: 'record changed since this draft began' }),
     ).toBeVisible();
     expect((await editEnvelope(page, record.id)).baseline.version).toBe(1);
     await expect(form.getByLabel('Manufacturer', { exact: true })).toHaveValue(
@@ -450,8 +450,8 @@ test('activity presets resolve local calendar boundaries across both DST transit
   for (const [now, preset, from, until] of cases) {
     await page.clock.setFixedTime(new Date(now));
     await page.goto(base);
-    // The failed CI attempt likely selected before hydration restored Custom.
-    // The browser-only zone is observable readiness; retain every range check.
+    // Browser-zone resolution also establishes hydration before a native
+    // select event; selecting the server-rendered control can lose its change.
     await expect(page.getByLabel('Display / preset timezone')).toHaveValue(
       'America/Chicago',
     );
