@@ -21,6 +21,12 @@ to no changes or its record is stale. Back, reload and external navigation retai
 the existing recovery contract; cancelable navigation gestures do not finalize a
 still-mounted editor.
 
+A pristine memory-only metadata editor with no owned persisted envelope can
+close or switch tasks without recovery finalization, including when storage
+cannot be read during hydration. Any inaccessible envelope remains untouched.
+Durable drafts, including reverted edits, still require the existing exact-envelope
+cleanup; dirty, pending and uncertain work retains its safeguards.
+
 A hidden editor whose actor or backend changed may explicitly close or switch
 tasks once no command is pending or uncertain; that exit touches neither scope's
 recovery. Unknown results establish the unresolved task guard before suppressing

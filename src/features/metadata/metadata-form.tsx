@@ -1511,6 +1511,10 @@ export function MetadataForm({
         removeEdit(discardedEdit.current.stored, editSession.current),
       );
     if (!active || active.status !== 'editing') return false;
+    // Pristine, memory-only editors own nothing to finalize. In particular,
+    // failed hydration must not block exit or touch an inaccessible envelope.
+    // Durable/reverted drafts still follow the exact-envelope cleanup below.
+    if (!editDurable.current && !editPrevious.current && !rawDirty) return true;
     const next: EditEnvelope = {
       ...active,
       sequence: active.sequence + 1,

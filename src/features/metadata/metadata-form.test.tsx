@@ -4459,6 +4459,134 @@ describe('existing edit recovery and review', () => {
     expect(sessionStorage.length).toBe(0);
     expect(submitInventory).not.toHaveBeenCalled();
   });
+  it.each([
+    ['quantity', 'Close task'],
+    ['quantity', 'Other task'],
+    ['quantity', 'Close'],
+    ['asset', 'Close task'],
+    ['asset', 'Other task'],
+    ['asset', 'Close'],
+  ] as const)(
+    'allows pristine %s exit through %s when hydration cannot read storage, preserving inaccessible recovery',
+    async (kind, exit) => {
+      const current = form();
+      current.published_definition.fields[0].applies_to = [kind];
+      const record = {
+        ...item,
+        customValues: {
+          [fieldId]: { value: false, validated_revision_id: firstRevision },
+        },
+      };
+      const editor = (
+        <MetadataForm
+          {...props}
+          kind={kind}
+          item={kind === 'quantity' ? record : undefined}
+          asset={
+            kind === 'asset'
+              ? {
+                  ...record,
+                  status: 'active',
+                  assetTag: null,
+                  serialNumber: null,
+                }
+              : undefined
+          }
+          forms={{ [categoryId]: current }}
+        />
+      );
+      const prior = render(editor);
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Earlier retained draft' },
+      });
+      const key = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('inventory-metadata-edit-v1:'),
+      )!;
+      const retained = sessionStorage.getItem(key);
+      prior.unmount();
+      const read = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(() => {
+          throw new DOMException('storage unavailable');
+        });
+      const write = vi.spyOn(Storage.prototype, 'setItem');
+      const remove = vi.spyOn(Storage.prototype, 'removeItem');
+      try {
+        render(
+          <TaskWorkspace
+            choices={[
+              { id: 'edit', label: 'Edit equipment' },
+              { id: 'other', label: 'Other task' },
+            ]}
+            context="Cable"
+          >
+            {(task) => (task === 'edit' ? editor : <p>Other task content</p>)}
+          </TaskWorkspace>,
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+        await waitFor(() =>
+          expect(screen.getByLabelText('Name')).toBeEnabled(),
+        );
+        expect(screen.getByLabelText('Name')).toHaveValue('Cable');
+        expect(screen.getByText('Nothing to save.')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: exit }));
+        expect(screen.queryByLabelText('Name')).toBeNull();
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+        if (exit === 'Other task')
+          expect(screen.getByText('Other task content')).toBeVisible();
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(submitInventory).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+        write.mockRestore();
+        remove.mockRestore();
+      }
+      expect(sessionStorage.getItem(key)).toBe(retained);
+    },
+  );
+  it('keeps a real non-durable draft guarded when storage hydration and discard reads fail', async () => {
+    const read = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new DOMException('storage unavailable');
+      });
+    try {
+      render(
+        <TaskWorkspace
+          choices={[
+            { id: 'edit', label: 'Edit equipment' },
+            { id: 'other', label: 'Other task' },
+          ]}
+          context="Cable"
+        >
+          {(task) =>
+            task === 'edit' ? (
+              <MetadataForm {...props} forms={{ [categoryId]: form() }} />
+            ) : (
+              <p>Other task content</p>
+            )
+          }
+        </TaskWorkspace>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Edit equipment' }));
+      await waitFor(() => expect(screen.getByLabelText('Name')).toBeEnabled());
+      fireEvent.change(screen.getByLabelText('Name'), {
+        target: { value: 'Keep this draft' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Other task' }));
+      expect(screen.getByRole('alertdialog')).toBeVisible();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Discard and switch' }),
+      );
+      expect(screen.getByLabelText('Name')).toHaveValue('Keep this draft');
+      expect(screen.queryByText('Other task content')).toBeNull();
+      expect(submitInventory).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
   it('guards client links after storage failure, preserves modifiers/new tabs, and allows explicit Stay or discard', () => {
     const storage = vi
       .spyOn(Storage.prototype, 'setItem')

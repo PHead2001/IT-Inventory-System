@@ -21,6 +21,10 @@ UUID, destination UUID and status. These identifiers remain internal.
 The Return form verifies identity, version and current picker eligibility when
 reconciling refreshed suggestions. A successful same-version origin read can
 recover an initial read failure and fill an untouched destination.
+If a later same-version origin read fails, the last verified suggestion,
+destination and clean baseline remain intact, with an explicit read-error
+explanation and no retained confirmation. Only a definitive successful read can
+replace that suggestion, including a verified absence of an eligible origin.
 The recovered destination also updates only that field's clean task baseline,
 so an automatic default leaves a pristine task clean while entered reasons,
 references and other manual changes remain dirty. Manual choices

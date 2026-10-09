@@ -164,7 +164,12 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   // A definitive stale rejection remains blocking even when input edits clear
   // its message or a failed refresh leaves the old props in place.
   const stale = newerSnapshot || rejectedVersion === version;
-  const nextReturnOrigin = resolveReturnOrigin(latest);
+  const fetchedReturnOrigin = resolveReturnOrigin(latest);
+  // A failed read is not a new assignment-origin fact. Retain the last
+  // verified suggestion, but mark it stale until a definitive read succeeds.
+  const nextReturnOrigin = fetchedReturnOrigin.loadError
+    ? { ...returnOrigin, loadError: true }
+    : fetchedReturnOrigin;
   // Same-version reads can recover a failed lookup. Crossing versions still
   // requires explicit baseline adoption, and unresolved commands stay frozen.
   if (
@@ -180,7 +185,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       returnOrigin.loadError !== nextReturnOrigin.loadError)
   ) {
     setReturnOrigin(nextReturnOrigin);
-    if (!destinationTouched) {
+    if (!nextReturnOrigin.loadError && !destinationTouched) {
       setValues((old) => ({
         ...old,
         destination_location_id: nextReturnOrigin.locationId ?? '',
@@ -717,7 +722,9 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
                 </Button>
                 <p className="text-sm text-slate-400">
                   {returnOrigin.loadError
-                    ? 'The previous storage location could not be checked. Choose a destination, or refresh to retry.'
+                    ? returnOrigin.status === 'suggested'
+                      ? 'The previous storage location could not be checked again. The last verified suggestion is retained. Choose a destination, or refresh to retry.'
+                      : 'The previous storage location could not be checked. Choose a destination, or refresh to retry.'
                     : returnOrigin.status === 'suggested'
                       ? 'Initially suggested from this asset’s site assignment. You can choose another destination.'
                       : returnOrigin.status === 'no_storage_origin'

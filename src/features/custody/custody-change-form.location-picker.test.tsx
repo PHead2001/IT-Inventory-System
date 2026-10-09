@@ -147,6 +147,111 @@ it('reconciles a failed origin read after same-version refresh only for the orig
   expect(submitCustody).not.toHaveBeenCalled();
 });
 
+it.each(['close', 'switch', 'reason'] as const)(
+  'retains the verified return default and clean baseline through a failed refresh on %s',
+  (exit) => {
+    const workspace = (failed: boolean) => (
+      <TaskWorkspace
+        choices={[
+          { id: 'return', label: 'Return asset' },
+          { id: 'other', label: 'Other task' },
+        ]}
+        context="Laptop"
+      >
+        {(task) =>
+          task === 'return' ? (
+            <CustodyChangeForm
+              {...returnProps}
+              returnSuggestion={
+                failed ? undefined : returnProps.returnSuggestion
+              }
+              returnSuggestionError={failed}
+            />
+          ) : (
+            <p>Other task content</p>
+          )
+        }
+      </TaskWorkspace>
+    );
+    const view = render(workspace(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Return asset' }));
+    if (exit === 'reason')
+      fireEvent.change(screen.getByLabelText('Reason (optional)'), {
+        target: { value: 'Keep my reason' },
+      });
+    view.rerender(workspace(true));
+    expect(returnPicker()).toHaveTextContent('Server Rack');
+    expect(screen.getByText(/could not be checked/)).toBeVisible();
+    expect(screen.queryByText(/Initially suggested/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: exit === 'close' ? 'Close task' : 'Other task',
+      }),
+    );
+    if (exit === 'reason') {
+      expect(screen.getByRole('alertdialog')).toBeVisible();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Stay with this task' }),
+      );
+      expect(returnPicker()).toHaveTextContent('Server Rack');
+      expect(screen.getByLabelText('Reason (optional)')).toHaveValue(
+        'Keep my reason',
+      );
+    } else {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(
+        screen.queryByRole('form', { name: 'Return to storage' }),
+      ).toBeNull();
+      if (exit === 'switch')
+        expect(screen.getByText('Other task content')).toBeVisible();
+    }
+    expect(submitCustody).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['suggested', 'no_storage_origin'] as const)(
+  'keeps the last verified return destination on read failure, then adopts a definitive %s result',
+  async (status) => {
+    const user = userEvent.setup();
+    const view = render(<CustodyChangeForm {...returnProps} />);
+    await user.click(
+      screen.getByRole('button', { name: 'Review return to storage' }),
+    );
+    view.rerender(
+      <CustodyChangeForm
+        {...returnProps}
+        returnSuggestion={undefined}
+        returnSuggestionError
+      />,
+    );
+    expect(returnPicker()).toHaveTextContent('Server Rack');
+    expect(
+      screen.getByText(/last verified suggestion is retained/),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    ).toBeNull();
+    view.rerender(
+      <CustodyChangeForm
+        {...returnProps}
+        returnSuggestion={{
+          ...returnProps.returnSuggestion,
+          status,
+          locationId: status === 'suggested' ? drawer.id : null,
+        }}
+      />,
+    );
+    expect(returnPicker()).toHaveTextContent(
+      status === 'suggested' ? 'Drawer 1' : 'Select a location',
+    );
+    expect(screen.queryByText(/could not be checked/)).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    ).toBeNull();
+    expect(submitCustody).not.toHaveBeenCalled();
+  },
+);
+
 it.each(['manual', 'cleared'] as const)(
   'preserves a %s destination when a failed same-version origin read succeeds',
   async (choice) => {
@@ -381,6 +486,15 @@ it('suggests a verified Return origin and preserves a manual choice and explicit
   view.rerender(
     <CustodyChangeForm
       {...props}
+      returnSuggestion={undefined}
+      returnSuggestionError
+    />,
+  );
+  expect(picker).toHaveTextContent('Drawer 1');
+  expect(screen.getByText(/could not be checked/)).toBeVisible();
+  view.rerender(
+    <CustodyChangeForm
+      {...props}
       returnSuggestion={{
         ...props.returnSuggestion,
         locationId: rack.id,
@@ -390,6 +504,14 @@ it('suggests a verified Return origin and preserves a manual choice and explicit
   );
   expect(picker).toHaveTextContent('Drawer 1');
   await user.click(screen.getByRole('button', { name: 'Clear destination' }));
+  view.rerender(
+    <CustodyChangeForm
+      {...props}
+      returnSuggestion={undefined}
+      returnSuggestionError
+    />,
+  );
+  expect(picker).toHaveTextContent('Select a location');
   view.rerender(<CustodyChangeForm {...props} />);
   expect(picker).toHaveTextContent('Select a location');
   expect(submitCustody).not.toHaveBeenCalled();
