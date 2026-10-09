@@ -546,6 +546,9 @@ test('viewer controls personal motion in Settings and retains it across routes w
   const preference = page.getByRole('region', {
     name: 'Appearance & preferences',
   });
+  await expect(
+    preference.getByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toBeEnabled();
   await preference
     .getByRole('switch', { name: 'Reduce motion in this browser' })
     .focus();
@@ -575,6 +578,61 @@ test('viewer controls personal motion in Settings and retains it across routes w
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
 });
 
+test('motion Settings waits for the browser choice before the first keyboard activation', async ({
+  page,
+  context,
+}) => {
+  await signIn(page, 'viewer');
+  for (const saved of [false, true]) {
+    await page.evaluate(
+      (value) =>
+        localStorage.setItem('it-inventory-reduce-motion', String(value)),
+      saved,
+    );
+    const probe = await context.newPage();
+    await probe.emulateMedia({ reducedMotion: 'no-preference' });
+    let release!: () => void;
+    const scripts = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await probe.route('**/*', async (route) => {
+      if (route.request().resourceType() === 'script') await scripts;
+      await route.continue();
+    });
+    try {
+      await probe.goto('/settings', { waitUntil: 'commit' });
+      const toggle = probe.getByRole('switch', {
+        name: 'Reduce motion in this browser',
+      });
+      await expect(toggle).toBeVisible();
+      await expect(toggle).toBeDisabled();
+      await expect(toggle).toHaveAccessibleDescription(
+        "Loading this browser's motion preference.",
+      );
+      await expect(probe.locator('html')).toHaveAttribute(
+        'data-motion',
+        'reduced',
+      );
+      release();
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toHaveAttribute('aria-checked', String(saved));
+      await toggle.focus();
+      await probe.keyboard.press('Space');
+      await expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+      await expect(probe.locator('html')).toHaveAttribute(
+        'data-motion',
+        saved ? 'full' : 'reduced',
+      );
+      await probe.reload();
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+    } finally {
+      release();
+      await probe.close();
+    }
+  }
+});
+
 for (const width of [1280, 375, 390]) {
   for (const reduced of [false, true]) {
     test(`working controls preserve accessible state at ${width}px with ${reduced ? 'Reduced' : 'Full'} motion`, async ({
@@ -589,6 +647,7 @@ for (const width of [1280, 375, 390]) {
       const toggle = page.getByRole('switch', {
         name: 'Reduce motion in this browser',
       });
+      await expect(toggle).toBeEnabled();
       await expect(toggle).toHaveAttribute('aria-checked', 'false');
       await toggle.focus();
       await page.keyboard.press('Space');

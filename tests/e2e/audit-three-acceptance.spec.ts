@@ -204,6 +204,12 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       `a[href="/settings/locations/${before.data!.code}"]`,
     );
     await search.press('Tab');
+    // Search reveals matching ancestors; Tab enters the tree at its root.
+    const tree = page.getByRole('tree', { name: 'Locations' });
+    await expect(
+      tree.getByRole('treeitem').first().getByRole('link'),
+    ).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(link).toBeFocused();
     await page.keyboard.press('Enter');
     const form = page.locator('form');

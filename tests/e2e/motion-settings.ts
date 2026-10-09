@@ -8,6 +8,7 @@ export async function setLocalReducedMotion(page: Page, reduced: boolean) {
     const toggle = settings.getByRole('switch', {
       name: 'Reduce motion in this browser',
     });
+    await expect(toggle).toBeEnabled();
     if ((await toggle.getAttribute('aria-checked')) !== String(reduced))
       await toggle.click();
     await expect(

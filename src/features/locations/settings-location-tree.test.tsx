@@ -86,6 +86,25 @@ const group = {
   parent_id: root.id,
 };
 const deepLeaf = { ...leaf, parent_id: group.id };
+it('enters a searched tree at its ancestor and reaches the match with arrows before native link activation', async () => {
+  const user = userEvent.setup();
+  render(<SettingsLocationTree locations={[root, leaf]} />);
+  await user.type(screen.getByRole('searchbox'), 'ITC-D07');
+  const ancestor = within(
+    screen.getByRole('treeitem', { name: /^IT Closet/ }),
+  ).getByRole('link');
+  const match = within(
+    screen.getByRole('treeitem', { name: /^Drawer 7/ }),
+  ).getByRole('link');
+  await user.tab();
+  expect(ancestor).toHaveFocus();
+  expect(match).toHaveAttribute('tabindex', '-1');
+  await user.keyboard('{ArrowDown}');
+  expect(match).toHaveFocus();
+  expect(match).toHaveAttribute('tabindex', '0');
+  expect(match).toHaveAttribute('href', '/settings/locations/ITC-D07');
+});
+
 it('collapses below the first level and reveals search ancestors without losing the browsing expansion', () => {
   render(<SettingsLocationTree locations={[deepLeaf, group, root]} />);
   expect(screen.getAllByRole('treeitem')).toHaveLength(2);

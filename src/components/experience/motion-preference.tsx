@@ -7,6 +7,18 @@ const storageKey = 'it-inventory-reduce-motion';
 const changeEvent = 'it-inventory-motion-change';
 let volatilePreference: boolean | null = null;
 
+function subscribeReadiness() {
+  return () => {};
+}
+
+function browserReady() {
+  return true;
+}
+
+function serverReady() {
+  return false;
+}
+
 function subscribe(listener: () => void) {
   function onStorage(event: StorageEvent) {
     if (event.key !== storageKey && event.key !== null) return;
@@ -76,6 +88,11 @@ export function MotionPreference({ children }: { children: React.ReactNode }) {
 export function MotionToggle() {
   const descriptionId = useId();
   const { local, system } = useMotionState();
+  const ready = useSyncExternalStore(
+    subscribeReadiness,
+    browserReady,
+    serverReady,
+  );
 
   function toggle() {
     const next = !local;
@@ -94,6 +111,7 @@ export function MotionToggle() {
         type="button"
         role="switch"
         onClick={toggle}
+        disabled={!ready}
         className="experience-motion-toggle"
         aria-checked={local}
         aria-label="Reduce motion in this browser"
@@ -104,17 +122,19 @@ export function MotionToggle() {
           <span className="experience-motion-track">
             <span />
           </span>
-          {local ? 'On' : 'Off'}
+          {!ready ? 'Loading' : local ? 'On' : 'Off'}
         </span>
       </button>
       <p id={descriptionId} className="experience-muted text-sm">
-        {local
-          ? system
-            ? 'Reduced motion is active. Your system also requires reduced motion.'
-            : 'Reduced motion is active in this browser.'
-          : system
-            ? 'Reduced motion is required by your system, even when this switch is off.'
-            : 'Full motion is active.'}
+        {!ready
+          ? "Loading this browser's motion preference."
+          : local
+            ? system
+              ? 'Reduced motion is active. Your system also requires reduced motion.'
+              : 'Reduced motion is active in this browser.'
+            : system
+              ? 'Reduced motion is required by your system, even when this switch is off.'
+              : 'Full motion is active.'}
       </p>
     </div>
   );

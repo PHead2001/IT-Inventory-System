@@ -729,6 +729,7 @@ test('desktop navigation reaches personal motion Settings after long-page scroll
     const toggle = page.getByRole('switch', {
       name: 'Reduce motion in this browser',
     });
+    await expect(toggle).toBeEnabled();
     await toggle.scrollIntoViewIfNeeded();
     const toggleBox = await toggle.boundingBox();
     expect(toggleBox).toBeTruthy();

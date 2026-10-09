@@ -96,6 +96,45 @@ it('keeps persisted local reduction during hydration when OS motion is normal', 
   container.remove();
 });
 
+it.each([false, true])(
+  'keeps the switch unavailable until the saved browser choice (%s) is known, then toggles that choice',
+  async (saved) => {
+    mockSystemMotion(false);
+    window.localStorage.setItem('it-inventory-reduce-motion', String(saved));
+    const view = (
+      <MotionPreference>
+        <MotionToggle />
+      </MotionPreference>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(view);
+    document.body.appendChild(container);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      const toggle = container.querySelector('button')!;
+      expect(toggle).toBeDisabled();
+      expect(toggle).toHaveAccessibleDescription(
+        "Loading this browser's motion preference.",
+      );
+      await act(async () => {
+        root = hydrateRoot(container, view);
+      });
+      await waitFor(() => {
+        expect(toggle).toBeEnabled();
+        expect(toggle).toHaveAttribute('aria-checked', String(saved));
+      });
+      await userEvent.setup().click(toggle);
+      expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(!saved),
+      );
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  },
+);
+
 it('combines OS and local choices and responds to either changing', async () => {
   const user = userEvent.setup();
   const setSystem = mockSystemMotion();
