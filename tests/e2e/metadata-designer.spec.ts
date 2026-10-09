@@ -5,6 +5,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import type { MetadataDefinition } from '../../src/features/metadata/contracts';
 
 async function signIn(page: Page) {
   await page.goto('/login');
@@ -33,10 +34,12 @@ function inspectorFor(control: Locator) {
 }
 
 async function inspectControl(control: Locator) {
-  await control.press('Enter');
   const designer = control.locator(
     'xpath=ancestor::section[@aria-labelledby="metadata-settings-heading"]',
   );
+  const canvas = designer.getByRole('button', { name: 'Canvas', exact: true });
+  if (await canvas.isVisible()) await canvas.click();
+  await control.press('Enter');
   const tab = designer.getByRole('button', { name: 'Inspector', exact: true });
   if (await tab.isVisible()) await tab.click();
   await expect(
@@ -131,6 +134,12 @@ test('phone designer edits publish with one save and render in quantity and asse
   );
   await connectorControl.press('Enter');
   await expect(
+    designer
+      .getByTestId('designer-inspector')
+      .getByRole('heading', { name: 'Inspector', exact: true }),
+  ).toBeFocused();
+  await panels.getByRole('button', { name: 'Canvas', exact: true }).click();
+  await expect(
     designer.getByRole('button', { name: 'Drag Connector type' }),
   ).toBeVisible();
   await designer.getByRole('button', { name: 'Add section' }).click();
@@ -210,6 +219,234 @@ test('phone designer edits publish with one save and render in quantity and asse
   await page.goto(assetUrl);
   await expect(page.getByText('HDMI', { exact: true })).toBeVisible();
 });
+
+for (const { width, height } of [
+  { width: 1180, height: 757 },
+  { width: 1050, height: 757 },
+  { width: 390, height: 757 },
+  { width: 1180, height: 300 },
+]) {
+  test(`late nested field settings remain reachable with real pointer and keyboard input at ${width}x${height}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await signIn(page);
+    const category = `Inspector ${randomUUID().slice(0, 8)}`;
+    await page.goto('/settings/categories');
+    await page.getByLabel('Display name').fill(category);
+    await page.getByRole('button', { name: 'Add category' }).click();
+    await expect(page.getByRole('status')).toContainText('Category added.');
+    const designer = await chooseDesigner(page, category);
+    await designer
+      .getByRole('button', { name: 'Recovery & advanced', exact: true })
+      .click();
+    await designer.getByText('Advanced JSON recovery', { exact: true }).click();
+    await designer
+      .getByRole('button', { name: 'Load current document JSON' })
+      .click();
+    const json = designer.getByLabel('Form definition JSON');
+    const definition = JSON.parse(
+      await json.inputValue(),
+    ) as MetadataDefinition;
+    for (let index = 0; index < 14; index++) {
+      const fieldId = randomUUID();
+      definition.fields.push({
+        id: fieldId,
+        type: 'short_text',
+        label: `Earlier field ${index}`,
+        applies_to: ['quantity', 'asset'],
+        required: false,
+        rules: {},
+        options: [],
+      });
+      definition.layout.push({
+        id: randomUUID(),
+        label: `Earlier section ${index}`,
+        controls: [
+          { id: randomUUID(), kind: 'field', field_id: fieldId, width: 12 },
+        ],
+      });
+    }
+    const fieldId = randomUUID();
+    const controlId = randomUUID();
+    const options: MetadataDefinition['fields'][number]['options'] = [];
+    for (let index = 0; index < 40; index++) {
+      const parent = randomUUID();
+      options.push({
+        id: parent,
+        parent_id: null,
+        label: `Long parent choice ${index}`,
+        active: true,
+      });
+      options.push({
+        id: randomUUID(),
+        parent_id: parent,
+        label: `Nested child choice ${index}`,
+        active: true,
+      });
+    }
+    const label = 'Late nested inspector field';
+    definition.fields.push({
+      id: fieldId,
+      type: 'hierarchical_select',
+      label,
+      applies_to: ['quantity', 'asset'],
+      required: false,
+      rules: {},
+      options,
+    });
+    definition.layout.push({
+      id: randomUUID(),
+      label: 'Late section',
+      controls: [
+        { id: controlId, kind: 'field', field_id: fieldId, width: 12 },
+      ],
+    });
+    await json.fill(JSON.stringify(definition));
+    await designer
+      .getByRole('button', { name: 'Apply JSON to visual editor' })
+      .click();
+    await page.setViewportSize({ width, height });
+    const panels = designer.getByRole('navigation', {
+      name: 'Designer panels',
+    });
+    if (width < 1152)
+      await panels
+        .getByRole('button', { name: 'Library', exact: true })
+        .click();
+    await designer
+      .getByTestId('designer-library')
+      .getByRole('button', { name: new RegExp(`^${label} ·`) })
+      .click();
+    const inspector = designer.getByTestId('designer-inspector');
+    const control = designer.locator(`[data-control-id="${controlId}"]`);
+    await expect(
+      inspector.getByLabel('Field name', { exact: true }),
+    ).toBeInViewport();
+    const flow = height === 300;
+    if (width >= 1152 && !flow) await expect(control).toBeFocused();
+    else
+      await expect(
+        inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+      ).toBeFocused();
+    await expect
+      .poll(() => inspector.evaluate((node) => node.scrollTop))
+      .toBe(0);
+    const geometry = await inspector.evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const toolbar = document.querySelector(
+        '[role="toolbar"][aria-label="Form designer"]',
+      )!;
+      return {
+        width: bounds.width,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        height: bounds.height,
+        toolbarBottom:
+          getComputedStyle(toolbar).position === 'sticky'
+            ? toolbar.getBoundingClientRect().bottom
+            : 0,
+        scroll: node.scrollHeight,
+        viewport: innerHeight,
+      };
+    });
+    if (width >= 1152) expect(geometry.width).toBeGreaterThanOrEqual(288);
+    expect(geometry.top).toBeGreaterThanOrEqual(geometry.toolbarBottom);
+    if (!flow)
+      expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport + 1);
+    if (!flow) expect(geometry.scroll).toBeGreaterThan(geometry.height);
+    else expect(geometry.height).toBeGreaterThan(geometry.viewport);
+    if (flow) {
+      await expect(designer.getByTestId('designer-panes')).toHaveAttribute(
+        'data-designer-flow',
+        'true',
+      );
+      expect(
+        await designer
+          .getByRole('toolbar', { name: 'Form designer' })
+          .evaluate((node) => getComputedStyle(node).position),
+      ).toBe('static');
+      expect(
+        await inspector.evaluate((node) => getComputedStyle(node).maxHeight),
+      ).toBe('none');
+    }
+    await inspector
+      .getByLabel('Field name', { exact: true })
+      .fill('Unsaved nested field');
+    await inspector
+      .getByRole('button', { name: 'Choices', exact: true })
+      .click();
+    await expect(
+      inspector.getByRole('heading', { name: 'Choices', exact: true }),
+    ).toBeInViewport();
+    const pageY = await page.evaluate(() => scrollY);
+    const bounds = (await inspector.boundingBox())!;
+    await page.mouse.move(
+      bounds.x + bounds.width / 2,
+      Math.max(32, Math.min(bounds.y + bounds.height / 2, height - 32)),
+    );
+    await page.mouse.wheel(0, 500);
+    if (flow) {
+      await expect
+        .poll(() => page.evaluate(() => scrollY))
+        .toBeGreaterThan(pageY);
+      expect(await inspector.evaluate((node) => node.scrollTop)).toBe(0);
+    } else {
+      await expect
+        .poll(() => inspector.evaluate((node) => node.scrollTop))
+        .toBeGreaterThan(100);
+      expect(await page.evaluate(() => scrollY)).toBe(pageY);
+    }
+    await inspector
+      .getByRole('button', { name: 'Layout', exact: true })
+      .click();
+    await expect(
+      inspector.getByRole('combobox', { name: 'Preferred width', exact: true }),
+    ).toBeInViewport();
+    await expect(
+      inspector.getByRole('region', { name: 'Appearance' }),
+    ).toBeFocused();
+    await inspector
+      .getByRole('button', { name: 'Basics', exact: true })
+      .focus();
+    await page.keyboard.press('Shift+Tab');
+    expect(
+      await inspector.evaluate((node) => node.contains(document.activeElement)),
+    ).toBe(false);
+    if (width < 1152)
+      await panels.getByRole('button', { name: 'Canvas', exact: true }).click();
+    await control.press('Enter');
+    await expect(control).toHaveAttribute('data-selected', 'true');
+    await expect(
+      inspector.getByLabel('Field name', { exact: true }),
+    ).toHaveValue('Unsaved nested field');
+    await expect
+      .poll(() => inspector.evaluate((node) => node.scrollTop))
+      .toBe(0);
+    await expect(
+      designer.getByRole('status', { name: 'Form save state' }),
+    ).toContainText('Unsaved changes');
+    if (width < 1152 || flow)
+      await expect(
+        inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+      ).toBeFocused();
+    if (flow) {
+      await page.setViewportSize({ width, height: 757 });
+      await expect(designer.getByTestId('designer-panes')).not.toHaveAttribute(
+        'data-designer-flow',
+      );
+      await control.press('Enter');
+      await expect(control).toBeFocused();
+      await expect(
+        inspector.getByLabel('Field name', { exact: true }),
+      ).toHaveValue('Unsaved nested field');
+      expect(
+        await inspector.evaluate((node) => getComputedStyle(node).maxHeight),
+      ).not.toBe('none');
+    }
+  });
+}
 
 test('phone designer preserves touch targets, inline boolean state, and long-text validation', async ({
   page,

@@ -2994,6 +2994,81 @@ describe('category form designer', () => {
     await waitFor(() => expect(name).toHaveFocus());
     expect(name).toHaveValue('Inspection notes');
   });
+  it.each(['desktop', 'phone', 'short'] as const)(
+    'resets the selected inspector scroll while preserving unsaved input and intentional %s focus',
+    (viewport) => {
+      mount();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(
+        (callback) => {
+          frames.push(callback);
+          return frames.length;
+        },
+      );
+      addField('Late field');
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      const inspector = screen.getByTestId('designer-inspector');
+      const canvas = screen.getByTestId('designer-canvas');
+      const control = canvas.querySelector<HTMLElement>(
+        '[data-control-id][data-selected="true"]',
+      )!;
+      const identity = control.dataset.controlId;
+      inspector.scrollTop = 900;
+      fireEvent.change(screen.getByLabelText('Field name'), {
+        target: { value: 'Unsaved literal <draft>' },
+      });
+      expect(inspector.scrollTop).toBe(900);
+      const scroll = vi.fn();
+      inspector.scrollTo = scroll;
+      fireEvent.click(
+        within(inspector).getByRole('button', { name: 'Layout' }),
+      );
+      expect(
+        within(inspector).getByRole('region', { name: 'Appearance' }),
+      ).toHaveFocus();
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText('Field name')).toHaveValue(
+        'Unsaved literal <draft>',
+      );
+      const select = within(canvas).getByRole('button', {
+        name: 'Inspect Unsaved literal <draft> settings',
+      });
+      fireEvent.click(select);
+      // Model responsive CSS after the panel state commits, before queued focus.
+      if (viewport === 'phone') canvas.style.display = 'none';
+      if (viewport === 'short')
+        screen.getByTestId('designer-panes').dataset.designerFlow = 'true';
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(inspector.scrollTop).toBe(0);
+      expect(control).toHaveAttribute('role', 'group');
+      expect(control.dataset.controlId).toBe(identity);
+      expect(control.querySelector('button button, button input')).toBeNull();
+      if (viewport === 'desktop') expect(control).toHaveFocus();
+      else
+        expect(
+          within(inspector).getByRole('heading', {
+            name: 'Inspector',
+          }),
+        ).toHaveFocus();
+      expect(screen.getByLabelText('Field name')).toHaveValue(
+        'Unsaved literal <draft>',
+      );
+      if (viewport === 'short') {
+        const appearance = within(inspector).getByRole('region', {
+          name: 'Appearance',
+        });
+        const documentJump = vi.fn();
+        appearance.scrollIntoView = documentJump;
+        fireEvent.click(
+          within(inspector).getByRole('button', { name: 'Layout' }),
+        );
+        expect(documentJump).toHaveBeenCalledOnce();
+        expect(scroll).toHaveBeenCalledOnce();
+        expect(appearance).toHaveFocus();
+      }
+      expect(saveMetadataForm).not.toHaveBeenCalled();
+    },
+  );
   it('applies pasted paths in one undoable designer edit', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
