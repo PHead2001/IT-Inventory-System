@@ -5,6 +5,14 @@ import FormsPage from './forms/page';
 import CategoryFormPage from './forms/[categoryId]/page';
 import LabelSettingsPage from './labels/page';
 import { SettingsNavigation } from './settings-navigation';
+vi.mock('@/features/build-info/read.server', () => ({
+  readBuildProvenance: () => ({
+    environment: 'Local',
+    version: '0.1.0',
+    commit: null,
+    buildStarted: null,
+  }),
+}));
 
 const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
@@ -136,6 +144,10 @@ it('offers browser-personal motion preferences on the member Settings landing pa
     screen.getByRole('button', { name: 'Reduce motion locally' }),
   ).toBeVisible();
   expect(mocks.categories).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole('region', { name: 'Build & environment' }),
+  ).toHaveTextContent('Local · Version 0.1.0');
+  expect(screen.getByText('Build support details')).toBeInTheDocument();
 });
 
 it('does not fetch a form for viewers or inactive category links', async () => {

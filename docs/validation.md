@@ -300,3 +300,31 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## Served build identity
+
+Focused tests in `src/features/build-info` cover metadata classification, conflicting
+production labels, malformed/missing commits, development fallback and the allowlist.
+The Settings route tests retain ordinary member access without configuration privilege;
+existing session tests exercise anonymous, inactive, viewer and staff membership.
+`tests/e2e/build-info.spec.ts` compares the actual production-build manifest with the
+signed-in viewer Settings disclosure, checks anonymous denial, exact time across reload,
+keyboard access and 375 px horizontal overflow. Run it through the canonical
+`npm run test:e2e -- tests/e2e/build-info.spec.ts` with exclusive local backend ownership.
+A unit pass or local build does not prove Vercel metadata, staging synchronization,
+production release or hosted visual acceptance. Retain the `.next/required-server-files.json`
+allowlisted snapshot plus compiled Settings artifact identity as local build evidence;
+never publish the entire environment or manifest containing unrelated configuration.
+
+The dedicated compiled-provenance test in `tests/e2e/build-info.spec.ts` automatically
+runs `node --test tests/build-provenance-compiled.test.mjs` against the existing
+backend-specific build during canonical `npm run test:e2e` and focused build-info runs.
+It uses the current Node executable, a bounded subprocess deadline/output limit and
+sanitized status/TAP assertions; nonzero exit or missing regression execution fails
+the browser suite. No additional build, package script or workflow is introduced.
+The same command can also run directly after `npm run build` without a database.
+It loads the actual compiled Settings page and compares its read-helper result with
+the saved build configuration, then changes runtime environment and repeats calls
+in two fresh processes. This proves literal immutability without a database; it does
+not render an authenticated HTTP request. Boundary tests separately exercise delayed
+worker reload, strict bridge rejection, typegen/import fallback and fresh build lifetimes.

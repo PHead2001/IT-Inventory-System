@@ -200,3 +200,55 @@ The database key ID is `stfileoembzjxwhxgtiypec`. An inactive sentinel row persi
 Activation and final success readback require the staging alias to serve the exact READY candidate ID and SHA with fresh matching runtime proof. The expected baseline remains permitted during building and reconciliation, but a rollback to it after candidate verification blocks activation or a success result, including reruns with an already active key. `STAGING_RUNTIME_PENDING` leaves a newly staged key inactive; obtain the missing runtime proof and rerun the same operation to recover its deployment without another POST. An already matching active key persists across supported candidate redeploys; it is never automatically rotated or revoked during fixture cleanup. Do not copy secrets into commands, logs, browser evidence, committed files, or run reports. Retain only the returned deployment/SHA/revision/fingerprint evidence outside the protected in-memory provisioning operation.
 
 For an unavailable validator, first inspect the alias/SHA/backend tuple, applied migrations, active key ID/fingerprint, and branch-specific server env ownership. Repair only the verified nonproduction boundary under its explicit authorization, then verify a fresh deployment received the values. A pending build or missing runtime proof is pending work, not a terminal failure or permission to redeploy. A lost POST response recovers only one fully matching deployment; no match, multiple matches, or a persisted env marker without a candidate is uncertain and forbids blind replay. The operator must reconcile authoritative provider records before another write. Only verified terminal ERROR/CANCELED attempts can advance, up to three. The same-SHA operation refuses changed backend/migration revisions. A new candidate SHA may bind freshly verified backend/migration revisions with the same key only after the previous operation is authoritatively terminal: READY with matching runtime proof, or ERROR/CANCELED. Pending, unknown and uncertain previous operations preserve their existing intent and block the new candidate; the helper rechecks this before writes. An exhausted budget, retired/manual key, or changed alias owner requires owner review rather than automatic takeover. Hosted publication/private retrieval and verified original/derivative deletion remain separate acceptance evidence after provisioning.
+
+### Served build identity and staging diagnosis
+
+Settings shows an immutable build snapshot to every active application member,
+including viewers. `next.config.ts` captures it during production build configuration:
+package version, a validated full 40-hex `VERCEL_GIT_COMMIT_SHA`, environment label,
+and the UTC **Build started** instant. That timestamp is config construction at build
+start, not deploy completion, server start or request time. Missing/invalid commit
+metadata reads **Unavailable**; it never queries upstream main or assumes a branch
+is latest. Development builds explicitly show Development with unavailable build
+identity. Local production builds need an explicit `APP_ENV` to identify their environment.
+
+Set `APP_ENV=staging` for the persistent staging Preview deployment. Ordinary Vercel
+Preview builds display Preview; a production Vercel target/environment always displays
+Production even if `APP_ENV` conflicts. Unknown/inconsistent provider metadata stays
+Unknown. Outside Vercel, exact `local`, `staging`, `preview` and `production` labels are
+accepted; `NODE_ENV=production` alone proves no deployment environment.
+
+Only these nonsensitive literals enter Next's `env` compilation. Next configuration
+`env` values are publicly bundleable, so never add credentials, tokens, endpoints,
+branch messages or wholesale environment serialization. A server-only reader supplies
+the protected Settings section; there is no public identity endpoint or response header.
+See the official [Next env compilation contract](https://nextjs.org/docs/app/api-reference/config/next-config-js/env)
+and [Vercel system metadata](https://vercel.com/docs/environment-variables/system-environment-variables).
+Rebuild to change identity; runtime environment changes and process restarts do not
+change the served build snapshot. Its support disclosure exposes the full commit and
+exact time without making release-readiness claims.
+
+For C404, the checked-in staging workflow advances Git only on `workflow_run` after
+successful Foundation CI for a main push (including its release prerequisite). The
+scheduled/manual paths maintain staging and mirror users; `sync_git` is skipped on
+those paths. Dispatch success therefore does not prove Git staging advanced or Vercel
+served a new revision. Compare the full Settings commit with the intended released
+SHA, then independently verify the matching workflow, Git staging ref, ready Vercel
+deployment and stable alias/backend. The audit acceptance register E1 records a lead
+observation of runner queueing followed by native workflow success. This source
+observation was not reverified by this implementation; it does not certify synchronization.
+No release gate, workflow, runner or hosted configuration is changed here.
+
+The snapshot bridge depends on the pinned Next 16.3.6 build-worker lifecycle:
+Turbopack removes config from its worker context and reloads it with
+`NEXT_PRIVATE_BUILD_WORKER=1`. The canonical `next build` parent mints one snapshot,
+overwrites any inherited external bridge and memoizes it for that process; workers
+strictly validate and reuse exactly those bytes. Missing/malformed worker snapshots
+fail the build. The private `__IT_INVENTORY_BUILD_PROVENANCE` process variable is not
+added to public config env. `next typegen` also loads the production-build config phase,
+so only canonical CLI `build` (or its marked worker) activates snapshot generation;
+development, typegen, start and ordinary imports do not mint production identity.
+Programmatic Next builds are outside this narrow CLI contract. A new CLI build process
+mints a fresh snapshot even if it inherits an old bridge. The worker marker is private
+framework behavior, not a public Next API: a Next upgrade requires the actual compiled
+artifact test again, not just unit configuration coverage.
