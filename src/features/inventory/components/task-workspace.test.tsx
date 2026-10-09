@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
@@ -330,4 +330,66 @@ it('opens a same-version no-op completion immediately and keeps pending/uncertai
     expect(screen.getByRole('textbox')).toBe(input);
     expect(launcher).toBeDisabled();
   }
+});
+
+it('blocks a withdrawn task immediately and never silently revives its retained dirty draft', () => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'retained private draft' },
+  });
+  const input = screen.getByLabelText('receive entry');
+  view.rerender(<Workspace tasks={[choices[1]]} />);
+  expect(input).not.toBeVisible();
+  expect(input).toBeDisabled();
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('no longer available');
+  view.rerender(<Workspace />);
+  expect(input).not.toBeVisible();
+  expect(input).toHaveValue('retained private draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Stay with this task' }));
+  expect(input).not.toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
+  expect(screen.getByLabelText('receive entry')).toHaveValue('');
+  expect(screen.getByRole('heading', { name: 'Receive stock' })).toHaveFocus();
+});
+it('keeps a withdrawn clean task inaccessible and returns focus to Tasks on Close', () => {
+  const view = render(<Workspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  view.rerender(<Workspace tasks={[choices[1]]} />);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.queryByLabelText('receive entry')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Tasks' })).toHaveFocus();
+});
+
+it('rejects interaction and submission from a retained withdrawn form', () => {
+  const submit = vi.fn((event: FormEvent) => event.preventDefault());
+  const click = vi.fn();
+  const content = (eligible: boolean) => (
+    <TaskWorkspace choices={eligible ? choices : [choices[1]]} context="Cable">
+      {() => (
+        <form aria-label="Receive form" onSubmit={submit}>
+          <button type="submit" onClick={click}>
+            Save receipt
+          </button>
+        </form>
+      )}
+    </TaskWorkspace>
+  );
+  const view = render(content(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  const form = screen.getByRole('form', { name: 'Receive form' });
+  const save = screen.getByRole('button', { name: 'Save receipt' });
+  view.rerender(content(false));
+  expect(screen.queryByRole('form', { name: 'Receive form' })).toBeNull();
+  expect(save).toBeDisabled();
+  fireEvent.click(save);
+  fireEvent.submit(form);
+  expect(click).not.toHaveBeenCalled();
+  expect(submit).not.toHaveBeenCalled();
 });

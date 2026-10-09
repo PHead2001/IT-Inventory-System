@@ -10,6 +10,8 @@ export type TaskState = {
 export const TaskStateContext = createContext<
   ((state: TaskState) => void) | null
 >(null);
+export const TaskEligibilityContext = createContext(true);
+export const useTaskEligibility = () => useContext(TaskEligibilityContext);
 export const TaskResetContext = createContext<(() => void) | null>(null);
 export const TaskWarningContext = createContext<
   ((message: string) => void) | null

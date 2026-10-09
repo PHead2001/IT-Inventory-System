@@ -16,6 +16,15 @@ moves also verify current stock and the caller-authorized historical receipt;
 prior receipts remain collapsed, timestamped and immutable while the new intent
 uses a fresh coherent stock/version snapshot.
 
+When a refreshed record withdraws the selected task, the workspace retains its
+mounted draft but hides and disables fresh input/submission. Close or switch
+still requires explicit draft discard. Reintroducing a launcher does not silently
+revive that draft; explicit reentry starts a new instance. Pending and uncertain
+commands retain their exact retry instance, and committed receipts retain Done
+and read recovery. Move more rejects new intent after withdrawal, including
+withdrawal while its fresh snapshot is loading. Actor and record workspace keys
+continue to isolate identities, and server authorization remains authoritative.
+
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 
 Operational timestamp rendering and the appended CSV display-zone metadata follow [shared time](shared-time.md). The protected layout supplies one browser-resolved zone after matching UTC server/initial hydration; canonical instants and datetime entry semantics remain unchanged.

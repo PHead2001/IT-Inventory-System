@@ -12,6 +12,7 @@ import {
   TaskResetContext,
   TaskDiscardContext,
   TaskWarningContext,
+  TaskEligibilityContext,
   type TaskState,
   type TaskDiscard,
 } from './task-state';
@@ -44,6 +45,12 @@ export function TaskWorkspace({
   const scope = useId();
   const [selected, setSelected] = useState<string | null>(null);
   const [instance, setInstance] = useState(0);
+  const [invalidated, setInvalidated] = useState(false);
+  const selectedEligible =
+    selected === null || choices.some((choice) => choice.id === selected);
+  // Once withdrawn, a task needs explicit reentry even if a later refresh
+  // offers it again. Retain its draft/retry instance until deliberate closure.
+  if (!selectedEligible && !invalidated) setInvalidated(true);
   const acknowledgedVersion = useRef<string | undefined>(undefined);
   const [requiredVersion, setRequiredVersion] = useState<string | undefined>(
     undefined,
@@ -70,9 +77,10 @@ export function TaskWorkspace({
   const returnFocusRequested = useRef(false);
   useEffect(() => {
     if (selected) heading.current?.focus();
-  }, [selected, instance]);
+  }, [selected, instance, invalidated]);
   const launcher = useRef<HTMLButtonElement | null>(null);
   const locked = state.pending || state.uncertain;
+  const unavailable = invalidated && !locked && !state.completed;
   useEffect(() => {
     if (
       selected !== null ||
@@ -107,7 +115,7 @@ export function TaskWorkspace({
     if (
       stateRef.current.pending ||
       stateRef.current.uncertain ||
-      (id === selected && !stateRef.current.completed)
+      (id === selected && !stateRef.current.completed && !invalidated)
     )
       return;
     if (
@@ -120,6 +128,7 @@ export function TaskWorkspace({
       return;
     if (stateRef.current.dirty && !stateRef.current.completed) setRequested(id);
     else {
+      setInvalidated(false);
       setInstance((value) => value + 1);
       setRequiredVersion(id === null ? undefined : acknowledgedVersion.current);
       setRefreshError(false);
@@ -275,6 +284,8 @@ export function TaskWorkspace({
                 choices.find((choice) => choice.id === requested)?.label ??
                   activeLabel,
               );
+              setInvalidated(false);
+              setInstance((value) => value + 1);
               setSelected(requested);
               setRequested(undefined);
               stateRef.current = clean;
@@ -296,49 +307,77 @@ export function TaskWorkspace({
             {activeLabel}
           </h3>
 
-          <TaskResetContext.Provider
-            value={() => {
-              if (stateRef.current.pending || stateRef.current.uncertain)
-                return;
-              if (discardTask.current && !discardTask.current()) return;
-              stateRef.current = clean;
-              setSelected(null);
-              setState(clean);
-              returnFocusRequested.current = true;
-            }}
+          {invalidated && (
+            <p role="status">
+              This task is no longer available for a new transaction.
+              {unavailable && ' Close it or choose another task to continue.'}
+            </p>
+          )}
+          <TaskEligibilityContext.Provider
+            value={!invalidated && selectedEligible}
           >
-            <TaskDiscardContext.Provider value={registerDiscard}>
-              <TaskStateContext.Provider value={report}>
-                <TaskWarningContext.Provider value={setWarning}>
-                  {waitingForRecord ? (
-                    <div className="space-y-3">
-                      <p role={refreshError ? 'alert' : 'status'}>
-                        {refreshError
-                          ? 'The current record could not be loaded. Retry before starting another transaction.'
-                          : 'Loading the current record before starting another transaction…'}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setRefreshError(false);
-                          try {
-                            onRefresh?.();
-                          } catch {
-                            setRefreshError(true);
-                          }
+            <TaskResetContext.Provider
+              value={() => {
+                if (stateRef.current.pending || stateRef.current.uncertain)
+                  return;
+                if (discardTask.current && !discardTask.current()) return;
+                stateRef.current = clean;
+                setInvalidated(false);
+                setSelected(null);
+                setState(clean);
+                returnFocusRequested.current = true;
+              }}
+            >
+              <TaskDiscardContext.Provider value={registerDiscard}>
+                <TaskStateContext.Provider value={report}>
+                  <TaskWarningContext.Provider value={setWarning}>
+                    {waitingForRecord ? (
+                      <div className="space-y-3">
+                        <p role={refreshError ? 'alert' : 'status'}>
+                          {refreshError
+                            ? 'The current record could not be loaded. Retry before starting another transaction.'
+                            : 'Loading the current record before starting another transaction…'}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setRefreshError(false);
+                            try {
+                              onRefresh?.();
+                            } catch {
+                              setRefreshError(true);
+                            }
+                          }}
+                        >
+                          Retry loading record
+                        </Button>
+                      </div>
+                    ) : (
+                      <fieldset
+                        hidden={unavailable}
+                        inert={unavailable}
+                        disabled={unavailable}
+                        onClickCapture={(event) => {
+                          if (!unavailable) return;
+                          event.preventDefault();
+                          event.stopPropagation();
                         }}
+                        onSubmitCapture={(event) => {
+                          if (!unavailable) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        className="min-w-0 space-y-3"
                       >
-                        Retry loading record
-                      </Button>
-                    </div>
-                  ) : (
-                    children(selected)
-                  )}
-                </TaskWarningContext.Provider>
-              </TaskStateContext.Provider>
-            </TaskDiscardContext.Provider>
-          </TaskResetContext.Provider>
+                        {children(selected)}
+                      </fieldset>
+                    )}
+                  </TaskWarningContext.Provider>
+                </TaskStateContext.Provider>
+              </TaskDiscardContext.Provider>
+            </TaskResetContext.Provider>
+          </TaskEligibilityContext.Provider>
           <Button
             type="button"
             variant="outline"

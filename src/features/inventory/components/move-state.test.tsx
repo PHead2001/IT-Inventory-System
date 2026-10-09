@@ -1097,3 +1097,98 @@ it('preserves fresh draft inputs and their version when a newer page snapshot ar
   expect(screen.getByText(/Recorded stock changed/)).toBeVisible();
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+
+it('preserves a withdrawn completed receipt and Done while blocking Move more and later resurrection', async () => {
+  const content = (eligible: boolean) => (
+    <TaskWorkspace
+      choices={eligible ? [{ id: 'move', label: 'Move stock' }] : []}
+      context={item.name}
+    >
+      {() => <MutationForm {...props} onRecordPage />}
+    </TaskWorkspace>
+  );
+  const view = render(content(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByText(/move completed/);
+  view.rerender(content(false));
+  expect(screen.getByText(/move completed/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Move more' })).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Move more' }));
+  expect(mocks.snapshot).not.toHaveBeenCalled();
+  view.rerender(content(true));
+  expect(screen.getByRole('button', { name: 'Move more' })).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Done' }));
+  expect(screen.queryByText(/move completed/)).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Tasks' })).toHaveFocus();
+  expect(mocks.submit).toHaveBeenCalledOnce();
+});
+it('rejects Move more if its launcher is withdrawn while the fresh snapshot is loading', async () => {
+  const content = (eligible: boolean) => (
+    <TaskWorkspace
+      choices={eligible ? [{ id: 'move', label: 'Move stock' }] : []}
+      context={item.name}
+    >
+      {() => <MutationForm {...props} onRecordPage />}
+    </TaskWorkspace>
+  );
+  const view = render(content(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByText(/move completed/);
+  let resolve!: (value: Awaited<ReturnType<typeof mocks.snapshot>>) => void;
+  mocks.snapshot.mockImplementationOnce(
+    () =>
+      new Promise((yes) => {
+        resolve = yes;
+      }),
+  );
+  await user.click(screen.getByRole('button', { name: 'Move more' }));
+  view.rerender(content(false));
+  await act(async () =>
+    resolve({
+      item: { ...item, version: 2 },
+      locations: props.locations,
+      balances: props.balances,
+    }),
+  );
+  expect(screen.getByText(/move completed/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Move more' })).toBeDisabled();
+  expect(mocks.submit).toHaveBeenCalledOnce();
+});
+
+it('retains the exact uncertain command after withdrawal and permits its safe retry', async () => {
+  mocks.submit
+    .mockRejectedValueOnce(new Error('Lost response'))
+    .mockResolvedValueOnce(committed);
+  const content = (eligible: boolean) => (
+    <TaskWorkspace
+      choices={eligible ? [{ id: 'move', label: 'Move stock' }] : []}
+      context={item.name}
+    >
+      {() => <MutationForm {...props} onRecordPage />}
+    </TaskWorkspace>
+  );
+  const view = render(content(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
+  const user = await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  const retry = await screen.findByRole('button', {
+    name: 'Retry this move safely',
+  });
+  const original = mocks.submit.mock.calls[0][0];
+  view.rerender(content(false));
+  expect(retry).toBeVisible();
+  expect(retry).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Close task' })).toBeDisabled();
+  await user.click(retry);
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+  expect(screen.getByText(/move completed/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Move more' })).toBeDisabled();
+});

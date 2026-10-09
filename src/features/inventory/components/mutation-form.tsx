@@ -1,5 +1,12 @@
 'use client';
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { countLabel } from '@/lib/count';
 import { Button } from '@/components/ui/button';
@@ -30,6 +37,7 @@ import {
   useTaskReset,
   useTaskDiscard,
   useTaskWarning,
+  useTaskEligibility,
 } from './task-state';
 import { field, panel } from './read-ui';
 import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
@@ -286,6 +294,11 @@ function MutationFormFields({
   freshStart?: Awaited<ReturnType<typeof loadMoveSnapshot>> | null;
 }) {
   const resetTask = useTaskReset();
+  const taskEligible = useTaskEligibility();
+  const taskEligibleRef = useRef(taskEligible);
+  useLayoutEffect(() => {
+    taskEligibleRef.current = taskEligible;
+  }, [taskEligible]);
   const reportTaskWarning = useTaskWarning();
   const router = useRouter();
   // The editable values and their optimistic-concurrency baseline travel together.
@@ -1093,7 +1106,14 @@ function MutationFormFields({
     });
   };
   const refreshMove = (startNew: boolean) => {
-    if (pending || inFlight.current || !item || !actorId) return;
+    if (
+      pending ||
+      inFlight.current ||
+      !item ||
+      !actorId ||
+      (startNew && !taskEligibleRef.current)
+    )
+      return;
     inFlight.current = true;
     startTransition(async () => {
       try {
@@ -1101,6 +1121,7 @@ function MutationFormFields({
           entityId: item.id,
           expectedActorId: submitted.current?.expectedActorId ?? actorId,
         });
+        if (startNew && !taskEligibleRef.current) return;
         if (state?.ok && Number(state.version) > fresh.item.version)
           throw new Error('Stale read');
         setBaseline({
@@ -1634,7 +1655,7 @@ function MutationFormFields({
           </Button>
           <Button
             type="button"
-            disabled={pending}
+            disabled={pending || !taskEligible}
             onClick={() => refreshMove(true)}
             variant="outline"
             className="hover:translate-y-0 active:scale-100"
