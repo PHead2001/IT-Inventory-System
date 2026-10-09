@@ -147,15 +147,41 @@ export function SettingsLocationTree({
         {rows.map((row, index) => (
           <li
             key={row.location.id}
+            id={`${id}-${index}`}
             role="treeitem"
-            aria-labelledby={`${id}-${index}`}
+            aria-labelledby={`${id}-${index}-label`}
+            tabIndex={
+              focused === row.location.id || (focused === null && index === 0)
+                ? 0
+                : -1
+            }
             aria-level={row.depth + 1}
             aria-selected={row.location.code === selectedCode}
             aria-expanded={
               row.hasChildren ? revealed.has(row.location.id) : undefined
             }
-            onFocus={() => setFocused(row.location.id)}
+            onFocus={(event) => {
+              setFocused(row.location.id);
+              if (event.target !== event.currentTarget)
+                event.currentTarget.focus();
+            }}
             onKeyDown={(event) => {
+              if (
+                event.key === 'Enter' &&
+                event.target === event.currentTarget
+              ) {
+                event.preventDefault();
+                event.currentTarget.querySelector('a')?.dispatchEvent(
+                  new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                    altKey: event.altKey,
+                    shiftKey: event.shiftKey,
+                  }),
+                );
+              }
               if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
                 event.preventDefault();
                 focus(
@@ -184,7 +210,7 @@ export function SettingsLocationTree({
                   );
               }
             }}
-            className="flex min-w-0 items-start gap-2 py-2"
+            className="flex min-w-0 items-start gap-2 rounded py-2 focus-visible:outline-2 focus-visible:outline-cyan-400"
             style={{ paddingLeft: row.depth * 16 }}
           >
             {row.hasChildren ? (
@@ -204,12 +230,8 @@ export function SettingsLocationTree({
               <span className="w-11 shrink-0" aria-hidden="true" />
             )}
             <Link
-              id={`${id}-${index}`}
-              tabIndex={
-                focused === row.location.id || (focused === null && index === 0)
-                  ? 0
-                  : -1
-              }
+              id={`${id}-${index}-label`}
+              tabIndex={-1}
               href={`/settings/locations/${encodeURIComponent(row.location.code)}`}
               className="min-w-0 flex-1 rounded py-2 text-cyan-200 underline focus-visible:outline-2 focus-visible:outline-cyan-400"
             >

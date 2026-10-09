@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { SettingsLocationTree } from './settings-location-tree';
 
 const root = {
@@ -29,9 +29,9 @@ it('shares hierarchy order, supports keyboard collapse and full-path search with
   expect(rows[0]).toHaveTextContent('IT Closet');
   expect(rows[1]).toHaveAttribute('aria-level', '2');
   fireEvent.keyDown(rows[0], { key: 'ArrowDown' });
-  expect(within(rows[1]).getByRole('link')).toHaveFocus();
+  expect(rows[1]).toHaveFocus();
   fireEvent.keyDown(rows[1], { key: 'ArrowLeft' });
-  expect(within(rows[0]).getByRole('link')).toHaveFocus();
+  expect(rows[0]).toHaveFocus();
   fireEvent.keyDown(rows[0], { key: 'ArrowLeft' });
   expect(screen.getAllByRole('treeitem')).toHaveLength(1);
   fireEvent.change(screen.getByRole('searchbox'), {
@@ -57,19 +57,15 @@ it('uses one tree Tab stop while arrow keys expose children and pointer collapse
   await user.tab();
   expect(screen.getByRole('searchbox')).toHaveFocus();
   await user.tab();
-  expect(within(parent).getByRole('link')).toHaveFocus();
+  expect(parent).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
   expect(parent).toHaveAttribute('aria-expanded', 'false');
   await user.keyboard('{ArrowRight}{ArrowRight}');
-  expect(
-    within(screen.getByRole('treeitem', { name: /Drawer 7/ })).getByRole(
-      'link',
-    ),
-  ).toHaveFocus();
+  expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveFocus();
   await user.tab();
   expect(screen.getByRole('button', { name: 'After locations' })).toHaveFocus();
   await user.click(screen.getByRole('button', { name: 'Collapse IT Closet' }));
-  expect(within(parent).getByRole('link')).toHaveFocus();
+  expect(parent).toHaveFocus();
   expect(parent).toHaveAttribute('aria-expanded', 'false');
   expect(
     screen.queryByRole('treeitem', { name: /Drawer 7/ }),
@@ -90,19 +86,18 @@ it('enters a searched tree at its ancestor and reaches the match with arrows bef
   const user = userEvent.setup();
   render(<SettingsLocationTree locations={[root, leaf]} />);
   await user.type(screen.getByRole('searchbox'), 'ITC-D07');
-  const ancestor = within(
-    screen.getByRole('treeitem', { name: /^IT Closet/ }),
-  ).getByRole('link');
-  const match = within(
-    screen.getByRole('treeitem', { name: /^Drawer 7/ }),
-  ).getByRole('link');
+  const ancestor = screen.getByRole('treeitem', { name: /^IT Closet/ });
+  const match = screen.getByRole('treeitem', { name: /^Drawer 7/ });
   await user.tab();
   expect(ancestor).toHaveFocus();
   expect(match).toHaveAttribute('tabindex', '-1');
   await user.keyboard('{ArrowDown}');
   expect(match).toHaveFocus();
   expect(match).toHaveAttribute('tabindex', '0');
-  expect(match).toHaveAttribute('href', '/settings/locations/ITC-D07');
+  expect(within(match).getByRole('link')).toHaveAttribute(
+    'href',
+    '/settings/locations/ITC-D07',
+  );
 });
 
 it('collapses below the first level and reveals search ancestors without losing the browsing expansion', () => {
@@ -140,12 +135,10 @@ it('reveals the selected location ancestors with a single selected tree Tab stop
   expect(selected).not.toHaveAttribute('aria-current');
   await user.tab();
   await user.tab();
-  expect(within(selected).getByRole('link')).toHaveFocus();
+  expect(selected).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
   expect(
-    within(screen.getByRole('treeitem', { name: /^Right Storage/ })).getByRole(
-      'link',
-    ),
+    screen.getByRole('treeitem', { name: /^Right Storage/ }),
   ).toHaveFocus();
 });
 
@@ -158,10 +151,10 @@ it('keeps search branch controls truthful and search expansion separate from bro
   ).not.toHaveAttribute('aria-expanded');
   fireEvent.change(search, { target: { value: 'ITC-D07' } });
   const parent = screen.getByRole('treeitem', { name: /^Right Storage/ });
-  within(parent).getByRole('link').focus();
+  parent.focus();
   fireEvent.keyDown(parent, { key: 'ArrowLeft' });
   expect(parent).toHaveAttribute('aria-expanded', 'false');
-  expect(within(parent).getByRole('link')).toHaveFocus();
+  expect(parent).toHaveFocus();
   expect(
     screen.queryByRole('treeitem', { name: /Drawer 7/ }),
   ).not.toBeInTheDocument();
@@ -175,7 +168,7 @@ it('keeps search branch controls truthful and search expansion separate from bro
 });
 
 it.each(['', 'ITC-D07'])(
-  'owns disclosures inside named treeitems in browse/search (%s), preserving one native link Tab stop',
+  'owns disclosures inside named treeitems in browse/search (%s), preserving one semantic tree Tab stop',
   async (query) => {
     const user = userEvent.setup();
     render(
@@ -193,17 +186,87 @@ it.each(['', 'ITC-D07'])(
     const link = within(row).getByRole('link');
     expect(link).toHaveAttribute('href', '/settings/locations/ITC-R');
     await user.click(disclosure);
-    expect(link).toHaveFocus();
+    expect(row).toHaveFocus();
     expect(row).toHaveAttribute('aria-expanded', query ? 'false' : 'true');
     await user.keyboard('{ArrowRight}{ArrowRight}');
-    expect(
-      within(screen.getByRole('treeitem', { name: /Drawer 7/ })).getByRole(
-        'link',
-      ),
-    ).toHaveFocus();
+    expect(screen.getByRole('treeitem', { name: /Drawer 7/ })).toHaveFocus();
     await user.keyboard('{ArrowLeft}');
-    expect(link).toHaveFocus();
+    expect(row).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('button', { name: 'After tree' })).toHaveFocus();
   },
 );
+
+it('keeps semantic focus and tree state together through arrows, Home/End and native Enter activation', async () => {
+  const user = userEvent.setup();
+  render(
+    <SettingsLocationTree
+      locations={[root, group, deepLeaf]}
+      selectedCode="ITC-D07"
+    />,
+  );
+  const parent = screen.getByRole('treeitem', { name: /^IT Closet/ });
+  const branch = screen.getByRole('treeitem', { name: /^Right Storage/ });
+  const selected = screen.getByRole('treeitem', { name: /^Drawer 7/ });
+  const link = within(selected).getByRole('link');
+  const activate = vi.fn((event: Event) => event.preventDefault());
+  link.addEventListener('click', activate);
+  await user.tab();
+  await user.tab();
+  expect(selected).toHaveFocus();
+  expect(selected).toHaveAttribute('aria-level', '3');
+  expect(selected).toHaveAttribute('aria-selected', 'true');
+  expect(link).toHaveAttribute('tabindex', '-1');
+  expect(
+    screen.getAllByRole('treeitem').filter((row) => row.tabIndex === 0),
+  ).toEqual([selected]);
+  await user.keyboard('{ArrowLeft}');
+  expect(branch).toHaveFocus();
+  expect(branch).toHaveAttribute('aria-expanded', 'true');
+  await user.keyboard('{Home}');
+  expect(parent).toHaveFocus();
+  await user.keyboard('{End}');
+  expect(selected).toHaveFocus();
+  expect(activate).not.toHaveBeenCalled();
+  await user.keyboard('{Enter}');
+  expect(activate).toHaveBeenCalledOnce();
+  expect(selected).toHaveFocus();
+  expect(link).toHaveAttribute('href', '/settings/locations/ITC-D07');
+  // Descendant Enter keeps its ordinary native path rather than triggering
+  // the row's synthetic activation a second time.
+  fireEvent.keyDown(link, { key: 'Enter' });
+  expect(activate).toHaveBeenCalledOnce();
+});
+
+it('preserves native anchor pointer, middle and modifier events while keeping its treeitem focused', async () => {
+  const user = userEvent.setup();
+  render(<SettingsLocationTree locations={[root, leaf]} />);
+  const row = screen.getByRole('treeitem', { name: /^Drawer 7/ });
+  const link = within(row).getByRole('link');
+  const clicks: MouseEvent[] = [];
+  const auxiliary: MouseEvent[] = [];
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    clicks.push(event);
+  });
+  link.addEventListener('auxclick', (event) => {
+    event.preventDefault();
+    auxiliary.push(event);
+  });
+  await user.click(link);
+  expect(row).toHaveFocus();
+  expect(clicks).toHaveLength(1);
+  fireEvent.click(link, { ctrlKey: true });
+  fireEvent.click(link, { metaKey: true });
+  fireEvent(link, new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+  expect(clicks.map((event) => [event.ctrlKey, event.metaKey])).toEqual([
+    [false, false],
+    [true, false],
+    [false, true],
+  ]);
+  expect(auxiliary).toHaveLength(1);
+  await user.keyboard('{Control>}{Enter}{/Control}');
+  expect(clicks).toHaveLength(4);
+  expect(clicks[3].ctrlKey).toBe(true);
+  expect(link).toHaveAttribute('href', '/settings/locations/ITC-D07');
+});

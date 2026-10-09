@@ -685,7 +685,7 @@ for (const width of [1280, 375, 390]) {
       await expect(
         tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
       ).toHaveCount(0);
-      await right.getByRole('link').focus();
+      await right.focus();
       await page.keyboard.press('ArrowRight');
       await expect(
         tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
@@ -703,11 +703,11 @@ for (const width of [1280, 375, 390]) {
       });
       await disclosure.click();
       await expect(right).toHaveAttribute('aria-expanded', 'false');
-      await expect(right.getByRole('link')).toBeFocused();
-      await right.getByRole('link').press('ArrowRight');
+      await expect(right).toBeFocused();
+      await right.press('ArrowRight');
       await expect(right).toHaveAttribute('aria-expanded', 'true');
-      await right.getByRole('link').press('ArrowRight');
-      await expect(selected.getByRole('link')).toBeFocused();
+      await right.press('ArrowRight');
+      await expect(selected).toBeFocused();
       if (width === 1280 && !reduced) {
         const original = page.url();
         const popupPromise = page.waitForEvent('popup');
@@ -716,9 +716,26 @@ for (const width of [1280, 375, 390]) {
         await expect(popup).toHaveURL(/\/settings\/locations\/ITC-D07$/);
         await expect(page).toHaveURL(original);
         await popup.close();
+        await expect(selected).toBeFocused();
+        const middlePopupPromise = page.waitForEvent('popup');
+        await selected.getByRole('link').click({ button: 'middle' });
+        const middlePopup = await middlePopupPromise;
+        await expect(middlePopup).toHaveURL(/\/settings\/locations\/ITC-D07$/);
+        await expect(page).toHaveURL(original);
+        await middlePopup.close();
+        const keyboardPopupPromise = page.waitForEvent('popup');
+        await selected.press('Control+Enter');
+        const keyboardPopup = await keyboardPopupPromise;
+        await expect(keyboardPopup).toHaveURL(
+          /\/settings\/locations\/ITC-D07$/,
+        );
+        await expect(page).toHaveURL(original);
+        await keyboardPopup.close();
+        await expect(selected).toBeFocused();
       }
       await expect(selected).toHaveAttribute('aria-level', '3');
-      await selected.getByRole('link').press('Enter');
+      await selected.press('Enter');
+      await expect(page).toHaveURL(/\/settings\/locations\/ITC-D07$/);
       await page
         .getByRole('link', { name: 'All locations', exact: true })
         .click();
@@ -727,7 +744,13 @@ for (const width of [1280, 375, 390]) {
       });
       await expect(returned).toHaveAttribute('aria-selected', 'true');
       await expect(returned).not.toHaveAttribute('aria-current');
-      await expect(returned.getByRole('link')).toHaveAttribute('tabindex', '0');
+      await expect(returned).toHaveAttribute('tabindex', '0');
+      await expect(returned.getByRole('link')).toHaveAttribute(
+        'tabindex',
+        '-1',
+      );
+      await returned.focus();
+      await expect(returned).toBeFocused();
       await page.screenshot({
         path: testInfo.outputPath('selected-location-tree.png'),
         fullPage: true,

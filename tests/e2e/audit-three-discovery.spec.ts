@@ -379,13 +379,13 @@ test('Settings hierarchy and the search location picker expose keyboard paths an
   });
   const tree = configuration.getByRole('tree', { name: 'Locations' });
   const root = tree.getByRole('treeitem', { name: /ITC · Active$/ });
-  await root.getByRole('link').focus();
-  await root.getByRole('link').press('ArrowLeft');
+  await root.focus();
+  await root.press('ArrowLeft');
   await expect(root).toHaveAttribute('aria-expanded', 'false');
   await expect(
     tree.getByRole('treeitem', { name: /ITC-R · Active$/ }),
   ).toHaveCount(0);
-  await root.getByRole('link').press('ArrowRight');
+  await root.press('ArrowRight');
   await expect(root).toHaveAttribute('aria-expanded', 'true');
   // Reused local fixtures can add earlier-sorted children to ITC. ArrowRight
   // follows the rendered hierarchy, rather than assuming Left Storage is first.
@@ -401,27 +401,26 @@ test('Settings hierarchy and the search location picker expose keyboard paths an
   await expect(firstChild.locator('span').nth(1)).toContainText(
     parentPath + ' / ',
   );
-  await root.getByRole('link').press('ArrowRight');
-  await expect(firstChild.getByRole('link')).toBeFocused();
+  await root.press('ArrowRight');
+  await expect(firstChild).toBeFocused();
   const right = tree.getByRole('treeitem', { name: /ITC-R · Active$/ });
-  await right.getByRole('link').focus();
-  await right.getByRole('link').press('ArrowLeft');
+  await right.focus();
+  await right.press('ArrowLeft');
   await expect(right).toHaveAttribute('aria-expanded', 'false');
   await expect(
     tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
   ).toHaveCount(0);
-  await right.getByRole('link').press('ArrowRight');
+  await right.press('ArrowRight');
   const drawer = tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ });
-  await drawer.getByRole('link').focus();
-  await drawer.getByRole('link').press('ArrowLeft');
-  await expect(right.getByRole('link')).toBeFocused();
-  await right.getByRole('link').press('Home');
+  await drawer.focus();
+  await expect(drawer).toHaveAttribute('aria-level', '3');
+  await drawer.press('ArrowLeft');
+  await expect(right).toBeFocused();
+  await right.press('Home');
   const first = tree.getByRole('treeitem').first();
-  await expect(first.getByRole('link')).toBeFocused();
-  await first.getByRole('link').press('End');
-  await expect(
-    tree.getByRole('treeitem').last().getByRole('link'),
-  ).toBeFocused();
+  await expect(first).toBeFocused();
+  await first.press('End');
+  await expect(tree.getByRole('treeitem').last()).toBeFocused();
   await configuration
     .getByLabel('Search locations', { exact: true })
     .fill('ITC-D07');
@@ -436,7 +435,8 @@ test('Settings hierarchy and the search location picker expose keyboard paths an
   });
   await result.scrollIntoViewIfNeeded();
   await withinViewport(result);
-  await result.getByRole('link').press('Enter');
+  await expect(result.getByRole('link')).toHaveAttribute('tabindex', '-1');
+  await result.press('Enter');
   await expect(page).toHaveURL(/\/settings\/locations\/ITC-D07$/);
 
   await page.goto('/inventory');
