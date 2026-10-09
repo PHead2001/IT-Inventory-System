@@ -56,6 +56,12 @@ export function editSummary(input: {
         : String(value);
   for (const key of Object.keys(metadataLabels)) {
     if (!Object.hasOwn(intent, key)) continue;
+    // These optional patch fields preserve their current value when omitted.
+    if (
+      (key === 'item_code' || key === 'reorder_threshold') &&
+      intent[key] === undefined
+    )
+      continue;
     const before = previous[key as keyof typeof previous];
     const after = intent[key];
     const normalizedBefore =

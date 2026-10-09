@@ -1,5 +1,6 @@
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { e2eScheduling, parallelSpecs } from '../../scripts/e2e-scheduling';
 
@@ -14,6 +15,45 @@ type DiscoveredSuite = {
   specs?: DiscoveredSpec[];
   suites?: DiscoveredSuite[];
 };
+
+function unsafeFixtureSignOuts(source: string) {
+  const file = ts.createSourceFile(
+    'fixture.ts',
+    source,
+    ts.ScriptTarget.Latest,
+  );
+  const unsafe: number[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'signOut' &&
+      ts.isPropertyAccessExpression(node.expression.expression) &&
+      node.expression.expression.name.text === 'auth'
+    ) {
+      const options = node.arguments[0];
+      const local =
+        options &&
+        ts.isObjectLiteralExpression(options) &&
+        options.properties.some(
+          (property) =>
+            ts.isPropertyAssignment(property) &&
+            (ts.isIdentifier(property.name) ||
+              ts.isStringLiteral(property.name)) &&
+            property.name.text === 'scope' &&
+            ts.isStringLiteral(property.initializer) &&
+            property.initializer.text === 'local',
+        );
+      if (!local)
+        unsafe.push(
+          file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+        );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return unsafe;
+}
 
 function discover(
   fullSuite: boolean,
@@ -57,6 +97,22 @@ function discover(
 }
 
 describe('browser scheduling', () => {
+  it('keeps independently authenticated fixture-client cleanup local in parallel specs', () => {
+    expect(
+      unsafeFixtureSignOuts("caller.auth.signOut({ scope: 'local' });"),
+    ).toEqual([]);
+    for (const source of [
+      'caller.auth.signOut();',
+      "caller.auth.signOut({ scope: 'global' });",
+      "caller.auth.signOut({ scope: 'others' });",
+    ])
+      expect(unsafeFixtureSignOuts(source)).toEqual([1]);
+    for (const spec of parallelSpecs)
+      expect(
+        unsafeFixtureSignOuts(readFileSync('tests/e2e/' + spec, 'utf8')),
+        spec,
+      ).toEqual([]);
+  });
   it('discovers exactly the same tests once in both modes and retains focused selection', () => {
     const baseline = discover(false);
     const scheduled = discover(true);

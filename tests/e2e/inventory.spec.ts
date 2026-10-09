@@ -92,6 +92,120 @@ async function createQuantity(
   ).toBe(true);
 }
 
+test('empty normalized edits leave history unchanged, Receive defaults once, and Move/Issue expose source availability', async ({
+  page,
+}) => {
+  await login(page);
+  await createQuantity(
+    page,
+    'Edit integrity browser ' + crypto.randomUUID(),
+    8,
+  );
+  const detailUrl = page.url();
+  const itemId = detailUrl.split('/').at(-1)!;
+  const api = new URL(process.env.LOCAL_API_URL!);
+  expect(['127.0.0.1', 'localhost']).toContain(api.hostname);
+  const client = createClient(
+    api.href,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  try {
+    expect(
+      (
+        await client.auth.signInWithPassword({
+          email: fixture.emails.staff,
+          password: fixture.password,
+        })
+      ).error,
+    ).toBeNull();
+    const before = await client
+      .from('quantity_items')
+      .select('name,version,updated_at')
+      .eq('id', itemId)
+      .single();
+    expect(before.error).toBeNull();
+    const events = await client
+      .from('quantity_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('item_id', itemId);
+    const edit = await openForm(page, 'Edit quantity metadata');
+    await expect(edit.getByText('Nothing to save.')).toBeVisible();
+    await edit
+      .getByLabel('Name', { exact: true })
+      .fill('  ' + before.data!.name + '  ');
+    await expect(edit.getByText('Nothing to save.')).toBeVisible();
+    await expect(
+      edit.getByRole('button', { name: 'Confirm save' }),
+    ).toHaveCount(0);
+    await edit.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(edit).toBeHidden();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const after = await client
+      .from('quantity_items')
+      .select('name,version,updated_at')
+      .eq('id', itemId)
+      .single();
+    expect(after.data).toEqual(before.data);
+    expect(
+      (
+        await client
+          .from('quantity_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('item_id', itemId)
+      ).count,
+    ).toBe(events.count);
+    const receive = await openForm(page, 'Receive stock');
+    await expect(
+      receive.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText('1A');
+    await choose(receive, 'Receive at', 'ITC-S1B');
+    await receive.getByLabel('Quantity to receive').fill('13');
+    await receive
+      .getByLabel('Reason (required)')
+      .fill('Second holding fixture');
+    await confirm(receive, 'Receive stock');
+    await page.goto(detailUrl);
+    const multiple = await openForm(page, 'Receive stock');
+    await expect(
+      multiple.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText('Select a location');
+    await page.goto(detailUrl);
+    const move = await openForm(page, 'Move stock');
+    await move
+      .getByRole('combobox', { name: 'Source location', exact: true })
+      .click();
+    await move
+      .getByRole('combobox', { name: 'Search locations' })
+      .fill('ITC-S1');
+    await expect(
+      move.getByRole('option', { name: /1A.*8 units available/ }),
+    ).toBeVisible();
+    await expect(
+      move.getByRole('option', { name: /1B.*13 units available/ }),
+    ).toBeVisible();
+    await page.goto(detailUrl);
+    const issue = await openForm(page, 'Issue stock to a site');
+    await issue
+      .getByRole('combobox', { name: 'Storage source', exact: true })
+      .click();
+    await issue
+      .getByRole('combobox', { name: 'Search locations' })
+      .fill('ITC-S1');
+    await expect(
+      issue.getByRole('option', { name: /1A.*8 units available/ }),
+    ).toBeVisible();
+    await expect(
+      issue.getByRole('option', { name: /1B.*13 units available/ }),
+    ).toBeVisible();
+  } finally {
+    // This SDK client owns a separate session from the browser and parallel
+    // fixtures sharing the staff account. End only its own fixture session.
+    await client.auth.signOut({ scope: 'local' });
+    await archiveFixture(page, detailUrl);
+  }
+});
+
 async function archiveFixture(
   page: Page,
   detailUrl: string,
@@ -669,7 +783,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await version(page, 5);
   await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit quantity metadata');
-  await expect(metadataReviewButton(form)).toBeEnabled();
+  await expect(form.getByLabel('Name', { exact: true })).toBeEnabled();
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
@@ -843,7 +957,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
   await version(page, 3);
   await beginNewRecordTransaction(page, 'New transaction');
   form = await openForm(page, 'Edit asset metadata');
-  await expect(metadataReviewButton(form)).toBeEnabled();
+  await expect(form.getByLabel('Model')).toBeEnabled();
   await form.getByLabel('Model').fill('Managed switch');
   await confirm(form, 'Edit asset metadata');
   await version(page, 4);
