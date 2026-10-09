@@ -7,6 +7,7 @@ import rawRoom from '../../data/rooms/it-closet.json' with { type: 'json' };
 import { buildRoomBindings } from '../../src/features/room/bindings';
 import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
+import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   observeRoomScene,
   captureRoomWitness,
@@ -308,10 +309,58 @@ async function chooseRoomLocation(page: Page, code: string) {
   await browser.getByRole('button', { name: new RegExp(`${code}$`) }).click();
 }
 
-async function settledLabels(page: Page) {
-  await expect(
-    page.locator('[aria-label="Interactive room canvas"] canvas'),
-  ).toHaveAttribute('data-label-layout-pending', 'false');
+async function settledLabels(page: Page, afterRevision?: number) {
+  const canvas = page.locator('[aria-label="Interactive room canvas"] canvas');
+  let previous = '';
+  await expect
+    .poll(async () => {
+      const current = await canvas.evaluate(async (element) => {
+        // Let the requested control update project and measure before accepting
+        // a settled flag that could still belong to the previous camera frame.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
+        return {
+          pending: element.dataset.labelLayoutPending,
+          revision: Number(element.dataset.labelLayoutRevision ?? 0),
+          frame: [
+            element.dataset.cameraViewMatrix,
+            element.dataset.cameraProjectionMatrix,
+          ],
+        };
+      });
+      const key = JSON.stringify(current);
+      const stable =
+        current.pending === 'false' &&
+        key === previous &&
+        (afterRevision === undefined || current.revision > afterRevision);
+      previous = key;
+      return stable;
+    })
+    .toBe(true);
+}
+
+async function uncoveredCanvasGesture(page: Page, dx: number, dy: number) {
+  return page.locator('[aria-label="Interactive room canvas"] canvas').evaluate(
+    (canvas, delta) => {
+      const rect = canvas.getBoundingClientRect();
+      // Labels are genuine DOM controls above the canvas. A canvas gesture must
+      // start on the canvas, with its whole initial path inside the viewport.
+      for (const yPart of [0.5, 0.3, 0.7, 0.15, 0.85])
+        for (const xPart of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+          const x = rect.x + rect.width * xPart;
+          const y = rect.y + rect.height * yPart;
+          const uncovered = Array.from({ length: 9 }, (_, step) => {
+            const px = x + (delta.dx * step) / 8;
+            const py = y + (delta.dy * step) / 8;
+            return document.elementFromPoint(px, py) === canvas;
+          }).every(Boolean);
+          if (uncovered) return { x, y };
+        }
+      throw new Error('No uncovered native canvas gesture path');
+    },
+    { dx, dy },
+  );
 }
 
 async function ready(page: Page) {
@@ -324,6 +373,45 @@ async function ready(page: Page) {
   await expect(viewer.locator('canvas')).toBeVisible();
   return viewer;
 }
+
+test('room label placement transforms are measurable synchronously in Full and Reduced motion', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await login(page);
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto('/room?location=ITC-S1A');
+    const viewer = await ready(page);
+    await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-S1A');
+    await settledLabels(page);
+    const movement = await viewer.evaluate((host) => {
+      const label = host.querySelector<HTMLElement>(
+        '[data-room-label-code][data-label-suppressed="false"]',
+      );
+      const projection = label?.closest<HTMLElement>(
+        '[class*="labelProjection"]',
+      );
+      if (!label || !projection)
+        throw new Error('Expected an exposed projected label');
+      return [label, projection].map((element) => {
+        const original = element.style.transform;
+        const before = label.getBoundingClientRect();
+        try {
+          element.style.transform = `${original} translate(11px, 7px)`;
+          const after = label.getBoundingClientRect();
+          return { dx: after.x - before.x, dy: after.y - before.y };
+        } finally {
+          element.style.transform = original;
+        }
+      });
+    });
+    for (const delta of movement) {
+      expect(delta.dx).toBeCloseTo(11, 2);
+      expect(delta.dy).toBeCloseTo(7, 2);
+    }
+  }
+});
 
 test('map wheel ownership preserves page/browser zoom and enables deliberate camera zoom', async ({
   page,
@@ -342,14 +430,31 @@ test('map wheel ownership preserves page/browser zoom and enables deliberate cam
       'wheel',
       (event) => {
         const canvas = document.querySelector('canvas');
-        queueMicrotask(() => {
-          if (canvas)
-            canvas.dataset.lastWheelCancelled = String(event.defaultPrevented);
-        });
+        if (!canvas) return;
+        const sequence =
+          Number(canvas.dataset.wheelDispatchedSequence ?? 0) + 1;
+        canvas.dataset.wheelDispatchedSequence = String(sequence);
+        // Native event listeners can have microtask checkpoints between them.
+        // A task observes cancellation after Orbit's target listener has run.
+        setTimeout(() => {
+          canvas.dataset.lastWheelCancelled = String(event.defaultPrevented);
+          canvas.dataset.lastWheelSequence = String(sequence);
+        }, 0);
       },
       { capture: true, passive: true },
     ),
   );
+  const wheelAndObserve = async (delta: number) => {
+    const previous = Number(
+      (await canvas.getAttribute('data-wheel-dispatched-sequence')) ?? 0,
+    );
+    await page.mouse.wheel(0, delta);
+    await expect
+      .poll(async () =>
+        Number((await canvas.getAttribute('data-last-wheel-sequence')) ?? 0),
+      )
+      .toBeGreaterThan(previous);
+  };
   for (const active of [false, true]) {
     if (active) await activateMap(page);
     await canvas.evaluate((element) =>
@@ -370,7 +475,7 @@ test('map wheel ownership preserves page/browser zoom and enables deliberate cam
       throw new Error('No uncovered canvas pixel for wheel ownership');
     });
     await page.mouse.move(point.x, point.y);
-    await page.mouse.wheel(0, 160);
+    await wheelAndObserve(160);
     if (active) {
       await expect
         .poll(async () => (await camera(page)).zoom)
@@ -380,7 +485,7 @@ test('map wheel ownership preserves page/browser zoom and enables deliberate cam
       for (const modifier of ['Control', 'Meta']) {
         const zoom = (await camera(page)).zoom;
         await page.keyboard.down(modifier);
-        await page.mouse.wheel(0, 60);
+        await wheelAndObserve(60);
         await page.keyboard.up(modifier);
         await expect(canvas).toHaveAttribute(
           'data-last-wheel-cancelled',
@@ -467,7 +572,7 @@ test('real Chromium touch swipes scroll passively and activated gestures rotate 
   await canvas.evaluate((element) =>
     element.scrollIntoView({ block: 'start' }),
   );
-  let box = (await canvas.boundingBox())!;
+  const box = (await canvas.boundingBox())!;
   const before = await camera(page);
   const scroll = await page.evaluate(() => window.scrollY);
   const x = box.x + box.width / 2;
@@ -484,11 +589,7 @@ test('real Chromium touch swipes scroll passively and activated gestures rotate 
   await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-S1A');
   await activateMap(page);
   await canvas.scrollIntoViewIfNeeded();
-  box = (await canvas.boundingBox())!;
-  const center = {
-    x: box.x + box.width / 2,
-    y: Math.max(80, Math.min(700, box.y + box.height / 2)),
-  };
+  const center = await uncoveredCanvasGesture(page, 80, 0);
   const activated = await camera(page);
   await touch('touchStart', [{ ...center, id: 0 }]);
   for (let step = 1; step <= 8; step++)
@@ -498,14 +599,16 @@ test('real Chromium touch swipes scroll passively and activated gestures rotate 
     Math.abs((await camera(page)).azimuth - activated.azimuth),
   ).toBeGreaterThan(0.05);
   const beforePinch = await camera(page);
+  const pinchStart = await uncoveredCanvasGesture(page, 108, 0);
+  const pinchCenter = { x: pinchStart.x + 54, y: pinchStart.y };
   await touch('touchStart', [
-    { x: center.x - 18, y: center.y, id: 0 },
-    { x: center.x + 18, y: center.y, id: 1 },
+    { x: pinchCenter.x - 18, y: pinchCenter.y, id: 0 },
+    { x: pinchCenter.x + 18, y: pinchCenter.y, id: 1 },
   ]);
   for (let step = 1; step <= 6; step++)
     await touch('touchMove', [
-      { x: center.x - 18 - step * 6, y: center.y, id: 0 },
-      { x: center.x + 18 + step * 6, y: center.y, id: 1 },
+      { x: pinchCenter.x - 18 - step * 6, y: pinchCenter.y, id: 0 },
+      { x: pinchCenter.x + 18 + step * 6, y: pinchCenter.y, id: 1 },
     ]);
   await touch('touchEnd', []);
   expect((await camera(page)).zoom).toBeGreaterThan(beforePinch.zoom);
@@ -1689,19 +1792,13 @@ test('manual pointer movement interrupts an in-flight selected-location focus', 
   expect(Number(await viewer.getAttribute('data-focus-count'))).toBe(
     completedBefore,
   );
-  await page.mouse.move(
-    bounds!.x + bounds!.width * 0.5,
-    bounds!.y + bounds!.height * 0.5,
-  );
   await activateMap(page);
+  const drag = await uncoveredCanvasGesture(page, bounds!.width * 0.12, 0);
+  await page.mouse.move(drag.x, drag.y);
   await page.mouse.down({ button: 'right' });
   await expect(canvas).toHaveAttribute('data-map-active', 'true');
   await expect(canvas).toBeFocused();
-  await page.mouse.move(
-    bounds!.x + bounds!.width * 0.62,
-    bounds!.y + bounds!.height * 0.5,
-    { steps: 6 },
-  );
+  await page.mouse.move(drag.x + bounds!.width * 0.12, drag.y, { steps: 6 });
   await page.mouse.up({ button: 'right' });
   const stopped = await camera(page);
   expect(stopped.target).not.toEqual(inFlight.target);
@@ -2221,8 +2318,10 @@ async function assertOccupiedWitnessActions(
       );
     const box = await action.boundingBox();
     expect(box).toBeTruthy();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
+    const targetSize = await action.evaluate(measureRoomTarget);
+    expect(roomTargetMeetsMinimum(targetSize), JSON.stringify(targetSize)).toBe(
+      true,
+    );
     expect(box!.x).toBeGreaterThanOrEqual(scene.frame.x);
     expect(box!.y).toBeGreaterThanOrEqual(scene.frame.y);
     expect(box!.x + box!.width).toBeLessThanOrEqual(
@@ -2296,6 +2395,9 @@ test('375px populated room gives every independently witnessed opaque target an 
     'overhead-open',
     'underside-open',
   ] as const) {
+    const requestedAfter = Number(
+      await canvas.getAttribute('data-label-layout-revision'),
+    );
     const open = scenario !== 'fit-closed';
     if (open && (await more.getAttribute('aria-expanded')) !== 'true')
       await more.click();
@@ -2326,7 +2428,10 @@ test('375px populated room gives every independently witnessed opaque target an 
           element.scrollTop = 0;
         });
     await page.mouse.move(15, 15);
-    await settledLabels(page);
+    await settledLabels(
+      page,
+      scenario === 'fit-closed' ? undefined : requestedAfter,
+    );
     const response = page.waitForResponse(
       (result) => result.url().includes('/api/room/occupancy?') && result.ok(),
     );

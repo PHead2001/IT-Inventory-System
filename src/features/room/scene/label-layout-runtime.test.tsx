@@ -383,6 +383,12 @@ describe('unified room label registry', () => {
     expect(queue).toHaveLength(1);
     anchored.element.focus();
     flush();
+    expect(anchored.element.dataset.labelSuppressed).toBe('false');
+    expect(anchored.element).toHaveFocus();
+    expect(hover.element.dataset.labelSuppressed).toBe('true');
+    anchored.element.blur();
+    registry.schedule();
+    flush();
     expect(anchored.element.dataset.labelSuppressed).toBe('true');
     expect(anchored.element).toHaveAttribute('aria-hidden', 'true');
     expect(anchored.element.tabIndex).toBe(-1);

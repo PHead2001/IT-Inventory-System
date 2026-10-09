@@ -93,6 +93,8 @@ export function createRoomLabelRegistry(
             : rect.height,
           mandatory: entry.options.mandatory,
           preferFull: entry.options.preferFull,
+          focused: document.activeElement === entry.element,
+          hovered: entry.options.inspection === 'hover',
           compact: entry.options.compact
             ? { width: 44, height: 44 }
             : undefined,

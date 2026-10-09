@@ -342,6 +342,14 @@
   position: relative;
   pointer-events: none;
 }
+/* Placement is measured synchronously, including under the global Reduced
+   duration override. Even a 0.01ms transition delays these geometry transforms. */
+.labelProjection,
+.labelProjection *,
+.hoverAnchor,
+.hoverAnchor * {
+  transition-property: none;
+}
 .hoverAnchor {
   position: absolute;
   z-index: 10;

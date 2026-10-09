@@ -1,3 +1,6 @@
+import capturedActive from '../../../../tests/fixtures/room/more-active-labels.json';
+import capturedSelected from '../../../../tests/fixtures/room/more-selected-labels.json';
+import capturedMore from '../../../../tests/fixtures/room/more-labels.json';
 import { describe, expect, it } from 'vitest';
 import { layoutLabels, type LabelRect } from './label-layout';
 
@@ -17,6 +20,183 @@ const label = (
 });
 
 describe('scene label placement', () => {
+  const narrowViewport = { left: 30, top: 404, right: 345, bottom: 812 };
+  const morePanel = [{ left: 106, top: 397, right: 346, bottom: 617 }];
+  it('recovers all 22 exposed real-scene targets from fragmented prior placements with More open', () => {
+    // Captured production RoomScene, room JSON, CSS and Inter font at 375x812.
+    const input: LabelRect[] = capturedMore;
+    expect(input).toHaveLength(22);
+    const result = layoutLabels(input, narrowViewport, morePanel);
+    expect(result.every((entry) => entry.visible)).toBe(true);
+    const areas = result.map((entry) => {
+      const source = input.find((item) => item.id === entry.id)!;
+      const size = entry.compact ? source.compact! : source;
+      return {
+        left: source.left + entry.dx,
+        top: source.top + entry.dy,
+        right: source.left + entry.dx + size.width,
+        bottom: source.top + entry.dy + size.height,
+      };
+    });
+    for (const [index, area] of areas.entries()) {
+      expect(area.left).toBeGreaterThanOrEqual(narrowViewport.left + 2);
+      expect(area.top).toBeGreaterThanOrEqual(narrowViewport.top + 2);
+      expect(area.right).toBeLessThanOrEqual(narrowViewport.right - 2);
+      expect(area.bottom).toBeLessThanOrEqual(narrowViewport.bottom - 2);
+      for (const other of [...morePanel, ...areas.slice(index + 1)])
+        expect(
+          area.left >= other.right + 3 ||
+            area.right + 3 <= other.left ||
+            area.top >= other.bottom + 3 ||
+            area.bottom + 3 <= other.top,
+        ).toBe(true);
+    }
+    expect(result).toEqual(
+      layoutLabels([...input].reverse(), narrowViewport, morePanel),
+    );
+    const repeated = input.map((entry) => {
+      const placement = result.find((item) => item.id === entry.id)!;
+      return {
+        ...entry,
+        previous: {
+          dx: placement.dx,
+          dy: placement.dy,
+          compact: !!placement.compact,
+        },
+      };
+    });
+    expect(layoutLabels(repeated, narrowViewport, morePanel)).toEqual(result);
+  });
+  it('realigns inactive selected text to recover all 22 targets and remains stable on the next frame', () => {
+    const input: LabelRect[] = capturedSelected;
+    expect(input).toHaveLength(22);
+    const result = layoutLabels(input, narrowViewport, morePanel);
+    expect(result.every((entry) => entry.visible)).toBe(true);
+    const selected = input.find((entry) => entry.selected)!;
+    // Same minimum-displacement result as exhaustive candidate traversal.
+    expect(result.find((entry) => entry.id === selected.id)).toMatchObject({
+      dx: 24,
+      dy: -11.967041015625,
+    });
+    expect(result.find((entry) => entry.id === selected.id)?.visible).toBe(
+      true,
+    );
+    expect(
+      result.find((entry) => entry.id === selected.id)?.compact ?? false,
+    ).toBe(false);
+    const repeated = input.map((entry) => {
+      const placed = result.find((item) => item.id === entry.id)!;
+      return {
+        ...entry,
+        previous: { dx: placed.dx, dy: placed.dy, compact: !!placed.compact },
+      };
+    });
+    expect(layoutLabels(repeated, narrowViewport, morePanel)).toEqual(result);
+    // Pointer entry must preserve the selected full label's settled hit rectangle.
+    expect(
+      layoutLabels(
+        repeated.map((entry) => ({ ...entry, hovered: entry.selected })),
+        narrowViewport,
+        morePanel,
+      ),
+    ).toEqual(result);
+  });
+  it('fits the captured focused selection plus a separately hovered full label without moving either', () => {
+    const input: LabelRect[] = capturedActive;
+    const active = input.filter((entry) => entry.focused || entry.hovered);
+    expect(active).toHaveLength(2);
+    const result = layoutLabels(input, narrowViewport, morePanel);
+    expect(result.every((entry) => entry.visible)).toBe(true);
+    for (const entry of active)
+      expect(result.find((item) => item.id === entry.id)).toMatchObject({
+        visible: true,
+        dx: entry.previous!.dx,
+        dy: entry.previous!.dy,
+      });
+  });
+  it.each(['focused', 'hovered'] as const)(
+    'honestly reports impossible capacity beside a %s selected action',
+    (active) => {
+      // Usable area is 92x44: the 91x44 selected action leaves only one pixel.
+      const input: LabelRect[] = [
+        {
+          ...label('selected', 2, 2, true),
+          mandatory: true,
+          width: 91,
+          height: 44,
+          [active]: true,
+          previous: { dx: 0, dy: 0, compact: false },
+        },
+        { ...label('other', 2, 2), mandatory: true, width: 44, height: 44 },
+      ];
+      const result = layoutLabels(input, {
+        left: 0,
+        top: 0,
+        right: 96,
+        bottom: 48,
+      });
+      expect(result.find((entry) => entry.id === 'selected')).toMatchObject({
+        visible: true,
+        dx: 0,
+        dy: 0,
+      });
+      expect(result.find((entry) => entry.id === 'other')?.visible).toBe(false);
+    },
+  );
+  it('uses the lower free band when an overlay cuts across the top-origin rail grid', () => {
+    const input = Array.from({ length: 24 }, (_, index) => ({
+      ...label(String(index), 150, 650),
+      mandatory: true,
+      width: 180,
+      height: 44,
+      compact: { width: 44, height: 44 },
+    }));
+    expect(
+      layoutLabels(input, narrowViewport, morePanel).every(
+        (entry) => entry.visible,
+      ),
+    ).toBe(true);
+  });
+  it('preserves a genuinely focused expanded footprint and selected text during fallback', () => {
+    const input: LabelRect[] = [
+      {
+        ...label('focused', 32, 625),
+        mandatory: true,
+        focused: true,
+        preferFull: true,
+        width: 91,
+        height: 44,
+        compact: { width: 44, height: 44 },
+        previous: { dx: 0, dy: 0, compact: false },
+      },
+      {
+        ...label('selected', 126, 625, true),
+        mandatory: true,
+        width: 185,
+        height: 44,
+      },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        ...label('M' + index, 150, 700),
+        mandatory: true,
+        width: 180,
+        height: 44,
+        compact: { width: 44, height: 44 },
+      })),
+    ];
+    const result = layoutLabels(input, narrowViewport, morePanel);
+    expect(result.every((entry) => entry.visible)).toBe(true);
+    expect(result.find((entry) => entry.id === 'focused')).toMatchObject({
+      visible: true,
+      dx: 0,
+      dy: 0,
+      compact: false,
+    });
+    expect(result.find((entry) => entry.id === 'selected')).toMatchObject({
+      visible: true,
+      dx: 0,
+      dy: 0,
+    });
+  });
   it('expands focus text only when every occupied action stays in its original placement', () => {
     const input: LabelRect[] = [
       {

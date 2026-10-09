@@ -1,6 +1,7 @@
 'use client';
 import { Html } from '@react-three/drei';
 import type { ComponentProps } from 'react';
+import styles from '../room-visual.module.css';
 import {
   LabelLayoutProvider,
   useRoomLabelRegistry,
@@ -11,12 +12,16 @@ import {
  */
 export function RoomLabelHtml({
   children,
+  wrapperClass,
   ...props
 }: ComponentProps<typeof Html>) {
   const registry = useRoomLabelRegistry();
   return (
     <Html
       {...props}
+      wrapperClass={[styles.labelProjection, wrapperClass]
+        .filter(Boolean)
+        .join(' ')}
       // Orbit can change occluders while a selected label stays at the same
       // projected pixel. Recheck occlusion on every demanded frame; this does
       // not request frames or change genuine opaque-furniture occlusion.
