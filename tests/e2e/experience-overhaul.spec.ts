@@ -479,7 +479,9 @@ test('a newly required field requests targeted confirmation before changing the 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${category}.`,
+  );
   await page.goto('/inventory/quantity/new');
   const create = page.getByRole('form', { name: 'Add quantity item' });
   await create
@@ -536,7 +538,9 @@ test('a stale category publication retains the exact unsaved input for explicit 
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${category}.`,
+  );
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/forms\/[0-9a-f-]{36}$/);

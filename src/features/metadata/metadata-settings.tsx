@@ -892,7 +892,7 @@ export function MetadataSettings({
   const recoveryScope = `${memberId}:${categoryId}`;
   const issues = definition
     ? [
-        ...designerIssues(definition),
+        ...designerIssues(definition, selected?.published_definition),
         ...Object.entries(configErrors)
           .filter(([id]) => definition.fields.some((field) => field.id === id))
           .map(([, message]) => message)
@@ -2986,6 +2986,11 @@ export function MetadataSettings({
                         <FieldSettings
                           key={`${selectedField.id}:${inspectorRevision}`}
                           field={selectedField}
+                          publishedOptions={
+                            selected?.published_definition.fields.find(
+                              (item) => item.id === selectedField.id,
+                            )?.options
+                          }
                           autoFocus={false}
                           revisionOptionCount={definition.fields.reduce(
                             (total, field) => total + field.options.length,

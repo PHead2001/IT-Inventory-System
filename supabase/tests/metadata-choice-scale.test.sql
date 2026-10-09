@@ -79,10 +79,10 @@ select is((select r.doc->f.field::text->'value' from choice_scale_read r cross j
   (select custom_values->f.field::text->'value' from choice_scale_values cross join choice_scale_fixture f),
   'max-size detail preserves answer IDs and their order');
 select is((select r.doc->f.field::text->'option_paths'->0->>0 from choice_scale_read r cross join choice_scale_fixture f),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1),
+  (select label||case when position=1 then '' else ' ('||position::text||')' end from choice_scale_options where position=1),
   'first historical answer retains original spelling and its identity disambiguator');
 select is((select r.doc->f.field::text->'option_paths'->999->>0 from choice_scale_read r cross join choice_scale_fixture f),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1000),
+  (select label||case when position=1 then '' else ' ('||position::text||')' end from choice_scale_options where position=1000),
   'last historical answer retains original spelling and its identity disambiguator');
 
 alter sequence metadata_fold_calls restart with 1;
@@ -122,7 +122,7 @@ create temporary table choice_scale_history_last as select public.metadata_event
 select is((select jsonb_array_length(doc->'option_paths') from choice_scale_history_last),8,
   'the final history page exposes all eight remaining paths');
 select is((select doc->'option_paths'->7->>0 from choice_scale_history_last),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1000),
+  (select label||case when position=1 then '' else ' ('||position::text||')' end from choice_scale_options where position=1000),
   'history reaches the thousandth historical choice');
 
 select throws_ok($$select private.metadata_option_paths(f.revision,f.field,

@@ -1,5 +1,6 @@
 'use client';
 
+import { CopyTechnicalDetails } from './copy-technical-details';
 import {
   createContext,
   useContext,
@@ -77,16 +78,12 @@ function RelativeTimestamp({
         title={timestamp.text}
       >
         <time dateTime={timestamp.dateTime}>{label}</time>
-        <span className="sr-only">
-          {' '}
-          · {timestamp.text}. Open for the exact recorded instant.
-        </span>
+        <span className="sr-only"> Recorded {timestamp.accessibleText}</span>
       </summary>
       <p className="max-w-full break-words text-xs">{timestamp.text}</p>
-      <p className="max-w-full break-all text-xs">
-        Recorded instant:{' '}
-        <span className="experience-code">{timestamp.dateTime}</span>
-      </p>
+      <CopyTechnicalDetails
+        details={`Recorded instant: ${timestamp.dateTime}`}
+      />
     </details>
   );
 }

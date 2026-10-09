@@ -43,7 +43,9 @@ async function createCategories(page: Page, prefix: string) {
     await page.goto('/settings/categories');
     await page.getByLabel('Display name').fill(name);
     await page.getByRole('button', { name: 'Add category' }).click();
-    await expect(page.getByRole('status')).toContainText('Category added.');
+    await expect(page.getByRole('status')).toContainText(
+      `Category added: ${name}.`,
+    );
   }
   await page.goto('/settings/forms');
   const categoryLink = page.getByRole('link', { name: names[0], exact: true });
@@ -384,7 +386,9 @@ test('category routes, pending field recovery and native modal focus remain cons
     await page.goto('/settings/categories');
     await page.getByLabel('Display name').fill(name);
     await page.getByRole('button', { name: 'Add category' }).click();
-    await expect(page.getByRole('status')).toContainText('Category added.');
+    await expect(page.getByRole('status')).toContainText(
+      `Category added: ${name}.`,
+    );
   }
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: names[0], exact: true }).click();

@@ -49,7 +49,7 @@ describe('local option path review', () => {
       expect(review.options).toEqual([...options, addition]);
     }
   });
-  it('allows equal names under distinct parents and shares new parents', () => {
+  it('refuses fresh equal names under distinct parents while sharing new parents', () => {
     let id = 0;
     const review = reviewOptionPaths(
       'Video > Shared\nAudio > Shared\nVideo > HDMI',
@@ -57,14 +57,15 @@ describe('local option path review', () => {
       0,
       () => `new-${++id}`,
     );
-    expect(review.conflicts).toEqual([]);
-    expect(review.options).toHaveLength(5);
+    expect(review.conflicts).toHaveLength(1);
+    expect(review.conflicts[0]).toContain('elsewhere in this field');
+    expect(review.options).toHaveLength(4);
     expect(
       review.options.filter((option) => option.label === 'Video'),
     ).toHaveLength(1);
     expect(
       review.options.filter((option) => option.label === 'Shared'),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
   it('accepts six and 64 levels, rejects 65 and enforces field/revision/input limits', () => {
     for (const depth of [6, 64])

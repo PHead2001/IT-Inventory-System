@@ -161,7 +161,7 @@ export default async function AssetPage({
                       href={'/inventory/assets/' + match.id}
                     >
                       {match.name} ({match.assetTag || 'untagged'},{' '}
-                      {match.status})
+                      <RecordStatus status={match.status} />)
                     </Link>
                   </li>
                 ))}

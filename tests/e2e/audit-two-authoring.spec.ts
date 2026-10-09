@@ -125,7 +125,7 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
     'USB > USB-C > USB 3 > Gen 2 > Gen 3 > Gen 4',
     'USB > USB-A',
     'USB > Shared',
-    'Ethernet > Shared',
+    'Ethernet > Shared Ethernet',
     'Labels > A\\>B',
     'USB > USB-A',
   ].join('\n');
@@ -167,9 +167,23 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   ).toHaveValue('Existing root');
   paste = await pasteReview(choices, paths);
   await paste.getByRole('button', { name: 'Apply paths', exact: true }).click();
+  // U403 now requires fresh labels to be distinguishable across parents too.
+  await choices
+    .getByLabel('Option name: Shared Ethernet', { exact: true })
+    .fill('Shared');
+  await expect(
+    choices.getByRole('alert').filter({ hasText: 'matches another choice' }),
+  ).toHaveCount(2);
+  await expect(
+    designer.getByRole('button', { name: 'Save changes', exact: true }),
+  ).toBeDisabled();
+  await choices
+    .getByLabel('Option name: Shared', { exact: true })
+    .last()
+    .fill('Shared Ethernet');
   await addOption(choices, ' shared ', 'USB');
   await expect(
-    choices.getByRole('alert').filter({ hasText: 'matches a sibling' }),
+    choices.getByRole('alert').filter({ hasText: 'matches another choice' }),
   ).toHaveCount(2);
   await expect(
     designer.getByRole('button', { name: 'Save changes', exact: true }),
@@ -196,7 +210,8 @@ test('nested paths are reviewed, cancelled, undone, published at six levels and 
   expect(depth).toBe(6);
   expect(
     field.options.filter((option) => option.label === 'Shared'),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
+  expect(choice('Shared Ethernet').parent_id).toBe(choice('Ethernet').id);
   const originalIds = field.options.map((option) => option.id).sort();
 
   await page.goto('/inventory/quantity/new');

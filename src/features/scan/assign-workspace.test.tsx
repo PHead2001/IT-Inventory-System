@@ -285,7 +285,7 @@ it('shows ambiguous identities for manual choice without submitting or silently 
   expect(mocks.inspect).not.toHaveBeenCalled();
   expect(mocks.submit).not.toHaveBeenCalled();
   fireEvent.click(
-    screen.getByRole('button', { name: 'Adapters · quantity · active' }),
+    screen.getByRole('button', { name: 'Adapters · Quantity item · Active' }),
   );
   await screen.findByRole('region', { name: 'Review assignment' });
   expect(mocks.submit).not.toHaveBeenCalled();
@@ -340,7 +340,7 @@ it('pages distinct search candidates without losing destination/ticket and inspe
   expect(mocks.inspect).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Next candidates' }));
   const selected = await screen.findByRole('button', {
-    name: 'Later laptop · asset · active',
+    name: 'Later laptop · Individual asset · Active',
   });
   expect(
     screen.getByRole('button', { name: 'Next candidates' }),
@@ -490,7 +490,10 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
   fireEvent.click(
     screen.getByRole('button', { name: 'Inspect current state' }),
   );
-  await screen.findByText(/Version 9/);
+  await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(2));
+  expect(
+    screen.getByRole('region', { name: 'Review assignment' }),
+  ).not.toHaveTextContent('Version');
   expect(mocks.submit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
@@ -562,4 +565,16 @@ it('masks the previous actor batch and discards late pending results on account 
   view.rerender(<AssignmentWorkspace {...props} />);
   await screen.findByRole('button', { name: 'Retry same assignment' });
   expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+
+it('inspects with a capitalized shared status and mono identifier, hiding the record version', async () => {
+  const { container } = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const review = screen.getByRole('region', { name: 'Review assignment' });
+  expect(review).toHaveTextContent('Active');
+  expect(review).not.toHaveTextContent('Version');
+  expect(container.querySelector('.experience-code')).toHaveTextContent(
+    candidate.identifier,
+  );
+  expect(mocks.submit).not.toHaveBeenCalled();
 });

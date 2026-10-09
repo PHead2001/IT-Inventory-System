@@ -865,11 +865,11 @@ it('describes queued locations as locations while retaining inventory category f
   render(<LabelDesigner {...props} initial={[location, uncategorized]} />);
   await waitFor(() =>
     expect(
-      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · active'),
+      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · Active'),
     ).toBeInTheDocument(),
   );
   expect(
-    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · active'),
+    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · Active'),
   ).toBeInTheDocument();
 });
 
@@ -1402,7 +1402,12 @@ it('shows a quantity Item code in search results without replacing its UUID rout
     pageSize: 25,
   });
   render(<LabelDesigner {...props} />);
-  expect(await screen.findByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(await screen.findByText('Item code: SKU-0042')).toHaveClass(
+    'experience-code',
+  );
+  expect(
+    screen.getByText('Active', { selector: '.experience-record-status' }),
+  ).toBeVisible();
   expect(screen.queryByText('ID ' + quantityId)).not.toBeInTheDocument();
   expect(
     screen.getByRole('checkbox', {
@@ -1605,14 +1610,14 @@ it('shows one named decision on returning to a changed item and invalidates revi
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(notice).toHaveTextContent('Laptop');
   expect(notice).toHaveTextContent('Individual asset');
-  expect(notice).toHaveTextContent('Lifecycle changed from active to retired.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Active to Retired.');
   expect(
     screen.queryByText('Review required before printing'),
   ).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   let snapshot = within(notice).getByRole('region', { name: 'Review Laptop' });
-  expect(snapshot).toHaveTextContent('Current authorized snapshot: retired');
+  expect(snapshot).toHaveTextContent('Current authorized snapshot: Retired');
   expect(
     within(snapshot).getByRole('link', { name: 'View item details' }),
   ).toHaveAttribute('href', asset.path);
@@ -1628,7 +1633,7 @@ it('shows one named decision on returning to a changed item and invalidates revi
   current = asset;
   fireEvent(window, new Event('focus'));
   notice = await screen.findByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Lifecycle changed from retired to active.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Retired to Active.');
   expect(within(notice).queryByRole('region')).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1664,7 +1669,7 @@ it('requires fresh review when the acknowledgment read returns a different tag o
     ).not.toBeInTheDocument(),
   );
   notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).toHaveTextContent('Identifier changed.');
   expect(printButton()).toBeDisabled();
   const stored = JSON.parse(
@@ -1845,9 +1850,9 @@ it('rejects a delayed acknowledgment after focus advances the queue validation g
   expect(stored.entries[0].lifecycleAcknowledged).toBe(false);
   expect(
     screen.getByRole('alert', { name: 'Label item decisions' }),
-  ).toHaveTextContent('Current state: active.');
+  ).toHaveTextContent('Current state: Active.');
   expect(
-    screen.queryByText(/Current authorized snapshot: retired/),
+    screen.queryByText(/Current authorized snapshot: Retired/),
   ).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1898,7 +1903,7 @@ it.each([false, true])(
       );
       expect(
         screen.getByRole('alert', { name: 'Label item decisions' }),
-      ).toHaveTextContent('Current state: active');
+      ).toHaveTextContent('Current state: Active');
     } else {
       await waitFor(() =>
         expect(
@@ -1930,7 +1935,7 @@ it('persists outstanding review when an observed retirement returns to active be
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Current state: active.'),
+    ).toHaveTextContent('Current state: Active.'),
   );
   expect(printButton()).toBeDisabled();
   expect(
@@ -1943,7 +1948,7 @@ it('persists outstanding review when an observed retirement returns to active be
   const notice = await screen.findByRole('alert', {
     name: 'Label item decisions',
   });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   expect(within(notice).queryByRole('checkbox')).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
@@ -1968,7 +1973,7 @@ it('latches another item changed in an acknowledgment read even when it restores
     ).toHaveTextContent('Laptop'),
   );
   const notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).not.toHaveTextContent('Adapters');
   const stored = JSON.parse(
     sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
@@ -2000,7 +2005,7 @@ it('retains a surviving item lifecycle observation beside a missing sibling thro
     name: 'Label item decisions',
   });
   expect(notice).toHaveTextContent('Laptop');
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(
     screen.queryByText(/Some queued records are unavailable/),
   ).not.toBeInTheDocument();
@@ -2055,13 +2060,13 @@ it('invalidates an already latched checked review immediately when a duplicate l
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Review item' }));
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
     screen.getByRole('region', { name: 'Review Laptop' }),
-  ).toHaveTextContent('Current authorized snapshot: active');
+  ).toHaveTextContent('Current authorized snapshot: Active');
   expect(window.print).not.toHaveBeenCalled();
 });
 
@@ -2128,7 +2133,7 @@ it('retains review debt when an overlapping manual lookup observes a second chan
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   expect(screen.getByText('1 distinct record · 1 label')).toBeVisible();
   expect(window.print).not.toHaveBeenCalled();
@@ -2172,10 +2177,12 @@ it.each([
       name: 'Search result records',
     });
     expect(
-      within(results).getByText(`${display} · ${categoryName} · active`),
-    ).toBeVisible();
+      within(results).getByText(`${display} · ${categoryName} ·`, {
+        exact: false,
+      }),
+    ).toHaveTextContent(`${display} · ${categoryName} · Active`);
     expect(
-      within(results).queryByText(`${kind} · ${categoryName} · active`),
+      within(results).queryByText(`${kind} · ${categoryName} · Active`),
     ).toBeNull();
   },
 );

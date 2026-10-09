@@ -30,7 +30,9 @@ async function createCategory(page: Page) {
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(name);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${name}.`,
+  );
   return name;
 }
 

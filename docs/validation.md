@@ -1,5 +1,32 @@
 # Validation
 
+## U403 choice identity proof
+
+The forward choice-identity migration keeps the public RPC signatures and pinned
+normalization unchanged. Focused option-label, picker, editor, paste and authoring
+tests cover field-wide collisions, separate trusted published baselines, readable
+ordinals, literal suffix reservation, inactive choices and paging/search/reload.
+`supabase/tests/metadata-choice-publication.test.sql` covers modern review/final
+publication, permissive legacy draft-save followed by review/publish, raw-spelling
+provenance changes, removal/reintroduction, stale versions/review tokens and
+atomic failure without identity, event, receipt or answer changes. Historical
+revision JSON, compiled options and event snapshots are compared byte-for-byte.
+The existing form-save integration invokes `metadata-choice-display.ts` to compare
+actual SQL paths with TypeScript over complete revisions, selected subsets and
+reordering followed by historical reads. The 1,000-choice pgTAP suite retains
+its one-normalization-per-option and output/resource-limit assertions.
+
+`tests/e2e/metadata-choice-identity.spec.ts` uses a loopback-only coherent legacy
+fixture for populated Inventory and Labels at desktop and 390 px in Full and
+Reduced motion, unchanged-legacy editing and blocked spelling changes. The
+existing nested authoring browser case now distinguishes fresh cross-parent
+collision rejection from unchanged published compatibility. These database and
+browser tests require the canonical disposable local stack or CI; source/unit
+passes do not certify SQL execution, hosted summaries or actual populated UI.
+Full database/type generation, browser captures, exact-SHA remote checks and
+fresh independent review remain acceptance gates. Generated database types need
+no API signature update for this private-function replacement.
+
 Checkpoint scope/accessibility regression coverage includes normalized location status/export links, caller-scoped record identity and unavailable history recovery, page-local versus full-row counts, empty inventory/destination states, page recovery, monitoring coverage, intact location codes and hidden/unmodeled/failed map guidance. Focused Vitest tests prove these contracts and stale-response handling; `scope-accessibility.spec.ts` exercises ordinary controls, real authorized reads and downloaded CSV across page boundaries. Required-input and category-focus interaction coverage lives in `scope-accessibility-forms.spec.ts`. Mocked reads are not integrated runtime or complete assistive-technology proof; use the existing disposable-local and isolated-preview gates for final acceptance.
 
 Dedicated first-use acceptance runs on the disposable local backend: run `npm run db:reset`, then `npm run test:e2e -- --config tests/acceptance/checkpoint2.config.ts` before other data-creating tests. Authenticated precondition reads require zero quantity definitions, serialized assets and sites; a nonempty catalog or failed read fails the test rather than skipping it. The ordinary CI and full-validation gates remain unchanged.
@@ -251,3 +278,19 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## P05 vocabulary and support detail checks
+
+Focused receipt/history, category, task, status and export tests cover immutable
+snapshots, safe uncertain retries, capitalized status, action-specific success,
+record-type help and precision-preserving clipboard details. Browser coverage in
+`tests/e2e/audit-four-vocabulary.spec.ts` is ready for populated authorized UI at
+desktop and 390 px, including task headings, scan status, history and clipboard.
+Local resource limits exclude builds, Docker resets and full browser execution;
+E2E discovery alone is not visual or hosted acceptance.
+
+The P05 review batch includes low-stock readable CSV labels with machine-column
+compatibility tests for both export branches and custom-field modes. Shared browser
+custody controls assert the specific committed operation, including transfer and
+quantity write-off, and category browser helpers check the actual category name.
+These focused/static checks do not replace the pending database/browser runtime gate.

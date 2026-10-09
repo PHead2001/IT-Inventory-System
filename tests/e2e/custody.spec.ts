@@ -1,3 +1,4 @@
+import { custodyButtons, custodyReceiptTitle } from './custody-controls';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
@@ -86,22 +87,26 @@ async function createQuantity(
   await expect(page).toHaveURL(/\/inventory\/quantity\/[0-9a-f-]+$/);
   return page.url().split('/').at(-1)!;
 }
-async function submitCustody(form: Locator, title: string) {
+async function submitCustody(
+  form: Locator,
+  title: string,
+  kind: 'quantity' | 'asset',
+) {
   await form
-    .getByRole('button', { name: 'Review ' + title.toLowerCase(), exact: true })
+    .getByRole('button', { name: custodyButtons(title)[0], exact: true })
     .click();
   await expect(
     form.getByRole('region', { name: 'Review changes', exact: true }),
   ).toBeVisible();
   await form
     .getByRole('button', {
-      name: 'Confirm ' + title.toLowerCase(),
+      name: custodyButtons(title)[1],
       exact: true,
     })
     .click();
   await expect(
     form.page().getByRole('region', { name: 'Custody completion' }),
-  ).toContainText('Custody saved');
+  ).toContainText(custodyReceiptTitle(title, kind));
 }
 function decodeQrDataUrl(source: string) {
   expect(source).toMatch(/^data:image\/png;base64,/);
@@ -320,7 +325,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await assign
     .getByLabel('Destination site')
     .selectOption({ label: `${siteName} (${siteCode})` });
-  await submitCustody(assign, 'Assign asset to a site');
+  await submitCustody(assign, 'Assign asset to a site', 'asset');
   await expect(
     page
       .locator('dt')
@@ -429,8 +434,8 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await page.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page).toHaveURL(assetUrl);
   const transfer = await custodyForm(page, 'Return to storage');
-  await chooseLocation(transfer, 'Return to storage', locationCode);
-  await submitCustody(transfer, 'Return to storage');
+  await chooseLocation(transfer, 'Storage location', locationCode);
+  await submitCustody(transfer, 'Return to storage', 'asset');
   await page.reload();
   await expect(
     page
@@ -533,7 +538,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
     .getByLabel('Destination site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
   await issue.getByLabel('Units').fill('3');
-  await submitCustody(issue, 'Issue stock to a site');
+  await submitCustody(issue, 'Issue stock to a site', 'quantity');
   await page.reload();
   await expect(
     page.getByRole('heading', {
@@ -556,11 +561,9 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await overReturn
     .getByLabel('Source site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
-  await chooseLocation(overReturn, 'Return to storage', 'ITO-GENERAL');
+  await chooseLocation(overReturn, 'Storage location', 'ITO-GENERAL');
   await overReturn.getByLabel('Units').fill('4');
-  await overReturn
-    .getByRole('button', { name: 'Review return to storage' })
-    .click();
+  await overReturn.getByRole('button', { name: 'Review return' }).click();
   await expect(
     overReturn.getByText(/This source has only 3 units available/),
   ).toBeVisible();
@@ -603,9 +606,9 @@ test('site movements distinguish available, assigned and recorded; dated activit
   await returned
     .getByLabel('Source site')
     .selectOption({ label: `Fictional site ${aCode} (${aCode})` });
-  await chooseLocation(returned, 'Return to storage', 'ITO-GENERAL');
+  await chooseLocation(returned, 'Storage location', 'ITO-GENERAL');
   await returned.getByLabel('Units').fill('1');
-  await submitCustody(returned, 'Return to storage');
+  await submitCustody(returned, 'Return to storage', 'quantity');
   await page.reload();
   await expect(
     page.getByText('2 assigned to sites · 10 total recorded'),
@@ -618,7 +621,7 @@ test('site movements distinguish available, assigned and recorded; dated activit
     .getByLabel('Destination site')
     .selectOption({ label: `Fictional site ${bCode} (${bCode})` });
   await transferred.getByLabel('Units').fill('1');
-  await submitCustody(transferred, 'Transfer between sites');
+  await submitCustody(transferred, 'Transfer between sites', 'quantity');
   await page.reload();
   await expect(
     page.getByRole('heading', {
@@ -745,7 +748,7 @@ test('opening holdings and write-off retain history without inventing a closet i
   ).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Custody history' }),
-  ).toContainText('opened');
+  ).toContainText('Site opening recorded');
   await expect(
     page.getByText('Archive is blocked while site holdings remain.'),
   ).toBeVisible();
@@ -761,14 +764,14 @@ test('opening holdings and write-off retain history without inventing a closet i
   await writeOff
     .getByLabel('Reason (required)')
     .fill('Fictional disposal evidence');
-  await submitCustody(writeOff, 'Write off at site');
+  await submitCustody(writeOff, 'Write off at site', 'quantity');
   await page.reload();
   await expect(
     page.getByText('0 assigned to sites · 0 total recorded'),
   ).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Custody history' }),
-  ).toContainText('written off');
+  ).toContainText('Quantity written off at site');
   await page.goto('/sites/' + siteCode);
   await expect(
     page.getByText('Opening quantity units').locator('..'),

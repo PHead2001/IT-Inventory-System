@@ -89,7 +89,9 @@ it('reports the committed category outcome instead of generic settings success',
     target: { value: 'Updated source' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
-  expect(await screen.findByText('Category name saved.')).toBeVisible();
+  expect(
+    await screen.findByText('Category name saved: Updated source.'),
+  ).toBeVisible();
   expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 
@@ -428,7 +430,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
     name: 'Removal impact review',
   });
   expect(review).toHaveTextContent(
-    'truly unreferenced category will be deleted',
+    'category has no inventory or history references',
   );
   const confirm = within(review).getByRole('button', {
     name: 'Remove category Source',
@@ -436,6 +438,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   await waitFor(() => expect(confirm).toBeEnabled());
   fireEvent.click(confirm);
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('Category removed: Source.')).toBeVisible();
   view.rerender(
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );
@@ -472,4 +475,22 @@ it('keeps an authored form category for history and shows target metadata gaps b
     'previous answers stay available for review',
   );
   expect(review).toHaveTextContent('retained for readable history');
+});
+
+it('names the category only after its creation commits', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  fireEvent.change(screen.getByLabelText('Display name'), {
+    target: { value: 'Adapters' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+  expect(screen.queryByText('Category added: Adapters.')).toBeNull();
+  await act(async () => finish({ ok: true, result: { changed: true } }));
+  expect(await screen.findByText('Category added: Adapters.')).toBeVisible();
 });

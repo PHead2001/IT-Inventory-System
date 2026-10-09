@@ -313,3 +313,13 @@ Category UUID and code are permanent. Active names are unique after case folding
 Inventory create, metadata update and restore RPCs take a shared advisory catalog lock after authorized receipt replay and before category/entity reads. Category lifecycle RPCs take its exclusive form. Stock-only mutations keep their entity row locks without a catalog lock. These functions reject fresh Repeatable Read and Serializable transactions; successful completed receipt replay remains available under those modes. Lock wait is bounded to two seconds. The new category RPCs declare a five-second `statement_timeout` for PostgREST to hoist before the main RPC statement; runtime certification verifies this with a delayed Data API call. The 10,000-record cap is a maximum, not a guarantee of completion before the time budget.
 
 Shared label defaults cover the current 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices. The print page starts from these defaults, while each print session can choose differently. The future custom-fields engine, designer and file schema are separate work. This slice preserves inventory rows and their extension point but creates no custom-field tables or forms.
+
+## Readable display vocabulary
+
+Custody event titles use the shared display mapping in `features/custody/vocabulary.ts`;
+record status uses `lib/record-status.ts`. These mappings do not change persisted
+operations, identities, event snapshots, expected-version checks or retry receipts.
+Inventory CSV appends readable Type label, Status label and Custody label columns;
+low-stock CSV appends Type label and Status label. Both retain existing machine column positions and values. Clipboard support details
+carry original event/operation IDs and ISO precision without rendering them in
+ordinary receipt/history text; local timestamp displays keep the recorded `dateTime`.

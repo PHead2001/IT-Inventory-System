@@ -115,9 +115,9 @@ export function SettingsPanel({
       setMessage(
         result.result.changed
           ? {
-              category_create: 'Category added.',
-              category_rename: 'Category name saved.',
-              category_remove: 'Category removed.',
+              category_create: `Category added: ${String(payload.name).trim()}.`,
+              category_rename: `Category name saved: ${String(payload.name).trim()}.`,
+              category_remove: `Category removed: ${categories?.find((category) => category.id === payload.category_id)?.name ?? 'Selected category'}.`,
               label_defaults_update: 'Label settings saved.',
             }[operation]
           : 'No values changed.',
@@ -199,7 +199,7 @@ export function SettingsPanel({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0 break-words">
                     <strong>{category.name}</strong>
-                    <span className="ml-3 text-sm text-slate-400">
+                    <span className="experience-code ml-3 text-sm text-slate-400">
                       {category.code}
                     </span>
                     {!category.active && (
@@ -408,7 +408,7 @@ export function SettingsPanel({
                           also reference this category.{' '}
                           {review.will_tombstone
                             ? 'The category will be removed from active choices but retained for readable history.'
-                            : 'This truly unreferenced category will be deleted.'}
+                            : 'This category has no inventory or history references and will be removed.'}
                         </p>
                         <p>
                           {review.authored_revision_count} authored form

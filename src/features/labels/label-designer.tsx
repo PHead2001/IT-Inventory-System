@@ -1,4 +1,6 @@
 'use client';
+import { recordStatusLabel } from '@/lib/record-status';
+import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
   useEffect,
@@ -1292,7 +1294,7 @@ function LabelDesignerWorkspace({
                     </Link>
                     <p className={styles.resultMeta}>
                       {recordKind(record.kind)} · {record.categoryName} ·{' '}
-                      {record.status}
+                      <RecordStatus status={record.status} />
                     </p>
                     <p className={styles.resultMeta}>
                       {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
@@ -1308,11 +1310,26 @@ function LabelDesignerWorkspace({
                           record.itemCode && `Item code: ${record.itemCode}`,
                           record.assetTag,
                           record.serialNumber,
-                          record.manufacturer,
-                          record.model,
                         ]
                           .filter(Boolean)
-                          .join(' · ')}
+                          .map((code, index) => (
+                            <span key={index} className="experience-code">
+                              {index > 0 && ' · '}
+                              {code}
+                            </span>
+                          ))}
+                        {[record.manufacturer, record.model]
+                          .filter(Boolean)
+                          .map((label, index) => (
+                            <span key={index}>
+                              {(record.itemCode ||
+                                record.assetTag ||
+                                record.serialNumber ||
+                                index > 0) &&
+                                ' · '}
+                              {label}
+                            </span>
+                          ))}
                       </p>
                     )}
                     {record.customPreview &&
@@ -1521,8 +1538,8 @@ function LabelDesignerWorkspace({
                         </h4>
                         <p className={styles.subtle}>
                           {stateChanged
-                            ? `Lifecycle changed from ${entry.baselineState} to ${row.state}.`
-                            : `Current state: ${row.state}.`}
+                            ? `Lifecycle changed from ${recordStatusLabel(entry.baselineState)} to ${recordStatusLabel(row.state)}.`
+                            : `Current state: ${recordStatusLabel(row.state)}.`}
                           {tagChanged ? ' Identifier changed.' : ''}
                         </p>
                         <div className={styles.queueActions}>
@@ -1569,7 +1586,8 @@ function LabelDesignerWorkspace({
                             aria-label={`Review ${row.name}`}
                           >
                             <p className={styles.subtle}>
-                              Current authorized snapshot: {row.state}
+                              Current authorized snapshot:{' '}
+                              <RecordStatus status={row.state} />
                               {row.tag
                                 ? ` · Tag ${row.tag}`
                                 : row.kind === 'asset'
@@ -1667,7 +1685,7 @@ function LabelDesignerWorkspace({
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
+                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
                         : `${id} · unavailable`}
                     </span>
                     <div className={styles.queueActions}>

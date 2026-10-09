@@ -793,7 +793,7 @@ it('loads counts only when enabled and refreshes counts and contents together on
     window.dispatchEvent(new Event('pageshow'));
   });
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 2));
-  await screen.findByText(/Counts are a snapshot/);
+  await screen.findByText(/Counts show quantity items with stock/);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
 });

@@ -539,7 +539,7 @@ describe('inventory operation forms', () => {
       if (operation === 'asset_retire')
         expect(
           screen.getByRole('button', { name: 'Confirm retire asset' }),
-        ).toHaveAccessibleDescription('Review retire asset for ' + item.name);
+        ).toHaveAccessibleDescription('Review changes for ' + item.name);
       await user.click(screen.getByRole('button', { name: /^Confirm / }));
       await screen.findByRole('alert');
       const first = mocks.submit.mock.calls[0][0];

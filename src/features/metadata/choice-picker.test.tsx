@@ -24,17 +24,51 @@ it('disambiguates legacy active siblings and ancestor paths without changing ans
       onChange={change}
     />,
   );
-  expect(
-    screen.getByText('Selected: usb [choice second] / Cable'),
-  ).toBeVisible();
+  expect(screen.getByText('Selected: usb (2) / Cable')).toBeVisible();
   fireEvent.click(
     screen.getByRole('button', {
-      name: 'USB [choice first]',
+      name: 'USB',
     }),
   );
   expect(change).toHaveBeenCalledWith('first');
 });
 describe('shared choice picker', () => {
+  it('keeps complete-revision disambiguators through paging, search and reload without exposing choice IDs', () => {
+    const choices = [
+      { id: 'retained', label: 'Same', active: false },
+      { id: 'early', label: 'same', active: true },
+      { id: 'literal', label: 'Same (2)', active: true },
+      ...Array.from({ length: 51 }, (_, n) => ({
+        id: `filler-${n}`,
+        label: `Choice ${n}`,
+        active: true,
+      })),
+      { id: 'late', label: 'Same', active: true },
+    ];
+    const change = vi.fn();
+    const props = {
+      options: choices,
+      type: 'single_select' as const,
+      label: 'Connector',
+      value: 'late',
+      onChange: change,
+    };
+    const view = render(<ChoicePicker {...props} />);
+    expect(screen.getByText('Selected: Same (4)')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Next options' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Same (4)' }));
+    expect(change).toHaveBeenCalledWith('late');
+    fireEvent.change(screen.getByLabelText('Search options'), {
+      target: { value: 'same' },
+    });
+    expect(screen.getByRole('button', { name: 'same (3)' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Same (2)' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Same (4)' })).toBeVisible();
+    expect(screen.queryByText(/\[choice/)).not.toBeInTheDocument();
+    view.unmount();
+    render(<ChoicePicker {...props} options={structuredClone(choices)} />);
+    expect(screen.getByText('Selected: Same (4)')).toBeVisible();
+  });
   it('associates submitted validation with the actual choice control without changing its value', () => {
     render(
       <>

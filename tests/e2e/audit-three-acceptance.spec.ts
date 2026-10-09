@@ -384,7 +384,7 @@ test('custody Done permits another operation and revisit cannot resurrect or rep
       name: 'Custody completion',
       exact: true,
     });
-    await expect(first).toContainText('Custody saved');
+    await expect(first).toContainText('Assigned to site');
     await first.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(
       page
@@ -394,17 +394,17 @@ test('custody Done permits another operation and revisit cannot resurrect or rep
     form = await openRecordTask(page, 'Return to storage');
     await expect(
       form.getByRole('button', {
-        name: 'Review return to storage',
+        name: 'Review return',
         exact: true,
       }),
     ).toBeEnabled();
-    await chooseLocation(form, 'Return to storage', 'ITC-BLACK');
+    await chooseLocation(form, 'Storage location', 'ITC-BLACK');
     await acceptanceConfirm(form, 'Return to storage');
     const second = page.getByRole('region', {
       name: 'Custody completion',
       exact: true,
     });
-    await expect(second).toContainText('Custody saved');
+    await expect(second).toContainText('Returned from site');
     await second.getByRole('button', { name: 'Done', exact: true }).click();
     await page.goto('/inventory');
     await page.goto(detail);
@@ -415,7 +415,7 @@ test('custody Done permits another operation and revisit cannot resurrect or rep
     form = await openRecordTask(page, 'Assign asset to a site');
     await expect(
       form.getByRole('button', {
-        name: 'Review assign asset to a site',
+        name: 'Review assignment',
         exact: true,
       }),
     ).toBeVisible();

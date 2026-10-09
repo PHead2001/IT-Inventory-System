@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { TaskResetContext } from '@/features/inventory/components/task-state';
 import { CustodyChangeForm } from './custody-change-form';
 import { submitCustody } from './actions';
 
@@ -110,9 +111,7 @@ it.each(['transfer', 'assign', 'return'] as const)(
     };
     const view = render(<CustodyChangeForm {...initial} />);
     if (action === 'return')
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Return to storage' }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: 'Storage location' }));
     else
       fireEvent.change(screen.getByLabelText('Destination site'), {
         target: { value: duplicateSite.id },
@@ -121,7 +120,11 @@ it.each(['transfer', 'assign', 'return'] as const)(
     const review = screen.getByRole('region', { name: 'Review changes' });
     expect(review).toHaveTextContent(`${sourceLabel} → ${destinationLabel}`);
     expect(submitCustody).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+      }),
+    );
     await screen.findByRole('button', { name: 'Done' });
     view.rerender(
       <CustodyChangeForm
@@ -140,8 +143,8 @@ it.each(['transfer', 'assign', 'return'] as const)(
     const completion = screen.getByRole('region', {
       name: 'Custody completion',
     });
-    expect(completion).toHaveTextContent(
-      `Reviewed route: ${sourceLabel} → ${destinationLabel}`,
+    expect(completion).not.toHaveTextContent(
+      'endpoints reviewed for this operation',
     );
     expect(completion).toHaveTextContent(
       'Immutable recorded source → Immutable recorded destination',
@@ -168,7 +171,7 @@ it('explains absent sites and disables only the unavailable assignment', () => {
     />,
   );
   expect(
-    screen.getByRole('button', { name: 'Review assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assignment' }),
   ).toBeDisabled();
   expect(screen.getByText(/No sites are configured/)).toBeVisible();
   expect(screen.queryByRole('link', { name: /site settings/i })).toBeNull();
@@ -206,7 +209,7 @@ it('offers existing site settings only to a maintainer and distinguishes inactiv
   expect(screen.queryByText(/No sites are configured/)).toBeNull();
   expect(screen.queryByRole('link', { name: 'Open site settings' })).toBeNull();
   expect(
-    screen.getByRole('button', { name: 'Review assign asset to a site' }),
+    screen.getByRole('button', { name: 'Review assignment' }),
   ).toBeDisabled();
 });
 
@@ -224,7 +227,7 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(screen.getByText(/No other active site/)).toBeVisible();
   expect(
-    screen.getByRole('button', { name: 'Review transfer between sites' }),
+    screen.getByRole('button', { name: 'Review transfer' }),
   ).toBeDisabled();
   view.rerender(
     <CustodyChangeForm
@@ -239,7 +242,7 @@ it('distinguishes a transfer with no other destination and leaves an archived-si
   );
   expect(
     screen
-      .getAllByRole('button', { name: 'Review return to storage' })
+      .getAllByRole('button', { name: 'Review return' })
       .find((button) => button.getAttribute('type') === 'submit'),
   ).toBeEnabled();
   expect(screen.queryByText(/No active sites/)).toBeNull();
@@ -259,9 +262,7 @@ it('collects destination and overdraw together and clears only corrected issues 
   );
   const amount = screen.getByLabelText('Units');
   fireEvent.change(amount, { target: { value: '4' } });
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Review issue stock to a site' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Review issue' }));
   expect(screen.getByRole('link', { name: 'Destination site' })).toBeVisible();
   expect(screen.getByRole('link', { name: 'Units' })).toBeVisible();
   amount.focus();
@@ -291,9 +292,7 @@ it('invalidates custody review after an edit or an observed catalog change, even
   fireEvent.change(screen.getByLabelText('Destination site'), {
     target: { value: site.id },
   });
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Review assign asset to a site' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Review assignment' }));
   expect(
     screen.getByRole('region', { name: 'Review changes' }),
   ).toHaveTextContent('Laptop');
@@ -301,13 +300,21 @@ it('invalidates custody review after an edit or an observed catalog change, even
     screen.getByLabelText('Ticket number reference (optional)'),
     { target: { value: 'T-2' } },
   );
-  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  expect(
+    screen.queryByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /^Review assign/ }));
   view.rerender(
     <CustodyChangeForm {...props} sites={[{ ...site, active: false }]} />,
   );
   view.rerender(<CustodyChangeForm {...props} />);
-  expect(screen.queryByRole('button', { name: /^Confirm / })).toBeNull();
+  expect(
+    screen.queryByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
+  ).toBeNull();
   expect(submitCustody).not.toHaveBeenCalled();
 });
 
@@ -331,10 +338,8 @@ it('requires review for asset return and fences double confirmation before dispa
       currentSite={site}
     />,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Return to storage' }));
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Review return to storage' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Storage location' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review return' }));
   expect(
     screen.getByRole('region', { name: 'Review changes' }),
   ).toHaveTextContent('Laptop');
@@ -368,11 +373,13 @@ it('assigns an asset from its authoritative storage source without duplicating a
   fireEvent.change(screen.getByLabelText('Destination site'), {
     target: { value: site.id },
   });
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Review assign asset to a site' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Review assignment' }));
   expect(submitCustody).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
+  );
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
     operation: 'asset_site_change',
@@ -429,11 +436,13 @@ it('transfers only the specified site-held quantity with stable version and no s
     target: { value: otherSite.id },
   });
   fireEvent.change(screen.getByLabelText('Units'), { target: { value: '2' } });
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Review transfer between sites' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Review transfer' }));
   expect(submitCustody).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
+  );
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   const payload = (
     vi.mocked(submitCustody).mock.calls[0][0] as {
@@ -488,10 +497,12 @@ it.each([
     fireEvent.change(screen.getByLabelText('Destination site'), {
       target: { value: site.id },
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Review assignment' }));
     fireEvent.click(
-      screen.getByRole('button', { name: 'Review assign asset to a site' }),
+      screen.getByRole('button', {
+        name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+      }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
     await screen.findByText(/result could not be confirmed/);
     const first = vi.mocked(submitCustody).mock.calls[0][0];
     expect(first).toMatchObject({
@@ -590,10 +601,12 @@ it('keeps a last-unit committed receipt independent of depleted live sources and
   fireEvent.change(screen.getByLabelText('Destination site'), {
     target: { value: site.id },
   });
+  fireEvent.click(screen.getByRole('button', { name: 'Review issue' }));
   fireEvent.click(
-    screen.getByRole('button', { name: 'Review issue stock to a site' }),
+    screen.getByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
   );
-  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm
@@ -672,11 +685,15 @@ it('preserves a last-unit return source name even when it leaves site holdings a
   const view = render(<CustodyChangeForm {...props} />);
   fireEvent.click(
     screen
-      .getAllByRole('button', { name: 'Return to storage' })
+      .getAllByRole('button', { name: 'Storage location' })
       .find((button) => button.getAttribute('type') === 'button')!,
   );
   fireEvent.submit(screen.getByRole('form', { name: 'Return to storage' }));
-  fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+    }),
+  );
   await screen.findByRole('button', { name: 'Done' });
   view.rerender(
     <CustodyChangeForm {...props} version="2" sites={[]} siteHoldings={[]} />,
@@ -763,19 +780,26 @@ it.each([
     expect(review).toHaveTextContent(`At ${site.name} (${site.code})`);
     expect(review).not.toHaveTextContent('→');
     expect(review).not.toHaveTextContent('No destination');
-    fireEvent.click(screen.getByRole('button', { name: /^Confirm / }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /^(Assign to site|Return to storage|Transfer between sites|Issue to site|Save correction|Write off at site|Retire asset at site|Record site holding)$/,
+      }),
+    );
     await screen.findByRole('button', { name: 'Done' });
     const completion = screen.getByRole('region', {
       name: 'Custody completion',
     });
+    expect(
+      screen.getByRole('heading', {
+        name: changed ? 'Site count corrected' : 'No change needed',
+      }),
+    ).toBeVisible();
     if (receiptAvailable) {
-      expect(completion).toHaveTextContent(
-        `Reviewed route: At ${site.name} (${site.code})`,
-      );
+      expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
     } else {
       expect(completion).toHaveTextContent(`Count correction at ${site.name}`);
       expect(completion).toHaveTextContent(
-        `Reviewed observed count: ${changed ? 10 : 5} units (submitted for this operation)`,
+        `Observed count: ${changed ? 10 : 5} units`,
       );
       expect(completion).toHaveTextContent(
         changed
@@ -795,5 +819,108 @@ it.each([
       },
     });
     expect(command).not.toHaveProperty('payload.destination_site_id');
+  },
+);
+
+it('leaves the task heading to the workspace and asks for a storage location', () => {
+  render(
+    <TaskResetContext.Provider value={vi.fn()}>
+      <CustodyChangeForm
+        actorId={id(8)}
+        kind="asset"
+        action="return"
+        entityId={id(1)}
+        entityName="Laptop"
+        version="1"
+        locations={[location]}
+        sites={[site]}
+        currentSite={site}
+      />
+    </TaskResetContext.Provider>,
+  );
+  expect(
+    screen.queryByRole('heading', { name: 'Return to storage' }),
+  ).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Storage location' }),
+  ).toBeVisible();
+});
+it('shows only individual asset retirement guidance', () => {
+  render(
+    <CustodyChangeForm
+      actorId={id(8)}
+      kind="asset"
+      action="retire"
+      entityId={id(1)}
+      entityName="Laptop"
+      version="1"
+      locations={[location]}
+      sites={[site]}
+      currentSite={site}
+    />,
+  );
+  expect(screen.getByText(/Retire ends this individual asset/)).toBeVisible();
+  expect(document.body.textContent).not.toContain('consumed quantity');
+});
+
+it.each([
+  ['assign', 'Assigned to site'],
+  ['return', 'Returned from site'],
+] as const)(
+  'acknowledges committed %s without substituting current holdings for a missing receipt',
+  async (action, outcome) => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: '2',
+      changed: true,
+      eventId: id(10),
+      refreshFailed: true,
+    });
+    render(
+      <CustodyChangeForm
+        kind="asset"
+        action={action}
+        entityId={id(1)}
+        entityName="Laptop"
+        version="1"
+        locations={[location]}
+        sites={[site]}
+        currentLocation={action === 'assign' ? location : null}
+        currentSite={action === 'return' ? site : null}
+      />,
+    );
+    if (action === 'return')
+      fireEvent.click(screen.getByRole('button', { name: 'Storage location' }));
+    else
+      fireEvent.change(screen.getByLabelText('Destination site'), {
+        target: { value: site.id },
+      });
+    fireEvent.click(screen.getByRole('button', { name: /^Review / }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: action === 'assign' ? 'Assign to site' : 'Return to storage',
+      }),
+    );
+    await screen.findByRole('button', { name: 'Done' });
+    const completion = screen.getByRole('region', {
+      name: 'Custody completion',
+    });
+    expect(screen.getByRole('heading', { name: outcome })).toBeVisible();
+    expect(completion).toHaveTextContent('Laptop');
+    expect(completion).toHaveTextContent(
+      action === 'assign'
+        ? `${location.breadcrumb} (${location.code}) → ${site.name} (${site.code})`
+        : `${site.name} (${site.code}) → ${location.breadcrumb} (${location.code})`,
+    );
+    expect(completion).toHaveTextContent(
+      'The transaction is confirmed. The event receipt is not available yet; current holdings are not its receipt balances.',
+    );
+    expect(completion).toHaveTextContent('do not submit this operation again');
+    expect(completion).not.toHaveTextContent('Custody saved');
+    expect(completion).not.toHaveTextContent(
+      action === 'assign' ? 'Assign asset to a site' : 'Return to storage ·',
+    );
+    expect(submitCustody).toHaveBeenCalledOnce();
   },
 );

@@ -18,11 +18,21 @@ const base: Field = {
     { id: id(4), label: 'Ethernet', active: true },
   ],
 };
-function Editor({ initial = base }: { initial?: Field }) {
+function Editor({
+  initial = base,
+  publishedOptions,
+}: {
+  initial?: Field;
+  publishedOptions?: Field['options'];
+}) {
   const [field, setField] = useState(initial);
   return (
     <>
-      <OptionTreeEditor field={field} change={setField} />
+      <OptionTreeEditor
+        field={field}
+        change={setField}
+        publishedOptions={publishedOptions}
+      />
       <output data-testid="field">{JSON.stringify(field)}</output>
     </>
   );
@@ -39,6 +49,41 @@ const tools = (name: string) => {
 const current = () =>
   JSON.parse(screen.getByTestId('field').textContent!) as Field;
 describe('choice editor', () => {
+  it('keeps unchanged published ambiguity editable but flags a spelling change and cross-parent new choice', () => {
+    const initial: Field = {
+      ...base,
+      options: [
+        ...base.options,
+        { id: id(5), label: 'usb-c', active: true, parent_id: id(4) },
+      ],
+    };
+    render(
+      <Editor
+        initial={initial}
+        publishedOptions={structuredClone(initial.options)}
+      />,
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: ' USB-C ' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: 'USB-C' } },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: New option' }),
+      { target: { value: 'usb-c' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(3);
+    expect(current().options.find((option) => option.id === id(3))?.label).toBe(
+      'USB-C',
+    );
+  });
   it('discards an accidentally added blank leaf without altering other answers', () => {
     render(<Editor initial={{ ...base, default: id(3) }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));

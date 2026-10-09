@@ -32,18 +32,18 @@ $$;
 select is(pg_temp.compile_choices('[
   {"id":"00000000-0000-4000-8000-000000000001","label":"Straße","active":true},
   {"id":"00000000-0000-4000-8000-000000000002","label":" STRASSE ","active":true}
-]'), 'P1021:ambiguous_active_sibling_options', 'fresh publication rejects root full-fold siblings');
+]'), 'P1021:ambiguous_active_field_options', 'fresh publication rejects root full-fold siblings');
 select is(pg_temp.compile_choices('[
   {"id":"00000000-0000-4000-8000-000000000001","label":"USB","active":true},
   {"id":"00000000-0000-4000-8000-000000000002","label":"Café","active":true,"parent_id":"00000000-0000-4000-8000-000000000001"},
   {"id":"00000000-0000-4000-8000-000000000003","label":"CAFÉ","active":true,"parent_id":"00000000-0000-4000-8000-000000000001"}
-]'), 'P1021:ambiguous_active_sibling_options', 'fresh publication rejects canonical-equivalent nested siblings');
+]'), 'P1021:ambiguous_active_field_options', 'fresh publication rejects canonical-equivalent nested siblings');
 select is(pg_temp.compile_choices('[
   {"id":"00000000-0000-4000-8000-000000000001","label":"USB","active":true},
   {"id":"00000000-0000-4000-8000-000000000002","label":"Network","active":true},
   {"id":"00000000-0000-4000-8000-000000000003","label":"Shared","active":true,"parent_id":"00000000-0000-4000-8000-000000000001"},
   {"id":"00000000-0000-4000-8000-000000000004","label":"shared","active":true,"parent_id":"00000000-0000-4000-8000-000000000002"}
-]'), 'ok', 'same label under different parent identities remains valid');
+]'), 'P1021:ambiguous_active_field_options', 'fresh cross-parent labels must be distinguishable throughout the field');
 select is(pg_temp.compile_choices('[
   {"id":"00000000-0000-4000-8000-000000000001","label":"Same","active":true},
   {"id":"00000000-0000-4000-8000-000000000002","label":"same","active":false}
@@ -51,7 +51,7 @@ select is(pg_temp.compile_choices('[
 select is(pg_temp.compile_choices('[
   {"id":"00000000-0000-4000-8000-000000000001","label":"Same","active":true},
   {"id":"00000000-0000-4000-8000-000000000002","label":"same","active":true}
-]', 'multi_select'), 'P1021:ambiguous_active_sibling_options', 'flat multiple choice has the same sibling rule');
+]', 'multi_select'), 'P1021:ambiguous_active_field_options', 'flat multiple choice has the same sibling rule');
 select is(pg_temp.compile_choices('[]','boolean','{"booleanPresentation":"yes_no"}'), 'ok', 'Yes/No presentation preserves false as a valid default and answer');
 select is(pg_temp.compile_choices('[]','boolean','{}'), 'ok', 'old checkbox callers remain valid');
 select is(pg_temp.compile_choices('[]','boolean','{"booleanPresentation":"unknown"}'), 'P1021:invalid_boolean_presentation', 'fabricated presentation is rejected authoritatively');
@@ -73,6 +73,7 @@ select is(pg_temp.compile_choices('[
 create function pg_temp.legacy_paths_unchanged() returns boolean language plpgsql as $$
 declare category uuid:=gen_random_uuid(); revision uuid:=gen_random_uuid(); field uuid:=gen_random_uuid();
   first uuid:=gen_random_uuid(); second uuid:=gen_random_uuid(); child uuid:=gen_random_uuid(); result boolean;
+  blank_first uuid:=gen_random_uuid(); blank_second uuid:=gen_random_uuid(); literal uuid:=gen_random_uuid();
 begin
   begin
     insert into public.categories(id,code,name) values(category,'LEGACY-'||upper(replace(category::text,'-','')),'Legacy '||category::text);
@@ -81,15 +82,21 @@ begin
     insert into public.metadata_fields(id,category_id,field_type) values(field,category,'hierarchical_select');
     insert into public.form_revision_fields(revision_id,field_id,label,applies_to,required,sort_order)
       values(revision,field,'Legacy choices',array['quantity'],false,0);
-    insert into public.metadata_options(id,field_id) values(first,field),(second,field),(child,field);
+    insert into public.metadata_options(id,field_id) values(first,field),(second,field),(child,field),
+      (blank_first,field),(blank_second,field),(literal,field);
     insert into public.form_revision_options(revision_id,field_id,option_id,parent_option_id,label,active,sort_order)
       values(revision,field,first,null,'USB',true,0),(revision,field,second,null,'usb',true,1),
-        (revision,field,child,second,'Cable',true,2);
+        (revision,field,child,second,'Cable',true,2),
+        (revision,field,blank_first,null,chr(160),true,3),
+        (revision,field,blank_second,null,chr(65279),false,4),
+        (revision,field,literal,null,'(2)',true,5);
     update public.category_form_revisions set status='published',published_at=now() where id=revision;
-    result:=private.metadata_option_path(revision,field,child)=array['usb [choice '||second::text||']','Cable']
+    result:=private.metadata_option_path(revision,field,child)=array['usb (2)','Cable']
       and private.metadata_option_paths(revision,field,array[child,first])=jsonb_build_array(
-        jsonb_build_array('usb [choice '||second::text||']','Cable'),jsonb_build_array('USB [choice '||first::text||']'))
+        jsonb_build_array('usb (2)','Cable'),jsonb_build_array('USB'))
       and (select label='usb' from public.form_revision_options where revision_id=revision and option_id=second)
+      and private.metadata_option_path(revision,field,blank_second)=array[chr(65279)||' (3)']
+      and private.metadata_option_path(revision,field,literal)=array['(2)']
       and private.metadata_value_valid(revision,field,to_jsonb(child::text));
     raise exception using errcode='P9999',message='rollback_test_fixture';
   exception when sqlstate 'P9999' then return result;

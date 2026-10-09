@@ -482,7 +482,7 @@ export function SpacesWorkspace({
               ? 'Refreshing item counts…'
               : occupancy.status === 'error'
                 ? 'Item counts unavailable. Refresh to try again.'
-                : 'Counts are a snapshot of active items: one per positive-stock quantity item and active individual asset at each leaf location.'}
+                : 'Counts show quantity items with stock and active individual assets at each storage location.'}
           </p>
           <button
             className={styles.commandButton}

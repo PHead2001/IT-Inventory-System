@@ -1,3 +1,4 @@
+import { custodyButtons, custodyReceiptTitle } from './custody-controls';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
@@ -137,20 +138,20 @@ async function custodyForm(page: Page, title: string) {
 }
 async function submitCustody(form: Locator, title: string) {
   await form
-    .getByRole('button', { name: `Review ${title.toLowerCase()}`, exact: true })
+    .getByRole('button', { name: custodyButtons(title)[0], exact: true })
     .click();
   await expect(
     form.getByRole('region', { name: 'Review changes' }),
   ).toBeVisible();
   await form
     .getByRole('button', {
-      name: `Confirm ${title.toLowerCase()}`,
+      name: custodyButtons(title)[1],
       exact: true,
     })
     .click();
   await expect(
     form.page().getByRole('region', { name: 'Custody completion' }),
-  ).toContainText('Custody saved');
+  ).toContainText(custodyReceiptTitle(title, 'asset'));
 }
 function png(color: number) {
   const image = new PNG({ width: 4, height: 4 });
@@ -589,7 +590,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   expect(download.suggestedFilename()).toBe('manual.pdf');
   expect(sha256(await readFile(await download.path()))).toBe(sha256(bytes));
   const returned = await custodyForm(page, 'Return to storage');
-  await chooseLocation(returned, 'Return to storage', 'ITC-RACK');
+  await chooseLocation(returned, 'Storage location', 'ITC-RACK');
   await submitCustody(returned, 'Return to storage');
   await page.goto(assetUrl);
   await expect(cards.getByText('manual.pdf', { exact: true })).toBeVisible();

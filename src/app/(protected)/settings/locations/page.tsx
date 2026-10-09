@@ -18,14 +18,12 @@ export default async function ManageLocationsPage() {
       <p className="experience-eyebrow mt-3">Configuration / Locations</p>
       <h1 className="experience-heading mb-3">Manage logical locations</h1>
       <p className="mb-5 max-w-3xl text-sm leading-6 text-slate-300">
-        IT Office / General Storage / Unsorted is a provisional software
-        location, not a measured shelf. Existing locations, permanent codes and
-        history are retained.
+        IT Office / General Storage / Unsorted holds inventory without a more
+        specific storage location.
       </p>
       <p className={panel}>
-        Configuration maintainers can rename display labels. Storage structure,
-        permanent codes and room bindings are maintained with reviewed room
-        code.
+        Configuration maintainers can rename display labels. Storage layout,
+        permanent codes and room connections require an application update.
       </p>
       <SettingsLocationTree locations={locations} />
     </>
