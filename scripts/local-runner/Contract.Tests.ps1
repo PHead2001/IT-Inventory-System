@@ -63,6 +63,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Network.Guardian.Process.Tests.ps1 failed.' }
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Prepared.Image.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Prepared image tests failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Sealed.Preparation.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Sealed preparation tests failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Guardian.Boot.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Guardian boot tests failed.' }
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "ITIR-contract-$([guid]::NewGuid().ToString('N'))"

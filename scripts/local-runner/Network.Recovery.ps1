@@ -425,7 +425,29 @@ function Test-RunnerRecoveryGeneration($State, $Binding, [long] $Generation, [st
     return $null -ne $State -and $State.PSObject.Properties.Name -contains 'networkRecovery' -and
         (Get-RunnerRecoveryClaimHash $State) -ceq $Binding.claimHash -and
         $State.networkRecovery.generation -eq $Generation -and $State.networkRecovery.operation -ceq $Operation -and
-        $State.networkRecovery.phase -cne 'failed'
+        $State.networkRecovery.phase -cnotin @('failed', 'sealed-preparation')
+}
+
+function Assert-RunnerSealedPreparation($State, [DateTime] $NowUtc) {
+    # Only the committed credential-free preparation seal can supervise absent
+    # VM registration. All provider absence/reference checks remain authoritative.
+    Assert-RunnerPrepareState $State
+    $r = $State.networkRecovery
+    if ($State.phase -cne 'sealed-off' -or $r.phase -cne 'sealed-preparation' -or $r.operation -cne '' -or $r.resumeRequired -ne $false -or
+        [guid]$r.binding.vmId -ne [guid]$State.vmId -or $r.binding.vmName -cne $State.vmName -or $r.binding.claimHash -cne (Get-RunnerRecoveryClaimHash $State) -or
+        -not (Test-RunnerProcessIdentity $State.supervisorPid $State.supervisorStartUtc) -or
+        -not (Test-RunnerProcessIdentity $State.guardianPid $State.guardianStartUtc) -or (Test-RunnerSessionStopRequested $State) -or
+        $NowUtc -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime() -or (Get-RunnerRecoveryExpiry $r $NowUtc) -or
+        $NowUtc -lt [DateTime]::Parse($r.progressUtc).ToUniversalTime()) { throw 'Sealed preparation identity, owner, guardian, Stop or deadline is invalid.' }
+    $seal = Get-RunnerEvidenceValue $State.imageSealBinding
+    $proof = Get-RunnerEvidenceValue $State.imageScrubProof
+    if ($seal.schema -ne 1 -or $seal.generation -ne $r.generation -or $seal.bindingHash -cnotmatch '^[0-9A-F]{64}$' -or $seal.bundleHash -cnotmatch '^[0-9A-F]{64}$' -or
+        $seal.recipeId -cnotmatch '^[0-9A-F]{64}$' -or $seal.scrubProofHash -cne $State.imageScrubProof.hash -or
+        $proof.schema -ne 1 -or $proof.recipeId -cne $seal.recipeId -or $proof.scrubbed -ne $true -or
+        (Compare-Object @($proof.capabilities | Sort-Object) @('os-prerequisites', 'node-toolcache', 'npm-cache', 'playwright', 'supabase-images' | Sort-Object))) { throw 'Sealed preparation committed scrub/binding proof is invalid.' }
+    Assert-RunnerImageStorageReceipt $proof
+    if (@(Get-RunnerVmInventory | Where-Object { $_.Name -ceq $State.vmName -or [guid]$_.Id -eq [guid]$State.vmId }).Count -ne 0) { throw 'Sealed preparation VM registration reappeared.' }
+    Assert-RunnerInstanceUnreferenced $State
 }
 
 function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outcome = $null) {
@@ -434,7 +456,10 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
     $probeOutcome = Get-RunnerRecoveryProbeOutcome
     if ($null -ne $probeOutcome) { $Outcome = $probeOutcome }
     $observation = $null
-    try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
+    $initial = Get-RunnerState
+    if ($null -eq $initial -or $initial.PSObject.Properties.Name -notcontains 'phase' -or $initial.phase -cne 'sealed-off') {
+        try { $observation = Get-RunnerNetworkObservation } catch { $observation = $null }
+    }
     $observedUtc = if ($null -ne $observation) { [DateTime]::Parse($observation.observedUtc).ToUniversalTime() } else { Get-RunnerRecoveryNow }
     $probe = $false; $probeState = $null; $result = $null; $reconnect = $null
     $mutex = Enter-RunnerLock
@@ -446,6 +471,13 @@ function Invoke-RunnerNetworkRecoveryTick([string] $SessionName, $Config, $Outco
         if ($state.PSObject.Properties.Name -notcontains 'networkRecovery') { throw 'Recovery tick requires its initialized protected journal.' }
         $recovery = $state.networkRecovery
         $now = Get-RunnerRecoveryNow
+        if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or $recovery.phase -ceq 'sealed-preparation') {
+            Assert-RunnerSealedPreparation $state $now
+            $recovery.progressUtc = $now.ToUniversalTime().ToString('o')
+            $state.guardianReady = $true
+            Write-RunnerJson $script:RunnerStatePath $state
+            return [pscustomobject]@{ continue = $true; outcome = $null }
+        }
         # Do not authorize a connection from an observation that waited for a lock.
         if (($now - $observedUtc).TotalSeconds -gt 2 -or ($now - $observedUtc).TotalSeconds -lt 0) { $observation = $null }
         $vm = Get-VM -Id ([guid]$recovery.binding.vmId) -ErrorAction Stop

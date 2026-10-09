@@ -212,6 +212,15 @@ function Invoke-RunnerImageBuild($State, $Config) {
         Assert-RunnerInstanceUnreferenced $current
         $current.phase = 'sealed-off'
         $current | Add-Member -NotePropertyName imageScrubProof -NotePropertyValue (Get-RunnerJsonEvidence $guest) -Force
+        # The guardian remains alive throughout the copy. Invalidate every old
+        # network/probe completion before committing absent-VM supervision.
+        $r = $current.networkRecovery
+        $r.generation++; $r.phase = 'sealed-preparation'; $r.operation = ''; $r.resumeRequired = $false
+        $r.episodeDeadlineUtc = ''; $r.episodeStartedUtc = ''; $r.candidateRules = @(); $r.verifiedRules = @()
+        $r.progressUtc = (Get-RunnerRecoveryNow).ToString('o')
+        $current | Add-Member imageSealBinding (Get-RunnerJsonEvidence ([ordered]@{ schema = 1; generation = $r.generation
+            bindingHash = $binding.hash; recipeId = $binding.recipeId; bundleHash = $binding.bundleHash; scrubProofHash = $current.imageScrubProof.hash })) -Force
+        Assert-RunnerSealedPreparation $current (Get-RunnerRecoveryNow)
         Write-RunnerJson $script:RunnerStatePath $current
     } finally { Exit-RunnerLock $mutex }
     return New-RunnerPreparedImageCandidate $current $Config $binding $guest
@@ -223,6 +232,10 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     Assert-SessionAlive $State
     $current = Get-RunnerState
     Assert-RunnerPrepareState $current
+    Assert-RunnerSealedPreparation $current (Get-RunnerRecoveryNow)
+    $sealBinding = Get-RunnerEvidenceValue $current.imageSealBinding
+    if ($sealBinding.bindingHash -cne $Binding.hash -or $sealBinding.bundleHash -cne $Binding.bundleHash -or $sealBinding.recipeId -cne $Binding.recipeId) { throw 'Sealed preparation image binding differs from the candidate.' }
+    $sealEvidenceHash = $current.imageSealBinding.hash
     if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or $current.instancePath -cne $State.instancePath -or $current.phase -cne 'sealed-off' -or
         $current.PSObject.Properties.Name -notcontains 'imageScrubProof') { throw 'Preparation has no committed graceful shutdown/scrub proof.' }
     $proof = Get-RunnerEvidenceValue $current.imageScrubProof
@@ -269,6 +282,8 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
             Assert-SessionAlive $State
             $current = Get-RunnerState
             Assert-RunnerPrepareState $current
+            Assert-RunnerSealedPreparation $current (Get-RunnerRecoveryNow)
+            if ($current.imageSealBinding.hash -cne $sealEvidenceHash) { throw 'Sealed preparation binding changed during image copy.' }
             if ($current.vmName -cne $State.vmName -or [guid]$current.vmId -ne [guid]$State.vmId -or $current.instancePath -cne $State.instancePath -or $current.phase -cne 'sealed-off' -or
                 (Get-RunnerJsonEvidence (Get-RunnerEvidenceValue $current.imageScrubProof)).hash -cne (Get-RunnerJsonEvidence $proof).hash) { throw 'Preparation proof changed during image copy; selection refused.' }
             if ((Get-RunnerImageBinding $Config).hash -cne $Binding.hash) { throw 'Trusted image binding changed during image copy.' }

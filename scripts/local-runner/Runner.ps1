@@ -204,6 +204,10 @@ function Assert-SessionAlive($State) {
         }
         if (-not (Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc) -or
             $current.networkRecovery.phase -ceq 'failed' -or (Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { throw 'Session network guardian failed or expired.' }
+        if (($current.PSObject.Properties.Name -contains 'phase' -and $current.phase -ceq 'sealed-off') -or $current.networkRecovery.phase -ceq 'sealed-preparation') {
+            Assert-RunnerSealedPreparation $current $now
+            return
+        }
         if ($current.networkRecovery.phase -ceq 'healthy' -and $current.guardianReady) { return }
         Start-Sleep -Milliseconds 250
     }
@@ -239,7 +243,7 @@ function Invoke-GuardCheck([string] $Name) {
         try {
             $state = Get-RunnerState
             if ($null -eq $state -or $state.vmName -cne $Name -or $state.guardianPid -ne $PID) { return $false }
-            $state.guardianReady = $state.networkRecovery.phase -ceq 'healthy'
+            $state.guardianReady = $state.networkRecovery.phase -cin @('healthy', 'sealed-preparation')
             Write-RunnerJson $script:RunnerStatePath $state
         } finally { Exit-RunnerLock $mutex }
     }
@@ -1211,7 +1215,12 @@ function Invoke-Watchdog {
             $guardianDead = $state.PSObject.Properties.Name -contains 'guardianReady' -and $state.guardianReady -eq $true -and
                 -not (Test-RunnerProcessIdentity $state.guardianPid $state.guardianStartUtc)
             $recoveryExpired = $state.PSObject.Properties.Name -contains 'networkRecovery' -and (Get-RunnerRecoveryExpiry $state.networkRecovery (Get-RunnerRecoveryNow))
-            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead -or $recoveryExpired) {
+            $sealedInvalid = $false
+            if (($state.PSObject.Properties.Name -contains 'phase' -and $state.phase -ceq 'sealed-off') -or
+                ($state.PSObject.Properties.Name -contains 'networkRecovery' -and $state.networkRecovery.phase -ceq 'sealed-preparation')) {
+                try { Assert-RunnerSealedPreparation $state (Get-RunnerRecoveryNow) } catch { $sealedInvalid = $true }
+            }
+            if ([DateTime]::UtcNow -ge $deadline -or -not $ownerAlive -or $guardianDead -or $recoveryExpired -or $sealedInvalid) {
                 if ($state.PSObject.Properties.Name -contains 'networkRecovery') {
                     $state.networkRecovery.generation++; $state.networkRecovery.phase = 'failed'; $state.networkRecovery.failure = 'watchdog-expired'
                     Write-RunnerJson $script:RunnerStatePath $state

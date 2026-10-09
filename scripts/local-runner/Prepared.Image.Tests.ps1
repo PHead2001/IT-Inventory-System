@@ -22,6 +22,7 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
     if (-not $rejected) { throw "Prepared-image fixture accepted $Case." }
 }
 $script:blocked = ''; $script:interrupt = ''; $script:attached = $false; $script:vms = @()
+$script:RunnerGuardOutcome = $null; $script:RunnerRecoveryProbe = $null
 $script:binding = [pscustomobject]@{ hash = ('A' * 64); recipeId = ('B' * 64); bundleHash = ('F' * 64) }
 $script:guest = [pscustomobject]@{ schema = 1; recipeId = $script:binding.recipeId; scrubbed = $true; capabilities = @('os-prerequisites', 'node-toolcache', 'npm-cache', 'playwright', 'supabase-images') }
 $fixtureInputs = Read-RunnerJson (Join-Path $PSScriptRoot 'Image.Inputs.json')
@@ -33,6 +34,7 @@ $script:guest | Add-Member -NotePropertyName images -NotePropertyValue @($fixtur
         aliases = @($(if ($entry.PSObject.Properties.Name -contains 'aliases') { $entry.aliases }) | ForEach-Object { [pscustomobject]@{ reference = $_; id = ('sha256:' + ('a' * 64)) } }) }
 })
 $config = [pscustomobject]@{ activation = 'disabled'; label = 'it-inventory-ephemeral'; maxMinutes = 120; guestIp = 'fixture'; baseVhdx = (Join-Path $base 'base.vhdx'); baseSha256 = ('C' * 64) }
+function Get-RunnerConfig { return $config }
 [IO.File]::WriteAllText($config.baseVhdx, 'generic-clean-base')
 function Assert-Administrator {}
 function Assert-SecureRoot {}
@@ -73,11 +75,30 @@ function New-SealedState {
     $state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = $name; vmId = [guid]::NewGuid().ToString(); instancePath = $instance
         purpose = 'prepare'; guestMac = '020000000001'; phase = 'sealed-off'; imageScrubProof = Get-RunnerJsonEvidence $script:guest
         deadlineUtc = [DateTime]::UtcNow.AddMinutes(2).ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o') }
+    Set-FixtureGuardian $state
+    $state.networkRecovery.generation++; $state.networkRecovery.phase = 'sealed-preparation'
+    $state | Add-Member imageSealBinding (Get-RunnerJsonEvidence ([ordered]@{ schema = 1; generation = $state.networkRecovery.generation
+        bindingHash = $script:binding.hash; recipeId = $script:binding.recipeId; bundleHash = $script:binding.bundleHash; scrubProofHash = $state.imageScrubProof.hash }))
     Write-RunnerJson $script:RunnerStatePath $state
     return $state
 }
+function Set-FixtureGuardian($State) {
+    foreach ($field in @('supervisor', 'guardian')) {
+        $State | Add-Member ($field + 'Pid') $PID -Force
+        $State | Add-Member ($field + 'StartUtc') ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')) -Force
+    }
+    $State | Add-Member guardianReady $true -Force
+    $binding = [pscustomobject]@{ vmId = $State.vmId; vmName = $State.vmName; claimHash = Get-RunnerRecoveryClaimHash $State }
+    $State | Add-Member networkRecovery (New-RunnerNetworkRecovery $binding ('a' * 64) ([DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) ([DateTime]::UtcNow)) -Force
+}
 $script:copyRace = ''
 function Copy-Item($LiteralPath, $Destination) {
+    if ($script:copyRace -ceq 'observe' -and [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Destination)) -ceq 'prepared-images') {
+        # Actual guardian ticks interleave after sealing and before/during bulk
+        # copy while the preparation registration is authoritatively absent.
+        $current = Get-RunnerState
+        foreach ($unused in 1..3) { if (-not (Invoke-GuardCheck $current.vmName)) { throw 'Sealed preparation guardian stopped during copy.' } }
+    }
     if ($script:copyRace -and [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Destination)) -ceq 'prepared-images') {
         $lockName = 'Local\' + [IO.Path]::GetFileName($base) + '-Global-ITInventoryLocalRunner-v1'
         $job = Start-Job -ArgumentList $PSScriptRoot, $base, $lockName, $script:copyRace -ScriptBlock {
@@ -93,6 +114,7 @@ function Copy-Item($LiteralPath, $Destination) {
                     'cleanup' { Remove-Item -LiteralPath $script:RunnerStatePath }
                     'guid' { $state.vmId = [guid]::NewGuid().ToString(); Write-RunnerJson $script:RunnerStatePath $state }
                     'proof' { $proof = Get-RunnerEvidenceValue $state.imageScrubProof; $proof.scrubbed = $false; $state.imageScrubProof = Get-RunnerJsonEvidence $proof; Write-RunnerJson $script:RunnerStatePath $state }
+                    'stop' { [IO.File]::WriteAllText((Join-Path $state.instancePath 'stop.requested'), '') }
                 }
                 [IO.File]::WriteAllText((Join-Path $root 'copy-guardian-acquired'), 'ready')
             } finally { Exit-RunnerLock $mutex }
@@ -181,7 +203,7 @@ try {
         if ((Get-FileHash -LiteralPath (Join-Path $base 'prepared-image.json')).Hash -cne $initialSelectorHash -or
             @(Get-ChildItem -LiteralPath (Join-Path $base 'prepared-images')).Count -ne 2) { throw 'Interrupted publication changed selection or left an unowned candidate.' }
     }
-    foreach ($race in @('cleanup', 'guid', 'proof')) {
+    foreach ($race in @('cleanup', 'guid', 'proof', 'stop')) {
         $state = New-SealedState; $script:copyRace = $race
         if (Test-Path (Join-Path $base 'copy-guardian-acquired')) { Remove-Item -LiteralPath (Join-Path $base 'copy-guardian-acquired') }
         Assert-Rejected { Publish-FixtureImage $state $config $script:binding $script:guest } "copy-$race"
@@ -266,10 +288,7 @@ try {
     function Start-SessionGuardian {
         $script:guardians++
         $fresh = Get-RunnerState
-        $fresh | Add-Member -NotePropertyName guardianReady -NotePropertyValue $true -Force
-        $fresh | Add-Member -NotePropertyName guardianPid -NotePropertyValue $PID -Force
-        $fresh | Add-Member -NotePropertyName guardianStartUtc -NotePropertyValue ((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')) -Force
-        $fresh | Add-Member -NotePropertyName networkRecovery -NotePropertyValue ([pscustomobject]@{ phase = 'healthy'; hardDeadlineUtc = $fresh.deadlineUtc; episodeDeadlineUtc = ''; progressUtc = [DateTime]::UtcNow.ToString('o') }) -Force
+        Set-FixtureGuardian $fresh
         Write-RunnerJson $script:RunnerStatePath $fresh
     }
     function Start-GuardedVm($State) { (Get-VM $State.vmName).State = 'Running' }

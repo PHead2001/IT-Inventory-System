@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-09.3",
+  "version": "2026-10-09.4",
   "files": [
     {
       "name": "Common.ps1",
@@ -9,7 +9,7 @@
     },
     {
       "name": "Runner.ps1",
-      "hash": "C252DF99D092612ADB1135FCC0C875119D5CCBC379DC357A9554A3F1733F6CD0"
+      "hash": "EB6FDE9C6688E8D87BF20E719ECCA13FD22B577AD723E69A79C420D987F0C1C7"
     },
     {
       "name": "Guest.Network.ps1",
@@ -17,7 +17,7 @@
     },
     {
       "name": "Network.Recovery.ps1",
-      "hash": "277597FB41AF61AB52CCC2D2EE678934AC7C6CB8D7C41291D38F93DBE39EE375"
+      "hash": "93C4BD9FD5580E2CA6EE9D5988141E8D3D0DFF871CE00ED42BF1D7566B8F7FEC"
     },
     {
       "name": "Network.Recovery.Probe.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "PreparedImage.ps1",
-      "hash": "940DB31A6F663E0C93AF588337B2B6B5117FEF211250DBEB69F5592B0795B233"
+      "hash": "6174641E292D34916214439CC88CB4DF20C61EBDE418A5F24E47C677E41C2813"
     },
     {
       "name": "Image.Prepare.sh",
