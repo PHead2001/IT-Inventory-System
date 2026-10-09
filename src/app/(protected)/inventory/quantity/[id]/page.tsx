@@ -263,7 +263,7 @@ export default async function QuantityPage({
       )}
       <h2 className="mb-3 text-xl font-semibold">Recent history</h2>
       <div className={styles.history}>
-        <HistoryList events={history} compact />
+        <HistoryList events={history} compact linkToEvent />
       </div>
       <Link
         className="mt-4 inline-block min-h-11 py-3 text-cyan-300 underline"

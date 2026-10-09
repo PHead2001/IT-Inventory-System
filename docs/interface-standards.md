@@ -172,9 +172,16 @@ both direct HTTP and client navigation on the deployed candidate. See the
 [Next.js not-found contract](https://nextjs.org/docs/app/api-reference/file-conventions/not-found).
 
 History summaries collapse an unchanged endpoint to **At** using custody snapshot
-identity, retaining immutable recorded labels. Older storage histories explicitly
-identify current reference labels. Relative times use one shared 30-second browser
-clock, paused when hidden and stopped without subscribers. Server/first hydration
+identity, retaining immutable recorded labels. Quantity moves and receipts derive
+their amount and locations from the immutable signed ledger lines. Technical event
+details identify current reference labels and current record names; ordinary summaries
+omit the provenance suffix and repeated title copy, following Audit 4.2's explicit
+history decision. Asset detail shows custody once in its recent inventory timeline.
+Recorded-event links open the exact event independently of list pagination; the event
+page retains navigation to all record history and custom snapshots.
+Relative times refresh the shared clock when a timestamp mounts and tolerate at most
+two minutes of future clock skew as **Just now**; genuinely future instants stay distinct.
+They use one shared 30-second browser clock, paused when hidden and stopped without subscribers. Server/first hydration
 uses exact UTC; focus/click opens the exact display timestamp, timezone and original
 recorded instant with its precision. Date-only controls and export formats are unchanged.
 

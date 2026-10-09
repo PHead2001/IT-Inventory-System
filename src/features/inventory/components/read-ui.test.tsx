@@ -545,7 +545,8 @@ it('keeps created snapshots and bounded custom history accessible behind compact
       ]}
     />,
   );
-  expect(screen.getByText('Record created')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Created' })).toBeVisible();
+  expect(screen.queryByText('Record created')).not.toBeInTheDocument();
   expect(screen.getByText(/Original serial/)).not.toBeVisible();
   fireEvent.click(screen.getByText('View event details'));
   expect(screen.getByText(/Original serial/)).toBeVisible();
@@ -562,6 +563,7 @@ it('shows the recorded movement amount and endpoints before compact details whil
   render(
     <HistoryList
       compact
+      linkToEvent
       events={[
         {
           id: 'move',
@@ -573,8 +575,8 @@ it('shows the recorded movement amount and endpoints before compact details whil
           actorName: 'Recorded Staff',
           reason: 'Restocking',
           assignment: null,
-          fromLocation: location,
-          toLocation: destination,
+          fromLocation: null,
+          toLocation: null,
           lines: [
             { location, delta: -2, before: 99, after: 97 },
             { location: destination, delta: 2, before: 5, after: 7 },
@@ -588,11 +590,66 @@ it('shows the recorded movement amount and endpoints before compact details whil
   );
   expect(
     screen.getByText(
-      `2 units · ${location.breadcrumb} → ${destination.breadcrumb} (current location labels)`,
+      `2 units · ${location.breadcrumb} → ${destination.breadcrumb}`,
     ),
   ).toBeVisible();
   expect(screen.getByText(/Recorded Staff/)).toBeVisible();
   expect(screen.getByText('Reason: Restocking')).not.toBeVisible();
   fireEvent.click(screen.getByText('View event details'));
   expect(screen.getByText('Reason: Restocking')).toBeVisible();
+  expect(
+    screen.getByText(/Storage location labels are current reference labels/),
+  ).not.toBeVisible();
+  fireEvent.click(screen.getByText('Technical event details'));
+  expect(
+    screen.getByText(/Storage location labels are current reference labels/),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Open recorded event' }),
+  ).toHaveAttribute('href', '/history/events/quantity/move');
+});
+it('adds useful changed fields and omits summaries that merely repeat event headings', () => {
+  const base = {
+    id: 'retired',
+    kind: 'asset' as const,
+    entityId: 'asset',
+    entityName: 'Switch',
+    eventType: 'retired',
+    at: '2026-10-07T12:00:00Z',
+    actorName: 'Staff',
+    reason: 'End of service',
+    assignment: null,
+    fromLocation: null,
+    toLocation: null,
+    lines: [],
+    metadataChanges: [],
+    customMetadataPresent: false,
+    customMetadataChanged: false,
+  };
+  render(
+    <HistoryList
+      compact
+      events={[
+        base,
+        {
+          ...base,
+          id: 'details',
+          eventType: 'metadata_updated',
+          metadataChanges: [
+            { field: 'Name', before: 'Switch', after: 'Core switch' },
+          ],
+        },
+        { ...base, id: 'corrected', eventType: 'location_corrected' },
+      ]}
+    />,
+  );
+  expect(screen.getAllByText('Asset retired')).toHaveLength(1);
+  expect(screen.getAllByText('Recorded location corrected')).toHaveLength(1);
+  expect(screen.getByText('Changed: Name')).toBeVisible();
+  expect(screen.queryByText('Record details updated')).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('link', { name: 'Open recorded event' }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByText('View event details')[0]);
+  expect(screen.getAllByText('Reason: End of service')[0]).toBeVisible();
 });

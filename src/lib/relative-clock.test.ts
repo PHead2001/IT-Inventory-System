@@ -21,12 +21,35 @@ it('uses one bounded timer across subscribers and stops at final unmount', () =>
   expect(relativeClockServerSnapshot()).toBeNull();
   vi.advanceTimersByTime(30_000);
   expect(relativeClockSnapshot()).toBe(Date.parse('2026-10-07T12:00:30Z'));
-  expect(second).toHaveBeenCalledOnce();
+  expect(second).toHaveBeenCalledTimes(2);
   unsubscribe();
   expect(vi.getTimerCount()).toBe(1);
   unsubscribeOther();
   expect(vi.getTimerCount()).toBe(0);
   expect(relativeClockSnapshot()).toBeNull();
+});
+it('refreshes an already subscribed clock when a newly committed event mounts', () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-07T12:00:00Z'));
+  const first = vi.fn();
+  const unsubscribe = subscribeRelativeClock(first);
+  vi.setSystemTime(new Date('2026-10-07T12:00:20Z'));
+  const other = subscribeRelativeClock(vi.fn());
+  expect(relativeClockSnapshot()).toBe(Date.parse('2026-10-07T12:00:20Z'));
+  expect(first).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(1);
+  other();
+  unsubscribe();
+});
+it('tolerates up to two minutes of server clock skew without hiding genuinely future instants', () => {
+  const now = Date.parse('2026-10-07T12:00:00Z');
+  for (const value of [
+    '2026-10-07T12:00:01Z',
+    '2026-10-07T12:01:59Z',
+    '2026-10-07T12:02:00Z',
+  ])
+    expect(relativeTimeLabel(value, now)).toBe('Just now');
+  expect(relativeTimeLabel('2026-10-07T12:02:01Z', now)).toBe('In 2 min');
 });
 it('pauses the shared clock while hidden and refreshes once on return', () => {
   vi.useFakeTimers();

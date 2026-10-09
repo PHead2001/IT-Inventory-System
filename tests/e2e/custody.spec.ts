@@ -336,9 +336,38 @@ test('office storage and property custody keep an asset UUID and avoid fictional
       .locator('xpath=following-sibling::dd')
       .getByRole('link', { name: `${siteName} (${siteCode})`, exact: true }),
   ).toBeVisible();
+  const assetTimeline = page.getByRole('region', {
+    name: 'Recent history',
+    exact: true,
+  });
   await expect(
-    page.getByRole('heading', { name: 'Custody history' }),
-  ).toBeVisible();
+    assetTimeline.getByRole('heading', {
+      name: 'Assigned to site',
+      exact: true,
+    }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole('heading', { name: 'Custody history', exact: true }),
+  ).toHaveCount(0);
+  const assignmentCard = assetTimeline
+    .getByRole('heading', { name: 'Assigned to site', exact: true })
+    .locator('xpath=ancestor::li[1]');
+  await expect(assignmentCard).toContainText(siteName);
+  await assignmentCard.getByText('View event details', { exact: true }).click();
+  await expect(
+    assignmentCard.getByRole('link', { name: 'Open recorded event' }),
+  ).toHaveAttribute('href', new RegExp('/history/events/asset/[0-9a-f-]+$'));
+  await assignmentCard
+    .getByRole('link', { name: 'Open recorded event' })
+    .click();
+  await expect(page).toHaveURL(new RegExp('/history/events/asset/[0-9a-f-]+$'));
+  const linkedEvent = page.getByRole('listitem');
+  await expect(linkedEvent).toContainText('Assigned to site');
+  await expect(linkedEvent).toContainText(siteName);
+  await expect(
+    page.getByRole('heading', { name: 'Assigned to site', exact: true }),
+  ).toHaveCount(1);
+  await page.goto(assetUrl);
   await page.screenshot({
     path: testInfo.outputPath('mobile-assigned-asset.png'),
     fullPage: true,
@@ -403,6 +432,16 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await chooseLocation(transfer, 'Return to storage', locationCode);
   await submitCustody(transfer, 'Return to storage');
   await page.reload();
+  await expect(
+    page
+      .getByRole('region', { name: 'Recent history', exact: true })
+      .getByRole('heading', { name: 'Returned from site', exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .getByRole('region', { name: 'Recent history', exact: true })
+      .getByRole('heading', { name: 'Assigned to site', exact: true }),
+  ).toHaveCount(1);
   await expect(
     page.getByRole('link', { name: new RegExp(locationCode) }).first(),
   ).toBeVisible();

@@ -22,7 +22,8 @@ export function subscribeRelativeClock(listener: () => void) {
   if (listeners.size === 1) {
     document.addEventListener('visibilitychange', visibility);
     visibility();
-  }
+    if (document.visibilityState === 'hidden') update();
+  } else update(); // New events must not inherit a previous subscriber's stale tick.
   return () => {
     listeners.delete(listener);
     if (!listeners.size) {
@@ -41,8 +42,8 @@ export function relativeTimeLabel(
   if (current === null) return null;
   const elapsed = current - new Date(value).getTime();
   if (!Number.isFinite(elapsed)) return null;
+  if (elapsed >= -120_000 && elapsed < 60_000) return 'Just now';
   const seconds = Math.abs(elapsed) / 1000;
-  if (seconds < 60) return elapsed >= 0 ? 'Just now' : 'In a moment';
   const unit = seconds < 3600 ? 'min' : seconds < 86400 ? 'hr' : 'day';
   const size = seconds < 3600 ? 60 : seconds < 86400 ? 3600 : 86400;
   const amount = Math.floor(seconds / size);

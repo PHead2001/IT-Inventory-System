@@ -3,14 +3,60 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import * as time from '@/lib/operational-time';
+import { relativeClockSnapshot } from '@/lib/relative-clock';
 import { MetadataFieldInput } from '@/features/metadata/field-value-input';
 import {
   OperationalTimeProvider,
   OperationalTimestamp,
   ExportLink,
 } from './operational-time';
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 const at = '2026-10-03T05:23:06.123456Z';
+it('updates every mounted timestamp for a new event, shared ticks and visibility resume while preserving recorded instants', () => {
+  vi.useFakeTimers();
+  const visibility = vi
+    .spyOn(document, 'visibilityState', 'get')
+    .mockReturnValue('visible');
+  vi.setSystemTime(new Date('2026-10-03T05:23:56Z'));
+  const original = '2026-10-03T05:23:06Z';
+  const saved = '2026-10-03T05:24:16.123456Z';
+  const view = (added: boolean) => (
+    <>
+      <OperationalTimestamp key="original" value={original} relative />
+      {added && <OperationalTimestamp key="saved" value={saved} relative />}
+    </>
+  );
+  const { container, rerender, unmount } = render(view(false));
+  expect(container.querySelector('time')).toHaveTextContent('Just now');
+  // No timer tick: mounting a new event must refresh the shared cached instant.
+  vi.setSystemTime(new Date('2026-10-03T05:24:16Z'));
+  rerender(view(true));
+  const timestamps = () => [...container.querySelectorAll('time')];
+  expect(timestamps()[0]).toHaveTextContent('1 min ago');
+  expect(timestamps()[1]).toHaveTextContent('Just now');
+  expect(vi.getTimerCount()).toBe(1);
+  act(() => vi.advanceTimersByTime(60_000));
+  expect(timestamps()[1]).toHaveTextContent('Just now'); // source subseconds are retained
+  act(() => {
+    visibility.mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(180_000);
+  });
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => {
+    visibility.mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(timestamps()[1]).toHaveTextContent('3 min ago');
+  expect(timestamps()[1]).toHaveAttribute('datetime', saved);
+  fireEvent.click(container.querySelectorAll('summary')[1]);
+  expect(screen.getByText(saved)).toBeVisible();
+  unmount();
+  expect(relativeClockSnapshot()).toBeNull();
+});
 it('hydrates relative history without replacing the server UTC text until subscription', async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-03T05:25:06Z'));

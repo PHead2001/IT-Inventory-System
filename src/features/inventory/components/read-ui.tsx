@@ -1,4 +1,8 @@
-import { historySummary, assignmentEndpointSummary } from '../history-summary';
+import {
+  historySummary,
+  historyEventTitle,
+  assignmentEndpointSummary,
+} from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
@@ -307,31 +311,15 @@ export function Pagination({
     </nav>
   );
 }
-const eventNames: Record<string, string> = {
-  created: 'Created',
-  received: 'Stock received',
-  moved: 'Physically moved',
-  adjusted: 'Physical count corrected',
-  metadata_updated: 'Details updated',
-  archived: 'Quantity item archived',
-  restored: 'Restored',
-  location_corrected: 'Recorded location corrected',
-  retired: 'Asset retired',
-  site_opened: 'Site opening recorded',
-  site_issued: 'Issued to site',
-  site_assigned: 'Assigned to site',
-  site_returned: 'Returned from site',
-  site_transferred: 'Transferred between sites',
-  site_corrected: 'Site custody corrected',
-  site_written_off: 'Written off at site',
-  site_retired: 'Retired at site',
-};
 export function HistoryList({
   events,
   compact = false,
+  linkToEvent = false,
 }: {
   events: HistoryEvent[];
   compact?: boolean;
+  /** Link to the immutable event identity, independent of history pagination. */
+  linkToEvent?: boolean;
 }) {
   const DetailTag = compact ? 'details' : 'div';
   if (!events.length)
@@ -341,12 +329,11 @@ export function HistoryList({
       {events.map((event) => (
         <li
           key={event.kind + event.id}
+          id={`history-event-${event.kind}-${event.id}`}
           className={`${panel} min-w-0 [overflow-wrap:anywhere]`}
         >
           <div className="flex flex-wrap justify-between gap-2">
-            <h3 className="font-semibold">
-              {eventNames[event.eventType] ?? event.eventType}
-            </h3>
+            <h3 className="font-semibold">{historyEventTitle(event)}</h3>
             <OperationalTimestamp
               relative
               className="text-sm text-slate-400"
@@ -367,7 +354,9 @@ export function HistoryList({
             </Link>{' '}
             · {event.actorName}
           </p>
-          <p className="mt-2 text-sm">{historySummary(event)}</p>
+          {historySummary(event) && (
+            <p className="mt-2 text-sm">{historySummary(event)}</p>
+          )}
           <DetailTag>
             {compact && (
               <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
@@ -427,8 +416,6 @@ export function HistoryList({
                     ? 'At: '
                     : 'From: '}
                   <LocationLink location={event.fromLocation} />
-                  {event.fromLocation.id === event.toLocation?.id &&
-                    ' (current location label)'}
                 </p>
               )}
             {!event.assignment &&
@@ -471,6 +458,43 @@ export function HistoryList({
                     : 'Inspect custom metadata snapshots'}
                 </Link>
               </p>
+            )}
+            <details className="mt-3 text-xs text-slate-400">
+              <summary className="min-h-11 cursor-pointer py-2">
+                Technical event details
+              </summary>
+              <p>
+                Event: {event.kind}:{event.id}
+              </p>
+              <p>Record: {event.entityId}</p>
+              <p>
+                Record name is the current name, not a recorded name snapshot.
+              </p>
+              {event.assignment && (
+                <>
+                  <p>Custody event: {event.assignment.eventId}</p>
+                  <p>
+                    Custody endpoint labels are recorded snapshots from this
+                    event.
+                  </p>
+                </>
+              )}
+              {(event.lines.length > 0 ||
+                event.fromLocation ||
+                event.toLocation) && (
+                <p>
+                  Storage location labels are current reference labels, not
+                  recorded name snapshots.
+                </p>
+              )}
+            </details>
+            {linkToEvent && (
+              <Link
+                className="inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
+                href={`/history/events/${event.kind}/${event.id}`}
+              >
+                Open recorded event
+              </Link>
             )}
           </DetailTag>
         </li>

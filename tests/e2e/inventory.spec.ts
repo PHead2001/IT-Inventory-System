@@ -9,6 +9,7 @@ import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { createClient } from '@supabase/supabase-js';
 
 async function login(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -114,6 +115,93 @@ async function archiveFixture(
   await expectRecordStatus(page, 'archived');
   if (finalVersion !== undefined) await version(page, finalVersion);
 }
+
+test('a saved event link survives more than one page of newer history and later insertions', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await login(page);
+  await createQuantity(page, 'Stable history link ' + crypto.randomUUID());
+  const detailUrl = page.url();
+  const itemId = detailUrl.split('/').at(-1)!;
+  const api = new URL(process.env.LOCAL_API_URL!);
+  expect(['127.0.0.1', 'localhost']).toContain(api.hostname);
+  const client = createClient(
+    api.href,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  try {
+    const signed = await client.auth.signInWithPassword({
+      email: fixture.emails.staff,
+      password: fixture.password,
+    });
+    expect(signed.error).toBeNull();
+    const location = await client
+      .from('inventory_locations')
+      .select('id')
+      .eq('code', 'ITC-S1A')
+      .single();
+    expect(location.error).toBeNull();
+    let currentVersion = 1;
+    async function receive(reason: string) {
+      const result = await client.rpc('quantity_receive', {
+        p_request_id: crypto.randomUUID(),
+        p_payload: {
+          item_id: itemId,
+          expected_version: currentVersion,
+          location_id: location.data!.id,
+          quantity: 1,
+          reason,
+        },
+      });
+      expect(result.error).toBeNull();
+      const committed = result.data as { version: number; event_id: string };
+      expect(committed.event_id).toMatch(/^[0-9a-f-]{36}$/);
+      currentVersion = committed.version;
+      return committed.event_id;
+    }
+    const eventId = await receive('Original receipt for stable link');
+    await page.reload();
+    const original = page
+      .getByRole('heading', { name: 'Stock received', exact: true })
+      .locator('xpath=ancestor::li[1]');
+    await original.getByText('View event details', { exact: true }).click();
+    const href = await original
+      .getByRole('link', { name: 'Open recorded event' })
+      .getAttribute('href');
+    expect(href).toBe('/history/events/quantity/' + eventId);
+    for (let index = 0; index < 30; index++)
+      await receive('Newer receipt ' + index);
+    await page.goto('/history?type=quantity&entityId=' + itemId);
+    await expect(
+      page.locator('#history-event-quantity-' + eventId),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: 'Next', exact: true }),
+    ).toBeVisible();
+    await page.goto(href!);
+    await expect(
+      page.getByRole('heading', { name: 'Inventory event', exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('listitem')).toContainText(
+      'Reason: Original receipt for stable link',
+    );
+    await expect(page.getByRole('listitem')).toContainText('0 → 1 unit (+1)');
+    await receive('Insertion after event navigation');
+    await page.reload();
+    await expect(page.getByRole('listitem')).toContainText(
+      'Reason: Original receipt for stable link',
+    );
+    await expect(page.getByRole('listitem')).toContainText('0 → 1 unit (+1)');
+    await expect(
+      page.getByRole('link', { name: 'View all record history' }),
+    ).toHaveAttribute('href', '/history?type=quantity&entityId=' + itemId);
+  } finally {
+    await client.auth.signOut({ scope: 'local' });
+    await archiveFixture(page, detailUrl);
+  }
+});
 
 test('quantity move rejects an overdraw and retains committed receipt through data refresh and reload', async ({
   page,
@@ -519,6 +607,19 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await form.getByLabel('Reason (required)').fill('New stock delivery');
   await confirm(form, 'Receive stock');
   await version(page, 2);
+  const receivedHistory = page
+    .getByRole('heading', { name: 'Stock received', exact: true })
+    .locator('xpath=ancestor::li[1]');
+  await expect(receivedHistory).toContainText(
+    /5 units received · IT Closet.*1B/,
+  );
+  await expect(receivedHistory.locator('time')).toHaveText('Just now');
+  await receivedHistory
+    .getByText('View event details', { exact: true })
+    .click();
+  await expect(receivedHistory).toContainText('0 → 5 units (+5)');
+  await expect(receivedHistory).not.toContainText('Amount not recorded');
+  await expect(receivedHistory).not.toContainText('No recorded destination');
   await page.reload();
   await expect(
     page.getByRole('heading', {
@@ -531,6 +632,18 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await form.getByLabel('Quantity to move').fill('3');
   await confirm(form, 'Move stock');
   await version(page, 3);
+  const movedHistory = page
+    .getByRole('heading', { name: 'Physically moved', exact: true })
+    .locator('xpath=ancestor::li[1]');
+  await expect(movedHistory).toContainText(
+    /3 units · IT Closet.*1A → IT Closet.*1B/,
+  );
+  await expect(movedHistory.locator('time')).toHaveText('Just now');
+  await movedHistory.getByText('View event details', { exact: true }).click();
+  await expect(movedHistory).toContainText('10 → 7 units (-3)');
+  await expect(movedHistory).toContainText('5 → 8 units (+3)');
+  await expect(movedHistory).not.toContainText('Amount not recorded');
+  await expect(movedHistory).not.toContainText('No recorded source');
   await page.reload();
   form = await openForm(page, 'Move stock');
   await form.getByRole('button', { name: 'Move more' }).click();
@@ -560,6 +673,10 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await form.getByLabel('Name', { exact: true }).fill(name + ' updated');
   await confirm(form, 'Edit quantity metadata');
   await version(page, 6);
+  await expect(page.getByText('Changed: Name', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Record details updated', { exact: true }),
+  ).toHaveCount(0);
   await page.goto('/inventory?q=' + encodeURIComponent(name));
   await expect(
     page.getByRole('link', { name: name + ' updated', exact: true }),
@@ -640,6 +757,17 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await expect(
     page.getByRole('heading', { name: 'Physically moved', exact: true }),
   ).toHaveCount(2);
+  // Later corrections and consumption must not replace historical quantities with current balances.
+  const originalMove = page
+    .getByRole('listitem')
+    .filter({
+      has: page.getByRole('heading', { name: 'Physically moved', exact: true }),
+    })
+    .filter({ hasText: /3 units · IT Closet.*1A → IT Closet.*1B/ });
+  await expect(originalMove).toHaveCount(1);
+  await originalMove.getByText('View event details', { exact: true }).click();
+  await expect(originalMove).toContainText('10 → 7 units (-3)');
+  await expect(originalMove).toContainText('5 → 8 units (+3)');
   await expect(
     page.getByRole('heading', {
       name: 'Physical count corrected',
