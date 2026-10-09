@@ -2,6 +2,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { layoutLabels, type LabelRect } from './label-layout';
+import { createLabelLayoutDiagnostics } from './label-layout-diagnostics';
 
 export type LabelOptions = {
   priority: number;
@@ -56,6 +57,9 @@ export function createRoomLabelRegistry(
   let lastMissing = '';
   let revision = 0;
   let lastSummary: string | null = null;
+  const diagnostics = createLabelLayoutDiagnostics(
+    typeof window === 'undefined' ? undefined : window,
+  );
   const place = () => {
     pending = null;
     const host = canvas?.parentElement;
@@ -156,14 +160,18 @@ export function createRoomLabelRegistry(
     let settled = false;
     // CSS changes a centered Html wrapper immediately. Reflow/validate those
     // real dimensions before exposing a settled revision, without idle frames.
+    diagnostics?.begin();
     for (let pass = 0; pass < 4; pass++) {
       const labels = measure();
+      diagnostics?.input(labels, viewport, reserved);
       let variantChanged = false;
       suppressed = 0;
       missing.length = 0;
       summary = null;
       focusedSummary = false;
-      for (const result of layoutLabels(labels, viewport, reserved)) {
+      const placements = layoutLabels(labels, viewport, reserved);
+      diagnostics?.output(placements);
+      for (const result of placements) {
         const entry = entries.get(result.id);
         if (!entry) continue;
         const { element, leader, options } = entry;
@@ -240,6 +248,7 @@ export function createRoomLabelRegistry(
         break;
       }
     }
+    diagnostics?.finish(settled);
     if (!settled) {
       if (canvas)
         canvas.dataset.labelLayoutError =

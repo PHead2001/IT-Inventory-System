@@ -59,3 +59,16 @@ Input regression tests must exercise actual browser event ownership: passive pag
 Spatial performance acceptance compares baseline and candidate with matching browser/renderer, build mode, viewport, DPR and active interactions. Record graphics readiness, real draw-bearing frames or browser traces, interaction frame intervals and settled idle work; requestAnimationFrame callbacks alone are not rendered frames or GPU timing. Software rendering and emulated touch do not certify hardware frame rates or a physical phone. The general navigation performance gate does not by itself prove renderer readiness.
 
 For focused browser iteration use `npm run test:e2e -- tests/e2e/room.spec.ts`. This still builds with the local public backend environment. Final certification remains fresh `npm ci` followed by the complete `npm run validate`, exact-head CI, fresh Codex review and the configured nonproduction preview smoke.
+
+The populated 375px browser harness explicitly opts into read-only label-layout
+diagnostics before application loading. Ordinary sessions expose no snapshot.
+Only the latest placement transaction is retained, with at most four exact packing
+input/output passes, 96 labels and 32 reserved rectangles. The snapshot is deeply
+copied and frozen; only checked-in scene IDs, exact renderer opening-coordinate
+IDs, stable location codes, finite layout numbers and flags are allowed. It contains
+no display names, inventory content, summaries, DOM nodes or callbacks. Invalid or
+oversized captures fail explicitly with no partial fixture. On the selected Fit/open
+More assertion failure, the harness emits bounded JSON (128 KiB including existing
+layout telemetry) at `fit-open-selected-before-long-text` and rethrows the original
+assertion. This supplies an observed replay fixture without changing placement,
+visibility, scheduling or the ordinary user flow; it does not establish a repair.

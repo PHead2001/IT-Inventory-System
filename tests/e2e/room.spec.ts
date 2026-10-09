@@ -9,6 +9,10 @@ import { roomSchema } from '../../src/features/room/schema';
 import type { RoomOccupancy } from '../../src/features/room/occupancy-contract';
 import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
+  enableRoomLayoutDiagnostics,
+  reportRoomLayoutFailure,
+} from './room-layout-diagnostics';
+import {
   observeRoomScene,
   captureRoomWitness,
   roomVisibilityWitnesses,
@@ -2357,6 +2361,7 @@ test('375px populated room gives every independently witnessed opaque target an 
   page,
 }, testInfo) => {
   test.setTimeout(180_000);
+  await enableRoomLayoutDiagnostics(page);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -2494,11 +2499,23 @@ test('375px populated room gives every independently witnessed opaque target an 
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
       const selectedScene = await captureRoomWitness(page);
-      const selectedWitnesses = await assertOccupiedWitnessActions(
-        page,
-        selectedScene,
-        counts,
-      );
+      let selectedWitnesses;
+      try {
+        selectedWitnesses = await assertOccupiedWitnessActions(
+          page,
+          selectedScene,
+          counts,
+        );
+      } catch (error) {
+        try {
+          await reportRoomLayoutFailure(
+            page,
+            bindingBounds.map((binding) => binding.code),
+          );
+        } finally {
+          throw error;
+        }
+      }
       expect(
         selectedWitnesses.has(code),
         'selected target is independently witnessed after reopening More',

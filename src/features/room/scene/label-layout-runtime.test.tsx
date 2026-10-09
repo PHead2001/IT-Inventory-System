@@ -63,11 +63,79 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  Reflect.deleteProperty(window, '__roomLayoutDiagnosticsEnabled');
+  Reflect.deleteProperty(window, '__roomLabelLayoutSnapshot');
   document.body.replaceChildren();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('observes exact inputs before placement without changing registry output or scheduling', () => {
+    const original = placement.layoutLabels;
+    let enabled = false;
+    const spy = vi
+      .spyOn(placement, 'layoutLabels')
+      .mockImplementation((labels, bounds, reserved) => {
+        if (enabled) {
+          expect(window.__roomLabelLayoutSnapshot!.passes.at(-1)).toEqual({
+            labels,
+            viewport: {
+              left: bounds.left,
+              top: bounds.top,
+              right: bounds.right,
+              bottom: bounds.bottom,
+            },
+            reserved: reserved?.map((area) => ({
+              left: area.left,
+              top: area.top,
+              right: area.right,
+              bottom: area.bottom,
+            })),
+          });
+        }
+        return original(labels, bounds, reserved);
+      });
+    const run = () => {
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas');
+      host.append(canvas);
+      document.body.append(host);
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+      const item = label(host),
+        suppression = vi.fn();
+      const registry = createRoomLabelRegistry(suppression),
+        cleanup = registry.connect(canvas);
+      registry.register('shelf-1a', item.element, item.leader, {
+        priority: 3,
+        locationCode: 'ITC-S1A',
+        mandatory: true,
+        compact: true,
+      });
+      flush();
+      const result = {
+        html: item.element.outerHTML,
+        leader: item.leader.outerHTML,
+        pendingFrames: queue.length,
+        calls: suppression.mock.calls,
+      };
+      cleanup();
+      host.remove();
+      return result;
+    };
+    const ordinary = run();
+    expect(window.__roomLabelLayoutSnapshot).toBeUndefined();
+    Object.defineProperty(window, '__roomLayoutDiagnosticsEnabled', {
+      value: true,
+      configurable: true,
+    });
+    enabled = true;
+    expect(run()).toEqual(ordinary);
+    expect(window.__roomLabelLayoutSnapshot).toMatchObject({
+      complete: true,
+      settled: true,
+    });
+    expect(spy).toHaveBeenCalled();
+  });
   it('keeps placement pending through actual centered full/compact CSS measurement and preserves focused neighbors', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
