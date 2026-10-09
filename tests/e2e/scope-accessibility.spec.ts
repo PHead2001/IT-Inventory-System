@@ -257,6 +257,33 @@ test('location status, holding scope, matching rows and real CSV agree across na
     });
     await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
     await expect(split.getByText('At this location')).toBeVisible();
+    const localGrid = split.locator('[class*="rowGrid"]').first();
+    expect(
+      await split.evaluate((row) => row.getBoundingClientRect().width),
+    ).toBeGreaterThan(680);
+    await expect
+      .poll(() =>
+        localGrid.evaluate(
+          (grid) =>
+            getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
+        ),
+      )
+      .toBe(2);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect
+      .poll(() =>
+        localGrid.evaluate(
+          (grid) =>
+            getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
+        ),
+      )
+      .toBe(1);
+    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath('location-row-two-column-mobile.png'),
+    });
+    await page.setViewportSize({ width: 1180, height: 757 });
+
     await expect(
       split.getByText('Across all storage: 2 available'),
     ).toBeVisible();

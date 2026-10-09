@@ -27,6 +27,9 @@
   gap: 12px 18px;
   align-items: start;
 }
+.rowGridWithoutLocation {
+  grid-template-columns: minmax(0, 1.6fr) minmax(125px, 0.7fr);
+}
 .identity {
   display: flex;
   align-items: flex-start;

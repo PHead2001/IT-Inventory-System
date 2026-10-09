@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
+import styles from './inventory-visual.module.css';
 import type { InventoryResult } from '../contracts-ui';
 import {
   HistoryList,
@@ -700,6 +701,15 @@ it('omits only the current location from scoped rows while retaining child locat
     />,
   );
   const rows = screen.getAllByRole('listitem');
+  expect(rows[0].querySelector(`.${styles.rowGrid}`)).toHaveClass(
+    styles.rowGridWithoutLocation,
+  );
+  expect(rows[1].querySelector(`.${styles.rowGrid}`)).not.toHaveClass(
+    styles.rowGridWithoutLocation,
+  );
+  expect(rows[2].querySelector(`.${styles.rowGrid}`)).not.toHaveClass(
+    styles.rowGridWithoutLocation,
+  );
   expect(
     within(rows[0]).queryByText('Storage / custody'),
   ).not.toBeInTheDocument();

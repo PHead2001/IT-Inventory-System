@@ -620,7 +620,7 @@ for (const width of [1280, 375, 390]) {
       await expect(
         tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
       ).toHaveCount(0);
-      await right.focus();
+      await right.getByRole('link').focus();
       await page.keyboard.press('ArrowRight');
       await expect(
         tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
@@ -632,16 +632,37 @@ for (const width of [1280, 375, 390]) {
         name: /ITC-D07 · Active$/,
       });
       await expect(right).toHaveAttribute('aria-expanded', 'true');
+      const disclosure = right.getByRole('button', {
+        name: 'Collapse Right Storage',
+        exact: true,
+      });
+      await disclosure.click();
+      await expect(right).toHaveAttribute('aria-expanded', 'false');
+      await expect(right.getByRole('link')).toBeFocused();
+      await right.getByRole('link').press('ArrowRight');
+      await expect(right).toHaveAttribute('aria-expanded', 'true');
+      await right.getByRole('link').press('ArrowRight');
+      await expect(selected.getByRole('link')).toBeFocused();
+      if (width === 1280 && !reduced) {
+        const original = page.url();
+        const popupPromise = page.waitForEvent('popup');
+        await selected.getByRole('link').click({ modifiers: ['Control'] });
+        const popup = await popupPromise;
+        await expect(popup).toHaveURL(/\/settings\/locations\/ITC-D07$/);
+        await expect(page).toHaveURL(original);
+        await popup.close();
+      }
       await expect(selected).toHaveAttribute('aria-level', '3');
-      await selected.press('Enter');
+      await selected.getByRole('link').press('Enter');
       await page
         .getByRole('link', { name: 'All locations', exact: true })
         .click();
       const returned = page.getByRole('treeitem', {
         name: /ITC-D07 · Active$/,
       });
-      await expect(returned).toHaveAttribute('aria-current', 'page');
-      await expect(returned).toHaveAttribute('tabindex', '0');
+      await expect(returned).toHaveAttribute('aria-selected', 'true');
+      await expect(returned).not.toHaveAttribute('aria-current');
+      await expect(returned.getByRole('link')).toHaveAttribute('tabindex', '0');
       await page.screenshot({
         path: testInfo.outputPath('selected-location-tree.png'),
         fullPage: true,

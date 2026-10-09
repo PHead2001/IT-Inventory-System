@@ -501,7 +501,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
   await page
-    .locator(`a[role="treeitem"][href="/settings/locations/${locationCode}"]`)
+    .locator(`[role="treeitem"] a[href="/settings/locations/${locationCode}"]`)
     .click();
   await expect(
     page.getByText('This location is read-only for your account.', {

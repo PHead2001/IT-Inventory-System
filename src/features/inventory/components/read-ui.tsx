@@ -115,6 +115,11 @@ export function InventoryRows({
         const summary = fileSummaries.find(
           (item) => item.kind === row.kind && item.id === row.id,
         );
+        const hideCurrentLocation = Boolean(
+          currentLocationId &&
+          !row.site &&
+          row.location?.id === currentLocationId,
+        );
         const recordHref = inventoryRecordHref(
           row.kind,
           row.id,
@@ -131,7 +136,9 @@ export function InventoryRows({
             }
             className={styles.row}
           >
-            <div className={styles.rowGrid}>
+            <div
+              className={`${styles.rowGrid}${hideCurrentLocation ? ' ' + styles.rowGridWithoutLocation : ''}`}
+            >
               <div className={styles.identity}>
                 <span
                   className={styles.thumbnail}
@@ -196,9 +203,7 @@ export function InventoryRows({
                     </span>
                   )}
               </div>
-              {(row.site ||
-                !currentLocationId ||
-                row.location?.id !== currentLocationId) && (
+              {!hideCurrentLocation && (
                 <div className={styles.location}>
                   <span className={styles.label}>Storage / custody</span>
                   {row.site ? (

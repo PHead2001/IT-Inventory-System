@@ -147,7 +147,43 @@ export function SettingsLocationTree({
         {rows.map((row, index) => (
           <li
             key={row.location.id}
-            role="none"
+            role="treeitem"
+            aria-labelledby={`${id}-${index}`}
+            aria-level={row.depth + 1}
+            aria-selected={row.location.code === selectedCode}
+            aria-expanded={
+              row.hasChildren ? revealed.has(row.location.id) : undefined
+            }
+            onFocus={() => setFocused(row.location.id)}
+            onKeyDown={(event) => {
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault();
+                focus(
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? rows.length - 1
+                      : index + (event.key === 'ArrowDown' ? 1 : -1),
+                );
+              }
+              if (event.key === 'ArrowRight' && row.hasChildren) {
+                event.preventDefault();
+                if (!revealed.has(row.location.id))
+                  toggle(row.location.id, true);
+                else focus(index + 1);
+              }
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                if (row.hasChildren && revealed.has(row.location.id))
+                  toggle(row.location.id, false);
+                else if (row.parentId)
+                  focus(
+                    rows.findIndex(
+                      (candidate) => candidate.location.id === row.parentId,
+                    ),
+                  );
+              }
+            }}
             className="flex min-w-0 items-start gap-2 py-2"
             style={{ paddingLeft: row.depth * 16 }}
           >
@@ -169,51 +205,11 @@ export function SettingsLocationTree({
             )}
             <Link
               id={`${id}-${index}`}
-              role="treeitem"
-              aria-level={row.depth + 1}
-              aria-current={
-                row.location.code === selectedCode ? 'page' : undefined
-              }
-              aria-expanded={
-                row.hasChildren ? revealed.has(row.location.id) : undefined
-              }
               tabIndex={
                 focused === row.location.id || (focused === null && index === 0)
                   ? 0
                   : -1
               }
-              onFocus={() => setFocused(row.location.id)}
-              onKeyDown={(event) => {
-                if (
-                  ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
-                ) {
-                  event.preventDefault();
-                  focus(
-                    event.key === 'Home'
-                      ? 0
-                      : event.key === 'End'
-                        ? rows.length - 1
-                        : index + (event.key === 'ArrowDown' ? 1 : -1),
-                  );
-                }
-                if (event.key === 'ArrowRight' && row.hasChildren) {
-                  event.preventDefault();
-                  if (!revealed.has(row.location.id))
-                    toggle(row.location.id, true);
-                  else focus(index + 1);
-                }
-                if (event.key === 'ArrowLeft') {
-                  event.preventDefault();
-                  if (row.hasChildren && revealed.has(row.location.id))
-                    toggle(row.location.id, false);
-                  else if (row.parentId)
-                    focus(
-                      rows.findIndex(
-                        (candidate) => candidate.location.id === row.parentId,
-                      ),
-                    );
-                }
-              }}
               href={`/settings/locations/${encodeURIComponent(row.location.code)}`}
               className="min-w-0 flex-1 rounded py-2 text-cyan-200 underline focus-visible:outline-2 focus-visible:outline-cyan-400"
             >
