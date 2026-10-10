@@ -390,6 +390,17 @@ erasure assertions wait for the designer's terminal access denial. Browser/datab
 execution remains required for actual request serialization, receipt atomicity,
 fresh same-tab authentication and native focus across canonical query binding.
 
+Run the focused skip-link browser regression without a backend or Next build:
+`node node_modules/@playwright/test/cli.js test --config tests/browser/skip-link.config.ts`.
+It requires installed Chromium and compiles the actual application stylesheet
+through PostCSS/Tailwind. A representative retained cleanup panel precedes the
+positioned protected shell; desktop and phone cases verify ordinary Retry clicks,
+unfocused link hit testing, and native Tab/Enter access to main. The same tests
+remain included in the normal E2E suite. This source-CSS geometry fixture does not
+mount the Auth controller or prove cross-tab authorization/readmission; the full
+`navigation-workflow.spec.ts` recovery scenario and approved local Auth E2E gate
+remain required.
+
 ## Protected page content gates
 
 Protected server pages resolve existing authorization/read/validation decisions

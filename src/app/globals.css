@@ -578,12 +578,15 @@ a {
   z-index: 50;
   left: 16px;
   top: -100px;
+  /* A preceding cleanup panel can move this positioned shell down the page. */
+  clip-path: inset(50%);
   background: var(--surface);
   color: var(--foreground);
   padding: 12px;
 }
 .experience-skip-link:focus {
   top: 8px;
+  clip-path: none;
 }
 .experience-motion-toggle {
   min-height: 44px;
