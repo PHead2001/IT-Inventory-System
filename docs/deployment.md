@@ -90,7 +90,19 @@ checks after the integrated app is ready to build. The fixture requires exclusiv
 of the already running loopback `it-inventory` stack, keeps the original Auth
 container intact, recreates only a temporary Auth container from its in-memory
 configuration with the policy enabled, runs direct provider checks (and requested
-browser checks), and restores the original container in `finally`. It refuses other
+browser checks), and restores the original container in `finally`. Before invoking
+those checks, a local-only preflight requires the exact invite/recovery Kong template
+URLs and retrieves both templates from the replacement Auth container's network.
+The fetched bytes must match the checked-in HTML hashes, with verified command
+completion, a hard process timeout, bounded Docker output and a shared retry deadline.
+Only temporary transport/readiness failures retry; configuration or content mismatch
+fails before the expensive build/browser run. Errors name the failing boundary but
+omit template bodies, stderr URLs and container environment. This diagnoses missing
+or inaccessible custom templates without changing Auth policy or email expectations.
+It follows the trusted Kong fetch's redirects and sends no authentication headers,
+tokens or cookies. Passing preflight does not prove GoTrue rendered the template or
+that invitation/recovery completion works: the three real captured-email E2E cases
+remain authoritative. It refuses other
 projects, versions, hosted Docker sockets and hosted database targets. It never edits
 Docker internals or vendored CLI code. Run it only when no other database/browser
 validation owns the stack. Forced process or host termination can interrupt cleanup;
