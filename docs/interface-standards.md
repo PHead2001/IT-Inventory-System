@@ -124,8 +124,111 @@ Use motion where it explains a change:
 Rules:
 
 - Transition only the properties that change. No computed `transition-property: all`, including controls with zero duration. The shared `--transition-interactive-properties` covers background-color, border-color, color, box-shadow, opacity and transform. Minimal interactive defaults in the base cascade layer set only that property list; they never start motion or override narrower utilities. The opt-in utility lives in the components layer so caller utilities retain control. Existing animated buttons use `experience-interactive` with `--motion-feedback` (130 ms) and `--ease-workspace`; narrower existing property lists remain narrow.
-- Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
+- Under either effective Reduced motion setting, show every animation's end state immediately. This newer Audit 4.2 owner decision supersedes the former short-fade allowance. Static visual quality must remain.
 - No motion that delays a request, replays on query-string updates, or runs continuously behind working forms.
+
+Protected route motion uses stable React 19.3 `ViewTransition` with the installed
+Next.js 16.3.6 commit integration, with a pathname-keyed content boundary and no update
+animation. React/Next owns server commits and streaming; never wrap `router.push`
+in `document.startViewTransition` or retain outgoing private children. Full motion
+crossfades content and settles it 8 px in `--motion-route` (200 ms); header/sidebar
+remain live. Native viewport/root snapshots are disabled. The **entire** `/room`
+ancestor content boundary opts out. Separate header, command, conventional inventory
+pane and location-browser boundaries animate without any canvas descendant.
+
+Inventory shared titles use an opaque per-navigation name only after Next's
+`Link.onNavigate` and existing dirty guards permit the initiating row. Matching
+requires record kind/identity, normalized results scope and stable holding identity
+(storage location UUID, site UUID or explicit unplaced);
+other holdings of the same record stay unnamed. The detail H1 is emitted only
+after server authorization. App Back reuses only the approved initiating origin;
+browser Back shares when its actual history URL is the exact departing results
+scope, either unanchored or bearing that same anchor. Ordinals locate anchors and
+do not identify holdings. Reordered holdings can pair at their new ordinal;
+deleted/replaced/ambiguous holdings fade instead. No history entry is changed for animation.
+Pair approval is staged and consumed within the same accepted Link event, for its
+exact href and current provider generation. Prevented/thrown handlers discard it;
+plain detail navigation or failed capture retires any older title intent/origin.
+Dirty guards and modified gestures never enter that transaction. Retirement affects
+only title metadata, preserving pending tasks, progress and ordinary navigation.
+Missing/ambiguous/pre-capture pairs use the normal route crossfade. Separate
+streaming commits consume the intent and cannot reconstruct the old private tree.
+
+React owns shared pairing and capture. A narrow `onShare` adapter replaces the
+exact named native group effect: it reads browser-captured source geometry,
+holds then cancels native width/height keyframes, reads the fixed destination box, then
+animates only translation/scale at 200 ms. Snapshot image fitting and dimensions
+are static. Unsupported/nonpositive/nonfinite/transformed geometry or unsupported
+pseudo-element WAAPI skips the **whole** transition instantly after capture;
+recapturing private DOM to rebuild a crossfade is prohibited. Browser proof of
+ordinary forward/Back morphing, scrolled/mobile/long titles, no clipping/end snap,
+allowed keyframes and CLS remains mandatory; the Vitest adapter is not that proof.
+
+Effective motion reduction suppresses/cancels native snapshots synchronously.
+The protected provider cancels on null/different Supabase actor, permitted logout
+submission, actor replacement and unmount (including access-denied redirects).
+Logout invokes the cancellation helper directly inside its existing submit
+handler after unresolved-save confirmation permits exit, before cleanup/action
+dispatch. A prevented native submit cannot distinguish the guard from React's
+server-action interception; document-level submit listeners do not decide this.
+Stale callbacks cannot restore invalidated intent or suppress a new provider.
+This hook grants no access and replaces no server membership/RLS checks. It stores
+only ephemeral record/URL metadata, never titles, private DOM or credentials.
+Existing structured inventory, custody, configuration and metadata action results
+are observed at their client await boundaries. Explicit `forbidden`, `P1001`,
+`42501` or `actor_changed` results synchronously cancel snapshots and clear intent
+for the provider that was mounted when the action started. Later callbacks cannot
+restart motion; results from a retired provider cannot suppress its replacement.
+This conservative presentation suppression does not prove membership revocation
+(`P1001` also covers insufficient staff permission), change authentication, sign
+out, or clear drafts/receipts. Generic messages, transport failures and successful
+results are not denial signals. Action paths without structured access codes and
+revocation without an observed response remain lifecycle limitations pending
+security review.
+Unsupported browsers retain instant ordinary navigation. Task/panel, review,
+receipt and disclosure motion remains pending U406 integration. W09 is an unfinished
+draft: Link pending, tracked imperative router operations, real action promises and
+mounted local fallback/request UI contribute registrations. A 150 ms timer only
+reveals pending work; it never declares completion. Reduced motion makes pending
+static and completion immediate. Required protected auth/title/primary data resolve
+in the same reveal boundary; there is no protected loading fallback replacing the
+paired outgoing title. Server-issued actor/full-query ready markers acknowledge
+only connected visible matching content, and only close native history tokens.
+Refresh completion remains tied to real React work. Activity reactivation runs the
+marker layout effect again; presentation epochs alone never fabricate readiness.
+Room query history instead uses its accepted selection and validated current contents
+or visibly committed current error, preserving the independent camera/renderer.
+Per-mounted caller cleanup withdraws presentation, never cancels a backend request.
+Async task promises are tracked per invocation outside React async transitions:
+the retained actual-React regression reproduced shared async-action entanglement,
+then passed after separating task promises from synchronous route transitions.
+Owner incarnation keeps local busy until actual settlement or caller retirement,
+independently of presentation epochs. History cancellation cannot enable resubmit
+on a still-mounted request. Provider epochs suppress stale global presentation
+and private denial callbacks, while the same live caller can finish its local busy.
+Completion releases presentation after its UI commit; it never completes another
+owner's task or a route refresh. Synchronous router errors still reach the original
+caller, including existing Retry recovery. Actual browser readiness and native
+overlap remain required before W09 acceptance.
+
+The 13 existing imperative router modules are scan-panel, settings-panel,
+custody management-form, custody activity-filter, custody-change-form,
+label-designer, inventory mutation-form, archive-quantity-form, refresh-button,
+search-form, room-workspace, metadata-form and metadata-settings. Their supported
+push/replace/refresh calls use the tracked router; existing local transitions use
+the tracked transition hook. refresh-button currently has no mounted product caller.
+The one history Next Form became a progressive ordinary GET form: native validation,
+successful controls/submitter, repeated values, overrides/modifiers and existing
+prevented submissions retain their semantics. Signed-in internal Links, including
+server-rendered navigation, report public descendant useLinkStatus. Export/download
+anchors, external links, modified/new-tab navigation, no-JavaScript document loads,
+authentication forms outside the protected shell and API/file requests without an
+owned presentation boundary remain native; they do not fabricate global route pending.
+
+React/DOM/types 19.3 and Fiber 9.8.1 replace the previous canary type reference;
+Drei/Three are unchanged. Fiber's [React 19.3 compatibility release](https://github.com/pmndrs/react-three-fiber/releases/tag/v9.8.0)
+and Activity/Canvas lifecycle fix require real WebGL/cache-Back/camera regression
+before acceptance. A jsdom children adapter is only an environment fallback.
 
 ---
 

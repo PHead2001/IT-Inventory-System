@@ -1,12 +1,9 @@
 'use client';
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useTransition,
-} from 'react';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { fetchCategoryForm } from './form-fetch.actions';
 import { refreshMetadataRecord } from './record-refresh.actions';
 import {
@@ -20,7 +17,7 @@ import {
   type CoreValues,
   type RecordMetadata,
 } from './reconciliation';
-import { useRouter } from 'next/navigation';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
@@ -243,6 +240,7 @@ export function MetadataForm({
   creationDraftId: routeDraftId,
   creationInstanceId,
 }: Props) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
   const timeZone = useOperationalTimeZone();
   const incoming = item ?? asset;
@@ -322,7 +320,7 @@ export function MetadataForm({
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [openingReason, setOpeningReason] = useState('');
   const [openingReference, setOpeningReference] = useState('');
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
@@ -1893,7 +1891,7 @@ export function MetadataForm({
       }
       setReview(true);
       if (kind === 'asset' && core.serial_number.trim()) {
-        startTransition(async () => {
+        startTask(async () => {
           try {
             const matches = await findDuplicateSerials(
               core.serial_number,
@@ -2034,23 +2032,27 @@ export function MetadataForm({
     setReceipt({ key, id: requestId });
     dispatched.current = true;
     reportTask({ pending: true });
-    startTransition(async () => {
+    startTask(async () => {
       let result: MutationState | CustodyState;
       try {
         result =
           openingSite && creating
-            ? await submitCustody({
-                operation,
-                requestId,
-                expectedActorId: formActor,
-                payload: commandPayload,
-              })
-            : await submitInventory({
-                operation,
-                requestId,
-                expectedActorId: formActor,
-                payload: commandPayload,
-              });
+            ? await observeRouteActionResult(
+                submitCustody({
+                  operation,
+                  requestId,
+                  expectedActorId: formActor,
+                  payload: commandPayload,
+                }),
+              )
+            : await observeRouteActionResult(
+                submitInventory({
+                  operation,
+                  requestId,
+                  expectedActorId: formActor,
+                  payload: commandPayload,
+                }),
+              );
         if (
           !creating &&
           baseline &&
@@ -2163,12 +2165,14 @@ export function MetadataForm({
                   key: JSON.stringify([operation, revised]),
                   id: requestId,
                 });
-                result = await submitInventory({
-                  operation,
-                  requestId,
-                  expectedActorId: formActor,
-                  payload: revised,
-                });
+                result = await observeRouteActionResult(
+                  submitInventory({
+                    operation,
+                    requestId,
+                    expectedActorId: formActor,
+                    payload: revised,
+                  }),
+                );
               }
             } else setReview(false);
           } else if (!fresh.ok) setRecordRefreshError(fresh.message);

@@ -1,4 +1,5 @@
 'use client';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import {
   useCallback,
   useEffect,
@@ -8,8 +9,8 @@ import {
   type FormEvent,
   type SetStateAction,
 } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/components/experience/route-link';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
 import type {

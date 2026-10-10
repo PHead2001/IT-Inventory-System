@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Plus } from 'lucide-react';
 
 /** Native disclosure keeps both creation paths available without displacing results. */

@@ -3,10 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
-    member: { display_name: 'Viewer', role: 'viewer' },
+    member: { user_id: 'viewer', display_name: 'Viewer', role: 'viewer' },
   }),
 }));
 vi.mock('@/lib/auth/actions', () => ({ logout: vi.fn() }));
+// Auth cancellation itself is covered in route-motion.test.tsx.
+vi.mock('@/components/experience/route-motion', () => ({
+  RouteMotionProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  useRouteMotion: () => ({ enabled: false, cancelIfInvalid: () => {} }),
+  useInvalidateRouteMotion: () => () => {},
+}));
 vi.mock('@/features/telemetry/private-speed-insights', () => ({
   PrivateSpeedInsights: () => <span data-testid="private-speed-insights" />,
 }));

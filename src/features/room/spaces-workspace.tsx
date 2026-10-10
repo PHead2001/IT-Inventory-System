@@ -1,6 +1,10 @@
 'use client';
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
+import { RouteReady } from '@/components/experience/route-ready';
+import { routeKey } from '@/components/experience/route-key';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { CanvasFreeRouteContent } from '@/components/experience/page-arrival';
 import {
   Component,
   useCallback,
@@ -109,6 +113,7 @@ export function SpacesWorkspace({
   initialCode,
   initialNotice = null,
   initialPage = 1,
+  initialRouteKey = '/room',
 }: {
   locations: LocationRef[];
   userId: string;
@@ -116,7 +121,10 @@ export function SpacesWorkspace({
   initialCode: string | null;
   initialNotice?: string | null;
   initialPage?: number;
+  initialRouteKey?: string;
 }) {
+  const [, startContentsRequest] = useRouteTask();
+  const [acceptedRouteKey, setAcceptedRouteKey] = useState(initialRouteKey);
   const [selection, setSelection] = useState<Selection>({
     space: initialSpace,
     code: initialCode,
@@ -258,6 +266,12 @@ export function SpacesWorkspace({
         setFocusEpoch((epoch) => epoch + 1);
       }
       setSelection(next);
+      setAcceptedRouteKey(
+        routeKey(
+          window.location.pathname,
+          new URLSearchParams(window.location.search),
+        ),
+      );
     }
     window.addEventListener('popstate', pop);
     let saved: string | null = null;
@@ -308,69 +322,82 @@ export function SpacesWorkspace({
       location: selection.code,
       page: String(selection.page),
     });
-    fetch('/api/room/contents?' + params, {
-      cache: 'no-store',
-      credentials: 'same-origin',
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (
-          !response.ok ||
-          !response.headers.get('content-type')?.includes('application/json')
-        )
-          throw new Error(
-            response.status === 401 || response.redirected
-              ? 'Sign in again to load inventory.'
-              : 'Inventory could not be loaded.',
-          );
-        const raw: unknown = await response.json();
-        return parseRoomContentsResponse(raw, {
-          userId,
-          environment: window.location.origin,
-          spaceId: selection.space.id,
-          locationCode: selection.code!,
-          filter: roomContentsFilter,
-          page: selection.page,
-        }).result;
-      })
-      .then((data) => {
-        if (active && current === generation.current) {
-          const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
-          if (data.page > lastPage) {
-            const url = new URL(window.location.href);
-            if (lastPage > 1) url.searchParams.set('page', String(lastPage));
-            else url.searchParams.delete('page');
-            window.history.replaceState(
-              null,
-              '',
-              url.pathname + url.search + url.hash,
-            );
-            setSelection((previous) => ({ ...previous, page: lastPage }));
-            return;
-          }
-          setContents({ key: attemptKey, result: data });
-        }
-      })
-      .catch((cause) => {
-        if (
-          active &&
-          current === generation.current &&
-          !controller.signal.aborted
-        ) {
-          setContents({
-            key: attemptKey,
-            error:
-              cause instanceof Error &&
-              [
-                'Sign in again to load inventory.',
-                'Inventory response identity did not match the selected location.',
-                'Inventory response failed validation.',
-              ].includes(cause.message)
-                ? cause.message
-                : 'Inventory could not be loaded.',
-          });
-        }
-      });
+    // Track the genuine owned request even when an already-validated pane is
+    // reused. Renderer/shader readiness and stale requests never acknowledge it.
+    startContentsRequest(
+      () =>
+        fetch('/api/room/contents?' + params, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller.signal,
+        })
+          .then(async (response) => {
+            if (
+              !response.ok ||
+              !response.headers
+                .get('content-type')
+                ?.includes('application/json')
+            )
+              throw new Error(
+                response.status === 401 || response.redirected
+                  ? 'Sign in again to load inventory.'
+                  : 'Inventory could not be loaded.',
+              );
+            const raw: unknown = await response.json();
+            return parseRoomContentsResponse(raw, {
+              userId,
+              environment: window.location.origin,
+              spaceId: selection.space.id,
+              locationCode: selection.code!,
+              filter: roomContentsFilter,
+              page: selection.page,
+            }).result;
+          })
+          .then((data) => {
+            if (active && current === generation.current) {
+              const lastPage = Math.max(
+                1,
+                Math.ceil(data.total / data.pageSize),
+              );
+              if (data.page > lastPage) {
+                const url = new URL(window.location.href);
+                if (lastPage > 1)
+                  url.searchParams.set('page', String(lastPage));
+                else url.searchParams.delete('page');
+                window.history.replaceState(
+                  null,
+                  '',
+                  url.pathname + url.search + url.hash,
+                );
+                setAcceptedRouteKey(routeKey(url.pathname, url.searchParams));
+                setSelection((previous) => ({ ...previous, page: lastPage }));
+                return;
+              }
+              setContents({ key: attemptKey, result: data });
+            }
+          })
+          .catch((cause) => {
+            if (
+              active &&
+              current === generation.current &&
+              !controller.signal.aborted
+            ) {
+              setContents({
+                key: attemptKey,
+                error:
+                  cause instanceof Error &&
+                  [
+                    'Sign in again to load inventory.',
+                    'Inventory response identity did not match the selected location.',
+                    'Inventory response failed validation.',
+                  ].includes(cause.message)
+                    ? cause.message
+                    : 'Inventory could not be loaded.',
+              });
+            }
+          }),
+      controller.signal,
+    );
     return () => {
       active = false;
       controller.abort();
@@ -383,6 +410,7 @@ export function SpacesWorkspace({
     selection.code,
     selection.page,
     userId,
+    startContentsRequest,
   ]);
   const navigate = useCallback(
     (next: Selection) => {
@@ -397,6 +425,7 @@ export function SpacesWorkspace({
       if (next.code) params.set('location', next.code);
       if (next.page > 1) params.set('page', String(next.page));
       window.history.pushState(null, '', '/room?' + params);
+      setAcceptedRouteKey(routeKey('/room', params));
       setSelection(next);
       setNotice(null);
     },
@@ -429,52 +458,54 @@ export function SpacesWorkspace({
           {notice}
         </p>
       )}
-      <div className={styles.commandBar}>
-        <label htmlFor="space-selector" className={styles.spaceLabel}>
-          Space
-        </label>
-        <select
-          id="space-selector"
-          className={styles.spaceSelect}
-          value={selection.space.id}
-          onChange={(event) => {
-            const next = resolveSpace(locations, event.target.value, null);
-            if (next) {
-              setSceneError(null);
-              navigate({ space: next, code: null, page: 1 });
-            }
-          }}
-        >
-          {availableSpaces(locations).map((space) => (
-            <option key={space.id} value={space.id}>
-              {space.name}
-            </option>
-          ))}
-        </select>
-        {room && (
-          <button
-            className={styles.commandButton}
-            onClick={() => {
-              if (visible) setFocusOnRestore(false);
-              setVisible((value) => !value);
-              setRetryTick((tick) => tick + 1);
+      <CanvasFreeRouteContent>
+        <div className={styles.commandBar}>
+          <label htmlFor="space-selector" className={styles.spaceLabel}>
+            Space
+          </label>
+          <select
+            id="space-selector"
+            className={styles.spaceSelect}
+            value={selection.space.id}
+            onChange={(event) => {
+              const next = resolveSpace(locations, event.target.value, null);
+              if (next) {
+                setSceneError(null);
+                navigate({ space: next, code: null, page: 1 });
+              }
             }}
           >
-            {visible ? 'Hide room' : 'Show room'}
-          </button>
-        )}
-        {selection.code && (
-          <button
-            className={styles.commandButton}
-            onClick={() => navigate({ ...selection, code: null, page: 1 })}
-          >
-            Clear selection
-          </button>
-        )}
-        <Link className={styles.commandLink} href="/inventory">
-          Search inventory
-        </Link>
-      </div>
+            {availableSpaces(locations).map((space) => (
+              <option key={space.id} value={space.id}>
+                {space.name}
+              </option>
+            ))}
+          </select>
+          {room && (
+            <button
+              className={styles.commandButton}
+              onClick={() => {
+                if (visible) setFocusOnRestore(false);
+                setVisible((value) => !value);
+                setRetryTick((tick) => tick + 1);
+              }}
+            >
+              {visible ? 'Hide room' : 'Show room'}
+            </button>
+          )}
+          {selection.code && (
+            <button
+              className={styles.commandButton}
+              onClick={() => navigate({ ...selection, code: null, page: 1 })}
+            >
+              Clear selection
+            </button>
+          )}
+          <Link className={styles.commandLink} href="/inventory">
+            Search inventory
+          </Link>
+        </div>
+      </CanvasFreeRouteContent>
       {showCounts && room && visible && (
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <p role="status">
@@ -601,138 +632,156 @@ export function SpacesWorkspace({
               </p>
             </div>
           ) : null}
-          <section
-            aria-label="Location inventory"
-            aria-busy={loading}
-            className={styles.inventoryPanel}
+          <RouteReady
+            actorId={userId}
+            routeKey={acceptedRouteKey}
+            contentIdentity={attemptKey || selection.space.id}
+            ready={!selection.code || Boolean(result || error)}
           >
-            {selected ? (
-              <div
-                key={selection.space.id + ':' + selected.code}
-                className={reducedMotion ? undefined : styles.arrival}
+            <CanvasFreeRouteContent>
+              <section
+                aria-label="Location inventory"
+                aria-busy={loading}
+                className={styles.inventoryPanel}
               >
-                <p className={styles.panelEyebrow}>Selected location</p>
-                <h2 className={styles.selectionTitle}>{selected.name}</h2>
-                <LocationCode code={selected.code} />
-                <p className={styles.breadcrumb}>
-                  {selected.breadcrumb}
-                  {!selected.can_hold_inventory
-                    ? ' · Includes descendant inventory'
-                    : ''}
-                </p>
-                <Link
-                  className={styles.detailLink}
-                  href={'/locations/' + encodeURIComponent(selected.code)}
-                >
-                  Location details and history
-                </Link>
-              </div>
-            ) : (
-              <div>
-                <p className={styles.panelEyebrow}>Location inventory</p>
-                <h2 className={styles.selectionTitle}>{currentSpace.name}</h2>
-                <p className={styles.breadcrumb}>
-                  {countLabel(
-                    scoped.filter((location) => location.can_hold_inventory)
-                      .length,
-                    'inventory destination',
-                  )}{' '}
-                  across{' '}
-                  {countLabel(
-                    scoped.filter((location) => !location.can_hold_inventory)
-                      .length,
-                    'group',
-                  )}
-                  . Choose a location in{' '}
-                  {room && visible && !sceneError
-                    ? 'the map or browser'
-                    : 'the location browser'}{' '}
-                  to view its current contents.
-                </p>
-              </div>
-            )}
-            {loading && (
-              <p role="status" className={styles.contentsState}>
-                Loading contents for {selected?.name ?? 'selected location'}…
-              </p>
-            )}
-            {error && (
-              <div role="alert" className={styles.contentsError}>
-                <p>{error}</p>
-                <button
-                  className="min-h-11 text-cyan-300 underline"
-                  onClick={() => setRetryTick((tick) => tick + 1)}
-                >
-                  Retry contents
-                </button>
-              </div>
-            )}
-            {result && !loading && (
-              <div
-                key={attemptKey}
-                className={reducedMotion ? undefined : styles.arrival}
-              >
-                <p className="mb-2 text-sm">
-                  Active only ·{' '}
-                  {selected?.can_hold_inventory
-                    ? 'At each listed destination'
-                    : 'Selected area and descendant inventory'}
-                </p>
-                <InventoryCount result={result} />
-                {result.total === 0 ? (
-                  <div className={styles.contentsState}>
-                    <p>No active inventory here.</p>
+                {selected ? (
+                  <div
+                    key={selection.space.id + ':' + selected.code}
+                    className={reducedMotion ? undefined : styles.arrival}
+                  >
+                    <p className={styles.panelEyebrow}>Selected location</p>
+                    <h2 className={styles.selectionTitle}>{selected.name}</h2>
+                    <LocationCode code={selected.code} />
+                    <p className={styles.breadcrumb}>
+                      {selected.breadcrumb}
+                      {!selected.can_hold_inventory
+                        ? ' · Includes descendant inventory'
+                        : ''}
+                    </p>
                     <Link
-                      className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                      href={
-                        '/locations/' +
-                        encodeURIComponent(selection.code!) +
-                        '?status=all'
-                      }
+                      className={styles.detailLink}
+                      href={'/locations/' + encodeURIComponent(selected.code)}
                     >
-                      Include all statuses
+                      Location details and history
                     </Link>
                   </div>
                 ) : (
-                  <InventoryRows rows={result.rows} />
+                  <div>
+                    <p className={styles.panelEyebrow}>Location inventory</p>
+                    <h2 className={styles.selectionTitle}>
+                      {currentSpace.name}
+                    </h2>
+                    <p className={styles.breadcrumb}>
+                      {countLabel(
+                        scoped.filter((location) => location.can_hold_inventory)
+                          .length,
+                        'inventory destination',
+                      )}{' '}
+                      across{' '}
+                      {countLabel(
+                        scoped.filter(
+                          (location) => !location.can_hold_inventory,
+                        ).length,
+                        'group',
+                      )}
+                      . Choose a location in{' '}
+                      {room && visible && !sceneError
+                        ? 'the map or browser'
+                        : 'the location browser'}{' '}
+                      to view its current contents.
+                    </p>
+                  </div>
                 )}
-                {result.total > 0 && (
-                  <nav aria-label="Pagination" className={styles.pagination}>
-                    <span>
-                      Page {result.page} of {pages}
-                    </span>
-                    {result.page > 1 && (
-                      <button
-                        className="min-h-11 text-cyan-300 underline"
-                        onClick={() =>
-                          navigate({ ...selection, page: result.page - 1 })
-                        }
-                      >
-                        Previous
-                      </button>
-                    )}
-                    {result.page < pages && (
-                      <button
-                        className="min-h-11 text-cyan-300 underline"
-                        onClick={() =>
-                          navigate({ ...selection, page: result.page + 1 })
-                        }
-                      >
-                        Next
-                      </button>
-                    )}
-                  </nav>
+                {loading && (
+                  <p role="status" className={styles.contentsState}>
+                    Loading contents for {selected?.name ?? 'selected location'}
+                    …
+                  </p>
                 )}
-              </div>
-            )}
-          </section>
+                {error && (
+                  <div role="alert" className={styles.contentsError}>
+                    <p>{error}</p>
+                    <button
+                      className="min-h-11 text-cyan-300 underline"
+                      onClick={() => setRetryTick((tick) => tick + 1)}
+                    >
+                      Retry contents
+                    </button>
+                  </div>
+                )}
+                {result && !loading && (
+                  <div
+                    key={attemptKey}
+                    className={reducedMotion ? undefined : styles.arrival}
+                  >
+                    <p className="mb-2 text-sm">
+                      Active only ·{' '}
+                      {selected?.can_hold_inventory
+                        ? 'At each listed destination'
+                        : 'Selected area and descendant inventory'}
+                    </p>
+                    <InventoryCount result={result} />
+                    {result.total === 0 ? (
+                      <div className={styles.contentsState}>
+                        <p>No active inventory here.</p>
+                        <Link
+                          className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                          href={
+                            '/locations/' +
+                            encodeURIComponent(selection.code!) +
+                            '?status=all'
+                          }
+                        >
+                          Include all statuses
+                        </Link>
+                      </div>
+                    ) : (
+                      <InventoryRows rows={result.rows} />
+                    )}
+                    {result.total > 0 && (
+                      <nav
+                        aria-label="Pagination"
+                        className={styles.pagination}
+                      >
+                        <span>
+                          Page {result.page} of {pages}
+                        </span>
+                        {result.page > 1 && (
+                          <button
+                            className="min-h-11 text-cyan-300 underline"
+                            onClick={() =>
+                              navigate({ ...selection, page: result.page - 1 })
+                            }
+                          >
+                            Previous
+                          </button>
+                        )}
+                        {result.page < pages && (
+                          <button
+                            className="min-h-11 text-cyan-300 underline"
+                            onClick={() =>
+                              navigate({ ...selection, page: result.page + 1 })
+                            }
+                          >
+                            Next
+                          </button>
+                        )}
+                      </nav>
+                    )}
+                  </div>
+                )}
+              </section>
+            </CanvasFreeRouteContent>
+          </RouteReady>
         </div>
-        <LocationBrowser
-          key={selection.space.id}
-          locations={scoped}
-          selectedCode={selection.code}
-          onSelect={selectCode}
-        />
+        <CanvasFreeRouteContent>
+          <LocationBrowser
+            key={selection.space.id}
+            locations={scoped}
+            selectedCode={selection.code}
+            onSelect={selectCode}
+          />
+        </CanvasFreeRouteContent>
       </div>
     </div>
   );

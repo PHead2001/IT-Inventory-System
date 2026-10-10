@@ -1,7 +1,10 @@
 'use client';
-import Link from 'next/link';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import Link from '@/components/experience/route-link';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
@@ -35,6 +38,7 @@ function useSubmission(
   actorId?: string,
   persistence?: React.RefObject<SubmissionPersistence | null>,
 ) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [state, setState] = useState<CustodyState | null>(null);
@@ -89,7 +93,7 @@ function useSubmission(
     setPending(true);
     let result: CustodyState;
     try {
-      result = await submitCustody(attempt);
+      result = await observeRouteActionResult(submitCustody(attempt));
     } catch {
       result = {
         ok: false,

@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { roomHref } from './navigation';
 import { buildRoomBindings } from './bindings';
 import { spaceRoom, spaces } from './spaces';

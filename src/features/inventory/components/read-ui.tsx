@@ -4,9 +4,14 @@ import {
   assignmentEndpointSummary,
 } from '../history-summary';
 import { RecordStatus } from '@/components/record-status';
+import { InventoryRecordLink } from '@/components/experience/record-transition';
+import {
+  inventoryHolding,
+  recordHoldingKey,
+} from '@/components/experience/route-motion-state';
 import { ShowInRoom } from '@/features/room/show-in-room';
 import { OperationalTimestamp } from '@/components/operational-time';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Box } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { countLabel } from '@/lib/count';
@@ -98,6 +103,13 @@ export function InventoryRows({
     return (
       emptyState ?? <p className={panel}>No inventory matches these filters.</p>
     );
+  const holdingKeys = rows.map((row) =>
+    recordHoldingKey(row, inventoryHolding(row)),
+  );
+  const holdingCounts = new Map<string, number>();
+  holdingKeys.forEach((key) => {
+    if (key) holdingCounts.set(key, (holdingCounts.get(key) ?? 0) + 1);
+  });
   return (
     <ul className={`experience-surface ${styles.list}`}>
       {rows.map((row, index) => {
@@ -136,9 +148,23 @@ export function InventoryRows({
                   )}
                 </span>
                 <div className="min-w-0">
-                  <Link className={styles.name} href={recordHref}>
+                  <InventoryRecordLink
+                    className={styles.name}
+                    href={recordHref}
+                    record={{ kind: row.kind, id: row.id }}
+                    holding={inventoryHolding(row)}
+                    pairable={
+                      holdingKeys[index] !== null &&
+                      holdingCounts.get(holdingKeys[index]!) === 1
+                    }
+                    returnTo={
+                      returnTo
+                        ? `${returnTo}#${inventoryRowAnchor(index)}`
+                        : undefined
+                    }
+                  >
                     {row.name}
-                  </Link>
+                  </InventoryRecordLink>
                   <p className={styles.meta}>
                     {row.categoryName} ·{' '}
                     {row.kind === 'quantity'

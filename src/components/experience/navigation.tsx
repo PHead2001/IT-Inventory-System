@@ -1,6 +1,7 @@
 'use client';
 
-import Link, { useLinkStatus } from 'next/link';
+import Link from '@/components/experience/route-link';
+import { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';

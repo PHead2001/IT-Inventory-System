@@ -1,5 +1,6 @@
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Boxes } from 'lucide-react';
+import { RoutePendingTerminal } from '@/components/experience/route-pending';
 
 export function UnavailablePage({
   inventory = false,
@@ -11,6 +12,7 @@ export function UnavailablePage({
       className="experience-surface mx-auto my-10 max-w-xl p-6"
       aria-labelledby="unavailable-heading"
     >
+      <RoutePendingTerminal />
       <span className="experience-brand-mark mb-5">
         <Boxes aria-hidden="true" size={24} />
       </span>

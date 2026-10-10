@@ -1,56 +1,58 @@
 'use client';
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { ViewTransition } from 'react';
 import { usePathname } from 'next/navigation';
-import { useEffectiveReducedMotion } from './motion-preference';
+import { useRouteMotion } from './route-motion';
 
-const subscribeHydration = () => () => {};
-const clientReady = () => true;
-const serverReady = () => false;
+/** Only use around conventional content with no canvas descendant. */
+export function CanvasFreeRouteContent({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { enabled, cancelIfInvalid, finishAfterSnapshot } = useRouteMotion();
+  return (
+    <ViewTransition
+      default="none"
+      enter={enabled ? 'route-content' : 'none'}
+      exit={enabled ? 'route-content' : 'none'}
+      onEnter={(instance) => {
+        cancelIfInvalid();
+        finishAfterSnapshot(instance);
+      }}
+      onExit={(instance) => {
+        cancelIfInvalid();
+        finishAfterSnapshot(instance);
+      }}
+    >
+      {children}
+    </ViewTransition>
+  );
+}
 
-/** A persistent surface: the router continues to own and stream server children. */
+/** Next owns the transition and server commit; never retain outgoing children. */
 export function PageArrival({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const reduced = useEffectiveReducedMotion();
-  const hydrated = useSyncExternalStore(
-    subscribeHydration,
-    clientReady,
-    serverReady,
-  );
-  const surface = useRef<HTMLDivElement>(null);
-  const previousPath = useRef<string | null>(null);
-  const animation = useRef<Animation | null>(null);
-
-  useEffect(() => {
-    // The server snapshot deliberately starts reduced. It is not the client's
-    // actual choice and must not consume the first route arrival.
-    if (!hydrated) return;
-    if (reduced) {
-      animation.current?.cancel();
-      animation.current = null;
-      previousPath.current = pathname;
-      return;
-    }
-    if (!pathname || previousPath.current === pathname) return;
-    previousPath.current = pathname;
-    animation.current?.cancel();
-    animation.current =
-      typeof surface.current?.animate === 'function'
-        ? surface.current.animate(
-            [
-              { opacity: 0.55, transform: 'translateY(12px)' },
-              { opacity: 1, transform: 'translateY(0)' },
-            ],
-            { duration: 230, easing: 'cubic-bezier(.2,.8,.2,1)' },
-          )
-        : null;
-  }, [pathname, reduced, hydrated]);
-
-  useEffect(() => () => animation.current?.cancel(), []);
-
+  const { enabled, cancelIfInvalid, finishAfterSnapshot } = useRouteMotion();
+  // Omitting the WHOLE ancestor boundary is necessary: naming the canvas `none`
+  // would still include its pixels in an ancestor's snapshot.
+  const animate = enabled && pathname !== '/room';
   return (
-    <div ref={surface} className="experience-page-arrival">
-      {children}
-    </div>
+    <ViewTransition
+      key={pathname}
+      default="none"
+      enter={animate ? 'route-content' : 'none'}
+      exit={animate ? 'route-content' : 'none'}
+      onEnter={(instance) => {
+        cancelIfInvalid();
+        finishAfterSnapshot(instance);
+      }}
+      onExit={(instance) => {
+        cancelIfInvalid();
+        finishAfterSnapshot(instance);
+      }}
+    >
+      <div className="experience-page-arrival">{children}</div>
+    </ViewTransition>
   );
 }

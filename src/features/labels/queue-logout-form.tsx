@@ -1,12 +1,14 @@
 'use client';
 import { logout } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
+import { useInvalidateRouteMotion } from '@/components/experience/route-motion';
 import { clearLabelQueueSession } from './queue-model';
 import {
   clearAllDesignerRecovery,
   hasUnresolvedDesignerRecovery,
 } from '@/features/metadata/designer-recovery';
 export function QueueLogoutForm() {
+  const invalidateRouteMotion = useInvalidateRouteMotion();
   return (
     <form
       action={logout}
@@ -20,6 +22,9 @@ export function QueueLogoutForm() {
           event.preventDefault();
           return;
         }
+        // React's server-action interceptor also prevents native submission.
+        // Cancel explicitly after our guard, before cleanup/action dispatch.
+        invalidateRouteMotion();
         clearLabelQueueSession();
         clearAllDesignerRecovery();
       }}

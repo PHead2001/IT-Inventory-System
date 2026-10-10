@@ -1,4 +1,6 @@
-import Link from 'next/link';
+import { RouteReady } from '@/components/experience/route-ready';
+import { routeReadyProps } from '@/components/experience/route-ready.server';
+import Link from '@/components/experience/route-link';
 import { redirect } from 'next/navigation';
 import {
   inventoryFilterParams,
@@ -93,101 +95,105 @@ export default async function InventoryPage({
     '/inventory' + (returnParams.size ? '?' + returnParams.toString() : '');
   const createQuery = new URLSearchParams({ returnTo }).toString();
   return (
-    <>
-      <p className="experience-eyebrow">Find equipment and stock</p>
-      <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>
-      {params.scopeAdjusted === 'true' && (
-        <p role="status" className="mt-2 text-sm text-amber-100">
-          The previous results page is no longer available. Showing the nearest
-          available page with your filters retained.
-        </p>
-      )}
-      <p className="experience-muted mt-1 max-w-2xl text-sm sm:mt-2">
-        Search stock, site holdings, and individual assets.
-      </p>
-      {member.role === 'staff' && <AddItemLauncher query={createQuery} />}
-      <div className="mt-2 sm:mt-4">
-        <SearchForm
-          params={params}
-          categories={categories}
-          locations={locations}
-          sites={sites}
-          diagnosticsEnabled={authDiagnosticsEnabled()}
-        />
-        <div className="experience-inventory-results mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
-          <div>
-            <h2 className="text-lg font-semibold">Matching inventory</h2>
-            <InventoryCount result={result} />
-          </div>
-          <details className="experience-export-menu">
-            <summary>
-              <Download size={15} aria-hidden="true" /> Export CSV
-            </summary>
-            <div role="group" aria-label="CSV export options">
-              <ExportLink href={'/api/exports/inventory?' + exportParams}>
-                Filtered inventory
-              </ExportLink>
-              <ExportLink
-                href={'/api/exports/inventory?export=low_stock&' + exportParams}
-              >
-                Matching low-stock items
-              </ExportLink>
-              <ExportLink
-                href={
-                  '/api/exports/inventory?customFields=true&' + exportParams
-                }
-              >
-                Inventory with custom fields
-              </ExportLink>
-            </div>
-          </details>
-        </div>
-        {filters.lowStock && (
-          <p className="mb-4 text-sm text-slate-400">
-            Low-stock state uses available storage across all locations,
-            including inactive ones. A site filter narrows rows, not the
-            item-wide threshold calculation.
+    <RouteReady {...await routeReadyProps('/inventory', searchParams)}>
+      <>
+        <p className="experience-eyebrow">Find equipment and stock</p>
+        <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>
+        {params.scopeAdjusted === 'true' && (
+          <p role="status" className="mt-2 text-sm text-amber-100">
+            The previous results page is no longer available. Showing the
+            nearest available page with your filters retained.
           </p>
         )}
-        <InventoryRows
-          returnTo={returnTo}
-          rows={result.rows}
-          fileSummaries={fileSummaries}
-          emptyState={
-            <div className={panel}>
-              <p>{emptyMessage}</p>
-              {constrained ? (
-                <Link
-                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                  href="/inventory"
-                >
-                  Clear inventory filters
-                </Link>
-              ) : recorded ? (
-                <Link
-                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                  href="/inventory?status=all"
-                >
-                  Include all statuses
-                </Link>
-              ) : member.role === 'staff' ? (
-                <Link
-                  className="inline-flex min-h-11 items-center text-cyan-300 underline"
-                  href={'/inventory/quantity/new?' + createQuery}
-                >
-                  Add the first quantity item
-                </Link>
-              ) : (
-                <p className="mt-2 text-sm text-slate-400">
-                  Ask an IT staff member to add the first record.
-                </p>
-              )}
+        <p className="experience-muted mt-1 max-w-2xl text-sm sm:mt-2">
+          Search stock, site holdings, and individual assets.
+        </p>
+        {member.role === 'staff' && <AddItemLauncher query={createQuery} />}
+        <div className="mt-2 sm:mt-4">
+          <SearchForm
+            params={params}
+            categories={categories}
+            locations={locations}
+            sites={sites}
+            diagnosticsEnabled={authDiagnosticsEnabled()}
+          />
+          <div className="experience-inventory-results mb-2 flex flex-wrap items-center justify-between gap-3 sm:mb-3">
+            <div>
+              <h2 className="text-lg font-semibold">Matching inventory</h2>
+              <InventoryCount result={result} />
             </div>
-          }
-        />
-        <Pagination result={result} base="/inventory" params={params} />
-      </div>
-    </>
+            <details className="experience-export-menu">
+              <summary>
+                <Download size={15} aria-hidden="true" /> Export CSV
+              </summary>
+              <div role="group" aria-label="CSV export options">
+                <ExportLink href={'/api/exports/inventory?' + exportParams}>
+                  Filtered inventory
+                </ExportLink>
+                <ExportLink
+                  href={
+                    '/api/exports/inventory?export=low_stock&' + exportParams
+                  }
+                >
+                  Matching low-stock items
+                </ExportLink>
+                <ExportLink
+                  href={
+                    '/api/exports/inventory?customFields=true&' + exportParams
+                  }
+                >
+                  Inventory with custom fields
+                </ExportLink>
+              </div>
+            </details>
+          </div>
+          {filters.lowStock && (
+            <p className="mb-4 text-sm text-slate-400">
+              Low-stock state uses available storage across all locations,
+              including inactive ones. A site filter narrows rows, not the
+              item-wide threshold calculation.
+            </p>
+          )}
+          <InventoryRows
+            returnTo={returnTo}
+            rows={result.rows}
+            fileSummaries={fileSummaries}
+            emptyState={
+              <div className={panel}>
+                <p>{emptyMessage}</p>
+                {constrained ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href="/inventory"
+                  >
+                    Clear inventory filters
+                  </Link>
+                ) : recorded ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href="/inventory?status=all"
+                  >
+                    Include all statuses
+                  </Link>
+                ) : member.role === 'staff' ? (
+                  <Link
+                    className="inline-flex min-h-11 items-center text-cyan-300 underline"
+                    href={'/inventory/quantity/new?' + createQuery}
+                  >
+                    Add the first quantity item
+                  </Link>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-400">
+                    Ask an IT staff member to add the first record.
+                  </p>
+                )}
+              </div>
+            }
+          />
+          <Pagination result={result} base="/inventory" params={params} />
+        </div>
+      </>
+    </RouteReady>
   );
 }
 import { ExportLink } from '@/components/operational-time';

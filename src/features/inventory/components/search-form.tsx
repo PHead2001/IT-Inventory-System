@@ -1,8 +1,10 @@
 'use client';
+import { useRouteTransition } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 
-import Link from 'next/link';
-import { useEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from '@/components/experience/route-link';
+import { useEffect, useRef, useState } from 'react';
+
 import { motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,7 +54,7 @@ export function SearchForm({
   }, [diagnosticsEnabled]);
   const filters = readFilters(params);
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, startTransition] = useRouteTransition();
   const appliedSignature = inventoryFilterParams(params).toString();
   const [draft, setDraft] = useState(params);
   const [syncedSignature, setSyncedSignature] = useState(appliedSignature);

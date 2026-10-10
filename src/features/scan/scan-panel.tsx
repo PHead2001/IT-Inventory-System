@@ -1,4 +1,5 @@
 'use client';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import {
   useCallback,
   useEffect,
@@ -6,8 +7,8 @@ import {
   useState,
   type FormEvent,
 } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/components/experience/route-link';
+
 import type { IScannerControls } from '@zxing/browser';
 import styles from './scan-visual.module.css';
 import {

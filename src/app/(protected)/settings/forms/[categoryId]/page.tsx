@@ -1,4 +1,6 @@
-import Link from 'next/link';
+import { RouteReady } from '@/components/experience/route-ready';
+import { routeReadyProps } from '@/components/experience/route-ready.server';
+import Link from '@/components/experience/route-link';
 import { notFound } from 'next/navigation';
 import { getConfigurationCategories } from '@/features/configuration/queries.server';
 import { getPublishedForms } from '@/features/metadata/queries.server';
@@ -7,7 +9,9 @@ import { designerInstanceKey } from '@/features/metadata/designer-recovery';
 
 export default async function CategoryFormPage({
   params,
+  searchParams,
 }: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
   params: Promise<{ categoryId: string }>;
 }) {
   const { categoryId } = await params;
@@ -18,39 +22,46 @@ export default async function CategoryFormPage({
   );
   if (!category) notFound();
   return (
-    <div className="space-y-3">
-      <Link href="/settings/forms" className="text-cyan-300 underline">
-        All category forms
-      </Link>
-      <div className={canManage ? 'sr-only' : undefined}>
-        <h1 className="text-3xl font-semibold">{category.name} form</h1>
-      </div>
-      {canManage ? (
-        <MetadataSettings
-          key={
-            designerInstanceKey(
-              memberId,
-              process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
-            ) +
-            ':' +
-            categoryId
-          }
-          selectedCategoryId={categoryId}
-          categories={categories
-            .filter((entry) => entry.active && !entry.removed_at)
-            .map(({ id, name, active }) => ({ id, name, active }))}
-          forms={await getPublishedForms([categoryId])}
-          memberId={memberId}
-        />
-      ) : (
-        <p
-          role="note"
-          className="rounded border border-slate-700 p-4 text-sm text-slate-300"
-        >
-          Form editing requires an active staff membership with configuration
-          access. Ask the application owner if you need that access.
-        </p>
+    <RouteReady
+      {...await routeReadyProps(
+        '/settings/forms/' + encodeURIComponent(categoryId),
+        searchParams,
       )}
-    </div>
+    >
+      <div className="space-y-3">
+        <Link href="/settings/forms" className="text-cyan-300 underline">
+          All category forms
+        </Link>
+        <div className={canManage ? 'sr-only' : undefined}>
+          <h1 className="text-3xl font-semibold">{category.name} form</h1>
+        </div>
+        {canManage ? (
+          <MetadataSettings
+            key={
+              designerInstanceKey(
+                memberId,
+                process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+              ) +
+              ':' +
+              categoryId
+            }
+            selectedCategoryId={categoryId}
+            categories={categories
+              .filter((entry) => entry.active && !entry.removed_at)
+              .map(({ id, name, active }) => ({ id, name, active }))}
+            forms={await getPublishedForms([categoryId])}
+            memberId={memberId}
+          />
+        ) : (
+          <p
+            role="note"
+            className="rounded border border-slate-700 p-4 text-sm text-slate-300"
+          >
+            Form editing requires an active staff membership with configuration
+            access. Ask the application owner if you need that access.
+          </p>
+        )}
+      </div>
+    </RouteReady>
   );
 }

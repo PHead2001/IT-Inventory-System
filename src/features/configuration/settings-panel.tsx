@@ -1,7 +1,11 @@
 'use client';
-import { useLayoutEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useRouteTask } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
+import { useLayoutEffect, useRef, useState } from 'react';
+
+import Link from '@/components/experience/route-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { OperationalTimestamp } from '@/components/operational-time';
@@ -39,8 +43,9 @@ export function SettingsPanel({
   canManage: boolean;
   mode?: 'both' | 'categories' | 'labels';
 }) {
+  const observeRouteActionResult = useRouteActionResult();
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
   const [message, setMessage] = useState('');
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
@@ -97,12 +102,14 @@ export function SettingsPanel({
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
     setMessage('');
-    startTransition(async () => {
-      const result = await submitConfiguration({
-        operation,
-        requestId,
-        payload,
-      });
+    startTask(async () => {
+      const result = await observeRouteActionResult(
+        submitConfiguration({
+          operation,
+          requestId,
+          payload,
+        }),
+      );
       if (!result.ok) {
         setMessage(result.message);
         if (operation === 'category_remove' && result.code === 'P1017') {
@@ -137,8 +144,10 @@ export function SettingsPanel({
   const previewRemoval = () => {
     if (!removing) return;
     setMessage('');
-    startTransition(async () => {
-      const result = await reviewCategoryRemoval(removing, replacement || null);
+    startTask(async () => {
+      const result = await observeRouteActionResult(
+        reviewCategoryRemoval(removing, replacement || null),
+      );
       if (!result.ok) {
         setMessage(result.message);
         setReview(null);

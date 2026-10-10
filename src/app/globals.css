@@ -6,6 +6,9 @@
   --text-xs--line-height: 1.45;
 }
 :root {
+  /* No native viewport snapshot: shell stays live, and no ancestor captures WebGL. */
+  view-transition-name: none;
+  --motion-route: 200ms;
   color-scheme: dark;
   --background: #060d18;
   --surface: #101e30;
@@ -408,6 +411,45 @@ a {
   border-bottom: 1px solid var(--workspace-header-border);
   background: var(--workspace-header-background);
   backdrop-filter: blur(12px);
+}
+
+/* Indeterminate work only: the 150ms reveal is owned by actual pending signals. */
+.experience-route-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 2px;
+  z-index: 100;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--motion-feedback) ease;
+}
+.experience-route-progress[data-visible='true'] {
+  opacity: 1;
+}
+.experience-route-progress-bar {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--accent);
+}
+.experience-route-progress[data-visible='true']:not([data-static='true'])
+  .experience-route-progress-bar {
+  animation: route-pending-sweep 1.2s ease-in-out infinite;
+}
+.experience-route-progress[data-static='true'] {
+  transition: none;
+}
+.experience-route-progress[data-static='true'] .experience-route-progress-bar {
+  width: 100%;
+}
+@keyframes route-pending-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
 }
 .experience-header-inner {
   max-width: 1600px;
@@ -1198,6 +1240,67 @@ html[data-motion='full'] .experience-auth-panel {
     transition-duration: 0.01ms !important;
   }
 }
+@keyframes route-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes route-content-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+::view-transition-group(.route-content) {
+  animation: none;
+}
+::view-transition-old(.route-content) {
+  animation: route-content-out var(--motion-route) var(--ease-workspace) both;
+}
+::view-transition-new(.route-content) {
+  animation: route-content-in var(--motion-route) var(--ease-workspace) both;
+}
+::view-transition-group(.record-title),
+::view-transition-old(.record-title),
+::view-transition-new(.record-title) {
+  animation-duration: var(--motion-route);
+  animation-timing-function: var(--ease-workspace);
+}
+::view-transition-group(.record-title) {
+  transform-origin: 0 0;
+  /* Hold native dimension keyframes until onShare replaces them. This affects
+     CSS animations only; the replacement WAAPI transform runs normally. */
+  animation-play-state: paused;
+}
+::view-transition-old(.record-title),
+::view-transition-new(.record-title) {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+/* Snapshots must never block focus, errors, clicks or the live canvas. */
+::view-transition {
+  pointer-events: none;
+}
+html[data-motion='reduced']::view-transition-group(*),
+html[data-route-motion-private='false']::view-transition-group(*) {
+  display: none;
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) {
+    display: none;
+    animation: none;
+  }
+}
+
 html[data-motion='reduced'] *,
 html[data-motion='reduced'] *::before,
 html[data-motion='reduced'] *::after {

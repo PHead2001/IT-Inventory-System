@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { expectedLocations } from '../../../tests/fixtures/reference';
 import type { LocationRef } from '../inventory/contracts-ui';
@@ -85,6 +85,14 @@ async function choose(user: ReturnType<typeof userEvent.setup>, code: string) {
 function expectPicker(code: string) {
   expect(screen.getByLabelText('Select location')).toHaveTextContent(code);
 }
+function PendingNavigation({ read }: { read: () => void }) {
+  const [code, setCode] = useState('ITC-S1A');
+  mocks.push.mockImplementation(() => {
+    setCode('ITC-D01');
+  });
+  if (code === 'ITC-D01') read();
+  return workspace(code);
+}
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.push.mockReset();
@@ -100,8 +108,16 @@ describe('room application and scene contract', () => {
     const navigation = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    mocks.push.mockReturnValue(navigation);
-    const view = render(workspace('ITC-S1A'));
+    let ready = false;
+    render(
+      <Suspense fallback={<p>Loading selected location</p>}>
+        <PendingNavigation
+          read={() => {
+            if (!ready) throw navigation;
+          }}
+        />
+      </Suspense>,
+    );
     await choose(user, 'ITC-D01');
     expect(mocks.push).toHaveBeenCalledWith('/room?location=ITC-D01', {
       scroll: false,
@@ -115,10 +131,10 @@ describe('room application and scene contract', () => {
     expect(mocks.sceneProps?.canFocusSelected).toBe(false);
     expect(screen.getByLabelText('Select location')).toBeDisabled();
     await act(async () => {
+      ready = true;
       finish();
       await navigation;
     });
-    view.rerender(workspace('ITC-D01'));
     expect(screen.getByText('Server inventory for ITC-D01')).toBeVisible();
     expectPicker('ITC-D01');
     expect(mocks.sceneProps?.selectedCode).toBe('ITC-D01');

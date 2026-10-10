@@ -1,4 +1,6 @@
 'use client';
+
+import { useRouteActionResult } from '@/components/experience/route-pending';
 import {
   useEffect,
   useLayoutEffect,
@@ -6,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
@@ -61,6 +63,7 @@ function AssignmentFields({
   initialSiteId,
   siteIssue,
 }: Props) {
+  const observeRouteActionResult = useRouteActionResult();
   const initialSite = sites.find(
     (site) => site.id === initialSiteId && site.active,
   );
@@ -307,7 +310,7 @@ function AssignmentFields({
     submitting.current = true;
     dispatch({ type: 'pending', command });
     try {
-      const result = await submitCustody(command);
+      const result = await observeRouteActionResult(submitCustody(command));
       if (!mounted.current) return;
       if (result.ok) {
         const cleared = clearAssignmentRecovery(

@@ -1,6 +1,7 @@
 'use client';
+import { useRouteTask } from '@/components/experience/route-pending';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -10,7 +11,7 @@ import { refreshDashboard } from './refresh.actions';
 
 import type { DashboardSnapshot } from './snapshot.server';
 
-import Link from 'next/link';
+import Link from '@/components/experience/route-link';
 
 import { countLabel } from '@/lib/count';
 
@@ -32,7 +33,7 @@ export function DashboardSnapshotView({
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
 
-  const [pending, startTransition] = useTransition();
+  const [pending, startTask] = useRouteTask();
 
   const [failed, setFailed] = useState(false);
 
@@ -41,7 +42,7 @@ export function DashboardSnapshotView({
   const result = snapshot.result;
 
   function refresh() {
-    startTransition(async () => {
+    startTask(async () => {
       try {
         const response = await refreshDashboard(result.page);
 

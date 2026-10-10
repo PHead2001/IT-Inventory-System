@@ -1,13 +1,14 @@
 'use client';
+import { useRouteTransition } from '@/components/experience/route-pending';
+import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/components/experience/route-link';
+
 import {
   Component,
   useCallback,
   useMemo,
   useState,
-  useTransition,
   type ReactNode,
 } from 'react';
 import type { RoomDefinition } from './schema';
@@ -61,7 +62,7 @@ export function RoomWorkspace({
     [serializedRoom],
   );
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, startTransition] = useRouteTransition();
   const [visible, setVisible] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [ready, setReady] = useState(false);

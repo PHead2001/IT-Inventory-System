@@ -12,6 +12,63 @@ For isolated hosted export proof, set the **server-only** `EXPORT_DIAGNOSTICS_EN
 
 package.json is the canonical command source. Iterate cheaply; certify the final candidate completely.
 
+Route motion regression coverage lives in `route-motion.test.tsx`,
+`shared-title-motion.test.ts` and `page-arrival.test.tsx`. Stable React/React DOM
+and their types are aligned at 19.3.0; Fiber 9.8.1 supports that runtime and
+Activity/Canvas lifecycle compatibility. Drei/Three remain unchanged. The jsdom
+environment lacks native snapshots/layout, so Vitest supplies a children-preserving
+adapter while focused tests inspect boundary intent and captured geometry.
+This proves permission/identity/cancellation and transform-only replacement
+contracts, not native animation. `route-motion.spec.ts` observes actual native
+old/new capture and WAAPI replacement under the production Next runtime, including
+duplicate holdings, app Back, fresh unanchored and anchored browser Back, desktop/390 px/long/scrolled
+titles, live-search query updates, canvas/ancestor exclusion, immediate reduced
+and unsupported paths. It attaches before/after captures and native proof; actual
+recordings/visual inspection must also rule out clipping and end snaps. Full build,
+authenticated real-browser journeys, dirty/error/focus sibling workflows and
+independent review remain required before accepting the route subset of D303.2.
+Panels/receipts/disclosures remain pending U406 integration. W09 source and
+journeys are being implemented, with readiness/overlap acceptance still pending.
+The decisive actual-React regression first reproduced async-action entanglement:
+a replacement caller rendered Ready while native pending remained behind a
+departed caller's unresolved action. It now passes with per-invocation promise
+tracking outside React async transitions and synchronous-only route transitions.
+Focused checks cover simultaneous task owners, late completion/rejection, owned
+abort, actual suspended route reveal, exact synchronous router errors, Activity
+readiness and quiet provider retirement. The latest bounded cycle passed 305 tests
+in ten affected suites, canonical typecheck and scoped zero-warning lint. A
+post-typecheck null-guard correction also passed all 31 route-motion tests.
+Final formatting and full certification remain pending. Independent review found holding-identity and
+local-busy lifetime gaps. The source correction carries stable storage/site UUIDs
+or explicit unplaced identity through Back pairing and separates invocation busy
+from global presentation epochs. New replacement/deletion/reordering, hash Back
+with a held Settings request, same-owner overlap and retained-closure regressions
+passed in that cycle.
+Residual-origin corrections additionally cover prior-origin ambiguous capture,
+ordinary same-record full-details links and canceled capture followed by a plain
+same-href gesture. Their one-event approval and independent-task preservation
+regressions also passed. Lint repairs preserve provider incarnation guards and
+derive local busy from committed snapshots of actual task-map events; the latest
+305-test run includes those repairs. These results do not establish native capture
+or streamed browser readiness.
+Real WebGL mount/unmount, cached Activity Back,
+camera preservation and canvas-ancestor exclusion after Fiber upgrade remain
+mandatory unrun browser criteria. Repository runner image inputs were regenerated;
+Bundle coherence/version requires root-owned integration with the current runner
+baseline before final certification.
+
+Additional authored native journeys at 1280/390 px use actual mobile Menu
+navigation, ordinary logout/preference controls and genuine read-only action
+denials for disposable loopback actors. They observe cancellation during a
+running snapshot without pausing or extending animations. The deferred-denial
+journey across logout/login proves real response transport, zero observed
+in-flight cancellations and preserved replacement navigation. `route.fulfill`
+is not a client observer-completion barrier: this browser journey does not
+positively observe the private retired-scope continuation. The completed-callback
+and generation-isolation unit regressions remain authoritative for that rule;
+isolated browser continuation proof remains limited. These additional browser
+journeys are authored, not runtime-accepted, until the real loopback suite runs.
+
 The canonical database integration gate runs
 `tests/integration/audit-four-edit-integrity.ts` after the existing Audit three
 contracts. It directly calls every supported legacy/v2/v3 metadata update API,

@@ -1,3 +1,13 @@
+// Protected page readiness receives the same mocked request actor as its reads.
+vi.mock('@/lib/auth/session.server', () => ({
+  requireMember: async () => ({
+    member: {
+      user_id: 'route-test-actor',
+      role: 'staff',
+      can_manage_configuration: true,
+    },
+  }),
+}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const m = vi.hoisted(() => ({
@@ -14,7 +24,11 @@ vi.mock('@/features/inventory/queries.server', () => ({
 vi.mock('@/features/metadata/queries.server', () => ({
   getEventCustomPage: m.custom,
 }));
-vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect: m.redirect }));
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(),
+  redirect: m.redirect,
+  useRouter: () => ({ push: vi.fn() }),
+}));
 import Page from './page';
 import { OperationalTimeProvider } from '@/components/operational-time';
 import * as operationalTime from '@/lib/operational-time';
