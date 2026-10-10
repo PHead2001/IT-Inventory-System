@@ -362,16 +362,33 @@ password action ownership through refreshed session props, protected restoration
 withholding and reactivation without losing unchanged editable state.
 Deferred-read regressions additionally cover query-only navigation, changed known
 server generation/action revision, newly mounted bootstrap under an internally
-updating retained route slot, and unchanged field node/value preservation.
+updating retained route slot, and unchanged field node/value/focus/selection
+preservation during harmless checks. Revocation coverage includes failed cleanup
+masking before erasure, late old verification, original-binding server checks,
+other-actor denial, explicit retry and separate fresh-owner admission. A bounded
+failed-cleanup regression checks that callback invalidation caused by the check
+itself does not create an automatic retry loop. These are authored contracts;
+report the actual focused test outcome separately from their presence in source.
 Assignment, label and scope-guard fixtures verify that pending readiness defers
 storage restoration and actor rebinding while the Auth logout observer remains
 subscribed; unchanged reactivation never restarts hydrated workspaces.
 `tests/e2e/logout-privacy.spec.ts` authors real Next logout/reload and two-tab
-same-actor protected-entry checks using synthetic per-tab recovery. The existing
+same-actor protected-entry checks using synthetic per-tab recovery, plus ordinary
+logout, login through its resulting form and a second logout in the same tab
+without navigation, reload, cookie replacement or forced input. The existing
 foundation password test exercises cookie-driven password Flight completion.
 These tests require the approved local E2E environment and must be reported as
 unrun until executed; unit fixtures do not prove delivered browser headers,
 cross-tab Auth broadcast timing or actual Next Flight behavior.
+
+Scan component regressions exercise attempted logout during a deferred mutation:
+the exact command survives, the old result is ignored even after original-binding
+readmission, and only explicit retry dispatches the same command. A different actor
+cannot retry that retained owner. Designer identity-request interception matches
+the business action's actor payload rather than every server-action POST; DOM
+erasure assertions wait for the designer's terminal access denial. Browser/database
+execution remains required for actual request serialization, receipt atomicity,
+fresh same-tab authentication and native focus across canonical query binding.
 
 ## Protected page content gates
 

@@ -36,7 +36,7 @@ export async function verifyTabPrivacy(
     if (current.status === 'absent') {
       if (marker === 'pending') {
         pause();
-        if (!invalidateAssignmentPrivacy(true))
+        if (!invalidateAssignmentPrivacy(true, false))
           return { ready: false, issue: cleanupIssue };
       }
       return { ready: true, generation: 'absent' };
@@ -53,7 +53,7 @@ export async function verifyTabPrivacy(
         acknowledged !== current.generation
       ) {
         pause();
-        if (!invalidateAssignmentPrivacy(true))
+        if (!invalidateAssignmentPrivacy(true, false))
           return { ready: false, issue: cleanupIssue };
       }
       const expected = current.generation;

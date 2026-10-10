@@ -6,6 +6,8 @@ import { isActiveMember } from './membership';
 import { loginDestination } from '@/features/scan/targets';
 import { createAuthDiagnostic, observeAuthStage } from './diagnostic.server';
 import { readPasswordSession } from './password-session.server';
+import { verifyProtectedPrivacyBinding } from './protected-binding.server';
+import type { ProtectedPrivacyBinding } from './protected-binding';
 import {
   compareLogoutGeneration,
   mayEstablishSession,
@@ -107,6 +109,11 @@ export async function logout() {
 }
 export async function readLogoutPrivacyGeneration() {
   return readLogoutGeneration();
+}
+export async function readProtectedPrivacyIdentity(
+  expected: ProtectedPrivacyBinding,
+) {
+  return verifyProtectedPrivacyBinding(expected);
 }
 export async function acknowledgeLogoutPrivacyGeneration(expected: string) {
   return compareLogoutGeneration(expected);

@@ -24,22 +24,28 @@ export default async function ApplicationLayout({
   const { member } = await requireMember();
   const privacy = await readLogoutGeneration();
   return (
-    <ProtectedPrivacyBoundary serverGeneration={privacy}>
+    <ProtectedPrivacyBoundary
+      serverGeneration={privacy}
+      binding={{
+        actorId: member.user_id,
+        backend: new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin,
+        role: member.role,
+        canManageConfiguration: member.can_manage_configuration === true,
+      }}
+    >
       <OperationalTimeProvider>
-        <ProtectedPrivacyContent>
-          <AssignmentScopeGuard
-            actorId={member.user_id}
-            backend={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}
-          />
-        </ProtectedPrivacyContent>
+        <AssignmentScopeGuard
+          actorId={member.user_id}
+          backend={process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}
+        />
         <MotionPreference>
           <div className="experience-app">
             <a href="#main-content" className="experience-skip-link">
               Skip to content
             </a>
-            <ProtectedPrivacyContent>
-              <header className="experience-header">
-                <div className="experience-header-inner">
+            <header className="experience-header">
+              <div className="experience-header-inner">
+                <ProtectedPrivacyContent>
                   <Link href="/dashboard" className="experience-brand">
                     <span className="experience-brand-mark">
                       <Boxes size={19} strokeWidth={1.8} aria-hidden="true" />
@@ -49,16 +55,18 @@ export default async function ApplicationLayout({
                       <small>Spatial workspace</small>
                     </span>
                   </Link>
-                  <div className="experience-account">
+                </ProtectedPrivacyContent>
+                <div className="experience-account">
+                  <ProtectedPrivacyContent>
                     <AccountIdentity
                       name={member.display_name}
                       role={member.role}
                     />
-                    <QueueLogoutForm />
-                  </div>
+                  </ProtectedPrivacyContent>
+                  <QueueLogoutForm />
                 </div>
-              </header>
-            </ProtectedPrivacyContent>
+              </div>
+            </header>
             <div className="experience-workspace">
               <aside className="experience-sidebar">
                 <ProtectedPrivacyContent>

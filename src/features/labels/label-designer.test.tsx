@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   searchLabelRecords: vi.fn(),
   readLogoutPrivacyGeneration: vi.fn(),
   acknowledgeLogoutPrivacyGeneration: vi.fn(),
+  readProtectedPrivacyIdentity: vi.fn(),
   authChanged: null as
     null | ((event: string, session: { user: { id: string } } | null) => void),
 }));
@@ -34,6 +35,7 @@ vi.mock('@/lib/supabase/browser', () => ({
 vi.mock('@/lib/auth/actions', () => ({
   readLogoutPrivacyGeneration: mocks.readLogoutPrivacyGeneration,
   acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
+  readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
 }));
 vi.mock('next/navigation', () => {
   const router = { replace: mocks.replace };
@@ -94,12 +96,13 @@ vi.mock('./label-sheet', () => ({
   ),
 }));
 import { LabelDesigner } from './label-designer';
-import { AuthPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { logoutAcknowledgementKey } from '@/lib/auth/privacy-barrier';
 import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
 import {
   invalidateAssignmentPrivacy,
   readAuthoritativeCleanupRevision,
+  assignmentEpoch,
 } from '@/features/scan/assign-batch';
 
 const quantityId = '7b84a7cf-197b-45b1-8016-87482d124cb4';
@@ -750,8 +753,13 @@ it.each([{ memberId: 'member-b' }, { origin: 'https://other.example.test' }])(
       <LabelDesigner {...props} {...scope} initial={[]} addIntent={[]} />,
     );
     await act(async () => finish([asset]));
-    expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+    expect(screen.getByText('0 distinct records · 0 labels')).not.toBeVisible();
     expect(mocks.replace).not.toHaveBeenCalled();
+    view.unmount();
+    render(<LabelDesigner {...props} {...scope} initial={[]} addIntent={[]} />);
+    expect(
+      await screen.findByText('0 distinct records · 0 labels'),
+    ).toBeVisible();
   },
 );
 
@@ -782,7 +790,7 @@ it.each([
   { memberId: 'member-b', origin: props.origin },
   { memberId: props.memberId, origin: 'https://other.example.test' },
 ])(
-  'remounts a changed queue scope and ignores a late old search ($memberId, $origin)',
+  'keeps a changed queue scope masked until a fresh owner entry and ignores a late old search ($memberId, $origin)',
   async (scope) => {
     let finish!: (result: {
       rows: [];
@@ -799,12 +807,18 @@ it.each([
     await waitFor(() =>
       expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(1),
     );
+    const originalSearch = screen.getByRole('textbox', {
+      name: /Name, serial, tag/,
+    });
     const restored = { ...defaultFilters, q: 'Current scope' };
     sessionStorage.setItem(
       queueStorageKey(scope.origin, scope.memberId),
       JSON.stringify({ entries: [], filters: restored, job: defaultJob }),
     );
     view.rerender(<LabelDesigner {...props} {...scope} initial={[]} />);
+    expect(originalSearch).not.toBeVisible();
+    view.unmount();
+    render(<LabelDesigner {...props} {...scope} initial={[]} />);
     await screen.findByText(/0 matching records\. Scroll this list/);
     expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(2);
     expect(mocks.searchLabelRecords).toHaveBeenLastCalledWith(restored);
@@ -2375,6 +2389,18 @@ it('discards a delayed selected addition on actor or environment replacement', a
     />,
   );
   await act(async () => finish([quantity]));
+  expect(
+    view.container.querySelector('[aria-label="Label queue"]'),
+  ).not.toBeVisible();
+  view.unmount();
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      memberId="member-b"
+      origin="https://other.example.test"
+    />,
+  );
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '0 distinct records',
   );
@@ -2469,14 +2495,25 @@ it.each(['retry', 'first attempt'] as const)(
       status: 'valid',
       generation,
     });
+    mocks.readProtectedPrivacyIdentity.mockResolvedValue({
+      status: 'match',
+      generation: { status: 'valid', generation },
+    });
     render(
-      <AuthPrivacyBoundary>
+      <ProtectedPrivacyBoundary
+        binding={{
+          actorId: props.memberId,
+          backend: 'https://isolated.supabase.co',
+          role: 'staff',
+          canManageConfiguration: true,
+        }}
+      >
         <AssignmentScopeGuard
           actorId={props.memberId}
           backend="https://isolated.supabase.co"
         />
         <LabelDesigner {...props} initial={[]} />
-      </AuthPrivacyBoundary>,
+      </ProtectedPrivacyBoundary>,
     );
     await screen.findByText('1 distinct record · 4 labels');
     const remove = Storage.prototype.removeItem;
@@ -2487,11 +2524,23 @@ it.each(['retry', 'first attempt'] as const)(
         remove.call(this, target);
       });
     const persist = vi.spyOn(Storage.prototype, 'setItem');
+    mocks.readLogoutPrivacyGeneration.mockClear();
+    mocks.readLogoutPrivacyGeneration.mockImplementation(async () => {
+      // Bound a runaway retry so this regression fails without exhausting memory.
+      if (mocks.readLogoutPrivacyGeneration.mock.calls.length > 8)
+        throw new Error(
+          'Privacy verification retried without an external trigger',
+        );
+      return { status: 'valid', generation };
+    });
     act(() => mocks.authChanged?.('SIGNED_OUT', null));
     if (mode === 'retry') {
       expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBe('all');
       act(() => window.dispatchEvent(new Event('focus')));
       await screen.findByRole('alert');
+      expect(
+        mocks.readLogoutPrivacyGeneration.mock.calls.length,
+      ).toBeLessThanOrEqual(3);
       denied.mockRestore();
       persist.mockClear();
       fireEvent.click(
@@ -2569,6 +2618,7 @@ it('rejects persistence from a late old-instance refresh after cleanup before th
         ready: true,
         generation: 'same',
         cleanupRevision: readAuthoritativeCleanupRevision(),
+        verifiedEpoch: assignmentEpoch(),
       }}
     >
       <LabelDesigner {...props} initial={[]} />

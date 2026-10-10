@@ -181,9 +181,7 @@ it('retries only privacy cleanup after confirmed signout when a private command 
   ).not.toBeInTheDocument();
   expect(signOutSession).toHaveBeenCalledOnce();
   denied.mockRestore();
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Finish signing out' }));
   await waitFor(() => expect(sessionStorage.getItem(command)).toBeNull());
   expect(signOutSession).toHaveBeenCalledOnce();
 });

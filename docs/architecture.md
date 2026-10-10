@@ -111,34 +111,56 @@ it performs no additional generation or resource read. Keep all success, empty
 and access-denied JSX branches gated. Gating the unresolved route slot itself
 lets the shell send HTTP 200 before an async missing-resource decision settles.
 Static Auth routes keep their query-aware Suspense boundary.
-Private shell siblings (scope guard, header/account/logout, navigation and
-telemetry) and Settings navigation have separate content gates. Layout/context
-providers and PageArrival pass route children through continuously. The gated
-wrapper uses `display: contents` only when ready; while pending it loses that
-display rule and is hidden/inert. This preserves layout boxes after release and
-retains unchanged editable nodes while blocking pending interaction. Existing
+Private brand/account identity, the ordinary sign-out form, navigation, telemetry
+and Settings navigation have separate content gates. The confirmed logout receipt
+owner and its distinct **Finish signing out** cleanup retry stay outside those
+gates so failed cleanup remains actionable after the private header is masked.
+The authoritative scope observer also stays outside those gates. Layout/context providers and PageArrival pass route
+children through continuously. The gated wrapper uses `display: contents` while
+accepted presentation is authorized and is hidden/inert when it is revoked.
+This preserves layout boxes and retained editable nodes. Existing
 inventory-specific unavailable boundaries and route-kind titles stay independent
 of private success content. Adding a protected page requires the same server
 checks-before-content-gate contract; see the route map and proof limits in
 [validation](validation.md#protected-page-content-gates).
-The boundary retains accepted direct child nodes hidden and inert while checking,
-so unchanged form fields and their action owner survive; this does not freeze
-internal component updates or effects. Assignment and label bootstrap gates
-independently consult readiness before a new instance or actor/backend scope can
-restore storage, including when Next's retained route slot updates internally.
-Existing unchanged instances do not rehydrate merely because focus returned;
-label storage persistence waits during verification. Scope adoption is gated
-separately from the authoritative Auth observer, which stays subscribed during
-checks. A pending read grants no logout/discard authority and does not invalidate
-already-running mutation reconciliation. Confirmed generation changes remount
-the cleared private workspaces under the newly verified generation. A separate
-shared in-memory cleanup revision advances only after a verified authoritative wipe
-at the common storage cleanup path, including successful Auth observer cleanup;
-this also resets private workspace state when a pending all-cleanup marker is
-cleared under an already acknowledged cookie generation. A matching generation
-cannot revive a previously hydrated label queue after cleanup. Unchanged checks
-and non-authoritative invalidation do not advance this revision, and the password
-action-state owner remains outside these private workspace reset bindings.
+Admission readiness and accepted presentation are separate. A same-binding
+pathname/query or focus check blocks incoming children and new restoration while
+keeping accepted nodes visible and focusable, including their native focus and
+selection. Known logout, generation change or binding mismatch revokes presentation
+immediately, before storage cleanup succeeds. Unavailable/invalid generation or
+cleanup evidence masks presentation as uncertainty and retains the draft rather
+than declaring a terminal identity revocation. Hidden/inert
+owners remain mounted so an uncertain in-memory command and an ordinary logout
+action can finish without being replaced. This does not freeze internal updates
+or effects. Assignment and label bootstrap gates independently consult readiness
+before a new instance can restore storage; an unchanged accepted instance does not
+rehydrate merely because focus returned. Label persistence waits during checks.
+
+The protected layout supplies the server-verified actor, backend origin, role and
+configuration capability. After revocation, readmission requires a fresh caller-
+scoped server check of that original binding and current privacy cleanup, with no
+intervening invalidation. The logout generation alone is not identity proof.
+Different actors, inactive membership and changed privileges cannot expose or
+retarget a retained owner. Transient verification failures offer explicit retry.
+The recovery UI offers Inventory in a new tab so the current account can use a
+fresh server-authorized owner without replacing the original uncertain recovery.
+Restoring the original account and retrying can reveal its retained owner; designer
+revocation remains terminal until its existing explicit access/recovery flow runs.
+Designers erase private input DOM and gestures before paint on known revocation
+while keeping any unresolved original command in their owner. A transient privacy
+verification failure masks the existing draft and requires fresh original-binding
+verification without erasing that draft.
+
+A sign-out attempt invalidates old callbacks but grants no logout/discard
+authority. Scan keeps the exact reserved/dispatched command and durable original
+record; only verified original-binding readmission allows explicit retry with the
+same request ID and payload. There is no automatic replay or rebase, and a late
+old response stays fenced after readmission. A separate shared cleanup revision
+advances only after a verified authoritative all-wipe, including successful Auth
+observer cleanup. That confirmed cleanup clears hydrated label queues and their
+late persistence without remounting unrelated action owners. A matching generation
+cannot revive a cleared queue. Unchanged checks and attempted logout do not
+advance this revision.
 Label hydration and persistence also compare their mounted revision with the live
 authoritative cleanup revision immediately before storage access. This prevents
 an old queued effect or late refresh from restoring cleared entries while React

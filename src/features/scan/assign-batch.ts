@@ -245,10 +245,32 @@ export function historicalInspection(
 // This module lives beyond the scan route. Unmounted callbacks retain a captured
 // epoch, and can never repopulate storage after privacy invalidation.
 let epoch = 0;
+const invalidationListeners = new Set<() => void>();
+export function subscribeAssignmentInvalidation(listener: () => void) {
+  invalidationListeners.add(listener);
+  return () => {
+    invalidationListeners.delete(listener);
+  };
+}
 let activeScope: string | null = null;
 let cleanupRequired: 'all' | 'private' | null = null;
 let authoritativeCleanupRevision = 0;
 const cleanupListeners = new Set<() => void>();
+let privacyRevocationRevision = 0;
+const revocationListeners = new Set<() => void>();
+export const readPrivacyRevocationRevision = () => privacyRevocationRevision;
+export function subscribePrivacyRevocation(listener: () => void) {
+  revocationListeners.add(listener);
+  return () => {
+    revocationListeners.delete(listener);
+  };
+}
+/** Known revocation masks retained owners before attempting any storage wipe. */
+export function revokePrivatePresentation() {
+  privacyRevocationRevision++;
+  for (const listener of revocationListeners) listener();
+  invalidateAssignmentCallbacks();
+}
 export const readAuthoritativeCleanupRevision = () =>
   authoritativeCleanupRevision;
 export function subscribeAuthoritativeCleanup(listener: () => void) {
@@ -290,6 +312,7 @@ export function adoptAssignmentScope(scope: AssignmentScope) {
 }
 export function invalidateAssignmentCallbacks() {
   epoch++;
+  for (const listener of invalidationListeners) listener();
   if (typeof window !== 'undefined')
     window.dispatchEvent(new Event('assignment-scope-invalidated'));
 }
@@ -401,8 +424,10 @@ function clearAssignmentPrivacyStorage(mode: 'all' | 'private') {
 }
 export function invalidateAssignmentPrivacy(
   authoritativeLogout: boolean,
+  revoke = true,
 ): boolean {
-  invalidateAssignmentCallbacks();
+  if (revoke) revokePrivatePresentation();
+  else invalidateAssignmentCallbacks();
   const cleared = clearAssignmentPrivacyStorage(
     authoritativeLogout ? 'all' : 'private',
   );

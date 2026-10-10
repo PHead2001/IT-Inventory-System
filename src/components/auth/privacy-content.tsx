@@ -9,6 +9,7 @@ export function ProtectedPrivacyContent({ children }: { children: ReactNode }) {
   return (
     <AcceptedPrivacyContent
       ready={privacy.ready}
+      visible={privacy.visible}
       generation={privacy.generation}
       preserveLayout
     >
@@ -23,11 +24,13 @@ type PrivacyChildren = ReactNode | ((generation: string) => ReactNode);
  * effects: private bootstrap components also consult the readiness context. */
 export function AcceptedPrivacyContent({
   ready,
+  visible = ready,
   generation,
   children,
   preserveLayout = false,
 }: {
   ready: boolean;
+  visible?: boolean;
   generation: string;
   children: PrivacyChildren;
   preserveLayout?: boolean;
@@ -50,9 +53,9 @@ export function AcceptedPrivacyContent({
     });
   return (
     <div
-      hidden={!ready}
-      inert={!ready}
-      className={preserveLayout && ready ? 'contents' : undefined}
+      hidden={!visible}
+      inert={!visible}
+      className={preserveLayout && visible ? 'contents' : undefined}
     >
       {accepted?.node}
     </div>

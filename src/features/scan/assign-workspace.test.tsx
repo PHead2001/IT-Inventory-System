@@ -13,6 +13,7 @@ import {
   invalidateAssignmentPrivacy,
   readBatch,
   batchKey,
+  adoptAssignmentScope,
 } from './assign-batch';
 import {
   readAssignmentRecovery,
@@ -21,6 +22,8 @@ import {
 import { assignmentCommand } from './assign-contracts';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { AssignmentScopeGuard } from './assignment-scope-guard';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { useEffect } from 'react';
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
@@ -33,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   decode: vi.fn(),
   stop: vi.fn(),
   guardFailure: false,
+  privacyRead: vi.fn(),
+  identityRead: vi.fn(),
 }));
 vi.mock('@/lib/supabase/browser', () => ({
   createSupabaseBrowserClient: () => ({
@@ -47,7 +52,8 @@ vi.mock('@/lib/supabase/browser', () => ({
 vi.mock('@/lib/auth/actions', () => ({
   signOutSession: mocks.signOut,
   acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
-  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+  readLogoutPrivacyGeneration: mocks.privacyRead,
+  readProtectedPrivacyIdentity: mocks.identityRead,
 }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -149,9 +155,19 @@ const match = {
 };
 beforeEach(() => {
   sessionStorage.clear();
+  adoptAssignmentScope({
+    actor: props.actorId,
+    origin: window.location.origin,
+    backend: props.backend,
+  });
   vi.resetAllMocks();
   mocks.realCamera = false;
   mocks.guardFailure = false;
+  mocks.privacyRead.mockResolvedValue({ status: 'absent' });
+  mocks.identityRead.mockResolvedValue({
+    status: 'match',
+    generation: { status: 'absent' },
+  });
   // jsdom has no layout hit-testing. The button occupies this explicit test point;
   // captured releases at other coordinates must not infer a hit from event.target.
   Object.defineProperty(document, 'elementFromPoint', {
@@ -233,21 +249,23 @@ it.each(['subscription', 'adoption'] as const)(
           <AssignmentWorkspace {...props} />
         </>,
       );
-      expect(screen.getByLabelText('Destination site')).toHaveValue('');
       expect(
-        screen.getByLabelText('Ticket number reference (optional)'),
-      ).toHaveValue('');
+        screen.queryByLabelText('Destination site'),
+      ).not.toBeInTheDocument();
       expect(
-        screen.getByLabelText('Scan, paste, or search inventory'),
-      ).toHaveValue('');
+        screen.queryByLabelText('Ticket number reference (optional)'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText('Scan, paste, or search inventory'),
+      ).not.toBeInTheDocument();
       expect(
         screen.queryByRole('button', { name: 'Start camera' }),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: 'Inspect equipment' }),
-      ).toBeDisabled();
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        'Your account or assignment environment changed',
+        screen.queryByRole('button', { name: 'Inspect equipment' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Assignment access changed',
       );
       expect(readAssignmentRecovery(scope).raw).toBe(raw);
     } finally {
@@ -1247,8 +1265,44 @@ it('masks the previous actor batch and discards late pending results on account 
   expect(
     screen.queryByRole('region', { name: 'Latest assignment receipt' }),
   ).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Destination site')).toHaveValue('');
-  view.rerender(<AssignmentWorkspace {...props} />);
+  view.unmount();
+  const newOwner = render(
+    <ProtectedPrivacyBoundary
+      binding={{
+        actorId: id(19),
+        backend: props.backend,
+        role: 'staff',
+        canManageConfiguration: false,
+      }}
+    >
+      <ProtectedPrivacyContent>
+        <AssignmentWorkspace
+          {...props}
+          actorId={id(19)}
+          initialSiteId={undefined}
+        />
+      </ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>,
+  );
+  expect(await screen.findByLabelText('Destination site')).toHaveValue('');
+  expect(
+    screen.getByLabelText('Ticket number reference (optional)'),
+  ).toHaveValue('');
+  newOwner.unmount();
+  render(
+    <ProtectedPrivacyBoundary
+      binding={{
+        actorId: props.actorId,
+        backend: props.backend,
+        role: 'staff',
+        canManageConfiguration: false,
+      }}
+    >
+      <ProtectedPrivacyContent>
+        <AssignmentWorkspace {...props} />
+      </ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>,
+  );
   await screen.findByRole('button', { name: 'Retry same assignment' });
   expect(mocks.submit).toHaveBeenCalledTimes(1);
 });
@@ -2737,3 +2791,112 @@ it('retains the original in-flight mutation and reconciles it once while privacy
   expect(mocks.submit).toHaveBeenCalledOnce();
   expect(readBatch(scope).value?.entries).toHaveLength(1);
 });
+
+it.each(['original', 'different'] as const)(
+  'keeps a deferred command after failed logout and permits explicit replay only after %s actor verification',
+  async (actor) => {
+    let oldOutcome!: (value: unknown) => void;
+    mocks.submit.mockReturnValueOnce(
+      new Promise((resolve) => {
+        oldOutcome = resolve;
+      }),
+    );
+    mocks.signOut.mockResolvedValue({
+      ok: false,
+      message: 'Signout transport failed.',
+    });
+    render(
+      <ProtectedPrivacyBoundary
+        binding={{
+          actorId: props.actorId,
+          backend: props.backend,
+          role: 'staff',
+          canManageConfiguration: false,
+        }}
+      >
+        <QueueLogoutForm />
+        <ProtectedPrivacyContent>
+          <AssignmentWorkspace {...props} />
+        </ProtectedPrivacyContent>
+      </ProtectedPrivacyBoundary>,
+    );
+    await screen.findByRole('button', { name: 'Inspect equipment' });
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    const command = mocks.submit.mock.calls[0][0];
+    const originalRaw = readAssignmentRecovery(scope).raw;
+    let originalIdentity!: (value: unknown) => void;
+    mocks.identityRead.mockReturnValueOnce(
+      new Promise((resolve) => {
+        originalIdentity = resolve;
+      }),
+    );
+    fireEvent.submit(
+      screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
+    );
+    await waitFor(() => expect(mocks.identityRead).toHaveBeenCalledOnce());
+    expect(readAssignmentRecovery(scope).raw).toBe(originalRaw);
+    expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
+    expect(
+      screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+    ).not.toBeInTheDocument();
+    await act(async () =>
+      originalIdentity(
+        actor === 'original'
+          ? { status: 'match', generation: { status: 'absent' } }
+          : { status: 'denied' },
+      ),
+    );
+    expect(mocks.identityRead).toHaveBeenCalledWith({
+      actorId: props.actorId,
+      backend: props.backend,
+      role: 'staff',
+      canManageConfiguration: false,
+    });
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    if (actor === 'different') {
+      await act(async () =>
+        oldOutcome({
+          ok: true,
+          changed: true,
+          entityId: candidate.id,
+          version: '8',
+          eventId: id(8),
+        }),
+      );
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'original account access',
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Retry same assignment' }),
+      ).not.toBeInTheDocument();
+      expect(readAssignmentRecovery(scope).raw).toBe(originalRaw);
+      return;
+    }
+    expect(await screen.findByText('Signout transport failed.')).toBeVisible();
+    const retry = await screen.findByRole('button', {
+      name: 'Retry same assignment',
+    });
+    await waitFor(() => expect(retry).toBeEnabled());
+    await act(async () =>
+      oldOutcome({
+        ok: true,
+        changed: true,
+        entityId: candidate.id,
+        version: '8',
+        eventId: id(8),
+      }),
+    );
+    expect(readBatch(scope).value?.entries[0].status).toBe('uncertain');
+    expect(
+      screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    expect(mocks.submit).toHaveBeenCalledTimes(2);
+    expect(mocks.submit.mock.calls[1][0]).toEqual(command);
+    expect(readBatch(scope).value?.entries).toHaveLength(1);
+    expect(readAssignmentRecovery(scope).value).toBeNull();
+  },
+);

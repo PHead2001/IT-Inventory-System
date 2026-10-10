@@ -4,20 +4,38 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({
-    member: { display_name: 'Viewer', role: 'viewer' },
+    member: {
+      user_id: 'viewer-actor',
+      display_name: 'Viewer',
+      role: 'viewer',
+      can_manage_configuration: false,
+    },
   }),
 }));
-const privacyMocks = vi.hoisted(() => ({ read: vi.fn(), compare: vi.fn() }));
+const privacyMocks = vi.hoisted(() => ({
+  read: vi.fn(),
+  compare: vi.fn(),
+  identity: vi.fn(),
+  signOut: vi.fn(),
+  replace: vi.fn(),
+  refresh: vi.fn(),
+}));
+const stableRouter = {
+  replace: privacyMocks.replace,
+  refresh: privacyMocks.refresh,
+};
 vi.mock('@/lib/auth/privacy-barrier.server', () => ({
   readLogoutGeneration: async () => ({ status: 'absent' }),
 }));
 vi.mock('@/lib/auth/actions', () => ({
-  signOutSession: vi.fn(),
+  signOutSession: privacyMocks.signOut,
+  readProtectedPrivacyIdentity: privacyMocks.identity,
   readLogoutPrivacyGeneration: privacyMocks.read,
   acknowledgeLogoutPrivacyGeneration: privacyMocks.compare,
 }));
@@ -25,14 +43,18 @@ vi.mock('@/features/scan/assignment-scope-guard', () => ({
   AssignmentScopeGuard: () => null,
 }));
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://isolated.supabase.co');
   sessionStorage.clear();
   privacyMocks.read.mockResolvedValue({ status: 'absent' });
   privacyMocks.compare.mockResolvedValue({ status: 'match' });
+  privacyMocks.identity.mockResolvedValue({ status: 'denied' });
+  privacyMocks.signOut.mockReset();
+  privacyMocks.replace.mockReset();
 });
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/',
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => stableRouter,
 }));
 vi.mock('@/features/telemetry/private-speed-insights', () => ({
   PrivateSpeedInsights: () => <span data-testid="private-speed-insights" />,
@@ -43,13 +65,68 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+it('keeps the unique confirmed logout completion retry usable in the actual protected shell', async () => {
+  privacyMocks.signOut.mockResolvedValue({
+    ok: true,
+    logoutGeneration: '00000000-0000-4000-8000-000000000001',
+  });
+  render(
+    await ApplicationLayout({
+      children: (
+        <ProtectedPrivacyContent>
+          <input
+            aria-label="Retained protected draft"
+            defaultValue="original work"
+          />
+        </ProtectedPrivacyContent>
+      ),
+    }),
+  );
+  const signOut = await screen.findByRole('button', { name: 'Sign out' });
+  const recovery = 'inventory-assign-v1:original';
+  sessionStorage.setItem(recovery, 'exact original command');
+  const remove = Storage.prototype.removeItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementation(function (this: Storage, key) {
+      if (key === recovery) throw new Error('storage blocked');
+      remove.call(this, key);
+    });
+  fireEvent.submit(signOut.closest('form')!);
+  const retry = await screen.findByRole('button', {
+    name: 'Finish signing out',
+  });
+  expect(
+    screen.getAllByRole('button', { name: 'Finish signing out' }),
+  ).toHaveLength(1);
+  expect(retry).toBeVisible();
+  expect(retry.closest('[inert]')).toBeNull();
+  expect(screen.getByLabelText('Retained protected draft')).not.toBeVisible();
+  expect(screen.getByLabelText('Account: Viewer, viewer')).not.toBeVisible();
+  expect(privacyMocks.replace).not.toHaveBeenCalled();
+  blocked.mockRestore();
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(privacyMocks.replace).toHaveBeenCalledWith('/login'),
+  );
+  expect(privacyMocks.signOut).toHaveBeenCalledOnce();
+  expect(sessionStorage.getItem(recovery)).toBeNull();
 });
 
 it('uses the dynamic privacy boundary without a streaming Suspense wrapper', async () => {
   const layout = await ApplicationLayout({ children: <p>Inventory</p> });
   expect(layout.type).toBe(ProtectedPrivacyBoundary);
   expect(layout.props.serverGeneration).toEqual({ status: 'absent' });
+  expect(layout.props.binding).toEqual({
+    actorId: 'viewer-actor',
+    backend: 'https://isolated.supabase.co',
+    role: 'viewer',
+    canManageConfiguration: false,
+  });
 });
 
 describe('protected Speed Insights placement', () => {
@@ -144,9 +221,8 @@ it('keeps privacy cleanup and retry before the blank shell while private fields 
     }),
   );
   await act(async () => window.dispatchEvent(new Event('focus')));
-  beforeShell(screen.getByRole('status'));
-  expect(field).not.toBeVisible();
-  expect(field.closest('[inert]')).not.toBeNull();
+  expect(field).toBeVisible();
+  expect(field.closest('[inert]')).toBeNull();
   await act(async () => finish({ status: 'invalid' }));
   beforeShell(await screen.findByRole('alert'));
   beforeShell(screen.getByRole('button', { name: 'Retry privacy cleanup' }));

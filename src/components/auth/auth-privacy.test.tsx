@@ -15,6 +15,14 @@ import { ProtectedPrivacyContent } from './privacy-content';
 import { AuthForm } from './auth-form';
 import { useEffect, useState, type ComponentProps } from 'react';
 import { PrivateRestorationGate } from './privacy-readiness';
+import { invalidateAssignmentPrivacy } from '@/features/scan/assign-batch';
+import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+const protectedBinding = {
+  actorId: 'original-actor',
+  backend: 'https://isolated.supabase.co',
+  role: 'staff',
+  canManageConfiguration: true,
+};
 const routing = vi.hoisted(() => ({
   replace: vi.fn(),
   refresh: vi.fn(),
@@ -29,6 +37,7 @@ const actions = vi.hoisted(() => ({
   signOutSession: vi.fn(),
   readLogoutPrivacyGeneration: vi.fn(),
   acknowledgeLogoutPrivacyGeneration: vi.fn(),
+  readProtectedPrivacyIdentity: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(routing.query),
@@ -50,9 +59,11 @@ function seed() {
 function ProtectedTestBoundary({
   children,
   ...props
-}: ComponentProps<typeof ProtectedPrivacyBoundary>) {
+}: Omit<ComponentProps<typeof ProtectedPrivacyBoundary>, 'binding'> & {
+  binding?: typeof protectedBinding;
+}) {
   return (
-    <ProtectedPrivacyBoundary {...props}>
+    <ProtectedPrivacyBoundary binding={protectedBinding} {...props}>
       <ProtectedPrivacyContent>{children}</ProtectedPrivacyContent>
     </ProtectedPrivacyBoundary>
   );
@@ -65,6 +76,10 @@ beforeEach(() => {
   actions.readLogoutPrivacyGeneration.mockResolvedValue({ status: 'absent' });
   actions.acknowledgeLogoutPrivacyGeneration.mockResolvedValue({
     status: 'match',
+  });
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({
+    status: 'match',
+    generation: { status: 'absent' },
   });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -113,9 +128,7 @@ it.each([batch, recovery, labels])(
     expect(sessionStorage.getItem(key)).not.toBeNull();
     expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBe('all');
     denied.mockRestore();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Retry privacy cleanup' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Finish signing out' }));
     await waitFor(() =>
       expect(routing.replace).toHaveBeenCalledWith('/login?password=updated'),
     );
@@ -344,9 +357,7 @@ it('blocks a confirmed logout reminder failure without replaying password or sig
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'reminder could not be saved',
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Finish signing out' }));
   expect(routing.replace).not.toHaveBeenCalled();
   expect(actions.setPassword).not.toHaveBeenCalled();
   expect(actions.signOutSession).not.toHaveBeenCalled();
@@ -404,7 +415,7 @@ it('renders the retained server route slot while withholding its successful priv
     );
   }
   render(
-    <ProtectedPrivacyBoundary>
+    <ProtectedPrivacyBoundary binding={protectedBinding}>
       <RouteSlot />
     </ProtectedPrivacyBoundary>,
   );
@@ -422,8 +433,8 @@ it('renders the retained server route slot while withholding its successful priv
   await act(async () => {
     window.dispatchEvent(new Event('focus'));
   });
-  expect(field).not.toBeVisible();
-  expect(field.closest('[inert]')).not.toBeNull();
+  expect(field).toBeVisible();
+  expect(field.closest('[inert]')).toBeNull();
   await act(async () => finish({ status: 'absent' }));
   expect(screen.getByLabelText('Private page field')).toBe(field);
   expect(field).toHaveValue('typed work');
@@ -546,7 +557,9 @@ it.each(['server generation', 'action revision'] as const)(
       </ProtectedTestBoundary>,
     );
     expect(storageRead).not.toHaveBeenCalled();
-    expect(screen.getByText('Accepted form')).not.toBeVisible();
+    if (change === 'server generation')
+      expect(screen.getByText('Accepted form')).not.toBeVisible();
+    else expect(screen.getByText('Accepted form')).toBeVisible();
     await act(async () => finish({ status: 'valid', generation: newer }));
     expect(await screen.findByText('Verified changed entry')).toBeVisible();
     expect(storageRead).toHaveBeenCalledWith(null);
@@ -568,7 +581,8 @@ it('holds direct incoming consumers during reactivation without losing unchanged
   await act(async () => {
     window.dispatchEvent(new Event('focus'));
   });
-  expect(field).not.toBeVisible();
+  expect(field).toBeVisible();
+  expect(field.closest('[inert]')).toBeNull();
   expect(field).toHaveValue('typed work');
   const storageRead = vi.fn();
   function NewPrivateConsumer() {
@@ -632,4 +646,463 @@ it('blocks a newly mounted restoration gate inside retained internally updating 
   ).toBeVisible();
   expect(screen.getByLabelText('Retained field')).toBe(field);
   expect(screen.getByLabelText('Retained field')).toHaveValue('pending values');
+});
+
+it('keeps accepted focus and selection during held query verification while blocking incoming bootstrap', async () => {
+  routing.pathname = '/inventory/assets/new';
+  const view = render(
+    <ProtectedTestBoundary>
+      <input aria-label="Accepted creation field" defaultValue="typed value" />
+    </ProtectedTestBoundary>,
+  );
+  const field = (await screen.findByLabelText(
+    'Accepted creation field',
+  )) as HTMLInputElement;
+  field.focus();
+  field.setSelectionRange(2, 5);
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const reads = vi.fn();
+  function IncomingPrivateOwner() {
+    reads();
+    return <p>New private owner</p>;
+  }
+  routing.query = 'draft=canonical';
+  view.rerender(
+    <ProtectedTestBoundary>
+      <input aria-label="Accepted creation field" defaultValue="typed value" />
+      <IncomingPrivateOwner />
+    </ProtectedTestBoundary>,
+  );
+  expect(field).toBeVisible();
+  expect(field.closest('[inert]')).toBeNull();
+  expect(field).toHaveFocus();
+  expect(field.selectionStart).toBe(2);
+  expect(field.selectionEnd).toBe(5);
+  expect(reads).not.toHaveBeenCalled();
+  await act(async () => finish({ status: 'absent' }));
+  expect(await screen.findByText('New private owner')).toBeVisible();
+  expect(screen.getByLabelText('Accepted creation field')).toBe(field);
+  expect(field).toHaveFocus();
+});
+
+it('masks accepted private owners before a known logout cleanup fails', async () => {
+  render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Retained uncertain owner"
+        defaultValue="original request"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Retained uncertain owner');
+  seed();
+  const remove = Storage.prototype.removeItem;
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+    this: Storage,
+    key,
+  ) {
+    if (key === recovery) throw new Error('storage blocked');
+    remove.call(this, key);
+  });
+  act(() => {
+    expect(invalidateAssignmentPrivacy(true)).toBe(false);
+  });
+  expect(field).not.toBeVisible();
+  expect(field.closest('[inert]')).not.toBeNull();
+  expect(field).toHaveValue('original request');
+});
+
+it('settles failed cleanup without retrying its own callback invalidation and retains the owner for explicit retry', async () => {
+  render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Cleanup retry owner"
+        defaultValue="uncertain original"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Cleanup retry owner');
+  expect(actions.readLogoutPrivacyGeneration).toHaveBeenCalledOnce();
+  seed();
+  const remove = Storage.prototype.removeItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementation(function (this: Storage, key) {
+      if (key === recovery) throw new Error('storage blocked');
+      remove.call(this, key);
+    });
+  // Bound a failing implementation: one verification may settle, but any
+  // erroneous automatic retry waits rather than recursively consuming memory.
+  actions.readLogoutPrivacyGeneration
+    .mockResolvedValueOnce({ status: 'absent' })
+    .mockReturnValue(new Promise(() => {}));
+  await act(async () => {
+    expect(invalidateAssignmentPrivacy(true)).toBe(false);
+    for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+  });
+  expect(actions.readLogoutPrivacyGeneration).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('alert')).toHaveTextContent('could not clear');
+  expect(field).not.toBeVisible();
+  expect(field.closest('[inert]')).not.toBeNull();
+  expect(field).toHaveValue('uncertain original');
+  expect(sessionStorage.getItem(recovery)).toBe(
+    'exact uncertain command and receipt',
+  );
+
+  blocked.mockRestore();
+  actions.readLogoutPrivacyGeneration.mockResolvedValue({ status: 'absent' });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  await waitFor(() => expect(field).toBeVisible());
+  expect(screen.getByLabelText('Cleanup retry owner')).toBe(field);
+  expect(field).toHaveValue('uncertain original');
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
+});
+
+it('cannot use a late pre-revocation success or another actor to release the original owner', async () => {
+  render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Original retained owner"
+        defaultValue="memory-only request"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Original retained owner');
+  let oldRead!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      oldRead = resolve;
+    }),
+  );
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  expect(field).toBeVisible();
+  let identity!: (value: { status: 'denied' }) => void;
+  actions.readProtectedPrivacyIdentity.mockReturnValueOnce(
+    new Promise((resolve) => {
+      identity = resolve;
+    }),
+  );
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  expect(field).not.toBeVisible();
+  await waitFor(() =>
+    expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+      protectedBinding,
+    ),
+  );
+  await act(async () => oldRead({ status: 'absent' }));
+  expect(field).not.toBeVisible();
+  await act(async () => identity({ status: 'denied' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'original account access',
+  );
+  expect(field).toHaveValue('memory-only request');
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  await waitFor(() => expect(field).toBeVisible());
+  expect(screen.getByLabelText('Original retained owner')).toBe(field);
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenLastCalledWith(
+    protectedBinding,
+  );
+});
+
+it('never retargets accepted opaque children to a different server binding', async () => {
+  const view = render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Original binding field"
+        defaultValue="private original"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Original binding field');
+  const bootstrap = vi.fn();
+  function OtherActorConsumer() {
+    bootstrap();
+    return <p>Other actor route</p>;
+  }
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  view.rerender(
+    <ProtectedTestBoundary
+      binding={{ ...protectedBinding, actorId: 'other-actor' }}
+    >
+      <OtherActorConsumer />
+    </ProtectedTestBoundary>,
+  );
+  expect(field).not.toBeVisible();
+  expect(field.closest('[inert]')).not.toBeNull();
+  await screen.findByRole('alert');
+  expect(bootstrap).not.toHaveBeenCalled();
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
+  expect(field).toHaveValue('private original');
+});
+
+it('keeps the original owner masked but admits a separate fresh server-verified owner for another actor', async () => {
+  const original = render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Original uncertain request"
+        defaultValue="original payload"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const originalField = await screen.findByLabelText(
+    'Original uncertain request',
+  );
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  expect(originalField).not.toBeVisible();
+  expect(originalField.closest('[inert]')).not.toBeNull();
+  await screen.findByRole('alert');
+  expect(originalField).toHaveValue('original payload');
+  const recoveryLink = screen.getByRole('link', {
+    name: 'open Inventory in a new tab',
+  });
+  expect(recoveryLink).toHaveAttribute('href', '/inventory');
+  expect(recoveryLink).toHaveAttribute('target', '_blank');
+
+  // A new document has its own server-authorized binding and owner. It must not
+  // inherit the old page's terminal denial or uncertain input values.
+  original.unmount();
+  const bootstrap = vi.fn();
+  function FreshOwner() {
+    bootstrap();
+    return <input aria-label="Fresh actor field" defaultValue="" />;
+  }
+  render(
+    <ProtectedTestBoundary
+      binding={{ ...protectedBinding, actorId: 'other-actor' }}
+    >
+      <FreshOwner />
+    </ProtectedTestBoundary>,
+  );
+  const freshField = await screen.findByLabelText('Fresh actor field');
+  expect(freshField).toBeVisible();
+  expect(freshField.closest('[inert]')).toBeNull();
+  expect(freshField).toHaveValue('');
+  expect(bootstrap).toHaveBeenCalled();
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
+  expect(actions.readProtectedPrivacyIdentity).not.toHaveBeenCalledWith({
+    ...protectedBinding,
+    actorId: 'other-actor',
+  });
+});
+
+it('ignores an old identity success after another revocation while preserving the original action owner', async () => {
+  render(
+    <ProtectedTestBoundary>
+      <input aria-label="Revoked owner" defaultValue="same request" />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Revoked owner');
+  let oldIdentity!: (value: {
+    status: 'match';
+    generation: { status: 'absent' };
+  }) => void;
+  actions.readProtectedPrivacyIdentity
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        oldIdentity = resolve;
+      }),
+    )
+    .mockResolvedValue({ status: 'denied' });
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  await waitFor(() =>
+    expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledOnce(),
+  );
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  await waitFor(() =>
+    expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledTimes(2),
+  );
+  await act(async () =>
+    oldIdentity({ status: 'match', generation: { status: 'absent' } }),
+  );
+  expect(field).not.toBeVisible();
+  expect(field).toHaveValue('same request');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'original account access',
+  );
+});
+
+it('allows the mounted ordinary logout action owner to complete navigation after revocation masks its shell', async () => {
+  actions.signOutSession.mockResolvedValue({ ok: true, ...receipt });
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  render(
+    <ProtectedTestBoundary>
+      <QueueLogoutForm />
+    </ProtectedTestBoundary>,
+  );
+  const button = await screen.findByRole('button', { name: 'Sign out' });
+  fireEvent.submit(button.closest('form')!);
+  await waitFor(() => expect(routing.replace).toHaveBeenCalledWith('/login'));
+  expect(actions.signOutSession).toHaveBeenCalledOnce();
+});
+
+it('keeps confirmed logout cleanup retry accessible outside masked private header content', async () => {
+  actions.signOutSession.mockResolvedValue({ ok: true, ...receipt });
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  render(
+    <ProtectedPrivacyBoundary binding={protectedBinding}>
+      <header>
+        <ProtectedPrivacyContent>
+          <p>Private account identity</p>
+        </ProtectedPrivacyContent>
+        <section aria-label="Logout action owner">
+          <QueueLogoutForm />
+        </section>
+      </header>
+      <ProtectedPrivacyContent>
+        <input aria-label="Private draft" defaultValue="keep owner" />
+      </ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>,
+  );
+  const button = await screen.findByRole('button', { name: 'Sign out' });
+  seed();
+  const remove = Storage.prototype.removeItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementation(function (this: Storage, key) {
+      if (key === recovery) throw new Error('storage blocked');
+      remove.call(this, key);
+    });
+  fireEvent.submit(button.closest('form')!);
+  const retry = await screen.findByRole('button', {
+    name: 'Finish signing out',
+  });
+  expect(retry).toBeVisible();
+  expect(retry.closest('[inert]')).toBeNull();
+  expect(screen.getByText('Private account identity')).not.toBeVisible();
+  expect(screen.getByLabelText('Private draft')).not.toBeVisible();
+  expect(routing.replace).not.toHaveBeenCalled();
+  blocked.mockRestore();
+  fireEvent.click(retry);
+  await waitFor(() => expect(routing.replace).toHaveBeenCalledWith('/login'));
+  expect(actions.signOutSession).toHaveBeenCalledOnce();
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+});
+
+it('preserves a draft through transient privacy uncertainty and rechecks its original binding before readmission', async () => {
+  render(
+    <ProtectedTestBoundary>
+      <input
+        aria-label="Uncertain verification draft"
+        defaultValue="typed work"
+      />
+    </ProtectedTestBoundary>,
+  );
+  const field = await screen.findByLabelText('Uncertain verification draft');
+  actions.readLogoutPrivacyGeneration.mockRejectedValueOnce(
+    new Error('connection unavailable'),
+  );
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  expect(await screen.findByRole('alert')).toHaveTextContent('could not clear');
+  expect(field).not.toBeVisible();
+  expect(field).toHaveValue('typed work');
+  actions.readProtectedPrivacyIdentity.mockResolvedValueOnce({
+    status: 'match',
+    generation: { status: 'absent' },
+  });
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  await waitFor(() => expect(field).toBeVisible());
+  expect(screen.getByLabelText('Uncertain verification draft')).toBe(field);
+  expect(field).toHaveValue('typed work');
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
+});
+
+it('rejects a stale initial acknowledgement after fresh admission instead of revoking its accepted field', async () => {
+  let oldAcknowledgement!: (value: { status: 'match' }) => void;
+  actions.readLogoutPrivacyGeneration.mockResolvedValueOnce({
+    status: 'valid',
+    generation,
+  });
+  actions.acknowledgeLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      oldAcknowledgement = resolve;
+    }),
+  );
+  render(
+    <ProtectedTestBoundary>
+      <input aria-label="Freshly admitted field" defaultValue="fresh value" />
+    </ProtectedTestBoundary>,
+  );
+  await waitFor(() =>
+    expect(actions.acknowledgeLogoutPrivacyGeneration).toHaveBeenCalledOnce(),
+  );
+  expect(
+    screen.queryByLabelText('Freshly admitted field'),
+  ).not.toBeInTheDocument();
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  const field = await screen.findByLabelText('Freshly admitted field');
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
+  field.focus();
+  await act(async () => oldAcknowledgement({ status: 'match' }));
+  expect(field).toBeVisible();
+  expect(field.closest('[inert]')).toBeNull();
+  expect(field).toHaveFocus();
+  expect(screen.getByLabelText('Freshly admitted field')).toBe(field);
+});
+
+it('does not admit initial opaque consumers after an external revocation denies the original binding', async () => {
+  let staleInitialRead!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      staleInitialRead = resolve;
+    }),
+  );
+  actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });
+  const reads = vi.fn();
+  function InitialPrivateConsumer() {
+    reads();
+    return <p>Initial private content</p>;
+  }
+  render(
+    <ProtectedTestBoundary>
+      <InitialPrivateConsumer />
+    </ProtectedTestBoundary>,
+  );
+  await waitFor(() =>
+    expect(actions.readLogoutPrivacyGeneration).toHaveBeenCalledOnce(),
+  );
+  act(() => {
+    invalidateAssignmentPrivacy(false);
+  });
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'original account access',
+  );
+  await act(async () => staleInitialRead({ status: 'absent' }));
+  expect(reads).not.toHaveBeenCalled();
+  expect(screen.queryByText('Initial private content')).not.toBeInTheDocument();
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
+    protectedBinding,
+  );
 });

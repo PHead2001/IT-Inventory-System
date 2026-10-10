@@ -12,6 +12,8 @@ import Link from 'next/link';
 import {
   PrivateRestorationGate,
   usePrivacyReadiness,
+  useAuthoritativeCleanupRevision,
+  usePrivacyRevocationRevision,
 } from '@/components/auth/privacy-readiness';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,6 +92,12 @@ function AssignmentFields({
   siteIssue,
 }: Props) {
   const privacy = usePrivacyReadiness();
+  const cleanupRevision = useAuthoritativeCleanupRevision();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const originalRevocation = useRef(revocationRevision);
+  const [privateMasked, setPrivateMasked] = useState(false);
+  const cleaned = useRef(cleanupRevision);
+  const requiresReadmission = useRef(false);
   const bootstrapped = useRef(false);
   const initialSite = sites.find(
     (site) => site.id === initialSiteId && site.active,
@@ -317,7 +325,14 @@ function AssignmentFields({
   };
   /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
-    if (!privacy.ready || bootstrapped.current) return;
+    if (!privacy.ready) return;
+    if (bootstrapped.current && requiresReadmission.current) {
+      if (privacy.verifiedEpoch !== assignmentEpoch()) return;
+      bootstrapped.current = false;
+      requiresReadmission.current = false;
+      setPrivateMasked(false);
+    }
+    if (bootstrapped.current) return;
     bootstrapped.current = true;
     let environment: string;
     try {
@@ -347,6 +362,22 @@ function AssignmentFields({
     if (stored.blocked || savedBatch.blocked) {
       setStorageError(
         'Your earlier assignment cannot be opened. Keep its saved data intact and contact IT support before assigning more.',
+      );
+      return;
+    }
+    if (
+      recovered.current &&
+      (stored.raw !== recoveryRaw.current ||
+        JSON.stringify(stored.value) !==
+          JSON.stringify(
+            parseAssignmentRecovery(
+              JSON.stringify(recovered.current),
+              identity,
+            ),
+          ))
+    ) {
+      setStorageError(
+        'The original assignment recovery changed or is unavailable. Keep this page open and restore its original saved request before retrying.',
       );
       return;
     }
@@ -545,7 +576,7 @@ function AssignmentFields({
     // Bootstrap exactly once per keyed actor/backend. Fresh catalog props are
     // checked before each new confirmation; they must not restart recovery.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actorId, backend, privacy.ready]);
+  }, [actorId, backend, privacy.ready, privacy.verifiedEpoch]);
   /* eslint-enable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     mounted.current = true;
@@ -556,13 +587,27 @@ function AssignmentFields({
   useEffect(() => {
     const invalidate = () => {
       generation.current++;
+      requiresReadmission.current = true;
+      submitting.current = false;
       resolving.current = false;
       setInput('');
       setRestoring(false);
       setReady(false);
-      setBatch(null);
-      batchRef.current = null;
-      dispatch({ type: 'hydrate', snapshot: initialAssignState(null) });
+      const original = recovered.current;
+      if (original) {
+        dispatch({
+          type: 'restore',
+          context: original.context,
+          candidate: original.candidate,
+          command: original.command,
+          sourceId: original.sourceId,
+          units: original.units,
+        });
+      } else {
+        setBatch(null);
+        batchRef.current = null;
+        dispatch({ type: 'hydrate', snapshot: initialAssignState(null) });
+      }
       setStorageError(
         'Your account or assignment environment changed. Reopen Scan and assign under the current staff session.',
       );
@@ -574,6 +619,25 @@ function AssignmentFields({
     return () =>
       window.removeEventListener('assignment-scope-invalidated', invalidate);
   }, [setStorageError]);
+  useLayoutEffect(() => {
+    if (cleaned.current === cleanupRevision) return;
+    cleaned.current = cleanupRevision;
+    // Only a completed authoritative all-wipe permits deleting the retained
+    // original command. Attempted logout and identity errors do not.
+    recovered.current = null;
+    recoveryRaw.current = null;
+    batchRef.current = null;
+    batchRaw.current = null;
+    setBatch(null);
+    dispatch({ type: 'hydrate', snapshot: initialAssignState(null) });
+  }, [cleanupRevision]);
+  useLayoutEffect(() => {
+    if (originalRevocation.current === revocationRevision) return;
+    originalRevocation.current = revocationRevision;
+    requiresReadmission.current = true;
+    setReady(false);
+    setPrivateMasked(true);
+  }, [revocationRevision]);
   const unresolved = state.phase === 'pending' || state.phase === 'unknown';
   useEffect(() => {
     if (!unresolved) return;
@@ -914,9 +978,11 @@ function AssignmentFields({
     reviewRef.current?.focus();
     recoveryRaw.current = readAssignmentRecovery(identity).raw;
     dispatch({ type: 'pending', command });
+    const mutationEpoch = epoch.current;
+    const mutationActive = () => alive() && epoch.current === mutationEpoch;
     try {
       const result = await submitCustody(command);
-      if (!alive()) return; // navigation keeps exact recovery; privacy blocks writes
+      if (!mutationActive()) return; // old outcomes stay fenced after readmission
       if (result.ok) {
         if (!result.eventId || result.entityId !== current.candidate.id) {
           dispatch({
@@ -993,14 +1059,14 @@ function AssignmentFields({
         });
       }
     } catch {
-      if (alive())
+      if (mutationActive())
         dispatch({
           type: 'unknown',
           message:
             'The assignment result could not be confirmed. Retry the same assignment; do not start another assignment.',
         });
     } finally {
-      if (alive()) submitting.current = false;
+      if (mutationActive()) submitting.current = false;
     }
   };
   const next = () => {
@@ -1128,6 +1194,13 @@ function AssignmentFields({
       if (alive() && generation.current === token) resolving.current = false;
     });
   };
+  if (privateMasked)
+    return (
+      <p role="status">
+        Assignment access changed. The original request remains locked until
+        this workspace’s original account access is verified.
+      </p>
+    );
   return (
     <div className="space-y-5">
       <section

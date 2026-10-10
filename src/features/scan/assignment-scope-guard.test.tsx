@@ -85,7 +85,7 @@ it.each(['SIGNED_OUT', 'SIGNED_IN'])(
     expect(mocks.unsubscribe).toHaveBeenCalledOnce();
   },
 );
-it('unsubscribes each StrictMode and actor/backend scope subscription', () => {
+it('keeps the original StrictMode observer across actor/backend drift and unsubscribes it on exit', () => {
   const view = render(
     <StrictMode>
       <AssignmentScopeGuard actorId={id} backend={scope.backend} />
@@ -101,10 +101,10 @@ it('unsubscribes each StrictMode and actor/backend scope subscription', () => {
       />
     </StrictMode>,
   );
-  expect(mocks.subscribed).toHaveBeenCalledTimes(3);
-  expect(mocks.unsubscribe).toHaveBeenCalledTimes(2);
+  expect(mocks.subscribed).toHaveBeenCalledTimes(2);
+  expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);
   view.unmount();
-  expect(mocks.unsubscribe).toHaveBeenCalledTimes(3);
+  expect(mocks.unsubscribe).toHaveBeenCalledTimes(2);
 });
 it.each(['client', 'subscription'])(
   'fails closed when %s creation fails',
@@ -179,6 +179,6 @@ it('withholds scope adoption during verification and retains the authoritative l
       <AssignmentScopeGuard actorId="new actor" backend={scope.backend} />
     </PrivacyReadinessContext>,
   );
-  expect(get).toHaveBeenCalledWith('inventory-assign-scope-v1');
-  expect(mocks.subscribed).toHaveBeenCalledTimes(2);
+  expect(get).not.toHaveBeenCalled();
+  expect(mocks.subscribed).toHaveBeenCalledTimes(1);
 });
