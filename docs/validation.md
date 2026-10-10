@@ -75,6 +75,28 @@ Start Supabase before database/full validation. Final certification runs fresh `
 
 The database gate uses the repository `db:start` bootstrap to install the local-only Storage `v1.77.9` override, then verifies the actual running image before reset and integration tests. `npm run test:local-storage` covers fresh-checkout creation, cache drift, linked-cache preservation and wrong-image rejection without Docker; CI's required job additionally exercises the real clean-checkout start. This override never enters the production migration-delivery command.
 
+The disposable-local Auth prerequisite also verifies the configured invitation and
+recovery template bodies after startup, database reset, and the E2E password-policy
+container replacement. It validates the local Docker endpoint and exact project,
+containers, network and template URLs before requesting only the two static Kong
+template paths. It allows up to 30 seconds of template readiness, bounds each
+command and response, rejects HTTP redirects, and compares the responses with the
+actual files selected by `supabase/config.toml`. Reports contain only a phase and
+fixed match/failure categories; they never include email links, tokens, environment
+values, response bodies or raw daemon errors. A failed prerequisite still restores
+the original Auth container through the existing fixture cleanup.
+
+`npm run test:auth:policy:contract` covers these diagnostics with mocked services,
+including transient readiness, missing listeners, wrong content/configuration,
+redirect rejection, redaction and cleanup after a template failure. Real proof uses
+the existing `npm run db:start`, `npm run db:reset`, then
+`npm run test:e2e -- tests/e2e/foundation.spec.ts`; the full CI workflow runs the
+same boundaries. PR44's earlier API-origin email failures indicate default-template
+fallback, but the underlying runtime cause remains unproven until those disposable
+checks execute. These probes do not replace the browser assertions for application
+origins, GET nonconsumption, explicit confirmation and CSRF protection, and they do
+not inspect or change hosted Auth configuration.
+
 ## Proof by layer
 
 Shared live-validation regressions cover every form-hook caller, including category create/rename and site/location management. Native validity changes followed by blur must clear associated errors without another submit; ordinary controlled typing retains its existing revalidation. Move completion regressions inject browser get/remove failures after commit and cover standalone Done, workspace Done/Close/switch and Move more after a fresh snapshot. Warnings remain visible after the task unmounts, unrelated/newer/different-item/malformed references remain untouched, and pending/uncertain commands still block closure and switching. These component checks do not replace database or real-browser certification.
