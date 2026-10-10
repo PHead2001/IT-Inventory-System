@@ -1315,8 +1315,15 @@ test('visible drawer labels remain distinct and clickable across desktop and pho
         'data-label-suppressed',
         /^(true|false)$/,
       );
-      await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
-      await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
+      // A hidden or never-placed target has no placement offset. Keep the
+      // subsequent real click/focus and opaque-visibility checks authoritative.
+      if (
+        (await label.getAttribute('data-label-suppressed')) === 'false' &&
+        (await label.isVisible())
+      ) {
+        await expect(label).toHaveAttribute('data-label-dx', /^-?\d/);
+        await expect(label).toHaveAttribute('data-label-dy', /^-?\d/);
+      }
     }
     await chooseMapMode(page, 'Free Orbit');
     const clicked = new Set<string>();

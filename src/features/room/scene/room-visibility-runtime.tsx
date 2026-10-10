@@ -19,7 +19,8 @@ import type { LabelArea } from './label-layout';
 
 /** One actual scene revision and cooperative work budget for the whole batch.
  * DOM masks are part of the measured revision, including viewport scrolling.
- * Unfinished results are retained until that revision changes or a user retries.
+ * Pending queries resume on bounded demand frames; terminal results stay latched
+ * until the measured revision changes or a user retries.
  */
 export class RoomVisibilityBatch {
   private measuredKey = '';
@@ -29,6 +30,8 @@ export class RoomVisibilityBatch {
     { code: string; result: ExposedAnchorResult }
   >();
   private active = new Set<Group>();
+  private pendingCodes = new Set<string>();
+  needsFrame = false;
   private viewport: LabelArea | undefined;
   private obstructions: LabelArea[] = [];
   private failure: string | null = 'viewport not measured';
@@ -42,30 +45,23 @@ export class RoomVisibilityBatch {
   }
   refresh(viewport: LabelArea, obstructions: LabelArea[]) {
     this.active.clear();
+    this.pendingCodes.clear();
     this.viewport = viewport;
     this.obstructions = obstructions;
     const domKey = JSON.stringify([viewport, obstructions]);
-    if (
-      this.domKey &&
-      domKey !== this.domKey &&
-      [...this.results.values()].some(
-        ({ result }) => result.status === 'unresolved',
-      )
-    )
-      this.projection.retry();
+    if (this.domKey && domKey !== this.domKey) this.projection.retry();
     this.domKey = domKey;
     this.projection.refresh();
     this.failure =
       Object.values(viewport).every(Number.isFinite) &&
       viewport.right > viewport.left &&
       viewport.bottom > viewport.top
-        ? this.projection.checkpoint()
+        ? null
         : 'viewport not measured';
     const key = JSON.stringify([
       this.projection.revision,
       viewport,
       obstructions,
-      this.failure,
     ]);
     if (key !== this.measuredKey) {
       this.measuredKey = key;
@@ -78,6 +74,14 @@ export class RoomVisibilityBatch {
     preferred: Vector3,
   ): ExposedAnchorResult {
     this.active.add(origin);
+    if (!this.failure && !this.projection.revisionChecked) {
+      this.pendingCodes.add(code);
+      return {
+        status: this.projection.pending ? 'pending' : 'unresolved',
+        reason: 'scene revision pending',
+        stats: this.projection.stats,
+      };
+    }
     const previous = this.results.get(origin);
     if (previous?.code === code) return previous.result;
     const result: ExposedAnchorResult = this.failure
@@ -96,18 +100,30 @@ export class RoomVisibilityBatch {
           this.obstructions,
           this.projection,
         );
-    this.results.set(origin, { code, result });
+    if (result.status !== 'pending') this.results.set(origin, { code, result });
+    else this.pendingCodes.add(code);
     return result;
   }
   finish() {
     for (const origin of this.results.keys())
       if (!this.active.has(origin)) this.results.delete(origin);
+    const activeCodes = new Set(this.pendingCodes);
+    for (const origin of this.active) {
+      const entry = this.results.get(origin);
+      if (entry) activeCodes.add(entry.code);
+    }
+    this.needsFrame =
+      !this.failure &&
+      this.active.size > 0 &&
+      this.projection.finishFrame(activeCodes, this.pendingCodes.size > 0);
     return [
-      ...new Set(
-        [...this.results.values()]
-          .filter(({ result }) => result.status === 'unresolved')
-          .map(({ code }) => code),
-      ),
+      ...new Set([
+        ...this.pendingCodes,
+        ...[...this.active].flatMap((origin) => {
+          const entry = this.results.get(origin);
+          return entry?.result.status === 'unresolved' ? [entry.code] : [];
+        }),
+      ]),
     ].sort();
   }
   retry() {
@@ -166,6 +182,7 @@ export function RoomVisibilityProvider({
       publication.current = key;
       onUnresolvedChange(codes);
     }
+    if (batch.needsFrame) invalidate();
   }, 0);
   useEffect(() => {
     const retry = () => {

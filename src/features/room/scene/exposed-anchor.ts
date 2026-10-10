@@ -16,9 +16,19 @@ import {
 export type ExposedAnchorResult =
   | { status: 'visible'; anchor: Vector3; stats: SurfaceWork }
   | { status: 'hidden'; stats: SurfaceWork }
+  | { status: 'pending'; reason: string; stats: SurfaceWork }
   | { status: 'unresolved'; reason: string; stats: SurfaceWork };
 
 const witnesses = new WeakMap<Group, Vector3>();
+const pendingRays = new WeakMap<
+  Group,
+  {
+    context: ProjectedVisibleSurface;
+    revision: number;
+    point: { x: number; y: number; z: number };
+    hit: ReturnType<typeof visibleRoomHit>;
+  }
+>();
 
 /** Preferred and previous verified rays are inexpensive witnesses only.
  * Exhaustive fallback uses actual projected surfaces, never box samples. A
@@ -59,7 +69,7 @@ export function resolveExposedTargetAnchor(
   let budgetFailure = projection.checkpoint();
   if (budgetFailure)
     return {
-      status: 'unresolved',
+      status: projection.pending ? 'pending' : 'unresolved',
       reason: budgetFailure,
       stats: projection.stats,
     };
@@ -89,12 +99,33 @@ export function resolveExposedTargetAnchor(
         return false;
     }
     ndc.set(projected.x, projected.y);
-    budgetFailure = projection.checkpoint(true);
+    const pending = pendingRays.get(origin);
+    const retained =
+      pending?.context === projection &&
+      pending.revision === projection.revision &&
+      pending.point.x === projected.x &&
+      pending.point.y === projected.y &&
+      pending.point.z === projected.z
+        ? pending
+        : null;
+    budgetFailure = projection.checkpoint(!retained);
     if (budgetFailure) return false;
     ray.setFromCamera(ndc, camera);
-    const visible = visibleRoomHit(ray.intersectObject(scene, true));
+    const visible = retained
+      ? retained.hit
+      : visibleRoomHit(ray.intersectObject(scene, true));
     budgetFailure = projection.checkpoint();
-    if (budgetFailure) return false;
+    if (budgetFailure) {
+      if (projection.pending)
+        pendingRays.set(origin, {
+          context: projection,
+          revision: projection.revision,
+          point: { x: projected.x, y: projected.y, z: projected.z },
+          hit: visible,
+        });
+      return false;
+    }
+    pendingRays.delete(origin);
     if (visible?.target?.code !== code) return false;
     const depth = visible.hit.point.clone().project(camera).z;
     if (depth < -1 || depth > 1) return false;
@@ -104,13 +135,14 @@ export function resolveExposedTargetAnchor(
     );
     return true;
   };
-  for (const local of [preferred, witnesses.get(origin)]) {
-    if (local && verify(origin.localToWorld(local.clone()).project(camera)))
-      return { status: 'visible', anchor: anchor!, stats: projection.stats };
-  }
+  if (!projection.hasPendingQuery(code))
+    for (const local of [preferred, witnesses.get(origin)]) {
+      if (local && verify(origin.localToWorld(local.clone()).project(camera)))
+        return { status: 'visible', anchor: anchor!, stats: projection.stats };
+    }
   if (budgetFailure)
     return {
-      status: 'unresolved',
+      status: projection.pending ? 'pending' : 'unresolved',
       reason: budgetFailure,
       stats: projection.stats,
     };

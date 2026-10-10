@@ -15,6 +15,7 @@ import {
 import {
   ProjectedVisibleSurface,
   defaultSurfaceLimits,
+  maxSurfaceContinuationFrames,
 } from './projected-visible-surface';
 import {
   RoomVisibilityBatch,
@@ -198,6 +199,129 @@ describe('shared room visibility transaction', () => {
     batch.refresh(viewport, []);
     expect(batch.finish()).toEqual([]);
   });
+  it('continues later labels after a cold shared deadline and stops once all labels complete', () => {
+    const { scene, origin, batch, projection } = fixture({
+      maxMilliseconds: 8,
+    });
+    const second = origin.clone();
+    second.position.x = 3;
+    second.userData.roomHoverTarget.code = 'ITC-S1B';
+    scene.add(second);
+    let now = 0,
+      cold = true;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const intersect = Raycaster.prototype.intersectObject;
+    const rays = vi
+      .spyOn(Raycaster.prototype, 'intersectObject')
+      .mockImplementation(function (this: Raycaster, ...args) {
+        const result = intersect.apply(this, args);
+        if (cold) {
+          cold = false;
+          now += 9;
+        }
+        return result;
+      });
+    try {
+      batch.refresh(viewport, []);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('pending');
+      expect(
+        batch.resolve(second, 'ITC-S1B', new Vector3(0, 0, 1)).status,
+      ).toBe('pending');
+      expect(batch.finish()).toEqual(['ITC-S1A', 'ITC-S1B']);
+      expect(batch.needsFrame).toBe(true);
+      const operations = projection.stats.operations;
+      now += 100;
+      batch.refresh(viewport, []);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('visible');
+      expect(
+        batch.resolve(second, 'ITC-S1B', new Vector3(0, 0, 1)).status,
+      ).toBe('visible');
+      expect(batch.finish()).toEqual([]);
+      expect(batch.needsFrame).toBe(false);
+      expect(projection.stats.operations).toBeGreaterThan(operations);
+      expect(rays).toHaveBeenCalledTimes(2); // the completed first ray survives the time yield
+      batch.refresh(viewport, []);
+      batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1));
+      batch.resolve(second, 'ITC-S1B', new Vector3(0, 0, 1));
+      batch.finish();
+      expect(batch.needsFrame).toBe(false);
+      expect(rays).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('withholds a cached visible result while its guard is incomplete, then notices already captured material changes', () => {
+    const { origin, mesh, batch, projection } = fixture({ maxMilliseconds: 8 });
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      batch.refresh(viewport, []);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('visible');
+      batch.finish();
+      const revision = projection.revision;
+      const side = mesh.material.side;
+      Object.defineProperty(mesh.material, 'side', {
+        configurable: true,
+        get: () => {
+          now += 9;
+          return side;
+        },
+      });
+      batch.refresh(viewport, []);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('pending');
+      batch.finish();
+      expect(batch.needsFrame).toBe(true);
+      Object.defineProperty(mesh.material, 'side', {
+        configurable: true,
+        value: side,
+        writable: true,
+      });
+      mesh.material.visible = false;
+      now += 100;
+      batch.refresh(viewport, []);
+      expect(projection.revision).toBeGreaterThan(revision);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('hidden');
+      batch.finish();
+      expect(batch.needsFrame).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('discards a pending DOM-obstructed query when the measured viewport changes', () => {
+    const { batch, projection, origin } = fixture({ maxMilliseconds: 8 });
+    let now = 0;
+    const clock = vi
+      .spyOn(performance, 'now')
+      .mockImplementation(() => (now += 0.2));
+    try {
+      batch.refresh(viewport, [viewport]);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(100, 0, 1)).status,
+      ).toBe('pending');
+      batch.finish();
+      const revision = projection.revision;
+      clock.mockImplementation(() => now);
+      batch.refresh({ ...viewport, left: 5, right: 405 }, []);
+      expect(projection.revision).toBeGreaterThan(revision);
+      expect(
+        batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1)).status,
+      ).toBe('visible');
+      batch.finish();
+      expect(batch.needsFrame).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it('refreshes the actual opaque-mask result on scroll and overlay movement while the camera stays fixed', () => {
     const { scene, camera, origin } = fixture();
     const surface = document.createElement('div'),
@@ -282,6 +406,104 @@ describe('shared room visibility transaction', () => {
     surface.remove();
   });
 
+  it('requests exactly the bounded pending frames and never schedules another frame after a terminal guard', () => {
+    const { scene, camera, origin } = fixture();
+    const canvas = document.createElement('canvas');
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      ...viewport,
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 400,
+      toJSON() {},
+    });
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const update = scene.updateWorldMatrix.bind(scene);
+    vi.spyOn(scene, 'updateWorldMatrix').mockImplementation(
+      (parents, children) => {
+        update(parents, children);
+        now += 9;
+      },
+    );
+    const invalidate = vi.fn(),
+      result = vi.fn(),
+      notify = vi.fn();
+    runtime.state = { scene, camera, gl: { domElement: canvas }, invalidate };
+    function Query() {
+      const batch = useRoomVisibilityBatch();
+      useFrame(
+        () => result(batch.resolve(origin, 'ITC-S1A', new Vector3())),
+        -0.25,
+      );
+      return null;
+    }
+    const view = render(
+      <RoomVisibilityProvider
+        onUnresolvedChange={notify}
+        retryRef={{ current: null }}
+      >
+        <Query />
+      </RoomVisibilityProvider>,
+    );
+    const frame = () =>
+      act(() =>
+        runtime.frames
+          .sort((a, b) => a.priority - b.priority)
+          .forEach(({ frame }) => frame()),
+      );
+    try {
+      for (let i = 0; i < maxSurfaceContinuationFrames; i++) frame();
+      expect(invalidate).toHaveBeenCalledTimes(
+        maxSurfaceContinuationFrames - 1,
+      );
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(['ITC-S1A']);
+      frame(); // unrelated externally demanded frame observes terminal state
+      expect(result.mock.lastCall?.[0].status).toBe('unresolved');
+      expect(invalidate).toHaveBeenCalledTimes(
+        maxSurfaceContinuationFrames - 1,
+      );
+    } finally {
+      view.unmount();
+      clock.mockRestore();
+    }
+  });
+  it('does not request continuation frames for an invalid viewport', () => {
+    const { origin, batch } = fixture({ maxOperations: 0 });
+    batch.refresh({ ...viewport, right: 0 }, []);
+    expect(batch.resolve(origin, 'ITC-S1A', new Vector3()).status).toBe(
+      'unresolved',
+    );
+    batch.finish();
+    expect(batch.needsFrame).toBe(false);
+  });
+  it('observes a genuinely changed scene after a resource cap without restarting on unchanged demand frames', () => {
+    const { scene, origin, projection, batch } = fixture({ maxTriangles: 0 });
+    const blocker = new Mesh(new BoxGeometry(4, 4, 1), new MeshBasicMaterial());
+    blocker.position.z = 4;
+    scene.add(blocker);
+    batch.refresh(viewport, []);
+    expect(batch.resolve(origin, 'ITC-S1A', new Vector3()).status).toBe(
+      'unresolved',
+    );
+    batch.finish();
+    expect(batch.needsFrame).toBe(false);
+    const revision = projection.revision;
+    batch.refresh(viewport, []);
+    batch.resolve(origin, 'ITC-S1A', new Vector3());
+    batch.finish();
+    expect(projection.revision).toBe(revision);
+    expect(batch.needsFrame).toBe(false);
+    blocker.removeFromParent();
+    batch.refresh(viewport, []);
+    expect(projection.revision).toBeGreaterThan(revision);
+    expect(batch.resolve(origin, 'ITC-S1A', new Vector3()).status).toBe(
+      'visible',
+    );
+    batch.finish();
+    expect(batch.needsFrame).toBe(false);
+  });
   it('mounts one provider, snapshots DOM masks once, resolves all anchors before publishing, and invalidates only on explicit retry', () => {
     const { scene, camera, origin } = fixture();
     const surface = document.createElement('div'),

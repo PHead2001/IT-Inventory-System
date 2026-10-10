@@ -17,6 +17,7 @@ import { resolveExposedTargetAnchor } from './exposed-anchor';
 import {
   ProjectedVisibleSurface,
   defaultSurfaceLimits,
+  maxSurfaceContinuationFrames,
 } from './projected-visible-surface';
 import { visibleRoomHit } from './visible-hover';
 
@@ -274,10 +275,12 @@ describe('projected actual visible regions', () => {
       maxOperations: 1,
     };
     const projection = new ProjectedVisibleSurface(f.scene, f.camera, limits);
-    const scan = vi.spyOn(f.scene, 'traverse');
+    const scan = vi.spyOn(f.target, 'getVertexPosition');
     projection.refresh();
     expect(scan).not.toHaveBeenCalled();
-    expect(projection.checkpoint()).toMatch(/^fingerprint incomplete:/);
+    expect(projection.checkpoint()).toMatch(
+      /^fingerprint unsupported within structural limits:/,
+    );
     projection.refresh();
     projection.refresh();
     expect(scan).not.toHaveBeenCalled();
@@ -296,7 +299,7 @@ describe('projected actual visible regions', () => {
     limits.maxOperations = defaultSurfaceLimits.maxOperations;
     projection.retry();
     projection.refresh();
-    expect(scan).toHaveBeenCalledTimes(1);
+    expect(projection.ready).toBe(true);
     expect(
       resolveExposedTargetAnchor(
         f.scene,
@@ -358,73 +361,383 @@ describe('projected actual visible regions', () => {
         maxOperations: 2000,
       };
       const projection = new ProjectedVisibleSurface(f.scene, f.camera, limits);
-      const scan = vi.spyOn(f.scene, 'traverse');
+      const scan = vi.spyOn(f.target, 'getVertexPosition');
       const result = projection.refresh();
-      expect(firstRead).toBeGreaterThan(0);
+      if (kind === 'materials') expect(firstRead).toBeGreaterThan(0);
+      else expect(firstRead).toBe(0); // group topology reservation stops before the scalar reads
       expect(finalRead).toBe(0);
       expect(result.revisionReused).toBe(false);
-      expect(projection.revision).toBe(0);
+      expect(projection.revision).toBe(1);
       expect(projection.checkpoint()).toMatch(
-        /^fingerprint incomplete: work budget exhausted/,
+        /^fingerprint unsupported within structural limits: work budget exhausted/,
       );
       expect(projection.find('TARGET', () => true).status).toBe('unresolved');
-      const reads = firstRead;
+      const revision = projection.revision;
       projection.refresh();
       projection.refresh();
-      expect(scan).toHaveBeenCalledTimes(1);
-      expect(firstRead).toBe(reads);
+      expect(projection.revision).toBe(revision);
+      expect(finalRead).toBe(0);
       expect(projection.stats.revisionReused).toBe(false);
       limits.maxOperations = defaultSurfaceLimits.maxOperations;
       projection.retry();
       projection.refresh();
-      expect(scan).toHaveBeenCalledTimes(2);
+      expect(projection.ready).toBe(true);
       expect(finalRead).toBeGreaterThan(0);
-      expect(projection.revision).toBe(1);
+      expect(projection.revision).toBeGreaterThan(revision);
       scan.mockRestore();
     },
   );
-  it('rejects and latches a fingerprint when its final signature assembly exceeds elapsed budget', () => {
+  it.each(['children', 'groups', 'materials'])(
+    'reserves a large %s collection before visiting or copying its elements',
+    (kind) => {
+      const f = setup();
+      let copies = 0,
+        scans = 0;
+      if (kind === 'children') {
+        const child = new Group();
+        child.parent = f.scene;
+        f.scene.children = Array.from({ length: 10000 }, () => child);
+        Object.defineProperty(f.scene.children, Symbol.iterator, {
+          value: function* (this: unknown[]) {
+            copies++;
+            yield* Array.prototype.values.call(this);
+          },
+        });
+      } else if (kind === 'groups') {
+        f.target.geometry.groups = Array.from({ length: 10000 }, () => ({
+          start: 0,
+          count: 3,
+          materialIndex: 0,
+        }));
+        Object.defineProperty(f.target.geometry.groups, Symbol.iterator, {
+          value: function* (this: unknown[]) {
+            copies++;
+            yield* Array.prototype.values.call(this);
+          },
+        });
+      } else {
+        const materials = Array.from(
+          { length: 10000 },
+          () => new MeshBasicMaterial(),
+        );
+        f.target.material = materials as unknown as typeof f.target.material;
+        Object.defineProperty(materials, 'every', {
+          value: () => {
+            scans++;
+            return false;
+          },
+        });
+        Object.defineProperty(materials, Symbol.iterator, {
+          value: function* (this: unknown[]) {
+            copies++;
+            yield* Array.prototype.values.call(this);
+          },
+        });
+      }
+      const projection = new ProjectedVisibleSurface(f.scene, f.camera, {
+        ...defaultSurfaceLimits,
+        maxOperations: 2000,
+        maxMilliseconds: Infinity,
+      });
+      projection.refresh();
+      expect(projection.find('TARGET', () => true).status).toBe('unresolved');
+      expect(projection.checkpoint()).toMatch(/work budget exhausted/);
+      expect(copies).toBe(0);
+      expect(scans).toBe(0);
+      expect(projection.finishFrame()).toBe(false);
+    },
+  );
+  it.each(['children', 'groups', 'materials'])(
+    'notices %s growth between slices before rereading it under the old reservation',
+    (kind) => {
+      const f = setup();
+      const projection = new ProjectedVisibleSurface(f.scene, f.camera, {
+        ...defaultSurfaceLimits,
+        maxOperations: 2000,
+      });
+      let now = 0,
+        copies = 0,
+        scans = 0;
+      const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+      try {
+        projection.refresh();
+        now += 9;
+        expect(projection.find('TARGET', () => true).status).toBe('pending');
+        const revision = projection.revision;
+        if (kind === 'children') {
+          const child = new Group();
+          child.parent = f.scene;
+          f.scene.children = Array.from({ length: 10000 }, () => child);
+          Object.defineProperty(f.scene.children, Symbol.iterator, {
+            value: function* (this: unknown[]) {
+              copies++;
+              yield* Array.prototype.values.call(this);
+            },
+          });
+        } else if (kind === 'groups') {
+          f.target.geometry.groups = Array.from({ length: 10000 }, () => ({
+            start: 0,
+            count: 3,
+            materialIndex: 0,
+          }));
+          Object.defineProperty(f.target.geometry.groups, Symbol.iterator, {
+            value: function* (this: unknown[]) {
+              copies++;
+              yield* Array.prototype.values.call(this);
+            },
+          });
+        } else {
+          // Keep the material-array identity; grow the collection captured by
+          // the guard so its old eligibility cost cannot authorize this scan.
+          const material = f.target.material;
+          const materials = [material];
+          f.target.material = materials as unknown as typeof material;
+          projection.retry();
+          projection.refresh();
+          now += 9;
+          expect(projection.find('TARGET', () => true).status).toBe('pending');
+          materials.push(...Array.from({ length: 9999 }, () => material));
+          Object.defineProperty(materials, 'every', {
+            value: () => {
+              scans++;
+              return false;
+            },
+          });
+          Object.defineProperty(materials, Symbol.iterator, {
+            value: function* (this: unknown[]) {
+              copies++;
+              yield* Array.prototype.values.call(this);
+            },
+          });
+        }
+        projection.refresh();
+        expect(projection.revision).toBeGreaterThan(revision);
+        expect(projection.find('TARGET', () => true).status).toBe('unresolved');
+        expect(copies).toBe(0);
+        expect(scans).toBe(0);
+        expect(projection.finishFrame()).toBe(false);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+  it('resumes a cold fingerprint after its final material read exhausts the 8ms frame allowance', () => {
     const f = setup();
     let now = 0,
-      expireDuringAssembly = true,
-      assemblies = 0;
+      cold = true,
+      reads = 0;
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
-    const originalJoin = Array.prototype.join;
-    const join = vi.spyOn(Array.prototype, 'join').mockImplementation(function (
-      this: unknown[],
-      separator?: string,
-    ) {
-      const result = originalJoin.call(this, separator);
-      if (
-        separator === '|' &&
-        this.length >= 33 &&
-        this.every((value) => typeof value === 'string')
-      ) {
-        assemblies++;
-        if (expireDuringAssembly) now = 9;
-      }
-      return result;
+    const side = f.target.material.side;
+    Object.defineProperty(f.target.material, 'side', {
+      configurable: true,
+      get: () => {
+        reads++;
+        if (cold) {
+          cold = false;
+          now += 9;
+        }
+        return side;
+      },
     });
     try {
       const projection = new ProjectedVisibleSurface(f.scene, f.camera);
       projection.refresh();
-      expect(assemblies).toBe(1);
-      expect(projection.revision).toBe(0);
-      expect(projection.checkpoint()).toMatch(
-        /^fingerprint incomplete: work budget exhausted/,
+      expect(projection.ready).toBe(false);
+      expect(projection.find('TARGET', () => true).status).toBe('pending');
+      const operations = projection.stats.operations;
+      expect(projection.finishFrame()).toBe(true);
+      now += 100;
+      projection.refresh();
+      expect(projection.ready).toBe(true);
+      expect(projection.stats.operations).toBeGreaterThan(operations);
+      expect(projection.revision).toBe(1);
+      expect(reads).toBe(2); // one capture plus the complete next-frame guard
+      expect(
+        resolveExposedTargetAnchor(
+          f.scene,
+          f.camera,
+          f.origin,
+          'TARGET',
+          new Vector3(),
+          viewport,
+          [],
+          projection,
+        ).status,
+      ).toBe('visible');
+      expect(projection.finishFrame()).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('continues exact clipping across frames and matches the unlimited opaque-owner result', () => {
+    const f = setup();
+    f.blocker(-5, 0.31);
+    f.blocker(0.33, 5);
+    const expected = f.run();
+    const freshOrigin = new Group();
+    f.owner.add(freshOrigin);
+    let now = 0;
+    const clock = vi
+      .spyOn(performance, 'now')
+      .mockImplementation(() => (now += 0.12));
+    try {
+      const projection = new ProjectedVisibleSurface(f.scene, f.camera);
+      let result;
+      let frames = 0,
+        pending = 0,
+        pendingClipping = false;
+      do {
+        projection.refresh();
+        result = resolveExposedTargetAnchor(
+          f.scene,
+          f.camera,
+          freshOrigin,
+          'TARGET',
+          new Vector3(),
+          viewport,
+          [],
+          projection,
+        );
+        if (result.status === 'pending') pending++;
+        if (result.status === 'pending' && projection.stats.overlaps > 0)
+          pendingClipping = true;
+        frames++;
+      } while (
+        projection.finishFrame() &&
+        frames < maxSurfaceContinuationFrames + 1
       );
+      expect(pending).toBeGreaterThan(0);
+      expect(pendingClipping).toBe(true);
+      expect(frames).toBeLessThanOrEqual(maxSurfaceContinuationFrames);
+      expect(result?.status).toBe(expected.status);
+      expect(result?.status).toBe('visible');
+      if (result?.status !== 'visible' || expected.status !== 'visible')
+        throw new Error('missing owner proof');
+      expect(result.anchor.toArray()).toEqual(expected.anchor.toArray());
+      expect(projection.stats.triangles).toBe(expected.stats.triangles);
+      expect(projection.stats.operations).toBeLessThan(
+        defaultSurfaceLimits.maxOperations,
+      );
+      expect(projection.finishFrame()).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('reproves a cached visible surface for a second local origin instead of returning an empty anchor', () => {
+    const f = setup();
+    f.blocker(-5, 0.31);
+    f.blocker(0.33, 5);
+    expect(f.run().status).toBe('visible');
+    const second = new Group();
+    second.position.set(0.2, 0.3, 0);
+    f.owner.add(second);
+    f.projection.refresh();
+    const first = resolveExposedTargetAnchor(
+      f.scene,
+      f.camera,
+      f.origin,
+      'TARGET',
+      new Vector3(),
+      viewport,
+      [],
+      f.projection,
+    );
+    const result = resolveExposedTargetAnchor(
+      f.scene,
+      f.camera,
+      second,
+      'TARGET',
+      new Vector3(),
+      viewport,
+      [],
+      f.projection,
+    );
+    expect(first.status).toBe('visible');
+    expect(result.status).toBe('visible');
+    if (result.status !== 'visible') throw new Error('missing anchor');
+    expect(result.anchor).toBeInstanceOf(Vector3);
+    expect(second.localToWorld(result.anchor.clone()).x).toBeGreaterThan(0.31);
+    expect(second.localToWorld(result.anchor.clone()).x).toBeLessThan(0.33);
+  });
+  it('invalidates already projected buffer state before a continuation can finish the old revision', () => {
+    const f = setup();
+    f.blocker(-5, 0.31);
+    f.blocker(0.33, 5);
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const vertex = f.target.getVertexPosition.bind(f.target);
+    const vertices = vi
+      .spyOn(f.target, 'getVertexPosition')
+      .mockImplementation((index, point) => {
+        now += 1;
+        return vertex(index, point);
+      });
+    try {
+      const projection = new ProjectedVisibleSurface(f.scene, f.camera);
       projection.refresh();
+      expect(
+        resolveExposedTargetAnchor(
+          f.scene,
+          f.camera,
+          f.origin,
+          'TARGET',
+          new Vector3(),
+          viewport,
+          [],
+          projection,
+        ).status,
+      ).toBe('pending');
+      expect(vertices).toHaveBeenCalled();
+      const revision = projection.revision;
+      f.target.geometry.translate(50, 0, 0);
+      f.target.geometry.getAttribute('position').needsUpdate = true;
+      vertices.mockRestore();
+      now += 100;
       projection.refresh();
-      expect(assemblies).toBe(1);
-      expect(projection.stats.revisionReused).toBe(false);
-      expireDuringAssembly = false;
-      now = 0;
+      expect(projection.revision).toBeGreaterThan(revision);
+      expect(
+        resolveExposedTargetAnchor(
+          f.scene,
+          f.camera,
+          f.origin,
+          'TARGET',
+          new Vector3(),
+          viewport,
+          [],
+          projection,
+        ).status,
+      ).toBe('hidden');
+      expect(projection.finishFrame()).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it('terminates no-progress frames at the hard ceiling without automatic retry', () => {
+    const f = setup();
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const update = f.scene.updateWorldMatrix.bind(f.scene);
+    const slow = vi
+      .spyOn(f.scene, 'updateWorldMatrix')
+      .mockImplementation((parents, children) => {
+        update(parents, children);
+        now += 9;
+      });
+    try {
+      const projection = new ProjectedVisibleSurface(f.scene, f.camera);
+      let frames = 0;
+      do {
+        projection.refresh();
+        frames++;
+      } while (projection.finishFrame());
+      expect(frames).toBe(maxSurfaceContinuationFrames);
+      expect(projection.find('TARGET', () => true).status).toBe('unresolved');
+      expect(projection.finishFrame()).toBe(false);
+      slow.mockRestore();
       projection.retry();
       projection.refresh();
-      expect(assemblies).toBe(2);
-      expect(projection.revision).toBe(1);
+      expect(projection.ready).toBe(true);
     } finally {
-      join.mockRestore();
       clock.mockRestore();
     }
   });
@@ -438,12 +751,12 @@ describe('projected actual visible regions', () => {
       maxOperations: 2000,
     });
     projection.refresh();
-    expect(projection.revision).toBe(0);
+    expect(projection.revision).toBe(1);
     expect(projection.checkpoint()).toMatch(
-      /^fingerprint incomplete: work budget exhausted/,
+      /^fingerprint unsupported within structural limits: work budget exhausted/,
     );
     projection.refresh();
-    expect(projection.stats.operations).toBe(0);
+    expect(projection.stats.operations).toBeGreaterThan(2000);
   });
   it.each([false, true])(
     'keeps shared seams closed with reversed winding and duplicated source vertices=%s',
