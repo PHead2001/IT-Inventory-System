@@ -120,6 +120,10 @@ cleared under an already acknowledged cookie generation. A matching generation
 cannot revive a previously hydrated label queue after cleanup. Unchanged checks
 and non-authoritative invalidation do not advance this revision, and the password
 action-state owner remains outside these private workspace reset bindings.
+Label hydration and persistence also compare their mounted revision with the live
+authoritative cleanup revision immediately before storage access. This prevents
+an old queued effect or late refresh from restoring cleared entries while React
+has yet to commit the workspace reset.
 Each tab keeps a verified generation in a separate sessionStorage key outside the
 cleanup namespaces. A new valid generation invalidates callbacks, verifies all
 cleanup, compares the exact expected generation with the current server cookie,

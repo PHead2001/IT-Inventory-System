@@ -13,6 +13,7 @@ import {
   PrivateRestorationGate,
   usePrivacyReadiness,
 } from '@/components/auth/privacy-readiness';
+import { readAuthoritativeCleanupRevision } from '@/features/scan/assign-batch';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
@@ -181,6 +182,7 @@ function LabelDesignerWorkspace({
   defaults = defaultJob,
 }: LabelDesignerProps) {
   const privacy = usePrivacyReadiness();
+  const cleanupRevision = useRef(readAuthoritativeCleanupRevision());
   const restoredStorageKey = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -284,7 +286,11 @@ function LabelDesignerWorkspace({
     // Hydration is asynchronous so React does not render a second, synchronous
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
-      if (!current) return;
+      if (
+        !current ||
+        cleanupRevision.current !== readAuthoritativeCleanupRevision()
+      )
+        return;
       restoredStorageKey.current = storageKey;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
@@ -318,7 +324,14 @@ function LabelDesignerWorkspace({
     };
   }, [storageKey, setEntries, privacy.ready]);
   useEffect(() => {
-    if (!hydrated || !privacy.ready) return;
+    // An old passive effect can run before the boundary's reset commits. Fence
+    // its writes against the live wipe revision, not only captured readiness.
+    if (
+      !hydrated ||
+      !privacy.ready ||
+      cleanupRevision.current !== readAuthoritativeCleanupRevision()
+    )
+      return;
     try {
       sessionStorage.setItem(
         storageKey,

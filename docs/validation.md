@@ -112,6 +112,9 @@ test delivers successful first-attempt SIGNED_OUT through the mounted Auth obser
 then rechecks the matching generation after its cleanup marker is gone. Shared
 cleanup revision tests distinguish successful authoritative wipes from ordinary checks
 and failed removal attempts.
+The label persistence regression resolves a delayed old-instance refresh after
+verified cleanup but before the readiness reset commits; the cleared queue key
+must remain absent until the new empty workspace persists its own state.
 
 Audit 4.2 P02 scan-batch regressions cover bounded UTF-8/schema/CAS storage, compact immutable operation snapshots, request/event deduplication, exact uncertain replay, legacy recovery and terminal cleanup reconciliation, restored historical reviews and nonmutating current availability reads, inactive destinations and evacuation-source preferences, safe Finish/End, capacity and privacy generation invalidation. Component checks include immediate inspection status/busy state, deliberate Cancel focus, chooser/review/error focus, deferred responses after ticket/source/destination/account changes, terminal storage failures and logout success/error/transport paths away from Scan. Auth tests preserve the caller-scoped local signout contract and sanitized acknowledgements. These tests do not replace actual browser/database proof.
 

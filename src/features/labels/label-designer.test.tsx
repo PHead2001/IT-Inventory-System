@@ -97,6 +97,10 @@ import { LabelDesigner } from './label-designer';
 import { AuthPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { logoutAcknowledgementKey } from '@/lib/auth/privacy-barrier';
 import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
+import {
+  invalidateAssignmentPrivacy,
+  readAuthoritativeCleanupRevision,
+} from '@/features/scan/assign-batch';
 
 const quantityId = '7b84a7cf-197b-45b1-8016-87482d124cb4';
 const assetId = 'd6a2c785-1489-4dd0-83ea-d8dc2f249711';
@@ -1503,15 +1507,17 @@ it('shows field-aware label-search answers including intentional UUID text witho
   expect(mocks.getQueueRecords).toHaveBeenLastCalledWith([
     { kind: 'quantity', key: quantityId },
   ]);
-  const stored = JSON.parse(
-    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-  );
-  expect(
-    stored.entries.map((entry: { kind: string; key: string }) => ({
-      kind: entry.kind,
-      key: entry.key,
-    })),
-  ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  await waitFor(() => {
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    );
+    expect(
+      stored.entries.map((entry: { kind: string; key: string }) => ({
+        kind: entry.kind,
+        key: entry.key,
+      })),
+    ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  });
   expect(
     screen.getByRole('region', { name: 'Label queue' }),
   ).not.toHaveTextContent('Braided cable');
@@ -2511,3 +2517,65 @@ it.each(['retry', 'first attempt'] as const)(
     expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBeNull();
   },
 );
+it('rejects persistence from a late old-instance refresh after cleanup before the readiness reset commits', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  const revision = readAuthoritativeCleanupRevision();
+  const key = queueStorageKey(props.origin, props.memberId);
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      entries: [
+        {
+          kind: asset.kind,
+          key: asset.key,
+          copies: 4,
+          baselineTag: asset.tag,
+          baselineState: asset.state,
+          lifecycleAcknowledged: true,
+        },
+      ],
+      filters: defaultFilters,
+      job: defaultJob,
+    }),
+  );
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise<LiveLabel[]>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(
+    <PrivacyReadinessContext
+      value={{ ready: true, generation: 'same', cleanupRevision: revision }}
+    >
+      <LabelDesigner {...props} initial={[]} />
+    </PrivacyReadinessContext>,
+  );
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledOnce());
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '1 distinct record · 4 labels',
+  );
+  // Model a queued refresh resolving before React commits the provider's reset.
+  act(() => {
+    expect(invalidateAssignmentPrivacy(true)).toBe(true);
+  });
+  expect(sessionStorage.getItem(key)).toBeNull();
+  await act(async () => finish([{ ...asset, tag: 'changed-after-request' }]));
+  expect(sessionStorage.getItem(key)).toBeNull();
+  view.rerender(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        generation: 'same',
+        cleanupRevision: readAuthoritativeCleanupRevision(),
+      }}
+    >
+      <LabelDesigner {...props} initial={[]} />
+    </PrivacyReadinessContext>,
+  );
+  await screen.findByText('0 distinct records · 0 labels');
+  await waitFor(() =>
+    expect(JSON.parse(sessionStorage.getItem(key)!).entries).toEqual([]),
+  );
+});
