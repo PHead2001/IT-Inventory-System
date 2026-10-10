@@ -15,10 +15,20 @@ $guest = [pscustomobject]@{ schema = 1; recipeId = 'B' * 64; scrubbed = $true; c
     images = @($inputs.images | ForEach-Object { $image = $_; [pscustomobject]@{ source = $image.source; reference = $image.candidates[0]; id = 'sha256:' + ('a' * 64); digests = @('sha256:' + ('b' * 64))
         aliases = @($(if ($image.PSObject.Properties.Name -contains 'aliases') { $image.aliases }) | ForEach-Object { [pscustomobject]@{ reference = $_; id = 'sha256:' + ('a' * 64) } }) } }) }
 $script:checks = 0
-function Check($Name, [scriptblock] $Work) { & $Work; $script:checks++; Write-Host "PASS $Name" }
+function Check($Name, [scriptblock] $Work) { & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
 function Refuse([scriptblock] $Work) { $rejected = $false; try { & $Work | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw 'Unsafe sealed supervision accepted.' } }
-function Enter-RunnerLock { if ($script:locked) { throw 'Nested fixture mutex.' }; $script:locked = $true; return 'fixture' }
-function Exit-RunnerLock { $script:locked = $false }
+# Windows state mutex recursion must retain locked=true until the outer release.
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:locked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:locked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:locked) { throw 'Nested state release exposed locked IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Get-RunnerState { return $script:state }
 function Write-RunnerJson($Path, $Value) { if ($Path -ceq $script:RunnerStatePath) { $script:state = $Value } }
 function Get-RunnerRecoveryNow { $script:now }
@@ -35,6 +45,7 @@ function Remove-RunnerInstance($State) { $script:cleanups++; $script:state = $nu
 function Invoke-RunnerSupervisorRecovery {}
 function Start-Sleep { throw 'Sealed liveness must not wait for normal network recovery.' }
 function New-Fixture {
+    if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
     $script:now = [DateTime]::UtcNow; $script:deadPids = @(); $script:locked = $false; $script:inventoryFailed = $false
     $script:vms = @(); $script:vmQueries = 0; $script:observations = 0; $script:cleanups = 0; $script:RunnerRecoveryProbe = $null; $script:RunnerGuardOutcome = $null
     $script:state = [pscustomobject]@{ tag = $script:RunnerTag; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'

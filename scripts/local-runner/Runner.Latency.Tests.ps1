@@ -172,12 +172,21 @@ try {
     # Archive publication assertions above keep their dedicated lock contract.
     # Supervisor reconciliation uses an isolated state lock, never the installed mutex.
     $script:loopStateLocked = $false
+    $script:loopStateDepth = 0
     function Enter-RunnerLock {
-        if ($script:loopStateLocked) { throw 'Supervisor fixture state lock was reentered.' }
+        $script:loopStateDepth++
         $script:loopStateLocked = $true
         return 'latency-state-fixture'
     }
-    function Exit-RunnerLock { $script:loopStateLocked = $false }
+    function Exit-RunnerLock {
+        if ($script:loopStateDepth -le 0) { throw 'Unbalanced latency state release.' }
+        $script:loopStateDepth--; $script:loopStateLocked = $script:loopStateDepth -gt 0
+    }
+    $fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+    Exit-RunnerLock $fixtureInner
+    if (-not $script:loopStateLocked) { throw 'Nested state release exposed memory IO.' }
+    Exit-RunnerLock $fixtureOuter
+    if ($script:loopStateLocked -or $script:loopStateDepth -ne 0) { throw 'Latency state fixture did not balance.' }
     function Assert-RunnerTransitionClear {}
     function Get-RunnerConfig { return [pscustomobject]@{ activation = 'active'; label = 'it-inventory-ephemeral' } }
     function Get-RunnerState { return $null }
@@ -209,6 +218,7 @@ try {
     foreach ($script:loopCase in @('completed', 'idle', 'withdrawn', 'error')) {
         $script:loopSleeps = 0; $script:sessions = 0; $script:queueCalls = 0
         Invoke-SupervisorLoop
+        if ($script:loopStateDepth -ne 0 -or $script:loopStateLocked) { throw 'Supervisor loop leaked state recursion.' }
         $expectedSleeps = if ($script:loopCase -eq 'completed') { 0 } else { 1 }
         if ($script:loopSleeps -ne $expectedSleeps -or ($script:loopCase -eq 'completed' -and ($script:sessions -ne 2 -or $script:queueCalls -ne 2))) { throw 'Supervisor skipped required backoff or waited between completed jobs.' }
         Remove-Item -LiteralPath (Join-Path $base 'stop.requested')

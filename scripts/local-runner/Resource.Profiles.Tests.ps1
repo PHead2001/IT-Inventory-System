@@ -13,8 +13,17 @@ function Assert-Rejected([scriptblock] $Work, [string] $Case) {
 $script:freeKiB = 0
 # Actual supervisor reconciliation uses only this synthetic offline state lock.
 $script:stateLocked = $false
-function Enter-RunnerLock { if ($script:stateLocked) { throw 'Nested fixture state mutex.' }; $script:stateLocked = $true; return 'fixture' }
-function Exit-RunnerLock { $script:stateLocked = $false }
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:stateLocked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:stateLocked) { throw 'Nested state release exposed memory IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:stateLocked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Assert-ProfileMemoryUnlocked { if ($script:stateLocked) { throw 'Profile memory inspection held the reconciliation state mutex.' } }
 function Get-CimInstance { Assert-ProfileMemoryUnlocked; return [pscustomobject]@{ FreePhysicalMemory = $script:freeKiB; TotalVisibleMemorySize = [uint64](32GB / 1KB) } }
 function New-VM {
@@ -154,4 +163,5 @@ $preview = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-ac
 foreach ($contract in @('github.event.pull_request.head.sha || github.sha', 'run: npm run validate:app', 'run: npm run test:db', 'run: npm run db:types:check', 'run: npm run test:e2e', 'run: node scripts/ci-gates.mjs', 'FOUNDATION_APP: ${{ steps.app.outcome }}', 'FOUNDATION_DB_TESTS: ${{ steps.db_tests.outcome }}', 'FOUNDATION_E2E: ${{ steps.e2e.outcome }}', 'environment: production-database', "github.ref == 'refs/heads/main'", 'needs: [required]', 'test "$REQUIRED_RESULT" = success')) { if (-not $ci.Contains($contract)) { throw 'CI exact-SHA/required/production gate changed.' } }
 foreach ($contract in @('pull_request_target:', 'ref: refs/heads/main', 'environment: preview-access', "github.ref == 'refs/heads/main'")) { if (-not $preview.Contains($contract)) { throw 'Trusted preview gate changed.' } }
 foreach ($contract in @('run: node scripts/ci-required.mjs', 'run: node scripts/ci-reuse.mjs --reverify', "if: needs.reuse_evidence.outputs.reuse != 'true'", "if: needs.reuse_evidence.outputs.reuse == 'true'", 'EVIDENCE_RESULT: ${{ needs.reuse_evidence.result }}', "if: `${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}")) { if (-not $ci.Contains($contract)) { throw 'CI reuse evidence/fallback/decision gate changed.' } }
+if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
 Write-Host 'Resource profiles passed: fixed boundaries, strict labels, queue skipping, VM/JIT readback, session propagation, capacity loss, legacy recovery and five validation/preview workflow gates.'

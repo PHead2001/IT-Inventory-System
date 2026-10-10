@@ -7,6 +7,12 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Test.Mutex.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-guardprocess-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
+$script:fixtureStateLock = 'Local\' + [IO.Path]::GetFileName($root)
+$script:realLock = (Get-Command Enter-RunnerLock).ScriptBlock
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+    if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $Name -cne $script:fixtureStateLock) { throw 'Guardian fixture requested an unrelated mutex.' }
+    & $script:realLock $script:fixtureStateLock -FailFast:$FailFast
+}
 $worker = $null; $blockedOwner = $null
 try {
     $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
@@ -26,8 +32,12 @@ Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'
 . (Join-Path $Source 'Network.Recovery.ps1')
 . (Join-Path $Source 'Test.Mutex.ps1')
 $script:RunnerRoot = $Root; $script:RunnerStatePath = Join-Path $Root 'state.json'
+$script:fixtureStateLock = 'Local\' + [IO.Path]::GetFileName($Root)
 $script:realLock = (Get-Command Enter-RunnerLock).ScriptBlock
-function Enter-RunnerLock { & $script:realLock ('Local\' + [IO.Path]::GetFileName($Root)) }
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+    if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $Name -cne $script:fixtureStateLock) { throw 'Guardian child requested an unrelated mutex.' }
+    & $script:realLock $script:fixtureStateLock -FailFast:$FailFast
+}
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $Source 'Runner.ps1'), [ref]$null, [ref]$null)
 $definition = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Invoke-GuardCheck' }, $true)
 Invoke-Expression $definition.Extent.Text
@@ -79,8 +89,6 @@ if (-not (Invoke-GuardCheck $name)) { throw 'Fixture guardian removed instead of
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
     $watchdog = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Invoke-Watchdog' }, $true)
     Invoke-Expression $watchdog.Extent.Text
-    $script:realLock = (Get-Command Enter-RunnerLock).ScriptBlock
-    function Enter-RunnerLock { & $script:realLock ('Local\' + [IO.Path]::GetFileName($root)) }
     function Assert-Administrator {}
     function Assert-SecureRoot {}
     function Invoke-RunnerSupervisorRecovery {}

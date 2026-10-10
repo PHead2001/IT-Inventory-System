@@ -12,8 +12,17 @@ $script:messages = [Collections.Generic.List[string]]::new()
 $script:sleeps = 0; $script:sessions = 0; $script:blocked = $null
 # Reconciliation must not acquire the installed runner's Global state mutex.
 $script:stateLocked = $false
-function Enter-RunnerLock { if ($script:stateLocked) { throw 'Nested fixture state mutex.' }; $script:stateLocked = $true; return 'fixture' }
-function Exit-RunnerLock { $script:stateLocked = $false }
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:stateLocked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:stateLocked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:stateLocked) { throw 'Nested state release exposed memory IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:stateLocked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 $config = [pscustomobject]@{activation='active';label='it-inventory-ephemeral';repo='example/fixture';memoryBytes=99GB;hostReserveBytes=0}
 function Assert-RunnerTransitionClear {}
 function Get-RunnerConfig { return $config }
@@ -76,6 +85,7 @@ try {
     if ($script:memoryReads -ne 1 -or -not ($script:messages -join "`n").Contains('startup memory 6.00 GiB; dynamic memory False; expected fixed guest 6 GiB')) { throw 'Verified active VM status lost actual candidate memory readback.' }
     $vm.Notes='unowned'; $script:messages.Clear(); Show-RunnerSessionResources $session $vm
     if ($script:memoryReads -ne 1 -or -not ($script:messages -join "`n").Contains('ownership is unverified')) { throw 'Status read memory from an unverified VM.' }
+if ($script:fixtureStateDepth -ne 0 -or $script:stateLocked) { throw 'Fixture leaked state recursion.' }
     Microsoft.PowerShell.Utility\Write-Host 'Capacity observation passed: heavy waiting/resume at 7 GiB, no config overrides, bounded poll counts/timestamps, complete per-profile status and malformed observation fallback.'
 } finally {
     if ([IO.Path]::GetDirectoryName($base).TrimEnd('\') -cne ([IO.Path]::GetTempPath()).TrimEnd('\') -or [IO.Path]::GetFileName($base) -notmatch '^ITIR-observation-[0-9a-f]{32}$') { throw 'Unexpected observation fixture cleanup path.' }

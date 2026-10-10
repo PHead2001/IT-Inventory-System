@@ -107,6 +107,13 @@ function Copy-Item($LiteralPath, $Destination) {
             . (Join-Path $source 'Common.ps1')
             . (Join-Path $source 'Test.Mutex.ps1')
             $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
+            # Nested production state reads must reacquire this same private lock.
+            $script:fixtureStateLock = $lockName
+            $script:fixtureEnter = (Get-Command Enter-RunnerLock).ScriptBlock
+            function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+                if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $Name -cne $script:fixtureStateLock) { throw 'Fixture child requested an unrelated mutex.' }
+                & $script:fixtureEnter $script:fixtureStateLock -FailFast:$FailFast
+            }
             $mutex = Enter-RunnerLock $lockName -FailFast
             try {
                 $state = Get-RunnerState

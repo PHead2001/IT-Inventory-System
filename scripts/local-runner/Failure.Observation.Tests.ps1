@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-        if ($definition.Name -cin @('New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
+        if ($definition.Name -cin @('New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
             'Test-RunnerSessionStopRequested', 'Assert-SessionAlive', 'Get-RunnerRecoveryExpiry', 'Invoke-Watchdog')) {
             Invoke-Expression $definition.Extent.Text
         }
@@ -212,5 +212,123 @@ Check 'new exact instance rotates evidence and malformed existing evidence is re
     Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $script:state $script:now
     Require ($script:writes -eq $writes -and $script:warnings[-1] -ceq 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE')
     Require ($script:journal.unknown -ceq 'SECRET')
+}
+Check 'actual state reader serializes publication and releases on absence and read failure' {
+    & {
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Common.ps1'), [ref]$null, [ref]$null)
+        Invoke-Expression ($ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Get-RunnerState' }, $false).Extent.Text)
+        $script:depth = 0; $script:readThrows = $false; $script:readAbsent = $false
+        function Enter-RunnerLock { $script:depth++; return 'fixture' }
+        function Exit-RunnerLock { $script:depth-- }
+        function Read-RunnerJson {
+            Require ($script:depth -gt 0)
+            if ($script:readThrows) { throw 'read sentinel' }
+            if ($script:readAbsent) { return $null }
+            return [pscustomobject]@{ value = 7 }
+        }
+        Require ((Get-RunnerState).value -eq 7 -and $script:depth -eq 0)
+        $script:depth = 1
+        Require ((Get-RunnerState).value -eq 7 -and $script:depth -eq 1)
+        $script:depth = 0; $script:readAbsent = $true
+        Require ($null -eq (Get-RunnerState) -and $script:depth -eq 0)
+        $script:readThrows = $true
+        $failure = Get-Failure { Get-RunnerState }
+        Require ($failure.Exception.Message -ceq 'read sentinel' -and $script:depth -eq 0)
+    }
+}
+Check 'Stop inspection holds one lock across markers protected state and exact claim decisions' {
+    & {
+        Reset-Fixture
+        $script:depth = 0; $script:rootStop = $true
+        function Enter-RunnerLock { $script:depth++; return 'fixture' }
+        function Exit-RunnerLock { $script:depth-- }
+        function Test-Path([string] $LiteralPath) {
+            Require ($script:depth -gt 0)
+            return $LiteralPath -ceq (Join-Path $script:RunnerRoot 'stop.requested')
+        }
+        function Assert-RunnerProtectedPath { Require ($script:depth -gt 0) }
+        function Get-RunnerState { Require ($script:depth -gt 0); return $script:state }
+        $reason = ''
+        Require (-not (Test-RunnerSessionStopRequested $script:state ([ref]$reason)))
+        Require ($reason -ceq 'none' -and $script:depth -eq 0)
+        function Assert-StateIdentity { Require ($script:depth -gt 0); throw 'identity sentinel' }
+        $failure = Get-Failure { Test-RunnerSessionStopRequested $script:state }
+        Require ($failure.Exception.Message -ceq 'identity sentinel' -and $script:depth -eq 0)
+    }
+}
+Check 'session deadline is resampled after Stop lock wait on both liveness passes' {
+    foreach ($waitAt in @(1, 2)) {
+        & {
+            Reset-Fixture
+            $script:lockEntries = 0
+            function Enter-RunnerLock {
+                $script:lockEntries++
+                if ($script:lockEntries -eq $waitAt) { $script:now = $script:now.AddHours(2) }
+                return 'fixture'
+            }
+            $failure = Get-Failure { Assert-SessionAlive $script:state }
+            Require ($failure.Exception.Data['runnerFailureObservation'].reason -ceq 'deadline')
+            Require ($script:identityCalls -eq 0 -and $script:lockEntries -ge $waitAt)
+        }
+    }
+}
+Check 'actual owner catch and finally persist initiating observation before cleanup without replacing the exception' {
+    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Runner.ps1'), [ref]$null, [ref]$null)
+    $session = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Invoke-RunnerSession' }, $false)
+    $handler = $session.Find({ param($node) $node -is [Management.Automation.Language.TryStatementAst] -and $null -ne $node.Finally -and $node.Finally.Extent.Text.Contains('$verificationFailure = $null') }, $true)
+    Require ($null -ne $handler -and $handler.CatchClauses.Count -eq 1)
+    foreach ($mode in @('failure', 'io-failure', 'healthy')) {
+        Reset-Fixture
+        $verificationReady = $false; $sessionFailure = $null; $name = $script:state.vmName
+        $record = New-RunnerFailureObservation 'session-current' 'stop' $script:state $script:now 'state-absent' '' @{ deadlineReached = $false }
+        $original = New-RunnerObservedFailure 'session sentinel' $record
+        $body = if ($mode -ceq 'healthy') { '{}' } else { '{ throw $original }' }
+        $script:writeFails = $mode -ceq 'io-failure'
+        $work = [scriptblock]::Create('try ' + $body + ' catch ' + $handler.CatchClauses[0].Body.Extent.Text + ' finally ' + $handler.Finally.Extent.Text)
+        if ($mode -ceq 'healthy') { & $work; Require ($script:writes -eq 0) }
+        else {
+            $failure = Get-Failure $work
+            Require ([Object]::ReferenceEquals($failure.Exception, $original))
+            if ($mode -ceq 'failure') {
+                Require ($script:journal.first.origin -ceq 'session-current' -and $script:journal.first.stopReason -ceq 'state-absent')
+                Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq ($record | ConvertTo-Json -Depth 4 -Compress))
+                Require ([array]::IndexOf($script:events, 'capture') -lt [array]::IndexOf($script:events, 'cleanup'))
+            } else { Require ($script:warnings.Count -eq 1) }
+        }
+        Require ($script:removed -and $script:events[-1] -ceq 'unlock')
+    }
+}
+Check 'liveness evaluates current recovery progress and Stop under the same publication lock' {
+    & {
+        Reset-Fixture
+        $script:depth = 0; $script:entries = 0
+        $script:state.phase = 'owned'
+        $script:state.networkRecovery.progressUtc = $script:now.AddSeconds(-15).ToString('o')
+        function Enter-RunnerLock {
+            $script:entries++
+            if ($script:depth -eq 0 -and $script:entries -gt 1) {
+                $script:now = $script:now.AddSeconds(20)
+                $script:state.networkRecovery.progressUtc = $script:now.ToString('o')
+            }
+            $script:depth++; return 'fixture'
+        }
+        function Exit-RunnerLock { $script:depth-- }
+        function Get-RunnerState { Require ($script:depth -gt 0); return $script:state | ConvertTo-Json -Depth 4 | ConvertFrom-Json }
+        function Test-RunnerProcessIdentity { Require ($script:depth -gt 0); return $true }
+        Assert-SessionAlive $script:state
+        Require ($script:depth -eq 0 -and $script:writes -eq 0)
+    }
+}
+Check 'sealed liveness releases publication lock before storage and VM provider inspection' {
+    & {
+        Reset-Fixture
+        $script:depth = 0; $script:sealedCalls = 0
+        function Enter-RunnerLock { $script:depth++; return 'fixture' }
+        function Exit-RunnerLock { $script:depth-- }
+        function Get-RunnerState { Require ($script:depth -gt 0); return $script:state }
+        function Assert-RunnerSealedPreparation { Require ($script:depth -eq 0); $script:sealedCalls++ }
+        Assert-SessionAlive $script:state
+        Require ($script:depth -eq 0 -and $script:sealedCalls -eq 1)
+    }
 }
 Write-Host "Failure observation passed: $script:checks pure guard/capture regressions. No host providers or files touched."

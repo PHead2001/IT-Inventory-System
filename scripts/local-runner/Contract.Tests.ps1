@@ -2,6 +2,45 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Reject nonportable package bytes before any expensive native checks.
+$bundleAuthor = Join-Path $PSScriptRoot 'Write-Bundle.ps1'
+$authorAst = [Management.Automation.Language.Parser]::ParseFile($bundleAuthor, [ref]$null, [ref]$null)
+$lfGuard = $authorAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Assert-RunnerBundleDependencyLf' }, $false)
+if ($null -eq $lfGuard) { throw 'Source bundle LF guard is missing.' }
+Invoke-Expression $lfGuard.Extent.Text
+$sourceManifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Bundle.json') -Raw | ConvertFrom-Json
+foreach ($entry in $sourceManifest.files) { Assert-RunnerBundleDependencyLf -Path (Join-Path $PSScriptRoot $entry.name) }
+
+# Exercise the real authoring script in TEMP: refuse both existing CRLF and CRLF
+# introduced by snapshot generation, without hashing or publishing either.
+$lfRoot = Join-Path $env:TEMP ('ITIR-bundle-lf-' + [Guid]::NewGuid().ToString('N'))
+try {
+    $lfSource = Join-Path $lfRoot 'scripts/local-runner'
+    [void](New-Item -ItemType Directory -Path $lfSource -Force)
+    Copy-Item -LiteralPath $bundleAuthor -Destination (Join-Path $lfSource 'Write-Bundle.ps1')
+    foreach ($entry in $sourceManifest.files) { [IO.File]::WriteAllText((Join-Path $lfSource $entry.name), "fixture`n", [Text.UTF8Encoding]::new($false)) }
+    $lfFixture = Join-Path $lfSource 'Common.ps1'
+    Assert-RunnerBundleDependencyLf -Path $lfFixture
+    foreach ($duringGeneration in @($false, $true)) {
+        [IO.File]::WriteAllText($lfFixture, $(if ($duringGeneration) { "fixture`n" } else { "fixture`r`n" }), [Text.UTF8Encoding]::new($false))
+        $probe = @{ nodeCalled = $false; refused = $false }
+        & {
+            function node {
+                $probe.nodeCalled = $true
+                [IO.File]::WriteAllText($lfFixture, "fixture`r`n", [Text.UTF8Encoding]::new($false))
+                $global:LASTEXITCODE = 0
+            }
+            try { & (Join-Path $lfSource 'Write-Bundle.ps1') -Version '2026-10-09.7' }
+            catch {
+                if ($_.Exception.Message -notlike '*contains a carriage return*') { throw }
+                $probe.refused = $true
+            }
+        }
+        if (-not $probe.refused -or $probe.nodeCalled -ne $duringGeneration -or (Test-Path -LiteralPath (Join-Path $lfSource 'Bundle.json'))) { throw 'Bundle LF publication fence failed.' }
+    }
+    Write-Host 'Bundle LF portability checks passed.'
+} finally { if (Test-Path -LiteralPath $lfRoot) { Remove-Item -LiteralPath $lfRoot -Recurse -Force } }
+
 foreach ($file in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1')) {
     $tokens = $null
     $errors = $null

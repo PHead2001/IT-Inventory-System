@@ -14,10 +14,20 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-integration-' + [guid]::NewG
 [void][IO.Directory]::CreateDirectory($root)
 $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
 $script:checks = 0; $script:locked = $false
-function Check([string] $Name, [scriptblock] $Work) { & $Work; $script:checks++; Write-Host "PASS $Name" }
+function Check([string] $Name, [scriptblock] $Work) { & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
 function Refuse([scriptblock] $Work) { $failed = $false; try { & $Work | Out-Null } catch { $failed = $true }; if (-not $failed) { throw 'Unsafe integration accepted.' } }
-function Enter-RunnerLock { if ($script:locked) { throw 'Nested recovery mutex.' }; $script:locked = $true; return 'fixture' }
-function Exit-RunnerLock { $script:locked = $false }
+# Windows state mutex recursion must retain locked=true until the outer release.
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:locked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:locked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:locked) { throw 'Nested state release exposed locked IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Get-RunnerState { $script:state }
 function Write-RunnerJson($Path, $Value) {
     if ($Path -ceq (Join-Path $script:RunnerRoot 'last-error.json')) { $script:failure = $Value }
@@ -34,6 +44,7 @@ function Start-Sleep {
     if ($script:state.networkRecovery.phase -cne 'healthy') { $script:state.networkRecovery.phase = 'healthy'; $script:state.guardianReady = $true }
 }
 function New-Fixture {
+    if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
     $registrationPath = Join-Path $root 'jit-registration.json'
     if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false

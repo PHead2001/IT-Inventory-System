@@ -13,11 +13,29 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-jit-' + [guid]::NewGuid().To
 $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
 $config = [pscustomobject]@{ repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 }
 $script:checks = 0; $script:locked = $false
-function Check($Name, [scriptblock] $Work) { if ($ControllerRestartOnly -and $Name -cne 'native process exit after durable intent retains barrier through restart cleanup') { return }; & $Work; $script:checks++; Write-Host "PASS $Name" }
+function Check($Name, [scriptblock] $Work) { if ($ControllerRestartOnly -and $Name -cne 'native process exit after durable intent retains barrier through restart cleanup') { return }; & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'JIT case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
 function Refuse([scriptblock] $Work) { $rejected = $false; try { & $Work | Out-Null } catch { $rejected = $true }; if (-not $rejected) { throw 'Unsafe JIT registration accepted.' } }
 function Refuse-Barrier([scriptblock] $Work) { $message = ''; try { & $Work | Out-Null } catch { $message = $_.Exception.Message }; if ($message -cnotmatch '^Unresolved JIT registration blocks') { throw 'Expected durable registration admission refusal was not observed.' } }
-function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') { if ($Name -ceq 'Global\ITInventoryLocalRunner-Supervisor-v1') { return 'lifetime' }; if ($script:locked) { throw 'Nested fixture state mutex.' }; $script:locked = $true; return 'fixture' }
-function Exit-RunnerLock($Mutex) { if ($Mutex -ceq 'fixture') { $script:locked = $false } }
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1') {
+    if ($Name -ceq 'Global\ITInventoryLocalRunner-Supervisor-v1') {
+        if ($script:fixtureStateDepth -gt 0) { throw 'Lifetime acquisition inside state lock.' }
+        return 'lifetime'
+    }
+    $script:fixtureStateDepth++; $script:locked = $true; return 'fixture'
+}
+function Exit-RunnerLock($Mutex) {
+    if ($Mutex -ceq 'fixture') {
+        if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced JIT state release.' }
+        $script:fixtureStateDepth--; $script:locked = $script:fixtureStateDepth -gt 0
+    }
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:locked) { throw 'Nested state release exposed remote IO.' }
+Refuse { Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1' }
+Exit-RunnerLock $fixtureOuter
+if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'JIT state fixture did not balance.' }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
 function Assert-Administrator {}
 function Assert-SecureRoot {}
@@ -54,6 +72,7 @@ function Invoke-GitHub($Uri, $Method, $Body, $Token) {
     throw 'Unexpected API operation.'
 }
 function New-Fixture {
+    if ($script:fixtureStateDepth -ne 0) { throw 'Previous JIT fixture leaked state recursion.' }
     foreach ($name in @('jit-registration.json', 'state.json', 'stop.requested', 'pilot-attempt.json')) {
         $path = Join-Path $root $name
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path }

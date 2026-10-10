@@ -31,6 +31,13 @@ function Start-VM($VM, [switch] $AsJob) {
         . (Join-Path $source 'Common.ps1')
         . (Join-Path $source 'Test.Mutex.ps1')
         $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
+        # Nested production state reads must reacquire this same private lock.
+        $script:fixtureStateLock = $lockName
+        $script:fixtureEnter = (Get-Command Enter-RunnerLock).ScriptBlock
+        function Enter-RunnerLock([string] $Name = 'Global\ITInventoryLocalRunner-v1', [switch] $FailFast) {
+            if ($Name -cne 'Global\ITInventoryLocalRunner-v1' -and $Name -cne $script:fixtureStateLock) { throw 'Fixture child requested an unrelated mutex.' }
+            & $script:fixtureEnter $script:fixtureStateLock -FailFast:$FailFast
+        }
         function Get-RunnerVmInventory { $entry = Read-RunnerJson (Join-Path $root 'vm.json'); if ($null -ne $entry) { $entry } }
         function Get-VMHardDiskDrive($VM) { return [pscustomobject]@{ Path = Join-Path (Get-RunnerState).instancePath 'guest.vhdx' } }
         function Remove-VM($VM, [switch] $Force) { if ($scenario -ceq 'cleanup-race') { Remove-Item -LiteralPath (Join-Path $root 'vm.json') } }

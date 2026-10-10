@@ -136,11 +136,17 @@ function Assert-RunnerCleanupJournal($Journal) {
 }
 
 function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $State, [DateTime] $NowUtc,
-    [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}, $Failure = $null) {
+    [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}, $Failure = $null, $CapturedRecord = $null) {
     # Callers hold the existing state mutex. Preserve the first decision for the
     # exact instance; later cleanup failures/retries replace only latest.
     try {
         $record = New-RunnerFailureObservation $Origin $Reason $State $NowUtc $StopReason $Expiry $Checks
+        if ($null -ne $CapturedRecord) {
+            $captured = ConvertTo-Json -InputObject $CapturedRecord -Depth 4 -Compress | ConvertFrom-Json
+            Assert-RunnerFailureRecord $captured
+            $record = [ordered]@{}
+            foreach ($property in $captured.PSObject.Properties) { $record[$property.Name] = $property.Value }
+        }
         $record.atUtc = $NowUtc.ToUniversalTime().ToString('o')
         if ($null -ne $Failure -and $record.capture -ceq 'complete') {
             $source = [IO.Path]::GetFileName($Failure.InvocationInfo.ScriptName)
@@ -168,6 +174,21 @@ function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $Sta
         Assert-RunnerCleanupJournal $validated
         Write-RunnerJson $path $journal
         Assert-RunnerProtectedPath $path
+    } catch {
+        try { Write-Warning 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    }
+}
+
+function Write-RunnerSessionFailureObservation($State, $Failure) {
+    # Only an observed failure from this invocation is eligible; healthy cleanup
+    # never creates evidence. Capture errors must not mask the initiating error.
+    try {
+        if ($null -eq $Failure) { return }
+        $record = $Failure.Exception.Data['runnerFailureObservation']
+        if ($null -eq $record) { return }
+        $captured = ConvertTo-Json -InputObject $record -Depth 4 -Compress | ConvertFrom-Json
+        Assert-RunnerFailureRecord $captured
+        Write-RunnerCleanupObservation '' '' $State ([DateTime]::Parse($captured.atUtc)) -CapturedRecord $captured
     } catch {
         try { Write-Warning 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
     }
@@ -691,34 +712,43 @@ function Assert-SecureRoot {
     }
 }
 
-function Get-RunnerState { return Read-RunnerJson $script:RunnerStatePath }
+function Get-RunnerState {
+    # File.Replace publication can be transiently absent to Windows providers.
+    # Share the writers' reentrant mutex for the entire existence/read sequence.
+    $mutex = Enter-RunnerLock
+    try { return Read-RunnerJson $script:RunnerStatePath }
+    finally { Exit-RunnerLock $mutex }
+}
 
 function Test-RunnerSessionStopRequested($State, $Observation = $null) {
     # An instance marker always cancels. The root marker also suspends pickup
     # during explicit owner image preparation; never infer that exemption from
     # a stale caller snapshot or a process-local preparation flag.
-    if ($null -ne $Observation) { $Observation.Value = 'unavailable' }
-    if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) {
-        if ($null -ne $Observation) { $Observation.Value = 'instance-marker' }; return $true
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
-        if ($null -ne $Observation) { $Observation.Value = 'none' }; return $false
-    }
-    Assert-RunnerProtectedPath $script:RunnerStatePath
-    $current = Get-RunnerState
-    if ($null -eq $current) { if ($null -ne $Observation) { $Observation.Value = 'state-absent' }; return $true }
-    Assert-StateIdentity $current
-    if ($current.vmName -cne $State.vmName -or $current.instancePath -ine $State.instancePath -or
-        ($State.PSObject.Properties.Name -contains 'vmId' -and
-            ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) {
-        if ($null -ne $Observation) { $Observation.Value = 'claim-mismatch' }; return $true
-    }
-    if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) {
-        if ($null -ne $Observation) { $Observation.Value = 'purpose-ineligible' }; return $true
-    }
-    $requested = Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested')
-    if ($null -ne $Observation) { $Observation.Value = if ($requested) { 'instance-marker' } else { 'none' } }
-    return $requested
+    $mutex = Enter-RunnerLock
+    try {
+        if ($null -ne $Observation) { $Observation.Value = 'unavailable' }
+        if (Test-Path -LiteralPath (Join-Path $State.instancePath 'stop.requested')) {
+            if ($null -ne $Observation) { $Observation.Value = 'instance-marker' }; return $true
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) {
+            if ($null -ne $Observation) { $Observation.Value = 'none' }; return $false
+        }
+        Assert-RunnerProtectedPath $script:RunnerStatePath
+        $current = Get-RunnerState
+        if ($null -eq $current) { if ($null -ne $Observation) { $Observation.Value = 'state-absent' }; return $true }
+        Assert-StateIdentity $current
+        if ($current.vmName -cne $State.vmName -or $current.instancePath -ine $State.instancePath -or
+            ($State.PSObject.Properties.Name -contains 'vmId' -and
+                ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) {
+            if ($null -ne $Observation) { $Observation.Value = 'claim-mismatch' }; return $true
+        }
+        if ($current.PSObject.Properties.Name -notcontains 'purpose' -or $current.purpose -cnotin @('prepare', 'verify-image')) {
+            if ($null -ne $Observation) { $Observation.Value = 'purpose-ineligible' }; return $true
+        }
+        $requested = Test-Path -LiteralPath (Join-Path $current.instancePath 'stop.requested')
+        if ($null -ne $Observation) { $Observation.Value = if ($requested) { 'instance-marker' } else { 'none' } }
+        return $requested
+    } finally { Exit-RunnerLock $mutex }
 }
 
 function Get-RunnerBytesHash([byte[]] $Bytes) {

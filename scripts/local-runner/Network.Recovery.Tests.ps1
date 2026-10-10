@@ -16,7 +16,7 @@ function Assert-Refused([scriptblock] $Work, [string] $Message) {
     $refused = $false; try { & $Work | Out-Null } catch { $refused = $true }
     if (-not $refused) { throw $Message }
 }
-function Check([string] $Name, [scriptblock] $Work) { & $Work; $script:count++; Write-Host "PASS $Name" }
+function Check([string] $Name, [scriptblock] $Work) { & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Recovery case leaked state recursion.' }; $script:count++; Write-Host "PASS $Name" }
 function New-Capture([string] $Ip = '192.168.4.12', [string] $Route = '192.168.4.0/24') {
     [pscustomobject]@{
         addresses = @([pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = $Ip; PrefixLength = 24; InterfaceIndex = 3 })
@@ -29,8 +29,18 @@ function Get-NetRoute { return $script:captures[[Math]::Min($script:readIndex, $
 function Get-RunnerState { return $script:state }
 function Write-RunnerJson($Path, $Value) { $script:state = $Value }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) } # TEMP fixture; no installed ACL claim.
-function Enter-RunnerLock { if ($script:locked) { throw 'Nested state mutex.' }; $script:locked = $true; return 'fixture' }
-function Exit-RunnerLock($Mutex) { $script:locked = $false }
+# Windows state mutex recursion must retain locked=true until the outer release.
+$script:fixtureStateDepth = 0
+function Enter-RunnerLock { $script:fixtureStateDepth++; $script:locked = $true; return 'fixture' }
+function Exit-RunnerLock {
+    if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
+    $script:fixtureStateDepth--; $script:locked = $script:fixtureStateDepth -gt 0
+}
+$fixtureOuter = Enter-RunnerLock; $fixtureInner = Enter-RunnerLock
+Exit-RunnerLock $fixtureInner
+if (-not $script:locked) { throw 'Nested state release exposed locked IO.' }
+Exit-RunnerLock $fixtureOuter
+if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Test-RunnerProcessIdentity { return $script:alive }
 function Get-RunnerRecoveryNow { return $script:clock }
 function Get-VM { return $script:vm }
@@ -96,6 +106,7 @@ function New-RunnerProbeProcess($Executable, $Arguments) {
 $script:realObservation = (Get-Command Get-RunnerNetworkObservation).ScriptBlock
 function Get-RunnerNetworkObservation { if ($script:locked) { throw 'Network observation held the state mutex.' }; return & $script:realObservation }
 function New-Fixture {
+    if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
     $script:now = [DateTime]::UtcNow
     $script:clock = $script:now; $script:RunnerRecoveryProbe = $null
     $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()

@@ -194,41 +194,56 @@ function Assert-SessionAlive($State) {
         $now = Get-RunnerRecoveryNow
         $deadlineReached = $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
         $stopReason = 'unavailable'
-        if ($deadlineReached -or (Test-RunnerSessionStopRequested $State ([ref]$stopReason))) {
+        $stopRequested = -not $deadlineReached -and (Test-RunnerSessionStopRequested $State ([ref]$stopReason))
+        # Stop inspection can wait for a publisher; never reuse the pre-wait clock.
+        $now = Get-RunnerRecoveryNow
+        $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()
+        if ($deadlineReached -or $stopRequested) {
             $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
             throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-initial' $reason $State $now $stopReason '' @{ deadlineReached = $deadlineReached }))
         }
         Save-Heartbeat $State
-        $current = Get-RunnerState
-        if ($null -eq $current -or $current.vmName -cne $State.vmName -or
-            ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
-        # Heartbeat may wait for the mutex while the guardian advances progress.
-        # Evaluate the freshly read journal against a later clock sample.
-        $now = Get-RunnerRecoveryNow
-        $deadlineReached = $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
-        $stopReason = 'unavailable'
-        if ($deadlineReached -or (Test-RunnerSessionStopRequested $current ([ref]$stopReason))) {
-            $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
-            throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-current' $reason $current $now $stopReason '' @{ deadlineReached = $deadlineReached }))
-        }
-        if ($current.PSObject.Properties.Name -notcontains 'networkRecovery') {
-            if ($current.PSObject.Properties.Name -contains 'guardianPid') { throw 'Recorded guardian lacks its recovery journal.' }
-            return # Pre-guardian setup only.
-        }
-        $guardianAlive = Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc
-        $expiry = ''
-        $failureReason = if (-not $guardianAlive) { 'guardian-identity' }
-            elseif ($current.networkRecovery.phase -ceq 'failed') { 'guardian-failed' }
-            elseif (($expiry = Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { 'recovery-expiry' }
-            else { '' }
-        if ($failureReason) {
-            throw (New-RunnerObservedFailure 'Session network guardian failed or expired.' (New-RunnerFailureObservation 'session-guardian' $failureReason $current $now '' $expiry @{ guardianAlive = [bool]$guardianAlive }))
-        }
-        if (($current.PSObject.Properties.Name -contains 'phase' -and $current.phase -ceq 'sealed-off') -or $current.networkRecovery.phase -ceq 'sealed-preparation') {
-            Assert-RunnerSealedPreparation $current $now
+        $sealedState = $null
+        $mutex = Enter-RunnerLock
+        try {
+            $current = Get-RunnerState
+            if ($null -eq $current -or $current.vmName -cne $State.vmName -or
+                ($State.PSObject.Properties.Name -contains 'vmId' -and ($current.PSObject.Properties.Name -notcontains 'vmId' -or [guid]$current.vmId -ne [guid]$State.vmId))) { throw 'Runner state was removed or replaced.' }
+            # Heartbeat may wait for the mutex while the guardian advances progress.
+            # Evaluate the freshly read journal against a later clock sample.
+            $now = Get-RunnerRecoveryNow
+            $deadlineReached = $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
+            $stopReason = 'unavailable'
+            $stopRequested = -not $deadlineReached -and (Test-RunnerSessionStopRequested $current ([ref]$stopReason))
+            $now = Get-RunnerRecoveryNow
+            $deadlineReached = $deadlineReached -or $now -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()
+            if ($deadlineReached -or $stopRequested) {
+                $reason = if ($deadlineReached) { 'deadline' } else { 'stop' }
+                throw (New-RunnerObservedFailure 'Session deadline or Stop reached.' (New-RunnerFailureObservation 'session-current' $reason $current $now $stopReason '' @{ deadlineReached = $deadlineReached }))
+            }
+            if ($current.PSObject.Properties.Name -notcontains 'networkRecovery') {
+                if ($current.PSObject.Properties.Name -contains 'guardianPid') { throw 'Recorded guardian lacks its recovery journal.' }
+                return # Pre-guardian setup only.
+            }
+            $guardianAlive = Test-RunnerProcessIdentity $current.guardianPid $current.guardianStartUtc
+            $expiry = ''
+            $failureReason = if (-not $guardianAlive) { 'guardian-identity' }
+                elseif ($current.networkRecovery.phase -ceq 'failed') { 'guardian-failed' }
+                elseif (($expiry = Get-RunnerRecoveryExpiry $current.networkRecovery $now)) { 'recovery-expiry' }
+                else { '' }
+            if ($failureReason) {
+                throw (New-RunnerObservedFailure 'Session network guardian failed or expired.' (New-RunnerFailureObservation 'session-guardian' $failureReason $current $now '' $expiry @{ guardianAlive = [bool]$guardianAlive }))
+            }
+            if (($current.PSObject.Properties.Name -contains 'phase' -and $current.phase -ceq 'sealed-off') -or $current.networkRecovery.phase -ceq 'sealed-preparation') {
+                $sealedState = $current
+            }
+            elseif ($current.networkRecovery.phase -ceq 'healthy' -and $current.guardianReady) { return }
+        } finally { Exit-RunnerLock $mutex }
+        if ($null -ne $sealedState) {
+            # Slow storage/Hyper-V inspection must not block containment's lock.
+            Assert-RunnerSealedPreparation $sealedState (Get-RunnerRecoveryNow)
             return
         }
-        if ($current.networkRecovery.phase -ceq 'healthy' -and $current.guardianReady) { return }
         Start-Sleep -Milliseconds 250
     }
 }
@@ -598,6 +613,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Invoke-RunnerTransitionCheckpoint 'claim-receipt'
     } finally { Exit-RunnerLock $mutex }
     $verificationReady = $false
+    $sessionFailure = $null
     try {
         New-Item -ItemType Directory -Path $instance -Force | Out-Null
         $script:RunnerOperationStage = 'disk-copy'
@@ -758,6 +774,9 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         Wait-DetachedRunner $state $Config
         Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
         return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
+    } catch {
+        $sessionFailure = $_
+        throw
     } finally {
         $verificationFailure = $null
         if ($verificationReady) { try { Assert-SessionAlive $state } catch { $verificationFailure = $_ } }
@@ -767,7 +786,11 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             if ($verificationReady) {
                 if ($null -eq $current -or $current.vmName -cne $name -or [guid]$current.vmId -ne [guid]$vm.Id) { throw 'Verifier ownership was cancelled before cleanup.' }
             }
-            if ($null -ne $current -and $current.vmName -eq $name) { Remove-RunnerInstance $current }
+            if ($null -ne $current -and $current.vmName -eq $name) {
+                Write-RunnerSessionFailureObservation $current $sessionFailure
+                if ($null -eq $sessionFailure) { Write-RunnerSessionFailureObservation $current $verificationFailure }
+                Remove-RunnerInstance $current
+            }
             if ($null -ne $verificationFailure) { throw $verificationFailure }
         } catch {
             Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
