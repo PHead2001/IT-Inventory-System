@@ -38,6 +38,7 @@ export type AssignmentLookup =
       matches: ScanMatch[];
       status: 'found' | 'ambiguous' | 'unknown' | 'invalid';
       searchPage?: AssignmentSearchPage;
+      truncated?: true;
     }
   | { ok: false; message: string };
 export type AssignmentSearchPage = {

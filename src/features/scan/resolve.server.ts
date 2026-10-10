@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
+import { getQueueRecords } from '@/features/labels/queue.server';
 import {
   itemCodeValid,
   normalizeItemCode,
@@ -13,10 +14,11 @@ export type ScanMatch = {
   path: string;
   label: string;
   state: 'active' | 'inactive' | 'retired' | 'archived';
+  context?: string;
 };
 export type ScanResolution =
-  | { status: 'invalid' | 'unknown'; matches: [] }
-  | { status: 'found' | 'ambiguous'; matches: ScanMatch[] };
+  | { status: 'invalid' | 'unknown'; matches: []; truncated?: true }
+  | { status: 'found' | 'ambiguous'; matches: ScanMatch[]; truncated?: true };
 
 const itemCodeRow = z.object({
   id: z.uuid(),
@@ -79,6 +81,7 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
   if (!target) return { status: 'invalid', matches: [] };
   const { supabase } = await requireMember();
   const matches: ScanMatch[] = [];
+  let truncated = false;
   if (target.kind === 'location' || target.kind === 'bare') {
     const code = target.kind === 'location' ? target.code : target.identifier;
     const { data, error } = await supabase
@@ -134,7 +137,10 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       'inventory_asset_tag_lookup',
       { p_tag: tag },
     );
-    if (error) throw new Error('Asset tag lookup failed.');
+    // A valid serial can exceed the tag limit. Only a bare candidate may miss
+    // this namespace; typed AST input retains the explicit tag contract.
+    if (error && !(target.kind === 'bare' && error.code === 'P1012'))
+      throw new Error('Asset tag lookup failed.');
     const data = assetTagRow.nullable().parse(raw);
     if (
       data &&
@@ -149,9 +155,51 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       !matches.some((match) => match.path === itemResult.matches[0].path)
     )
       matches.push(itemResult.matches[0]);
+    const { data, error } = await supabase.rpc('inventory_serial_matches', {
+      p_serial: target.identifier,
+    });
+    if (error) throw new Error('Serial lookup failed.');
+    const serials = z.array(assetTagRow).max(20).parse(data);
+    truncated = serials.length === 20;
+    if (serials.length) {
+      // Matching is PostgreSQL's exact case-insensitive rule. This second,
+      // bounded caller-scoped read adds current context, never new candidates.
+      const requested = new Set(serials.map((row) => row.id));
+      const context = await getQueueRecords(
+        [...requested].map((key) => ({ kind: 'asset', key })),
+      );
+      const available = new Map(
+        context
+          .filter((row) => row.kind === 'asset' && requested.has(row.key))
+          .map((row) => [row.key, row]),
+      );
+      for (const row of serials) {
+        const live = available.get(row.id);
+        if (!live) continue;
+        const match = assetMatch(row);
+        match.context = [
+          live.manufacturer ? `Manufacturer: ${live.manufacturer}` : null,
+          live.holdingContext,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        const existing = matches.findIndex(
+          (value) => value.path === match.path,
+        );
+        if (existing >= 0)
+          matches[existing] = { ...matches[existing], context: match.context };
+        else matches.push(match);
+      }
+    }
   }
-  if (matches.length === 0) return { status: 'unknown', matches: [] };
-  return { status: matches.length > 1 ? 'ambiguous' : 'found', matches };
+  truncated ||= matches.length > 20;
+  const limit = truncated ? { truncated: true as const } : {};
+  if (matches.length === 0) return { status: 'unknown', matches: [], ...limit };
+  return {
+    status: truncated || matches.length > 1 ? 'ambiguous' : 'found',
+    matches: matches.slice(0, 20),
+    ...limit,
+  };
 }
 
 function quantityLabel(data: {

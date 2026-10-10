@@ -223,7 +223,11 @@ function AssignmentFields({
           generation: token,
           message: resolution.message,
         });
-      else if (resolution.status === 'found' && resolution.matches.length === 1)
+      else if (
+        resolution.status === 'found' &&
+        !resolution.truncated &&
+        resolution.matches.length === 1
+      )
         await inspect(resolution.matches[0], token);
       else
         dispatch({
@@ -231,8 +235,10 @@ function AssignmentFields({
           generation: token,
           matches: resolution.matches,
           searchPage: resolution.searchPage,
-          message:
-            resolution.status === 'invalid'
+          truncated: resolution.truncated,
+          message: resolution.truncated
+            ? 'Lookup reached the 20-record limit. More matches may exist. Choose a shown record or search inventory.'
+            : resolution.status === 'invalid'
               ? 'This is not a supported inventory label or identifier.'
               : resolution.searchPage &&
                   !resolution.matches.length &&
@@ -577,9 +583,19 @@ function AssignmentFields({
               >
                 {match.label} · {match.kind} · {match.state}
               </Button>
+              {match.context && (
+                <p className="break-words text-sm text-slate-400">
+                  {match.context}
+                </p>
+              )}
             </li>
           ))}
         </ul>
+      )}
+      {state.truncated && (
+        <Link href="/inventory" className="underline">
+          Search inventory
+        </Link>
       )}
       {state.search && (
         <nav

@@ -35,6 +35,9 @@ vi.mock('@/features/inventory/actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),
 }));
+vi.mock('@/features/inventory/asset-tag.actions', () => ({
+  checkAssetTag: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('@/features/custody/actions', () => ({ submitCustody: vi.fn() }));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./record-refresh.actions', () => ({ refreshMetadataRecord: vi.fn() }));

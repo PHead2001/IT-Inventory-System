@@ -24,6 +24,9 @@ vi.mock('../actions', () => ({
   reloadMoveReceipt: mocks.receipt,
   loadMoveSnapshot: mocks.snapshot,
 }));
+vi.mock('../asset-tag.actions', () => ({
+  checkAssetTag: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: vi.fn() }),
 }));

@@ -107,6 +107,30 @@ async function inspect() {
   fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
   await screen.findByRole('region', { name: 'Review assignment' });
 }
+it('a saturated serial chooser shows context and search guidance without inspecting or assigning automatically', async () => {
+  mocks.find.mockResolvedValue({
+    ok: true,
+    status: 'ambiguous',
+    truncated: true,
+    matches: [{ ...match, context: 'Manufacturer: Dell · Closet / Red' }],
+  });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'Serial' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  expect(
+    await screen.findByText(/Lookup reached the 20-record limit/),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('list', { name: 'Choose inventory record' }),
+  ).toHaveTextContent('Manufacturer: Dell · Closet / Red');
+  expect(
+    screen.getByRole('link', { name: 'Search inventory' }),
+  ).toHaveAttribute('href', '/inventory');
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
 it('inspects keyboard input without mutation, confirms once, keeps context and accepts a deliberate fresh repeat', async () => {
   render(<AssignmentWorkspace {...props} />);
   fireEvent.change(

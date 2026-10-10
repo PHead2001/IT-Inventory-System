@@ -7,38 +7,52 @@ const db = vi.hoisted(() => ({
   origin: vi.fn(),
   predicate: vi.fn(),
   tagLookup: vi.fn(),
+  serial: vi.fn(),
+  hydrate: vi.fn(),
+  denied: false,
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/features/labels/origin.server', () => ({
   getLabelOrigin: db.origin,
 }));
+vi.mock('@/features/labels/queue.server', () => ({
+  getQueueRecords: db.hydrate,
+}));
 vi.mock('@/lib/auth/session.server', () => ({
-  requireMember: async () => ({
-    supabase: {
-      rpc: (name: string, args: { p_code?: string; p_tag?: string }) => {
-        if (name === 'inventory_asset_tag_lookup') {
-          db.tagLookup(args.p_tag);
-          return db.asset(args.p_tag);
-        }
-        return db.itemCode(args.p_code);
-      },
-      from: (table: string) => ({
-        select: () => ({
-          eq: (field: string, value: string) => {
-            db.predicate(table, field, value);
-            return {
-              maybeSingle: () =>
-                table === 'inventory_locations'
-                  ? db.location(value)
-                  : table === 'quantity_items'
-                    ? db.quantity(value)
-                    : db.asset(value),
-            };
-          },
+  requireMember: async () => {
+    if (db.denied) throw new Error('Active member required.');
+    return {
+      supabase: {
+        rpc: (
+          name: string,
+          args: { p_code?: string; p_tag?: string; p_serial?: string },
+        ) => {
+          if (name === 'inventory_serial_matches')
+            return db.serial(args.p_serial);
+          if (name === 'inventory_asset_tag_lookup') {
+            db.tagLookup(args.p_tag);
+            return db.asset(args.p_tag);
+          }
+          return db.itemCode(args.p_code);
+        },
+        from: (table: string) => ({
+          select: () => ({
+            eq: (field: string, value: string) => {
+              db.predicate(table, field, value);
+              return {
+                maybeSingle: () =>
+                  table === 'inventory_locations'
+                    ? db.location(value)
+                    : table === 'quantity_items'
+                      ? db.quantity(value)
+                      : db.asset(value),
+              };
+            },
+          }),
         }),
-      }),
-    },
-  }),
+      },
+    };
+  },
 }));
 import { resolveItemCode, resolveScan } from './resolve.server';
 beforeEach(() => {
@@ -52,6 +66,182 @@ beforeEach(() => {
   });
   db.predicate.mockReset();
   db.tagLookup.mockReset();
+  db.serial.mockReset().mockResolvedValue({ data: [], error: null });
+  db.hydrate.mockReset().mockResolvedValue([]);
+  db.denied = false;
+});
+
+const serialId = (index: number) =>
+  `70000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+const serialRow = (index: number, status = 'active') => ({
+  id: serialId(index),
+  name: `Equipment ${index}`,
+  asset_tag: `Tag-${index}`,
+  status,
+});
+const serialContext = (index: number) => ({
+  kind: 'asset',
+  key: serialId(index),
+  manufacturer: `Maker ${index}`,
+  holdingContext:
+    index === 2 ? 'Depot [DEPOT] · assigned site' : 'IT Closet / Red Container',
+});
+it('resolves trimmed serials with PostgreSQL spelling and shows duplicate manufacturer/location/lifecycle context', async () => {
+  db.serial.mockResolvedValue({
+    data: [serialRow(1), serialRow(2, 'retired')],
+    error: null,
+  });
+  db.hydrate.mockResolvedValue([serialContext(1), serialContext(2)]);
+  const result = await resolveScan('  Serial-Mixed  ');
+  expect(db.serial).toHaveBeenCalledExactlyOnceWith('Serial-Mixed');
+  expect(db.hydrate).toHaveBeenCalledExactlyOnceWith([
+    { kind: 'asset', key: serialId(1) },
+    { kind: 'asset', key: serialId(2) },
+  ]);
+  expect(result).toMatchObject({
+    status: 'ambiguous',
+    matches: [
+      {
+        label: 'Equipment 1 (Tag-1)',
+        state: 'active',
+        context: 'Manufacturer: Maker 1 · IT Closet / Red Container',
+      },
+      {
+        label: 'Equipment 2 (Tag-2)',
+        state: 'retired',
+        context: 'Manufacturer: Maker 2 · Depot [DEPOT] · assigned site',
+      },
+    ],
+  });
+});
+it('deduplicates one asset matched by tag and serial while adding its context', async () => {
+  db.asset.mockResolvedValue({ data: serialRow(1), error: null });
+  db.serial.mockResolvedValue({ data: [serialRow(1)], error: null });
+  db.hydrate.mockResolvedValue([serialContext(1)]);
+  const result = await resolveScan('Tag-1');
+  expect(result.status).toBe('found');
+  expect(result.matches).toHaveLength(1);
+  expect(result.matches[0].context).toContain('Maker 1');
+});
+it('keeps tag/SKU/location/serial collisions explicit and never uses hydration as a new identity candidate', async () => {
+  db.location.mockResolvedValue({
+    data: { code: 'ITC', name: 'Closet', active: true },
+    error: null,
+  });
+  db.asset.mockResolvedValue({ data: serialRow(1), error: null });
+  db.itemCode.mockResolvedValue({
+    data: { id: serialId(3), name: 'Cable', item_code: 'ITC', archived: false },
+    error: null,
+  });
+  db.serial.mockResolvedValue({ data: [serialRow(2)], error: null });
+  db.hydrate.mockResolvedValue([
+    serialContext(2),
+    serialContext(9),
+    { ...serialContext(2), kind: 'quantity' },
+  ]);
+  expect(await resolveScan('ITC')).toMatchObject({
+    status: 'ambiguous',
+    matches: [
+      { kind: 'location' },
+      { path: '/inventory/assets/' + serialId(1) },
+      { kind: 'quantity' },
+      { path: '/inventory/assets/' + serialId(2) },
+    ],
+  });
+});
+it('drops unavailable serial candidates without loading individual details', async () => {
+  db.serial.mockResolvedValue({
+    data: [serialRow(1), serialRow(2)],
+    error: null,
+  });
+  db.hydrate.mockResolvedValue([serialContext(2)]);
+  expect(await resolveScan('Serial')).toMatchObject({
+    status: 'found',
+    matches: [{ path: '/inventory/assets/' + serialId(2) }],
+  });
+  db.hydrate.mockResolvedValue([]);
+  expect(await resolveScan('Serial')).toEqual({
+    status: 'unknown',
+    matches: [],
+  });
+});
+it('keeps a saturated serial result bounded and ambiguous even when only one candidate is still accessible', async () => {
+  db.serial.mockResolvedValue({
+    data: Array.from({ length: 20 }, (_, index) => serialRow(index)),
+    error: null,
+  });
+  db.hydrate.mockResolvedValue([serialContext(1)]);
+  expect(await resolveScan('Serial')).toMatchObject({
+    status: 'ambiguous',
+    truncated: true,
+    matches: [{ path: '/inventory/assets/' + serialId(1) }],
+  });
+  expect(db.hydrate.mock.calls[0][0]).toHaveLength(20);
+});
+it('caps combined namespaces at twenty without hiding truncation', async () => {
+  db.location.mockResolvedValue({
+    data: { code: 'ITC', name: 'Closet', active: true },
+    error: null,
+  });
+  db.asset.mockResolvedValue({ data: serialRow(25), error: null });
+  db.itemCode.mockResolvedValue({
+    data: {
+      id: serialId(26),
+      name: 'Cable',
+      item_code: 'ITC',
+      archived: false,
+    },
+    error: null,
+  });
+  db.serial.mockResolvedValue({
+    data: Array.from({ length: 19 }, (_, index) => serialRow(index)),
+    error: null,
+  });
+  db.hydrate.mockResolvedValue(
+    Array.from({ length: 19 }, (_, index) => serialContext(index)),
+  );
+  const result = await resolveScan('ITC');
+  expect(result).toMatchObject({ status: 'ambiguous', truncated: true });
+  expect(result.matches).toHaveLength(20);
+  expect(result.matches.slice(0, 3).map((row) => row.kind)).toEqual([
+    'location',
+    'asset',
+    'quantity',
+  ]);
+});
+it('a valid long bare serial can miss the shorter tag namespace while typed AST remains invalid', async () => {
+  const serial = 'S'.repeat(200);
+  db.asset.mockResolvedValue({ data: null, error: { code: 'P1012' } });
+  db.serial.mockResolvedValue({ data: [serialRow(1)], error: null });
+  db.hydrate.mockResolvedValue([serialContext(1)]);
+  expect(await resolveScan(serial)).toMatchObject({ status: 'found' });
+  expect(await resolveScan('AST:' + serial)).toEqual({
+    status: 'invalid',
+    matches: [],
+  });
+  expect(db.serial).toHaveBeenCalledExactlyOnceWith(serial);
+});
+it('explicit prefixes and UUID labels never add serial candidates', async () => {
+  for (const value of [
+    'AST:tag',
+    'LOC:ITC',
+    '/inventory/assets/' + serialId(1),
+    '/inventory/quantity/' + serialId(1),
+  ])
+    await resolveScan(value);
+  expect(db.serial).not.toHaveBeenCalled();
+  expect(db.hydrate).not.toHaveBeenCalled();
+});
+it('serial read/hydration errors fail closed and direct private lookup requires a member', async () => {
+  db.serial.mockResolvedValue({ data: null, error: { message: 'private' } });
+  await expect(resolveScan('Serial')).rejects.toThrow('Serial lookup failed');
+  db.serial.mockResolvedValue({ data: [serialRow(1)], error: null });
+  db.hydrate.mockRejectedValue(new Error('Context unavailable'));
+  await expect(resolveScan('Serial')).rejects.toThrow('Context unavailable');
+  db.denied = true;
+  db.serial.mockClear();
+  await expect(resolveScan('Serial')).rejects.toThrow('Active member required');
+  expect(db.serial).not.toHaveBeenCalled();
 });
 it('looks up differently cased tags by the generated unique key and preserves display spelling', async () => {
   db.asset.mockResolvedValue({

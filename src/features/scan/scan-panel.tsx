@@ -75,10 +75,15 @@ export function ScanPanel() {
         setResult(resolution);
         if (
           resolution.status === 'found' &&
+          !resolution.truncated &&
           resolution.matches[0].state === 'active'
         ) {
           router.push(resolution.matches[0].path);
-        } else if (resolution.status === 'invalid')
+        } else if (resolution.truncated)
+          setMessage(
+            'Lookup reached the 20-record limit. More matches may exist. Choose a shown record or search inventory.',
+          );
+        else if (resolution.status === 'invalid')
           setMessage(
             lookupMode === 'item_code'
               ? 'Enter an Item code (SKU) with at most 100 characters and no control characters.'
@@ -276,7 +281,7 @@ export function ScanPanel() {
           <p className={styles.hint}>
             {mode === 'item_code'
               ? 'Use this mode for quantity codes beginning with / or containing a colon. Text that looks like a URL is matched only against stored Item codes.'
-              : 'Locations use LOC:CODE; asset tags use AST:tag. Bare identifiers are checked for exact matches across locations, assets, and quantity items.'}
+              : 'Locations use LOC:CODE; asset tags use AST:tag. Bare text checks exact locations, tags, serial numbers and Item codes; collisions need a choice.'}
           </p>
           <div className={styles.submitRow}>
             <button disabled={busy} className={styles.primaryButton}>
@@ -290,13 +295,23 @@ export function ScanPanel() {
           {message}
         </p>
       )}
+      {result?.truncated && (
+        <Link href="/inventory" onClick={stop} className="underline">
+          Search inventory
+        </Link>
+      )}
       {result && result.matches.length > 0 && (
         <ul className={styles.results} aria-label="Matching records">
           {result.matches.map((match) => (
             <li key={match.path} className={styles.result}>
-              <Link href={match.path} onClick={stop} className="underline">
-                {match.label}
-              </Link>
+              <div className="min-w-0 break-words">
+                <Link href={match.path} onClick={stop} className="underline">
+                  {match.label}
+                </Link>
+                {match.context && (
+                  <p className={styles.hint}>{match.context}</p>
+                )}
+              </div>
               <span className={styles.state}>{match.state}</span>
             </li>
           ))}

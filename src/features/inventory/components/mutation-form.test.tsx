@@ -21,6 +21,9 @@ vi.mock('../actions', () => ({
   findDuplicateSerials: mocks.duplicates,
   loadMoveSnapshot: mocks.loadMove,
 }));
+vi.mock('../asset-tag.actions', () => ({
+  checkAssetTag: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: mocks.refresh, push: mocks.push }),
 }));

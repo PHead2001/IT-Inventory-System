@@ -33,6 +33,34 @@ const args = {
   siteId: id(2),
   path: '/inventory/quantity/' + id(3),
 };
+it('preserves serial truncation and context from the authorized shared resolver', async () => {
+  mocks.resolve.mockResolvedValue({
+    status: 'ambiguous',
+    truncated: true,
+    matches: [
+      {
+        kind: 'asset',
+        path: '/inventory/assets/' + id(3),
+        label: 'Device',
+        state: 'retired',
+        context: 'Manufacturer: Dell · Last recorded storage: Closet',
+      },
+    ],
+  });
+  expect(
+    await findAssignmentRecords({
+      actorId: args.actorId,
+      text: 'Serial',
+      mode: 'identifier',
+    }),
+  ).toMatchObject({
+    ok: true,
+    status: 'ambiguous',
+    truncated: true,
+    matches: [{ state: 'retired', context: expect.stringContaining('Dell') }],
+  });
+  expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith('Serial');
+});
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue({

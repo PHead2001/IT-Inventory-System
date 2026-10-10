@@ -36,6 +36,79 @@ beforeEach(() => {
   mocks.resolve.mockResolvedValue({ status: 'unknown', matches: [] });
   mocks.resolveItemCode.mockResolvedValue({ status: 'unknown', matches: [] });
 });
+it.each(['manual', 'camera'])(
+  'a %s serial collision shows context and lifecycle without silently opening either asset',
+  async (mode) => {
+    mocks.resolve.mockResolvedValue({
+      status: 'ambiguous',
+      matches: [
+        {
+          kind: 'asset',
+          path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+          label: 'Laptop (Tag-1)',
+          state: 'active',
+          context: 'Manufacturer: Dell · IT Closet / Red Container',
+        },
+        {
+          kind: 'asset',
+          path: '/inventory/assets/70000000-0000-4000-8000-000000000002',
+          label: 'Spare laptop (Tag-2)',
+          state: 'retired',
+          context:
+            'Manufacturer: Lenovo · Last recorded storage: Black Container',
+        },
+      ],
+    });
+    render(<ScanPanel />);
+    if (mode === 'manual') {
+      fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+        target: { value: 'Serial-Mixed' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
+      await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
+      mocks.decode.mock.calls[0][2]({ getText: () => 'Serial-Mixed' });
+    }
+    expect(
+      await screen.findByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('list', { name: 'Matching records' }),
+    ).toHaveTextContent('Dell · IT Closet / Red Container');
+    expect(
+      screen.getByRole('list', { name: 'Matching records' }),
+    ).toHaveTextContent('retired');
+    expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith('Serial-Mixed');
+    expect(mocks.push).not.toHaveBeenCalled();
+  },
+);
+it('a saturated result never claims a unique match and offers ordinary inventory search', async () => {
+  mocks.resolve.mockResolvedValue({
+    status: 'found',
+    truncated: true,
+    matches: [
+      {
+        kind: 'asset',
+        path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
+        label: 'Laptop',
+        state: 'active',
+      },
+    ],
+  });
+  render(<ScanPanel />);
+  fireEvent.change(screen.getByLabelText(/Paste a label URL/), {
+    target: { value: 'Serial' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+  expect(
+    await screen.findByText(/Lookup reached the 20-record limit/),
+  ).toBeVisible();
+  expect(
+    screen.getByRole('link', { name: 'Search inventory' }),
+  ).toHaveAttribute('href', '/inventory');
+  expect(mocks.push).not.toHaveBeenCalled();
+});
 afterEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', {
     configurable: true,

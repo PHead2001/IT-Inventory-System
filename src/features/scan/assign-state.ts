@@ -21,6 +21,7 @@ export type AssignState = {
   candidate: AssignmentCandidate | null;
   matches: ScanMatch[];
   search: AssignmentSearchPage | null;
+  truncated: boolean;
   sourceId: string;
   units: string;
   command: AssignmentCommand | null;
@@ -45,6 +46,7 @@ export const initialAssignState = (
   candidate: null,
   matches: [],
   search: null,
+  truncated: false,
   sourceId: '',
   units: '1',
   command: null,
@@ -60,6 +62,7 @@ export type AssignEvent =
       matches: ScanMatch[];
       message: string;
       searchPage?: AssignmentSearchPage;
+      truncated?: true;
     }
   | {
       type: 'candidate';
@@ -176,6 +179,7 @@ export function assignReducer(
         candidate: null,
         matches: [],
         search: null,
+        truncated: false,
         command: null,
         message: '',
       };
@@ -185,6 +189,7 @@ export function assignReducer(
         phase: event.matches.length ? 'choose' : 'ready',
         matches: event.matches,
         search: event.searchPage ?? null,
+        truncated: event.truncated === true,
         message: event.message,
       };
     case 'candidate':
@@ -193,6 +198,7 @@ export function assignReducer(
         phase: 'review',
         candidate: event.candidate,
         matches: [],
+        truncated: false,
         sourceId: event.sourceId,
         units: '1',
         message: '',
