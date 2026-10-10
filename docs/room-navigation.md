@@ -24,6 +24,60 @@ The orthographic camera has two explicit modes. Guided applies the room's finite
 
 Recenter translates the camera and orbit pivot to `room.camera.target` while preserving angle, elevation, zoom and selection. Double-clicking exposed floor invokes that same action; dragging or double-clicking furniture and labels does not. A recent manual camera movement also suppresses an accidental floor double-click. Opaque envelope and furniture geometry stop raycast clicks behind them. Side-anchored labels move to the camera-facing box face and remain single, upright, occlusion-aware selection buttons. Fit room projects the validated room and binding bounds at the current orientation and sizes them against the actual canvas viewport, so its framing differs from Recenter and responds to sidebar/viewport changes. Center selected preserves the primary binding's focus point and sizes the selected bounds around it in the canvas viewport; small locations retain a useful zoom cap while aggregates stay in frame. Repeated requests for the same selection work. Any camera command or manual control input interrupts an older focus animation; reduced motion snaps immediately. Initial Fit waits for a positive canvas size and applies only while the view is pristine. Restored views, manual input and camera commands end that state; later resizing never reframes over user intent. The primary toolbar keeps Fit room, Center selected, zoom, Interact and More in one row with 44 px targets. More is a compact nonmodal anchored overlay with internally scrollable Recenter, orbit mode, grouped pan/rotate/tilt, Show labels, counts and help. It leaves the canvas size unchanged and map controls operable. Its rectangle is reserved in label placement. Opening focuses its first control; Tab remains free. Escape closes it, disarms an active map, announces that state and restores Interact focus; a passive Escape restores More. Outside dismissal does not steal focus. Fit room and Center selected close More and help before revealing the requested view, retain focus on the invoking primary button, and preserve interaction mode and logical selection. Recenter also dismisses the panel and restores the surviving More trigger; repeated Pan, Rotate and Tilt commands keep the panel open.
 
+## Selected-location reveal
+
+The shared spatial controller owns presentation phases (`idle`, `flying`,
+`revealing`, `settled`, `cancelled`), never inventory selection. Each request has an
+immutable actor/environment/space scope, generation, request ID and stable code.
+The same token follows camera completion, cancellation and reveal; an older
+A→B→A completion cannot act on the newer A. Clear, missing bindings, graphics
+failure and unmount clear the old flight before any later callback. Camera input,
+mode changes and Fit/Recenter cancel pending flight/opening. Input after opening
+has started settles the currently selected open endpoint immediately. Cancelled
+requests remain cancelled when Reduced motion is subsequently enabled.
+
+After a real committed scene frame and positive viewport, direct arrival and Show
+in room start at Fit and fly for 750 ms, followed by a 400 ms reveal. In-room
+selection uses the current view. Back and restored per-space context preserve the
+camera unless the user explicitly requests fresh focus. Reduced motion centers,
+labels and opens the valid target immediately, including a preference change
+during flight. Repeated focus on the same code retains its open visual endpoint.
+
+The optional additive v1 `visual.reveal.offset` tuple uses node-local room XYZ
+inches; each finite component is bounded to −24…24. These are code-managed visual
+defaults, not measurements. Six left drawers move +X and six right drawers −X by
+`min(6, local X depth × 0.35)` (5.6 inches for the measured 16-inch boxes). Red
+Container moves +X four inches; Black and Clear move −X four inches as whole
+boxes. Shelf sections rise one inch. Rack and aggregate selection retain existing
+focus/highlight treatment; they never open descendant drawers or receive invented
+aggregate count badges.
+
+Measured outer transforms, hierarchy and `buildRoomBindings` resting coordinates
+remain unchanged. Stationary transparent logical hitboxes are separate from the
+animated body, decorations, exposed-face samples and label/badge origins. Pointer
+down and click both validate the first actual visible surface, including opaque
+unbound blockers; vacated hitbox volume cannot select, and a moved exposed face
+outside its old bounds still owns its original stable code. A separate rest/open
+union envelope frames camera focus without mutating logical bindings. World
+matrices update before hover/label sampling. Reveal and flight invalidate demand
+frames while running plus bounded endpoint settling, then stop.
+
+Selected reveals demand the existing scoped occupancy snapshot even with Show
+item counts off. Only that exact selected location receives its real products /
+units / individual assets triple; known eligible zero is explicit, while missing,
+inactive, unsupported, loading and error counts remain unknown. Decimal text
+retains precision beyond JavaScript's safe integer range. This does not change
+the endpoint, inventory scope, mutation authorization or aggregate semantics.
+
+Controller, schema, framing, camera supersession and selected-count regressions
+are authored locally. Browser pointer tests use real transformed opaque triangles
+and read-only scene observation at oblique, overhead, underside and panned poses,
+including both drawer sides, containers, shelves, rack/aggregate behavior,
+stationary hover, moving down/up, interruption past old deadlines, Reduced motion
+and settled real draw counts. Authored tests are not evidence of a browser pass;
+recordings, viewport/theme checks and independent review remain required before
+acceptance.
+
 ## Accessibility, failure and performance
 
 Location names and codes occupy separate lines. Ordinary codes remain intact; codes longer than 24 characters have a bounded horizontal scroll region with the complete code and a keyboard focus target outside selection buttons. Search results retain full path context, while group-detail child links use short names with full accessible breadcrumbs and existing capability labels. A single parent map/Spaces action supplies the secondary navigation.
@@ -40,7 +94,7 @@ The map starts passive: plain wheel scrolling and one-finger swipes belong to th
 
 Optional Show item counts is off by default. The renderer receives locationOccupancy keyed by stable location code; it never fetches per mesh. Each triple separately names active quantity products, quantity units and individual assets. Products count distinct nonarchived definitions with positive holdings; units sum those holdings; assets count active physically stored records, excluding site assignments. No mixed total is invented. Known eligible zero is explicit, while missing/ineligible/loading/error remains unknown. Occupied targets use one non-color-only compact badge when needed, with accurate counts in its accessible name and deliberate focus/hover/selected presentation. No aggregate parent badges are shown.
 
-SpacesWorkspace enables one uncached /api/room/occupancy request with space and fresh generation when counts are on. The endpoint derives modeled active inventory-capable leaf codes from authenticated locations and Git geometry and invokes the additive caller-scoped inventory_location_occupancy(text[]) read. The legacy active-entry RPC remains unchanged. New counts are canonical decimal text bounded to PostgreSQL signed bigint; BigInt is used only for exact display formatting. Response identity binds actor, application origin, independently derived public backend origin, space, active-only filter and a fresh request UUID. Every transition owns a new generation, including off/on and A→B→A. Old counts disappear before the next committed paint. No private cache is shared or persisted. The RPC application deadline is five seconds and the browser deadline eight seconds; timeout produces unavailable counts, never zero. Cleanup aborts are quiet. SQL retains its five-second statement_timeout; actual REST elapsed-time enforcement still needs runtime proof.
+SpacesWorkspace enables one uncached /api/room/occupancy request with space and fresh generation when counts are on or a selected modeled eligible leaf needs a reveal badge. The endpoint derives modeled active inventory-capable leaf codes from authenticated locations and Git geometry and invokes the additive caller-scoped inventory_location_occupancy(text[]) read. The legacy active-entry RPC remains unchanged. New counts are canonical decimal text bounded to PostgreSQL signed bigint; BigInt is used only for exact display formatting. Response identity binds actor, application origin, independently derived public backend origin, space, active-only filter and a fresh request UUID. Every transition owns a new generation, including off/on and A→B→A. Old counts disappear before the next committed paint. No private cache is shared or persisted. The RPC application deadline is five seconds and the browser deadline eight seconds; timeout produces unavailable counts, never zero. Cleanup aborts are quiet. SQL retains its five-second statement_timeout; actual REST elapsed-time enforcement still needs runtime proof.
 
 Navigation, page return, window focus and visibility restoration refresh enabled counts and selected contents; returning from an inventory operation reloads both. Refresh inventory provides an explicit retry. These are snapshots, not realtime occupancy: another session's changes appear on refresh/return. The contents row total remains active holding/asset entries, whereas the badge distinguishes products, units and assets; the reads may observe separate concurrent commits.
 

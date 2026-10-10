@@ -16,7 +16,13 @@ vi.mock('next/dynamic', () => ({
       locationOccupancy?: import('./occupancy-contract').RoomOccupancy;
       selectedCode: string | null;
       onSelect: (code: string) => void;
-      focusRequest: { requestId: number };
+      focusRequest: {
+        requestId: number;
+        preserveView?: boolean;
+        fitBeforeFlight?: boolean;
+        generation?: number;
+        scope?: string;
+      };
       focusOnRestore: boolean;
       initialView?: CameraView | null;
       onViewChange?: (view: CameraView) => void;
@@ -33,6 +39,8 @@ vi.mock('next/dynamic', () => ({
           data-counts={JSON.stringify(props.locationOccupancy ?? null)}
           data-code={props.selectedCode ?? ''}
           data-focus={props.focusRequest.requestId}
+          data-preserve-view={String(props.focusRequest.preserveView)}
+          data-fit-before-flight={String(props.focusRequest.fitBeforeFlight)}
           data-focus-on-restore={String(props.focusOnRestore)}
           data-initial-view={JSON.stringify(props.initialView ?? null)}
         >
@@ -51,7 +59,7 @@ vi.mock('next/dynamic', () => ({
           <button onClick={() => props.onFailure?.('Graphics failed.')}>
             Fail room
           </button>
-          <button onClick={props.onFocusCancel}>Cancel focus</button>
+          <button onClick={() => props.onFocusCancel?.()}>Cancel focus</button>
           <button
             onClick={() =>
               props.onViewChange?.({
@@ -616,7 +624,7 @@ it('restores URL selection on Back and refocuses a repeated selection', async ()
   );
 });
 
-it('replays focus for a modeled location reached through browser history', async () => {
+it('restores a modeled selection through browser history while preserving camera intent', async () => {
   window.history.replaceState(null, '', '/room?location=ITC-S1A');
   vi.stubGlobal(
     'fetch',
@@ -648,6 +656,10 @@ it('replays focus for a modeled location reached through browser history', async
   act(() => window.dispatchEvent(new PopStateEvent('popstate')));
   expect(screen.getByTestId('scene-selection')).toHaveAttribute(
     'data-focus-on-restore',
+    'false',
+  );
+  expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+    'data-preserve-view',
     'true',
   );
   expect(
@@ -765,7 +777,7 @@ it('explains a transport failure and retries the same selection', async () => {
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
-it('loads counts only when enabled and refreshes counts and contents together on return', async () => {
+it('demands selected reveal counts with the toggle off and refreshes counts and contents together on return', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn().mockImplementation((url: string) => {
     if (url.startsWith('/api/room/occupancy?'))
@@ -807,7 +819,7 @@ it('loads counts only when enabled and refreshes counts and contents together on
   await screen.findByText('Cable');
   expect(
     fetcher.mock.calls.filter(([url]) => String(url).includes('/occupancy?')),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
   await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
   await waitFor(() =>
     expect(screen.getByTestId('scene-selection')).toHaveAttribute(

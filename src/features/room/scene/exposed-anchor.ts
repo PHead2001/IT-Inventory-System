@@ -38,6 +38,7 @@ export function exposedTargetAnchor(
           candidates.push(point);
         }
   }
+  scene.updateMatrixWorld(true);
   origin.updateWorldMatrix(true, false);
   camera.updateMatrixWorld();
   for (const local of candidates) {

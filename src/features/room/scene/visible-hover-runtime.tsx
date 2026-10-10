@@ -90,6 +90,8 @@ export function VisibleHoverTracker({
       return;
     }
     ndc.current.set((x / rect.width) * 2 - 1, 1 - (y / rect.height) * 2);
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
     raycaster.current.setFromCamera(ndc.current, camera);
     const target = visibleRoomTarget(
       raycaster.current.intersectObjects(scene.children, true),

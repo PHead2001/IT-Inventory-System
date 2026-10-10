@@ -8,6 +8,52 @@ import {
 } from './label-layout-runtime';
 
 describe('room counts', () => {
+  it.each([
+    ['0', '0 products / 0 units / 0 assets'],
+    ['9007199254740993', '1 product / 9,007,199,254,740,993 units / 0 assets'],
+  ])(
+    'selected reveal shows the exact known %s count while unknown remains unknown',
+    (units, expected) => {
+      const registry = createRoomLabelRegistry(vi.fn());
+      const view = render(
+        <LabelLayoutProvider registry={registry}>
+          <RoomLabel
+            id="selected"
+            code="ITC-D01"
+            label="Drawer 1"
+            priority={3}
+            selected
+            occupancy={{
+              quantity_product_count: units === '0' ? '0' : '1',
+              quantity_unit_count: units,
+              asset_count: '0',
+            }}
+            onSelect={vi.fn()}
+          />
+        </LabelLayoutProvider>,
+      );
+      expect(
+        screen.getByRole('button', {
+          name: `Select Drawer 1 (ITC-D01); ${expected} at this location`,
+        }),
+      ).toHaveTextContent(expected);
+      view.rerender(
+        <LabelLayoutProvider registry={registry}>
+          <RoomLabel
+            id="selected"
+            code="ITC-D01"
+            label="Drawer 1"
+            priority={3}
+            selected
+            onSelect={vi.fn()}
+          />
+        </LabelLayoutProvider>,
+      );
+      expect(
+        screen.getByRole('button', { name: 'Select Drawer 1 (ITC-D01)' }),
+      ).toHaveTextContent(/^Drawer 1$/);
+    },
+  );
   it('retains the full long name and distinct counts for keyboard focus, then restores its compact marker', async () => {
     const registry = createRoomLabelRegistry(vi.fn());
     const register = vi.spyOn(registry, 'register');

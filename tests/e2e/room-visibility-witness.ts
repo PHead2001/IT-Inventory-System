@@ -288,6 +288,60 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
   );
 }
 
+/** Read actual visual transforms and draw count without subscribing or changing the scene. */
+export async function captureRoomReveal(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('[data-room-surface] canvas');
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1)
+      throw new Error('Expected one committed reveal scene');
+    const offsets: Record<string, number[]> = {};
+    states[0].scene.traverse((object) => {
+      const id: unknown = object.userData.roomRevealNode;
+      if (typeof id === 'string') offsets[id] = object.position.toArray();
+    });
+    return { offsets, drawFrame: states[0].gl.info.render.frame };
+  });
+}
+
+/** Independent first actual triangle at one stationary screen point, including unbound blockers. */
+export function roomWitnessCodeAtPoint(
+  snapshot: WitnessSnapshot,
+  point: { x: number; y: number },
+) {
+  const inverse = new Matrix4()
+    .multiplyMatrices(
+      new Matrix4().fromArray(snapshot.projection),
+      new Matrix4().fromArray(snapshot.view),
+    )
+    .invert();
+  const x = ((point.x - snapshot.frame.x) / snapshot.frame.width) * 2 - 1;
+  const y = 1 - ((point.y - snapshot.frame.y) / snapshot.frame.height) * 2;
+  const near = new Vector3(x, y, -1).applyMatrix4(inverse),
+    far = new Vector3(x, y, 1).applyMatrix4(inverse);
+  const ray = new Ray(near, far.clone().sub(near).normalize());
+  let distance = Infinity,
+    code: string | null = null;
+  for (const face of snapshot.triangles) {
+    const a = new Vector3().fromArray(face.vertices, 0),
+      b = new Vector3().fromArray(face.vertices, 3),
+      c = new Vector3().fromArray(face.vertices, 6);
+    const hit =
+      face.side === 1
+        ? ray.intersectTriangle(c, b, a, true, new Vector3())
+        : ray.intersectTriangle(a, b, c, face.side !== 2, new Vector3());
+    if (!hit) continue;
+    const measured = near.distanceTo(hit);
+    if (measured <= near.distanceTo(far) && measured < distance) {
+      distance = measured;
+      code = face.code;
+    }
+  }
+  return code;
+}
+
 /** Independent bounded ray/triangle oracle. No production visibility helper. */
 export function roomVisibilityWitnessReport(snapshot: WitnessSnapshot) {
   const transform = new Matrix4().multiplyMatrices(
