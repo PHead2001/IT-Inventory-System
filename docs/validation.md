@@ -104,6 +104,29 @@ not inspect or change hosted Auth configuration.
 
 ## Proof by layer
 
+The logout privacy regression also mounts a populated label queue with an already
+acknowledged generation, fails authoritative logout cleanup, then retries under
+the same cookie generation. It verifies that cleared entries disappear from the
+workspace and are never persisted again from the old hydrated instance. A sibling
+test delivers successful first-attempt SIGNED_OUT through the mounted Auth observer,
+then rechecks the matching generation after its cleanup marker is gone. Shared
+cleanup revision tests distinguish successful authoritative wipes from ordinary checks
+and failed removal attempts.
+The label persistence regression resolves a delayed old-instance refresh after
+verified cleanup but before the readiness reset commits; the cleared queue key
+must remain absent until the new empty workspace persists its own state.
+
+Audit 4.2 P02 scan-batch regressions cover bounded UTF-8/schema/CAS storage, compact immutable operation snapshots, request/event deduplication, exact uncertain replay, legacy recovery and terminal cleanup reconciliation, restored historical reviews and nonmutating current availability reads, inactive destinations and evacuation-source preferences, safe Finish/End, capacity and privacy generation invalidation. Component checks include immediate inspection status/busy state, deliberate Cancel focus, chooser/review/error focus, deferred responses after ticket/source/destination/account changes, terminal storage failures and logout success/error/transport paths away from Scan. Auth tests preserve the caller-scoped local signout contract and sanitized acknowledgements. These tests do not replace actual browser/database proof.
+
+`tests/e2e/scan-assign.spec.ts` uses real local Auth/custody actions and ordinary controls for record visit + actual Back, reload + automatic availability refresh, immutable checklist/event links, deliberate repeat assignments, Finish/End, cancellation, independent writer stale stock, blocked command persistence, an actual server-action fetch with a lost browser response, exact replay with one event, terminal cleanup failure + clear-only reload, and successful signout from another route. Run through the canonical `npm run test:e2e` disposable loopback environment; do not point fixtures at a hosted backend. A Docker-unavailable host may run focused unit/component checks and typecheck, but must record real E2E and the complete DB/application gate as pending CI. Full/Reduced desktop and 390 px hands-on candidate acceptance, real devices and P10 Light-mode acceptance are separately required.
+
+Held restoration checks correlate the response to the exact intercepted request,
+require HTTP success, then assert the decoded business result, busy state, focus,
+stationary Cancel target and absence of writes. A Next action result can be usable
+before its enclosing Flight stream ends; stream EOF is not restoration completion.
+The focused transport regression preserves this distinction and rejects an
+interleaved response with identical business arguments from a different request.
+
 Shared live-validation regressions cover every form-hook caller, including category create/rename and site/location management. Native validity changes followed by blur must clear associated errors without another submit; ordinary controlled typing retains its existing revalidation. Move completion regressions inject browser get/remove failures after commit and cover standalone Done, workspace Done/Close/switch and Move more after a fresh snapshot. Warnings remain visible after the task unmounts, unrelated/newer/different-item/malformed references remain untouched, and pending/uncertain commands still block closure and switching. These component checks do not replace database or real-browser certification.
 
 Checkpoint 3 operational composition is exercised through ordinary controls in `tests/e2e/operational-composition.spec.ts`, including creation review visibility, one mounted detail task, explicit next transactions, lifecycle review and compact history. Focused creation-summary and task-state/component regressions cover normalized intent, cleared/default/absent answers, dirty Stay/discard, pending and uncertain switching barriers, exact retries across refreshed versions and eligibility, retained receipts and actor/record isolation. These presentation and client-state changes introduce no new persistence semantics; existing RPC authorization, version and retry contracts remain authoritative. Mocked file cards and loopback-only local Storage fixtures prove their stated UI/local paths, not hosted private download, upload validation or cleanup behavior. Hosted file proof still requires authenticated isolated-preview checks against actual authorized states, as described in [inventory files](inventory-files.md).
@@ -337,3 +360,115 @@ Room tests cover opaque occlusion and exposed transformed face samples, shared p
 The test-only visibility witness captures the actual committed R3F scene once per settled scenario and independently checks transformed triangles, material sides, opaque blockers and DOM overlay masks. Actual BoxGeometry capture regressions distinguish a single material across all groups from indexed material arrays. Transparent mapped coverage is supported only for verified unsigned-byte RGBA DataTexture resources, with exact dimensions/data length and a cumulative 262,144-texel/1 MiB byte bound. Uniformly nonopaque alpha excludes the actual contact footprint; uniformly opaque alpha retains furniture. Mixed alpha, custom mipmaps, alpha maps/tests or unsupported resources fail explicitly rather than hiding an uncertain blocker. This is bounded representative visibility evidence, not exhaustive pixel or physical-phone proof. Mounted camera regressions defer commands through zero/nonfinite canvas measurement and execute the newest command once; registry regressions retain pending state through centered full/compact CSS remeasurement, preserve focused neighbors and fail explicitly after four unstable synchronous passes.
 
 Acceptance still requires real WebGL at 375px with the actual canvas, loaded fonts, selected long text and open More; independent exposed-object coverage, no overlapping/shrunk actions, accurate authorized triples, actual camera/input/focus response, resize and settled demand-idle evidence. Long-label component/DOM stress cannot replace current-geometry browser proof. Run the clean database gate and authentic type regeneration, then the complete exact-candidate gates and independent reviews described above; unavailable Docker/browser execution is an explicit limitation, never a pass.
+
+## Logout-generation privacy barrier
+
+Focused Auth tests cover retained HttpOnly generation creation only after confirmed
+local sign-out, read-only exact-generation comparison, stale login/confirmation
+submission, first storage read failure before tombstone creation followed by module
+reload, independent tab acknowledgement, newer-generation restarts, invalid/absent
+markers, acknowledgement write/readback failures, cleanup-only retries, stable
+password action ownership through refreshed session props, protected restoration
+withholding and reactivation without losing unchanged editable state.
+Deferred-read regressions additionally cover query-only navigation, changed known
+server generation/action revision, newly mounted bootstrap under an internally
+updating retained route slot, and unchanged field node/value/focus/selection
+preservation during harmless checks. Revocation coverage includes failed cleanup
+masking before erasure, late old verification, original-binding server checks,
+other-actor denial, explicit retry and separate fresh-owner admission. A bounded
+failed-cleanup regression checks that callback invalidation caused by the check
+itself does not create an automatic retry loop. These are authored contracts;
+report the actual focused test outcome separately from their presence in source.
+Assignment, label and scope-guard fixtures verify that pending readiness defers
+storage restoration and actor rebinding while the Auth logout observer remains
+subscribed; unchanged reactivation never restarts hydrated workspaces.
+`tests/e2e/logout-privacy.spec.ts` authors real Next logout/reload and two-tab
+same-actor protected-entry checks using synthetic per-tab recovery, plus ordinary
+logout, login through its resulting form and a second logout in the same tab
+without navigation, reload, cookie replacement or forced input. The existing
+foundation password test exercises cookie-driven password Flight completion.
+These tests require the approved local E2E environment and must be reported as
+unrun until executed; unit fixtures do not prove delivered browser headers,
+cross-tab Auth broadcast timing or actual Next Flight behavior.
+
+Scan component regressions exercise attempted logout during a deferred mutation:
+the exact command survives, the old result is ignored even after original-binding
+readmission, and only explicit retry dispatches the same command. A different actor
+cannot retry that retained owner. Designer identity-request interception matches
+the business action's actor payload rather than every server-action POST; DOM
+erasure assertions wait for the designer's terminal access denial. Browser/database
+execution remains required for actual request serialization, receipt atomicity,
+fresh same-tab authentication and native focus across canonical query binding.
+
+Run the focused skip-link browser regression without a backend or Next build:
+`node node_modules/@playwright/test/cli.js test --config tests/browser/skip-link.config.ts`.
+It requires installed Chromium and compiles the actual application stylesheet
+through PostCSS/Tailwind. A representative retained cleanup panel precedes the
+positioned protected shell; desktop and phone cases verify ordinary Retry clicks,
+unfocused link hit testing, and native Tab/Enter access to main. The same tests
+remain included in the normal E2E suite. This source-CSS geometry fixture does not
+mount the Auth controller or prove cross-tab authorization/readmission; the full
+`navigation-workflow.spec.ts` recovery scenario and approved local Auth E2E gate
+remain required.
+
+## Protected page content gates
+
+Protected server pages resolve existing authorization/read/validation decisions
+before returning gated private content. The shared controller and all layout
+providers must keep the opaque route slot rendered, without an ancestor Suspense
+or accepted-content gate. No resource preflight, duplicate query or extra logout
+generation read is needed. Keep every success, empty and access-denied return
+gated when adding or changing a page.
+
+`auth-privacy.test.tsx` exercises the actual retained route-slot/content-gate
+pattern with deferred initial checks, query changes, known generation/action
+changes, focus reactivation, newly mounted consumers and retained field nodes.
+`privacy-content.test.tsx` proves that pending server rendering never mounts a
+private bootstrap consumer. `tests/unit/protected-page-gates.test.ts` additionally
+checks every JSX return branch of every protected server page, including future
+pages. This structural guard supplements runtime proof; it does not establish
+HTTP status, database authorization, delivered Flight or visual acceptance.
+
+The scoped production fixture used installed Next.js 16.3.6/React 19.2.8, a
+delayed async `notFound()`, the actual privacy components and PageArrival, and
+private shell/body probes that throw if mounted before readiness. The old
+route-omitting boundary returned HTTP 200 even without Suspense. The structural
+page-gate pattern returned HTTP 404 for the missing page and HTTP 200 for the
+successful page without mounting those private probes. This is DB-free local
+transport evidence, not full-application or hosted browser acceptance. Preserve
+the real direct missing-resource document assertions in the interface E2E, and
+run the complete application/browser gates for the final change. Inspect desktop
+and phone-width layout after the gates release; unit visibility checks alone do
+not establish that new wrappers preserve the rendered layout.
+
+Current mapping below is relative to `src/app/(protected)/`. “Missing” identifies
+pages with existing `notFound()` decisions; other routes retain their original
+redirect, empty and access-denied branches.
+
+| Server page                            | Content-gated return branches | Missing |
+| -------------------------------------- | ----------------------------: | ------- |
+| `dashboard/page.tsx`                   |                             1 |         |
+| `history/page.tsx`                     |                             3 | Yes     |
+| `history/events/[kind]/[id]/page.tsx`  |                             1 | Yes     |
+| `inventory/page.tsx`                   |                             1 |         |
+| `inventory/assets/new/page.tsx`        |                             3 |         |
+| `inventory/assets/[id]/page.tsx`       |                             1 | Yes     |
+| `inventory/quantity/new/page.tsx`      |                             3 |         |
+| `inventory/quantity/[id]/page.tsx`     |                             1 | Yes     |
+| `labels/page.tsx`                      |                             2 |         |
+| `locations/page.tsx`                   |                             1 |         |
+| `locations/[code]/page.tsx`            |                             1 | Yes     |
+| `room/page.tsx`                        |                             2 |         |
+| `scan/page.tsx`                        |                             1 |         |
+| `settings/page.tsx`                    |                             1 |         |
+| `settings/categories/page.tsx`         |                             1 |         |
+| `settings/forms/page.tsx`              |                             1 |         |
+| `settings/forms/[categoryId]/page.tsx` |                             1 | Yes     |
+| `settings/labels/page.tsx`             |                             1 |         |
+| `settings/locations/page.tsx`          |                             1 |         |
+| `settings/locations/[code]/page.tsx`   |                             1 | Yes     |
+| `settings/sites/page.tsx`              |                             1 |         |
+| `settings/sites/[code]/page.tsx`       |                             1 | Yes     |
+| `sites/page.tsx`                       |                             1 |         |
+| `sites/[code]/page.tsx`                |                             1 | Yes     |
+| `sites/[code]/open/[kind]/page.tsx`    |                             3 | Yes     |
