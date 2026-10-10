@@ -1339,9 +1339,11 @@ function AssignmentFields({
           void lookup(input);
         }}
       >
+        {/* Restoration can complete during a press; keep its hit target fixed. */}
         <Button
           ref={cancelRef}
           variant="outline"
+          className="hover:translate-y-0 active:scale-100"
           type="button"
           disabled={unresolved || !freshReady}
           onPointerDown={(event) => {

@@ -540,6 +540,30 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       const cancel = inspection.getByRole('button', {
         name: /^(Cancel inspection|Skip inspection \/ review)$/,
       });
+      const expectStationaryCancel = async () => {
+        // Inspect the winning browser CSS, including Tailwind's individual
+        // transform properties, while the real primary pointer is held.
+        await expect
+          .poll(() =>
+            cancel.evaluate((element) => {
+              const style = getComputedStyle(element);
+              return {
+                transform:
+                  style.transform === 'none' ||
+                  new DOMMatrixReadOnly(style.transform).isIdentity,
+                scale:
+                  style.scale === 'none' ||
+                  style.scale.split(' ').every((value) => Number(value) === 1),
+                translate:
+                  style.translate === 'none' ||
+                  style.translate
+                    .split(' ')
+                    .every((value) => Number.parseFloat(value) === 0),
+              };
+            }),
+          )
+          .toEqual({ transform: true, scale: true, translate: true });
+      };
       await expect(inspection).toHaveAttribute('aria-busy', 'true');
       await expect(cancel).toHaveText('Cancel inspection');
       await expect(cancel).toBeFocused();
@@ -555,6 +579,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       await page.mouse.move(point.x, point.y);
       await page.mouse.down();
       await expect(cancel).toBeFocused();
+      await expectStationaryCancel();
       const restoredResponse = page.waitForResponse(
         (response) =>
           response.url().includes('/scan?mode=assign') &&
@@ -574,6 +599,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       // These checks happen with the mouse still held. Review focus must not
       // scroll the pressed target away and divert the browser's eventual click.
       await expect(cancel).toBeFocused();
+      await expectStationaryCancel();
       expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
       const after = await cancel.boundingBox();
       expect(after).toMatchObject({
