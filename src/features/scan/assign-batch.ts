@@ -205,6 +205,28 @@ export function batchTotals(entries: BatchEntry[]) {
     uncertain: entries.filter((row) => row.status === 'uncertain').length,
   };
 }
+/** An interrupted read has no command to replay or retained review to reopen. */
+export function reconcileInterruptedLookups(
+  value: AssignmentBatch,
+): AssignmentBatch {
+  let changed = false;
+  const entries = value.entries.map((row) => {
+    if (
+      row.status !== 'pending' ||
+      row.requestId !== null ||
+      row.id === value.historical?.entryId
+    )
+      return row;
+    changed = true;
+    return {
+      ...row,
+      status: 'skipped' as const,
+      message:
+        'Inspection interrupted before confirmation. Nothing was submitted.',
+    };
+  });
+  return changed ? { ...value, entries } : value;
+}
 export function historicalInspection(
   state: AssignState,
   entryId: string,

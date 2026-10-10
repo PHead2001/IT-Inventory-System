@@ -507,134 +507,213 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       page.getByRole('region', { name: 'Review assignment' }),
     ).toHaveCount(0);
     expect(await count()).toBe(0);
-    await inspect(page);
-    // Restore a persisted pending review on a phone. Unlike the late-result
-    // cancellation above, this read completes between a real press and release.
-    const originalViewport = page.viewportSize();
-    await page.setViewportSize({ width: 375, height: 812 });
-    let releaseRestore!: () => void;
-    const heldRestore = new Promise<void>((resolve) => {
-      releaseRestore = resolve;
+    let releaseInterrupted!: () => void;
+    const interruptedRead = new Promise<void>((resolve) => {
+      releaseInterrupted = resolve;
     });
-    let signalRestore!: () => void;
-    const restoreIntercepted = new Promise<void>((resolve) => {
-      signalRestore = resolve;
+    let signalInterrupted!: () => void;
+    const interruptedLookup = new Promise<void>((resolve) => {
+      signalInterrupted = resolve;
     });
-    let restoreDelayed = false;
+    let interruptedDelayed = false;
     await page.route('**/scan?mode=assign*', async (route) => {
       if (
-        !restoreDelayed &&
+        !interruptedDelayed &&
         route.request().method() === 'POST' &&
         route.request().headers()['next-action']
       ) {
-        restoreDelayed = true;
-        signalRestore();
-        await heldRestore;
+        interruptedDelayed = true;
+        signalInterrupted();
+        await interruptedRead;
       }
       await route.continue();
     });
     try {
-      await page.reload();
-      await restoreIntercepted;
-      const inspection = page.getByRole('form', { name: 'Inspect equipment' });
-      const cancel = inspection.getByRole('button', {
-        name: /^(Cancel inspection|Skip inspection \/ review)$/,
-      });
-      const expectStationaryCancel = async () => {
-        // Inspect the winning browser CSS, including Tailwind's individual
-        // transform properties, while the real primary pointer is held.
-        await expect
-          .poll(() =>
-            cancel.evaluate((element) => {
-              const style = getComputedStyle(element);
-              return {
-                transform:
-                  style.transform === 'none' ||
-                  new DOMMatrixReadOnly(style.transform).isIdentity,
-                scale:
-                  style.scale === 'none' ||
-                  style.scale.split(' ').every((value) => Number(value) === 1),
-                translate:
-                  style.translate === 'none' ||
-                  style.translate
-                    .split(' ')
-                    .every((value) => Number.parseFloat(value) === 0),
-              };
-            }),
-          )
-          .toEqual({ transform: true, scale: true, translate: true });
-      };
-      await expect(inspection).toHaveAttribute('aria-busy', 'true');
-      await expect(cancel).toHaveText('Cancel inspection');
-      await expect(cancel).toBeFocused();
-      await cancel.scrollIntoViewIfNeeded();
-      await page.evaluate(() => document.fonts.ready);
-      const before = await cancel.boundingBox();
-      expect(before).toBeTruthy();
-      const point = {
-        x: before!.x + before!.width / 2,
-        y: before!.y + before!.height / 2,
-      };
-      const scrollBefore = await page.evaluate(() => window.scrollY);
-      await page.mouse.move(point.x, point.y);
-      await page.mouse.down();
-      await expect(cancel).toBeFocused();
-      await expectStationaryCancel();
-      const restoredResponse = page.waitForResponse(
-        (response) =>
-          response.url().includes('/scan?mode=assign') &&
-          response.request().method() === 'POST' &&
-          !!response.request().headers()['next-action'],
-      );
-      releaseRestore();
-      expect(await (await restoredResponse).finished()).toBeNull();
-      await expect(inspection).toHaveAttribute('aria-busy', 'false');
-      await expect(
-        page.getByText(
-          'Availability refreshed. Review the source and units before confirming.',
-          { exact: true },
-        ),
-      ).toBeVisible();
-      await expect(cancel).toHaveText('Skip inspection / review');
-      // These checks happen with the mouse still held. Review focus must not
-      // scroll the pressed target away and divert the browser's eventual click.
-      await expect(cancel).toBeFocused();
-      await expectStationaryCancel();
-      expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
-      const after = await cancel.boundingBox();
-      expect(after).toMatchObject({
-        x: before!.x,
-        y: before!.y,
-        height: before!.height,
-      });
-      expect(
-        await cancel.evaluate(
-          (element, point) =>
-            document.elementFromPoint(point.x, point.y)?.closest('button') ===
-            element,
-          point,
-        ),
-      ).toBe(true);
-      expect(await count()).toBe(0);
-      await page.mouse.up();
-      await expect(
-        page.getByLabel('Scan, paste, or search inventory'),
-      ).toBeFocused();
-      await expect(
-        page.getByRole('region', { name: 'Review assignment' }),
-      ).toHaveCount(0);
+      await page.getByLabel('Scan, paste, or search inventory').fill(path);
+      await page.getByLabel('Scan, paste, or search inventory').press('Enter');
+      await interruptedLookup;
+      await page.goto(path); // Leave the route while its requestless lookup is held.
+      await page.goBack();
       await expect(
         page.getByRole('region', { name: 'Batch checklist' }),
       ).toContainText('0 pending');
       await expect(
         page.getByRole('region', { name: 'Batch checklist' }),
-      ).toContainText('Skipped before confirmation.');
+      ).toContainText(
+        'Inspection interrupted before confirmation. Nothing was submitted.',
+      );
+      await expect(
+        page.getByRole('button', { name: 'Inspect equipment', exact: true }),
+      ).toBeEnabled();
+      releaseInterrupted();
+      await page.unrouteAll({ behavior: 'wait' });
+      await expect(
+        page.getByRole('region', { name: 'Review assignment' }),
+      ).toHaveCount(0);
+      await page.reload();
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText('0 pending');
       expect(await count()).toBe(0);
     } finally {
-      releaseRestore();
-      await page.mouse.up();
+      releaseInterrupted();
       await page.unrouteAll({ behavior: 'wait' });
-      if (originalViewport) await page.setViewportSize(originalViewport);
+    }
+    await inspect(page);
+    // Restore a persisted pending review on a phone. Unlike the late-result
+    // cancellation above, this read completes between a real press and release.
+    const originalViewport = page.viewportSize();
+    for (const releaseGesture of ['inside', 'outside'] as const) {
+      if (releaseGesture === 'outside') await inspect(page);
+      await page.setViewportSize({ width: 375, height: 812 });
+      let releaseRestore!: () => void;
+      const heldRestore = new Promise<void>((resolve) => {
+        releaseRestore = resolve;
+      });
+      let signalRestore!: () => void;
+      const restoreIntercepted = new Promise<void>((resolve) => {
+        signalRestore = resolve;
+      });
+      let restoreDelayed = false;
+      await page.route('**/scan?mode=assign*', async (route) => {
+        if (
+          !restoreDelayed &&
+          route.request().method() === 'POST' &&
+          route.request().headers()['next-action']
+        ) {
+          restoreDelayed = true;
+          signalRestore();
+          await heldRestore;
+        }
+        await route.continue();
+      });
+      try {
+        await page.reload();
+        await restoreIntercepted;
+        const inspection = page.getByRole('form', {
+          name: 'Inspect equipment',
+        });
+        const cancel = inspection.getByRole('button', {
+          name: /^(Cancel inspection|Skip inspection \/ review)$/,
+        });
+        const expectStationaryCancel = async () => {
+          // Inspect the winning browser CSS, including Tailwind's individual
+          // transform properties, while the real primary pointer is held.
+          await expect
+            .poll(() =>
+              cancel.evaluate((element) => {
+                const style = getComputedStyle(element);
+                return {
+                  transform:
+                    style.transform === 'none' ||
+                    new DOMMatrixReadOnly(style.transform).isIdentity,
+                  scale:
+                    style.scale === 'none' ||
+                    style.scale
+                      .split(' ')
+                      .every((value) => Number(value) === 1),
+                  translate:
+                    style.translate === 'none' ||
+                    style.translate
+                      .split(' ')
+                      .every((value) => Number.parseFloat(value) === 0),
+                };
+              }),
+            )
+            .toEqual({ transform: true, scale: true, translate: true });
+        };
+        await expect(inspection).toHaveAttribute('aria-busy', 'true');
+        await expect(cancel).toHaveText('Cancel inspection');
+        await expect(cancel).toBeFocused();
+        await cancel.scrollIntoViewIfNeeded();
+        await page.evaluate(() => document.fonts.ready);
+        const before = await cancel.boundingBox();
+        expect(before).toBeTruthy();
+        const point = {
+          x: before!.x + before!.width / 2,
+          y: before!.y + before!.height / 2,
+        };
+        const scrollBefore = await page.evaluate(() => window.scrollY);
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.down();
+        await expect(cancel).toBeFocused();
+        await expectStationaryCancel();
+        const restoredResponse = page.waitForResponse(
+          (response) =>
+            response.url().includes('/scan?mode=assign') &&
+            response.request().method() === 'POST' &&
+            !!response.request().headers()['next-action'],
+        );
+        releaseRestore();
+        expect(await (await restoredResponse).finished()).toBeNull();
+        await expect(inspection).toHaveAttribute('aria-busy', 'false');
+        await expect(
+          page.getByText(
+            'Availability refreshed. Review the source and units before confirming.',
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(cancel).toHaveText('Skip inspection / review');
+        // These checks happen with the mouse still held. Review focus must not
+        // scroll the pressed target away and divert the browser's eventual click.
+        await expect(cancel).toBeFocused();
+        await expectStationaryCancel();
+        expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+        const after = await cancel.boundingBox();
+        expect(after).toMatchObject({
+          x: before!.x,
+          y: before!.y,
+          height: before!.height,
+        });
+        expect(
+          await cancel.evaluate(
+            (element, point) =>
+              document.elementFromPoint(point.x, point.y)?.closest('button') ===
+              element,
+            point,
+          ),
+        ).toBe(true);
+        expect(await count()).toBe(0);
+        if (releaseGesture === 'outside') {
+          await page.mouse.move(2, point.y); // Nonfocusable page edge, no Cancel click.
+          expect(
+            await cancel.evaluate(
+              (element, y) =>
+                document.elementFromPoint(2, y)?.closest('button') === element,
+              point.y,
+            ),
+          ).toBe(false);
+        }
+        await page.mouse.up();
+        if (releaseGesture === 'outside') {
+          await expect(
+            page.getByRole('region', { name: 'Review assignment' }),
+          ).toBeFocused();
+          await expect(
+            page.getByRole('region', { name: 'Batch checklist' }),
+          ).toContainText('1 pending');
+          expect(await count()).toBe(0);
+          await cancel.click(); // Settle deliberately after proving aborted focus transfer.
+        }
+        await expect(
+          page.getByLabel('Scan, paste, or search inventory'),
+        ).toBeFocused();
+        await expect(
+          page.getByRole('region', { name: 'Review assignment' }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole('region', { name: 'Batch checklist' }),
+        ).toContainText('0 pending');
+        await expect(
+          page.getByRole('region', { name: 'Batch checklist' }),
+        ).toContainText('Skipped before confirmation.');
+        expect(await count()).toBe(0);
+      } finally {
+        releaseRestore();
+        await page.mouse.up();
+        await page.unrouteAll({ behavior: 'wait' });
+        if (originalViewport) await page.setViewportSize(originalViewport);
+      }
     }
     await inspect(page);
     const other = await context.newPage();

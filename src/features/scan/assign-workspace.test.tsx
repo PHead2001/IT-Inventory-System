@@ -1573,6 +1573,200 @@ it('repeated Back/remount refreshes availability without adding rows or replacin
   expect(readBatch(scope).value?.entries).toHaveLength(1);
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+it.each([
+  'lookup reload',
+  'lookup Back',
+  'inspection reload',
+  'inspection Back',
+])(
+  'persists a truthful interrupted outcome for %s before a new inspection is usable',
+  async (interruption) => {
+    let finish!: (value: unknown) => void;
+    const held = new Promise((resolve) => {
+      finish = resolve;
+    });
+    if (interruption.startsWith('lookup')) mocks.find.mockReturnValueOnce(held);
+    else mocks.inspect.mockReturnValueOnce(held);
+    const original = render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+      { target: { value: candidate.path } },
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    await waitFor(() =>
+      expect(
+        interruption.startsWith('lookup') ? mocks.find : mocks.inspect,
+      ).toHaveBeenCalledOnce(),
+    );
+    const pending = readBatch(scope).value!.entries[0];
+    expect(pending).toMatchObject({ status: 'pending', requestId: null });
+    expect(readBatch(scope).value!.historical).toBeNull();
+    original.unmount(); // Reload and Back both enter a new mounted route owner.
+    const resumed = render(<AssignmentWorkspace {...props} />);
+    expect(
+      screen.getByRole('button', { name: 'Inspect equipment' }),
+    ).toBeEnabled();
+    expect(readBatch(scope).value!.entries[0]).toMatchObject({
+      id: pending.id,
+      status: 'skipped',
+      message:
+        'Inspection interrupted before confirmation. Nothing was submitted.',
+    });
+    expect(
+      screen.getByRole('region', { name: 'Batch checklist' }),
+    ).toHaveTextContent('0 pending');
+    const reconciled = readBatch(scope).raw;
+    await act(async () =>
+      finish(
+        interruption.startsWith('lookup')
+          ? { ok: true, status: 'found', matches: [match] }
+          : { ok: true, candidate },
+      ),
+    );
+    expect(readBatch(scope).raw).toBe(reconciled);
+    expect(
+      screen.queryByRole('region', { name: 'Review assignment' }),
+    ).not.toBeInTheDocument();
+    resumed.unmount();
+    render(<AssignmentWorkspace {...props} />);
+    expect(readBatch(scope).raw).toBe(reconciled);
+    await inspect();
+    expect(readBatch(scope).value!.entries).toHaveLength(2);
+    expect(readBatch(scope).value!.entries[0].status).toBe('skipped');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+it.each(['write denied', 'CAS changed'])(
+  'does not expose usable hydration when interrupted-read reconciliation fails because %s',
+  async (failure) => {
+    mocks.find.mockReturnValueOnce(new Promise(() => {}));
+    const original = render(<AssignmentWorkspace {...props} />);
+    fireEvent.change(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+      { target: { value: candidate.path } },
+    );
+    fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+    const before = readBatch(scope).raw!;
+    original.unmount();
+    const set = Storage.prototype.setItem;
+    const get = Storage.prototype.getItem;
+    let reads = 0;
+    const changed = JSON.stringify({ ...JSON.parse(before), finished: true });
+    const storage =
+      failure === 'write denied'
+        ? vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+            this: Storage,
+            key,
+            value,
+          ) {
+            if (key === batchKey(scope)) throw new Error('Storage denied');
+            return set.call(this, key, value);
+          })
+        : vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+            this: Storage,
+            key,
+          ) {
+            if (key === batchKey(scope) && ++reads === 2)
+              set.call(this, key, changed);
+            return get.call(this, key);
+          });
+    try {
+      render(<AssignmentWorkspace {...props} />);
+      expect(
+        screen.getByText(/This batch could not be saved/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Inspect equipment' }),
+      ).toBeDisabled();
+      expect(
+        screen.queryByText(/Inspection interrupted before confirmation/),
+      ).not.toBeInTheDocument();
+      expect(get.call(sessionStorage, batchKey(scope))).toBe(
+        failure === 'write denied' ? before : changed,
+      );
+      expect(mocks.find).toHaveBeenCalledOnce();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    } finally {
+      storage.mockRestore();
+    }
+  },
+);
+it('settles an orphaned read while reopening only the retained historical identity', async () => {
+  const original = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  original.unmount();
+  const saved = readBatch(scope).value!;
+  const retained = saved.entries[0];
+  const orphan = {
+    ...retained,
+    id: id(99),
+    kind: null,
+    entityId: null,
+    units: 0,
+    name: 'Interrupted lookup',
+  };
+  sessionStorage.setItem(
+    batchKey(scope),
+    JSON.stringify({ ...saved, entries: [orphan, retained] }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  await screen.findByText(
+    'Availability refreshed. Review the source and units before confirming.',
+  );
+  expect(readBatch(scope).value!.entries).toMatchObject([
+    { id: orphan.id, status: 'skipped' },
+    { id: retained.id, status: 'pending' },
+  ]);
+  expect(readBatch(scope).value!.historical?.entryId).toBe(retained.id);
+  expect(mocks.inspect).toHaveBeenCalledTimes(2);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('settles an orphaned read without replacing uncertain recovery or dispatching a new command', async () => {
+  const original = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  mocks.submit.mockRejectedValueOnce(new Error('Lost acknowledgement'));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await screen.findByRole('button', { name: 'Retry same assignment' });
+  original.unmount();
+  const saved = readBatch(scope).value!;
+  const uncertain = saved.entries[0];
+  const recovery = readAssignmentRecovery(scope).raw;
+  const orphan = {
+    ...uncertain,
+    id: id(99),
+    requestId: null,
+    status: 'pending' as const,
+    kind: null,
+    entityId: null,
+    units: 0,
+    name: 'Interrupted lookup',
+  };
+  sessionStorage.setItem(
+    batchKey(scope),
+    JSON.stringify({
+      ...saved,
+      historical: null,
+      entries: [orphan, uncertain],
+    }),
+  );
+  mocks.inspect.mockClear();
+  render(<AssignmentWorkspace {...props} />);
+  expect(
+    screen.getByRole('button', { name: 'Retry same assignment' }),
+  ).toBeEnabled();
+  expect(readBatch(scope).value!.entries).toMatchObject([
+    { id: orphan.id, status: 'skipped' },
+    uncertain,
+  ]);
+  expect(readAssignmentRecovery(scope).raw).toBe(recovery);
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  expect(mocks.submit).toHaveBeenCalledOnce();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same assignment' }),
+  );
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit.mock.calls[1][0]).toEqual(mocks.submit.mock.calls[0][0]);
+});
 it('cancelled restoration ignores its late availability and finally after a new lookup', async () => {
   const first = render(<AssignmentWorkspace {...props} />);
   await inspect();
@@ -1711,6 +1905,102 @@ it('does not steal focus from an in-progress primary Cancel press when restorati
   expect(
     screen.queryByRole('button', { name: 'Confirm assign' }),
   ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it.each(['outside pointerup', 'pointercancel', 'window blur'])(
+  'resumes deferred current review focus after restoration completes before an aborted %s',
+  async (gesture) => {
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    original.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(
+      <>
+        <AssignmentWorkspace {...props} />
+        <p data-testid="outside-release">Outside</p>
+      </>,
+    );
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    fireEvent(cancel, pointer('pointerdown', 7));
+    await act(async () => finish({ ok: true, candidate }));
+    expect(cancel).toHaveFocus();
+    if (gesture === 'window blur') {
+      fireEvent(window, new Event('blur'));
+      expect(cancel).toHaveFocus(); // A background window must not take focus.
+      fireEvent(window, new Event('focus'));
+    } else if (gesture === 'pointercancel')
+      fireEvent(cancel, pointer('pointercancel', 7));
+    else
+      fireEvent(screen.getByTestId('outside-release'), pointer('pointerup', 7));
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+    expect(readBatch(scope).value!.entries[0].status).toBe('pending');
+    expect(readBatch(scope).value!.historical).not.toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+it('does not steal deliberate focus navigation after a held restoration or a later window activation', async () => {
+  const original = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  original.unmount();
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(
+    <>
+      <AssignmentWorkspace {...props} />
+      <button>Unrelated task</button>
+    </>,
+  );
+  const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+  fireEvent(cancel, pointer('pointerdown', 7));
+  await act(async () => finish({ ok: true, candidate }));
+  const unrelated = screen.getByRole('button', { name: 'Unrelated task' });
+  act(() => unrelated.focus());
+  fireEvent(document.body, pointer('pointerup', 7));
+  fireEvent(window, new Event('focus'));
+  expect(unrelated).toHaveFocus();
+  expect(readBatch(scope).value!.entries[0].status).toBe('pending');
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it('does not resume an older deferred review after cancellation starts a new lookup generation', async () => {
+  const original = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  original.unmount();
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+  fireEvent(cancel, pointer('pointerdown', 7));
+  await act(async () => finish({ ok: true, candidate }));
+  fireEvent(window, new Event('blur'));
+  fireEvent.click(cancel);
+  mocks.find.mockReturnValueOnce(new Promise(() => {}));
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'NEW' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  fireEvent(window, new Event('focus'));
+  expect(
+    screen.getByRole('button', { name: 'Cancel inspection' }),
+  ).toHaveFocus();
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(readBatch(scope).value!.entries[0].status).toBe('skipped');
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 it.each(['keyboard', 'secondary press', 'cancelled press', 'released press'])(

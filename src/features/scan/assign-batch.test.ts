@@ -12,6 +12,7 @@ import {
   assignmentEpoch,
   adoptAssignmentScope,
   invalidateAssignmentPrivacy,
+  reconcileInterruptedLookups,
   type BatchEntry,
 } from './assign-batch';
 const id = (n: number) =>
@@ -91,6 +92,60 @@ it('counts server confirmed asset identities separately from quantity assignment
     pending: 1,
     uncertain: 1,
   });
+});
+it('reconciles only requestless orphaned reads while retaining historical, submitted and terminal identities', () => {
+  const orphan = {
+    ...entry,
+    id: id(20),
+    requestId: null,
+    eventId: null,
+    status: 'pending' as const,
+  };
+  const retained = { ...orphan, id: id(21) };
+  const submitted = { ...orphan, id: id(22), requestId: id(23) };
+  const uncertain = {
+    ...submitted,
+    id: id(24),
+    requestId: id(25),
+    status: 'uncertain' as const,
+  };
+  const failed = { ...orphan, id: id(26), status: 'failed' as const };
+  const historical = {
+    candidate: {
+      kind: 'quantity' as const,
+      id: entry.entityId!,
+      path: '/inventory/quantity/' + entry.entityId,
+      name: entry.name,
+      identifier: entry.identifier,
+      version: '1',
+      status: 'active' as const,
+      currentSite: null,
+      sources: [],
+    },
+    sourceId: '',
+    units: '1',
+    entryId: retained.id,
+  };
+  const batch = {
+    ...emptyBatch(scope),
+    context,
+    entries: [orphan, retained, submitted, uncertain, failed, entry],
+    historical,
+  };
+  const reconciled = reconcileInterruptedLookups(batch);
+  expect(reconciled.entries[0]).toMatchObject({
+    id: orphan.id,
+    status: 'skipped',
+    requestId: null,
+    eventId: null,
+    message:
+      'Inspection interrupted before confirmation. Nothing was submitted.',
+  });
+  expect(reconciled.historical).toBe(historical);
+  for (let index = 1; index < batch.entries.length; index++)
+    expect(reconciled.entries[index]).toBe(batch.entries[index]);
+  expect(batch.entries[0]).toBe(orphan);
+  expect(reconcileInterruptedLookups(reconciled)).toBe(reconciled);
 });
 it('counts two legitimate asset events for one asset without conflating event replay or asset identity', () => {
   const first = { ...entry, kind: 'asset' as const, units: 1 };

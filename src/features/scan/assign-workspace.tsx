@@ -55,6 +55,7 @@ import {
   matchesRecoveryEntry,
   readBatch,
   recoveryEntry,
+  reconcileInterruptedLookups,
   storeBatch,
   terminalFits,
   type AssignmentBatch,
@@ -133,9 +134,41 @@ function AssignmentFields({
   const [batch, setBatch] = useState<AssignmentBatch | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const cancelPress = useRef<number | null>(null);
+  const deferredReviewFocus = useRef<number | null>(null);
+  const reviewRef = useRef<HTMLElement>(null);
+  const chooserRef = useRef<HTMLUListElement>(null);
+  const resumeReviewFocus = useCallback(() => {
+    if (cancelPress.current !== null) return;
+    const token = deferredReviewFocus.current;
+    deferredReviewFocus.current = null;
+    if (
+      token === null ||
+      !mounted.current ||
+      epoch.current !== assignmentEpoch() ||
+      generation.current !== token ||
+      stateRef.current.generation !== token ||
+      document.activeElement !== cancelRef.current
+    )
+      return;
+    if (stateRef.current.phase === 'review') reviewRef.current?.focus();
+    else if (stateRef.current.phase === 'choose') chooserRef.current?.focus();
+    else if (stateRef.current.phase === 'ready' && stateRef.current.message)
+      inputRef.current?.focus();
+  }, []);
   useEffect(() => {
     const release = (event: PointerEvent) => {
-      if (cancelPress.current === event.pointerId) cancelPress.current = null;
+      if (cancelPress.current !== event.pointerId) return;
+      cancelPress.current = null;
+      // An inside pointerup must leave the target stationary for the native click.
+      // Aborted/outside gestures have no Cancel click to finish the focus transfer.
+      if (
+        event.type === 'pointercancel' ||
+        !(
+          event.target instanceof Node &&
+          cancelRef.current?.contains(event.target)
+        )
+      )
+        resumeReviewFocus();
     };
     const leaveWindow = () => {
       cancelPress.current = null;
@@ -145,15 +178,16 @@ function AssignmentFields({
     window.addEventListener('pointerup', release, true);
     window.addEventListener('pointercancel', release, true);
     window.addEventListener('blur', leaveWindow);
+    window.addEventListener('focus', resumeReviewFocus);
     return () => {
       window.removeEventListener('pointerup', release, true);
       window.removeEventListener('pointercancel', release, true);
       window.removeEventListener('blur', leaveWindow);
+      window.removeEventListener('focus', resumeReviewFocus);
       cancelPress.current = null;
+      deferredReviewFocus.current = null;
     };
-  }, []);
-  const reviewRef = useRef<HTMLElement>(null);
-  const chooserRef = useRef<HTMLUListElement>(null);
+  }, [resumeReviewFocus]);
   const [ready, setReady] = useState(false);
   const [storageError, setStorageIssue] = useState('');
   const [fatalStorageError, setFatalStorageError] = useState(false);
@@ -197,12 +231,16 @@ function AssignmentFields({
   useLayoutEffect(() => {
     // Keep the pressed Cancel target in place until release. Review focus can
     // scroll the form away between pointerdown and the accepted click.
-    if (cancelPress.current !== null) return;
+    deferredReviewFocus.current = null;
+    if (cancelPress.current !== null) {
+      deferredReviewFocus.current = state.generation;
+      return;
+    }
     if (state.phase === 'review') reviewRef.current?.focus();
     else if (state.phase === 'choose') chooserRef.current?.focus();
     else if (state.phase === 'ready' && state.message)
       inputRef.current?.focus();
-  }, [state.phase, state.message]);
+  }, [state.phase, state.message, state.generation]);
   const alive = () => mounted.current && epoch.current === assignmentEpoch();
   const resetReceiptRead = () => {
     setReceiptLoading(false);
@@ -302,6 +340,13 @@ function AssignmentFields({
     };
     batchRaw.current = savedBatch.raw;
     batchRef.current = restored;
+    const reconciled = reconcileInterruptedLookups(restored);
+    if (reconciled !== restored) {
+      // Reconcile only abandoned reads, before exposing a usable hydrated batch.
+      // Submitted recovery and its exact command/receipt remain untouched.
+      if (!saveBatch(reconciled)) return;
+      restored = reconciled;
+    }
     if (stored.value) {
       recovered.current = stored.value;
       recoveryRaw.current = stored.raw;
@@ -984,6 +1029,7 @@ function AssignmentFields({
   const freshReady = ready && !batch?.finished;
   const cancelInspection = () => {
     cancelPress.current = null;
+    deferredReviewFocus.current = null;
     if (submitting.current || unresolved) return;
     next();
     inputRef.current?.focus();
@@ -1352,6 +1398,9 @@ function AssignmentFields({
           }}
           onBlur={() => {
             cancelPress.current = null;
+            // Deliberate focus navigation must not be stolen by a later release.
+            if (document.activeElement !== cancelRef.current)
+              deferredReviewFocus.current = null;
           }}
           onClick={cancelInspection}
         >
