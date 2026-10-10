@@ -179,6 +179,9 @@ function csvRows(text: string) {
     );
 }
 
+// SearchForm's fake-timer tests retain elapsed debounce/composition exclusions.
+// The request-negative checks here are browser wiring checks; applied URL, rows,
+// filters and idle status establish readiness without a fixed debounce sleep.
 test('live inventory typing keeps applied rows, chips and CSV coherent through delay, composition, history and competing navigation', async ({
   page,
 }, info) => {
@@ -233,8 +236,6 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
 
     await input.dispatchEvent('compositionstart');
     await input.fill(beta);
-    // Deliberately cross the real 250ms debounce while composition is active.
-    await page.waitForTimeout(350);
     expect(delayed.requests).not.toContain(beta);
     await expect(input).toHaveValue(beta);
     await expect(
@@ -275,7 +276,6 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
       .click();
     await appliedSearch(page, alpha, 24);
     await expect(page).toHaveURL((url) => !url.searchParams.has('type'));
-    await page.waitForTimeout(350);
     expect(delayed.requests).not.toContain(chipCancelled);
 
     await input.fill(setup.prefix);
@@ -290,7 +290,6 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
     await expect(page).toHaveURL((url) => url.searchParams.get('page') === '2');
     await appliedSearch(page, setup.prefix, 26);
     await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible();
-    await page.waitForTimeout(350);
     expect(delayed.requests).not.toContain(pageCancelled);
 
     const absent = setup.prefix + ' absent';
@@ -306,7 +305,11 @@ test('live inventory typing keeps applied rows, chips and CSV coherent through d
       .click();
     await expect(page).toHaveURL((url) => !url.searchParams.has('q'));
     await expect(input).toHaveValue('');
-    await page.waitForTimeout(350);
+    await expect(
+      page.getByText('Results and CSV use the applied search.', {
+        exact: true,
+      }),
+    ).toBeVisible();
     expect(delayed.requests).not.toContain(clearCancelled);
 
     // An unavailable page reconciles to real rows without broadening CSV scope.

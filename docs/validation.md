@@ -1,5 +1,34 @@
 # Validation
 
+## C403 live-search timing coverage
+
+`tests/e2e/audit-three-discovery.spec.ts` uses applied URL, input, row count,
+filter chips and idle status for live-search readiness, including Clear filters.
+Its immediate request-negative checks verify browser wiring; they no longer
+claim that a real debounce deadline elapsed. The held real response, rapid edits,
+composition commit, Back/Forward, competing chip/pagination/Clear navigation,
+page-99 reconciliation and actual full-filter CSV download remain in that spec.
+
+The original elapsed-time exclusions are retained deterministically in
+`src/features/inventory/components/search-form.test.tsx`:
+
+- **waits for composition, preserves later typing across an earlier response, and
+  restores history** advances 500 ms during composition without navigation,
+  then 250 ms after composition ends; it also retains newer typing when an
+  earlier response arrives.
+- **cancels unsent typing when a chip, pagination or Clear filters commits another
+  search** separately advances 300 ms after each real link click and verifies
+  that cancelled typing does not navigate.
+- **debounces rapid A/B/A typing and clear, but submits immediately without a
+  duplicate request** proves the 249+1 ms boundary and immediate submission
+  without a later duplicate replacement.
+
+Removing the four fixed 350 ms browser sleeps is only partial C403 progress.
+Broader milestone-to-feature consolidation still requires mapping each failure
+check to retained coverage; no CI gate, security/race coverage or runner configuration is
+relaxed by this change. Component proof does not replace the retained browser
+integration gate.
+
 ## U403 choice identity proof
 
 The forward choice-identity migration keeps the public RPC signatures and pinned
