@@ -1474,15 +1474,17 @@ it('shows field-aware label-search answers including intentional UUID text witho
   expect(mocks.getQueueRecords).toHaveBeenLastCalledWith([
     { kind: 'quantity', key: quantityId },
   ]);
-  const stored = JSON.parse(
-    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-  );
-  expect(
-    stored.entries.map((entry: { kind: string; key: string }) => ({
-      kind: entry.kind,
-      key: entry.key,
-    })),
-  ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  await waitFor(() => {
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    );
+    expect(
+      stored.entries.map((entry: { kind: string; key: string }) => ({
+        kind: entry.kind,
+        key: entry.key,
+      })),
+    ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  });
   expect(
     screen.getByRole('region', { name: 'Label queue' }),
   ).not.toHaveTextContent('Braided cable');
