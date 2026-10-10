@@ -406,7 +406,7 @@ describe('auth boundaries', () => {
           role: 'staff',
         }),
       ),
-    ).rejects.toThrow('REDIRECT:/login?password=updated');
+    ).resolves.toEqual({ passwordUpdated: true, sessionClosed: true });
     expect(mocks.updateUser).toHaveBeenCalledWith({
       password: 'Password123456',
     });
@@ -438,7 +438,7 @@ describe('auth boundaries', () => {
         {},
         form({ ...values, current_password: 'CurrentPassword123456' }),
       ),
-    ).rejects.toThrow('REDIRECT:/login?password=updated');
+    ).resolves.toEqual({ passwordUpdated: true, sessionClosed: true });
     expect(mocks.updateUser).toHaveBeenCalledWith({
       password: values.password,
       current_password: 'CurrentPassword123456',

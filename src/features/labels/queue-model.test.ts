@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addEntry,
   clearLabelQueueSession,
@@ -102,10 +102,29 @@ describe('session-scoped queue', () => {
     sessionStorage.setItem(second, 'b');
     sessionStorage.setItem(third, 'c');
     sessionStorage.setItem('other-application', 'keep');
-    clearLabelQueueSession();
+    expect(clearLabelQueueSession()).toBe(true);
     expect(sessionStorage.getItem(first)).toBeNull();
     expect(sessionStorage.getItem(second)).toBeNull();
     expect(sessionStorage.getItem(third)).toBeNull();
     expect(sessionStorage.getItem('other-application')).toBe('keep');
+  });
+  it('reports thrown or silent queue removal failure without clearing unrelated storage', () => {
+    const key = queueStorageKey('https://branch.example.test', 'member-a');
+    sessionStorage.setItem(key, 'private');
+    sessionStorage.setItem('other-application', 'keep');
+    const remove = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(() => {});
+    try {
+      expect(clearLabelQueueSession()).toBe(false);
+      expect(sessionStorage.getItem(key)).toBe('private');
+      remove.mockImplementation(() => {
+        throw new Error('denied');
+      });
+      expect(clearLabelQueueSession()).toBe(false);
+      expect(sessionStorage.getItem('other-application')).toBe('keep');
+    } finally {
+      remove.mockRestore();
+    }
   });
 });

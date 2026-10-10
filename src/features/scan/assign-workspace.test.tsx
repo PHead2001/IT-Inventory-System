@@ -80,9 +80,22 @@ vi.mock('./assign-camera', async (importOriginal) => {
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 // jsdom does not expose PointerEvent; retain pointer identity on mouse-backed events.
-const pointer = (type: string, pointerId = 1, button = 0) => {
-  const event = new MouseEvent(type, { bubbles: true, button });
+const pointer = (
+  type: string,
+  pointerId = 1,
+  button = 0,
+  clientX = 10,
+  clientY = 10,
+  pointerType = 'mouse',
+) => {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    button,
+    clientX,
+    clientY,
+  });
   Object.defineProperty(event, 'pointerId', { value: pointerId });
+  Object.defineProperty(event, 'pointerType', { value: pointerType });
   return event;
 };
 const site = {
@@ -132,6 +145,15 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.realCamera = false;
   mocks.guardFailure = false;
+  // jsdom has no layout hit-testing. The button occupies this explicit test point;
+  // captured releases at other coordinates must not infer a hit from event.target.
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: (x: number, y: number) =>
+      x === 10 && y === 10
+        ? document.querySelector('form[aria-label="Inspect equipment"] button')
+        : document.body,
+  });
   mocks.find.mockResolvedValue({ ok: true, status: 'found', matches: [match] });
   mocks.inspect.mockResolvedValue({ ok: true, candidate });
   mocks.submit.mockResolvedValue({
@@ -1936,12 +1958,73 @@ it.each(['outside pointerup', 'pointercancel', 'window blur'])(
     } else if (gesture === 'pointercancel')
       fireEvent(cancel, pointer('pointercancel', 7));
     else
-      fireEvent(screen.getByTestId('outside-release'), pointer('pointerup', 7));
+      fireEvent(
+        screen.getByTestId('outside-release'),
+        pointer('pointerup', 7, 0, 20, 20),
+      );
     expect(
       screen.getByRole('region', { name: 'Review assignment' }),
     ).toHaveFocus();
     expect(readBatch(scope).value!.entries[0].status).toBe('pending');
     expect(readBatch(scope).value!.historical).not.toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+it.each(['touch', 'pen'] as const)(
+  'uses release hit-testing for an implicitly captured %s pointer instead of its button target',
+  async (pointerType) => {
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    original.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<AssignmentWorkspace {...props} />);
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    fireEvent(cancel, pointer('pointerdown', 7, 0, 10, 10, pointerType));
+    await act(async () => finish({ ok: true, candidate }));
+    expect(cancel).toHaveFocus();
+    // Real implicit capture retargets pointerup to Cancel even outside its box.
+    fireEvent(cancel, pointer('pointerup', 8, 0, 20, 20, pointerType));
+    expect(cancel).toHaveFocus(); // A different pointer cannot release this press.
+    fireEvent(cancel, pointer('pointerup', 7, 0, 20, 20, pointerType));
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+    // Capture can also target the compatibility click at the original button.
+    fireEvent(cancel, pointer('click', 7, 0, 20, 20, pointerType));
+    expect(readBatch(scope).value!.entries[0].status).toBe('pending');
+    expect(readBatch(scope).value!.historical).not.toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    act(() => cancel.focus());
+    fireEvent.click(cancel); // A deliberate keyboard click remains usable.
+    expect(readBatch(scope).value!.entries[0].status).toBe('skipped');
+  },
+);
+it.each(['touch', 'pen'] as const)(
+  'keeps an inside captured %s release stationary until its native click',
+  async (pointerType) => {
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    original.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<AssignmentWorkspace {...props} />);
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    fireEvent(cancel, pointer('pointerdown', 7, 0, 10, 10, pointerType));
+    await act(async () => finish({ ok: true, candidate }));
+    fireEvent(cancel, pointer('pointerup', 7, 0, 10, 10, pointerType));
+    expect(cancel).toHaveFocus();
+    expect(readBatch(scope).value!.entries[0].status).toBe('pending');
+    fireEvent.click(cancel);
+    expect(readBatch(scope).value!.entries[0].status).toBe('skipped');
     expect(mocks.submit).not.toHaveBeenCalled();
   },
 );
@@ -2056,7 +2139,10 @@ it.each(['pointerup', 'pointercancel'])(
     );
     const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
     fireEvent(cancel, pointer('pointerdown', 7));
-    fireEvent(screen.getByTestId('outside-release'), pointer(type, 7));
+    fireEvent(
+      screen.getByTestId('outside-release'),
+      pointer(type, 7, 0, 20, 20),
+    );
     // A nonfocusable release target leaves the button focused but is not a click.
     expect(cancel).toHaveFocus();
     expect(readBatch(scope).value?.entries[0].status).toBe('pending');

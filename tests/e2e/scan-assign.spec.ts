@@ -1,6 +1,6 @@
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { randomUUID } from 'node:crypto';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import { PNG } from 'pngjs';
@@ -532,7 +532,24 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       await page.getByLabel('Scan, paste, or search inventory').fill(path);
       await page.getByLabel('Scan, paste, or search inventory').press('Enter');
       await interruptedLookup;
-      await page.goto(path); // Leave the route while its requestless lookup is held.
+      await page.getByRole('link', { name: 'Inventory', exact: true }).click();
+      await expect(page).toHaveURL(/\/inventory(?:\?.*)?$/);
+      // Prove the read remained orphaned after the old React owner unmounted.
+      // Full-document goto may instead abort and honestly settle it as failed.
+      expect(
+        await page.evaluate(() => {
+          const key = Object.keys(sessionStorage).find((value) =>
+            value.startsWith('inventory-assign-batch-v1:'),
+          )!;
+          const saved = JSON.parse(sessionStorage.getItem(key)!);
+          const row = saved.entries.at(-1);
+          return {
+            status: row.status,
+            requestId: row.requestId,
+            historical: saved.historical,
+          };
+        }),
+      ).toEqual({ status: 'pending', requestId: null, historical: null });
       await page.goBack();
       await expect(
         page.getByRole('region', { name: 'Batch checklist' }),
@@ -563,8 +580,12 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     // Restore a persisted pending review on a phone. Unlike the late-result
     // cancellation above, this read completes between a real press and release.
     const originalViewport = page.viewportSize();
-    for (const releaseGesture of ['inside', 'outside'] as const) {
-      if (releaseGesture === 'outside') await inspect(page);
+    for (const releaseGesture of [
+      'inside',
+      'outside',
+      'touch outside',
+    ] as const) {
+      if (releaseGesture !== 'inside') await inspect(page);
       await page.setViewportSize({ width: 375, height: 812 });
       let releaseRestore!: () => void;
       const heldRestore = new Promise<void>((resolve) => {
@@ -575,6 +596,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         signalRestore = resolve;
       });
       let restoreDelayed = false;
+      let touch: CDPSession | undefined;
       await page.route('**/scan?mode=assign*', async (route) => {
         if (
           !restoreDelayed &&
@@ -634,8 +656,53 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
           y: before!.y + before!.height / 2,
         };
         const scrollBefore = await page.evaluate(() => window.scrollY);
-        await page.mouse.move(point.x, point.y);
-        await page.mouse.down();
+        if (releaseGesture === 'touch outside') {
+          touch = await context.newCDPSession(page);
+          await touch.send('Emulation.setTouchEmulationEnabled', {
+            enabled: true,
+            maxTouchPoints: 1,
+          });
+          await cancel.evaluate((element) => {
+            element.style.touchAction = 'none'; // Keep this deliberate drag from becoming page pan.
+            const evidence = {
+              captured: false,
+              released: false,
+              target: false,
+              x: -1,
+              type: '',
+            };
+            (
+              window as Window & { capturedCancelRelease?: typeof evidence }
+            ).capturedCancelRelease = evidence;
+            element.addEventListener(
+              'gotpointercapture',
+              () => {
+                evidence.captured = true;
+              },
+              { once: true },
+            );
+            element.addEventListener(
+              'pointerup',
+              (event) => {
+                const pointer = event as PointerEvent;
+                evidence.released = true;
+                evidence.target = event.target === element;
+                evidence.x = pointer.clientX;
+                evidence.type = pointer.pointerType;
+              },
+              { once: true },
+            );
+          });
+          await touch.send('Input.dispatchTouchEvent', {
+            type: 'touchStart',
+            touchPoints: [
+              { ...point, id: 11, radiusX: 1, radiusY: 1, force: 1 },
+            ],
+          });
+        } else {
+          await page.mouse.move(point.x, point.y);
+          await page.mouse.down();
+        }
         await expect(cancel).toBeFocused();
         await expectStationaryCancel();
         const restoredResponse = page.waitForResponse(
@@ -674,8 +741,15 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
           ),
         ).toBe(true);
         expect(await count()).toBe(0);
-        if (releaseGesture === 'outside') {
-          await page.mouse.move(2, point.y); // Nonfocusable page edge, no Cancel click.
+        if (releaseGesture !== 'inside') {
+          if (touch)
+            await touch.send('Input.dispatchTouchEvent', {
+              type: 'touchMove',
+              touchPoints: [
+                { x: 2, y: point.y, id: 11, radiusX: 1, radiusY: 1, force: 1 },
+              ],
+            });
+          else await page.mouse.move(2, point.y); // Nonfocusable page edge, no Cancel click.
           expect(
             await cancel.evaluate(
               (element, y) =>
@@ -684,8 +758,26 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
             ),
           ).toBe(false);
         }
-        await page.mouse.up();
-        if (releaseGesture === 'outside') {
+        if (touch) {
+          await touch.send('Input.dispatchTouchEvent', {
+            type: 'touchEnd',
+            touchPoints: [],
+          });
+          expect(
+            await page.evaluate(
+              () =>
+                (window as Window & { capturedCancelRelease?: object })
+                  .capturedCancelRelease,
+            ),
+          ).toMatchObject({
+            captured: true,
+            released: true,
+            target: true,
+            x: 2,
+            type: 'touch',
+          });
+        } else await page.mouse.up();
+        if (releaseGesture !== 'inside') {
           await expect(
             page.getByRole('region', { name: 'Review assignment' }),
           ).toBeFocused();
@@ -710,6 +802,16 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         expect(await count()).toBe(0);
       } finally {
         releaseRestore();
+        if (touch) {
+          await touch.send('Input.dispatchTouchEvent', {
+            type: 'touchEnd',
+            touchPoints: [],
+          });
+          await touch.send('Emulation.setTouchEmulationEnabled', {
+            enabled: false,
+          });
+          await touch.detach();
+        }
         await page.mouse.up();
         await page.unrouteAll({ behavior: 'wait' });
         if (originalViewport) await page.setViewportSize(originalViewport);

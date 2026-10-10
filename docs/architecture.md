@@ -86,8 +86,22 @@ provider would otherwise exempt that session from checking them. Sign in again t
 obtain an ordinary password session or request a new reset email. Mixed stale-email
 and password AMR also fails closed; unavailable verification never mutates the password.
 
-After a successful password update, the action signs out the local session and
-requires normal sign-in. If sign-out fails after the update commits, the UI states
+After a successful password update and confirmed caller-scoped sign-out, the action
+returns only a typed password-updated/session-closed acknowledgement. A password-free
+client completion clears and verifies this tab's assignment batch, exact uncertain
+commands and label queues before navigating to normal sign-in. Failed cleanup keeps
+the strongest durable all-cleanup tombstone and offers cleanup retry without another
+password mutation. Auth forms resume only an existing valid all-cleanup marker and
+block use until verified removal; URL flags, anonymous landing, private or invalid
+markers never authorize deletion of uncertain recovery. Server logout and browser
+cleanup are not atomic: response loss or closing the window before acknowledgement
+is not guaranteed to deliver browser cleanup absent an existing authoritative Auth
+session event. That delivery boundary still needs real-browser acceptance.
+The password page keeps the same client action owner when cookie writes trigger
+a server rerender, while refreshing the server-verified sessionAvailable prop.
+An unavailable/expired session hides editable fields without clearing recovery;
+only the action's genuine session-closed result permits the completion cleanup.
+If sign-out fails after the update commits, the UI states
 that the password changed and offers the existing guarded Sign out action rather
 than retrying the password change. Email-token replay rejection does not imply
 one-use password mutation: an already issued recovery JWT may remain usable through

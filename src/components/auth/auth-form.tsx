@@ -1,24 +1,36 @@
 'use client';
 import { useActionState } from 'react';
+import Link from 'next/link';
 import { login, recover, confirmAuth, setPassword } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AuthState } from '@/lib/auth/schemas';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import { AuthPrivacyBoundary, PasswordLogoutCompletion } from './auth-privacy';
 const actions = { login, recover, confirm: confirmAuth, password: setPassword };
-export function AuthForm({
-  mode,
-  tokenHash,
-  tokenType,
-  next,
-  emailedCompletion = false,
-}: {
+type Props = {
   mode: keyof typeof actions;
   tokenHash?: string;
   tokenType?: string;
   next?: string;
   emailedCompletion?: boolean;
-}) {
+  sessionAvailable?: boolean;
+};
+export function AuthForm(props: Props) {
+  return (
+    <AuthPrivacyBoundary>
+      <AuthFields {...props} />
+    </AuthPrivacyBoundary>
+  );
+}
+function AuthFields({
+  mode,
+  tokenHash,
+  tokenType,
+  next,
+  emailedCompletion = false,
+  sessionAvailable = true,
+}: Props) {
   const [state, action, pending] = useActionState<AuthState, FormData>(
     actions[mode],
     {},
@@ -29,6 +41,8 @@ export function AuthForm({
     confirm: 'Continue securely',
     password: 'Set password',
   }[mode];
+  if (mode === 'password' && state.passwordUpdated && state.sessionClosed)
+    return <PasswordLogoutCompletion />;
   if (state.passwordUpdated)
     return (
       <div className="space-y-5">
@@ -36,6 +50,23 @@ export function AuthForm({
           {state.error}
         </p>
         <QueueLogoutForm />
+      </div>
+    );
+  if (mode === 'password' && !sessionAvailable)
+    return (
+      <div role="alert">
+        <p>Unable to verify your session.</p>
+        <nav
+          aria-label="Password recovery"
+          className="mt-5 flex flex-wrap gap-3"
+        >
+          <Button asChild variant="outline">
+            <Link href="/login?switch=1">Sign in again</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/forgot-password">Request a new reset email</Link>
+          </Button>
+        </nav>
       </div>
     );
   return (

@@ -21,8 +21,18 @@ export const passwordSchema = z
     message: 'Passwords must match',
     path: ['confirmation'],
   });
-export type AuthState = {
-  error?: string;
-  message?: string;
-  passwordUpdated?: boolean;
+/** Only the password action's confirmed caller-scoped logout returns this shape. */
+export type PasswordLogoutAcknowledgement = {
+  passwordUpdated: true;
+  sessionClosed: true;
+  error?: never;
+  message?: never;
 };
+export type AuthState =
+  | {
+      error?: string;
+      message?: string;
+      passwordUpdated?: boolean;
+      sessionClosed?: never;
+    }
+  | PasswordLogoutAcknowledgement;

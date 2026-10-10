@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { clearLabelQueueSession } from '@/features/labels/queue-model';
 import {
   assignmentCandidateSchema,
   assignmentContextSchema,
@@ -282,6 +283,26 @@ export function invalidateAssignmentCallbacks() {
   if (typeof window !== 'undefined')
     window.dispatchEvent(new Event('assignment-scope-invalidated'));
 }
+/** Only a durable authoritative all-cleanup marker permits auth-entry deletion. */
+export function readAuthoritativeLogoutCleanup():
+  'pending' | 'none' | 'blocked' {
+  try {
+    const marker = sessionStorage.getItem('inventory-assign-cleanup-v1');
+    const scopeMarker = sessionStorage.getItem('inventory-assign-scope-v1');
+    if (
+      (marker !== null && marker !== 'all' && marker !== 'private') ||
+      (scopeMarker?.startsWith('cleanup:') &&
+        scopeMarker !== 'cleanup:all' &&
+        scopeMarker !== 'cleanup:private')
+    )
+      return 'blocked';
+    return marker === 'all' || scopeMarker === 'cleanup:all'
+      ? 'pending'
+      : 'none';
+  } catch {
+    return 'blocked';
+  }
+}
 function strongestCleanup(...modes: ('all' | 'private' | null)[]) {
   return modes.includes('all')
     ? 'all'
@@ -323,7 +344,9 @@ function clearAssignmentPrivacyStorage(mode: 'all' | 'private') {
       // Account/environment changes preserve exact uncertain recovery.
       if (
         key?.startsWith('inventory-assign-batch-v1:') ||
-        (mode === 'all' && key?.startsWith('inventory-assign-v1:'))
+        (mode === 'all' &&
+          (key?.startsWith('inventory-assign-v1:') ||
+            key?.startsWith('it-inventory-label-queue:v1:')))
       )
         targets.push(key);
     }
@@ -340,6 +363,9 @@ function clearAssignmentPrivacyStorage(mode: 'all' | 'private') {
         absent = false;
       }
     }
+    // Keep the strongest tombstone until the independently verified label helper
+    // also proves that every queue namespace is absent.
+    if (mode === 'all' && !clearLabelQueueSession()) absent = false;
     if (!absent) {
       // Successful independent deletions may have freed marker capacity.
       establishMarker();

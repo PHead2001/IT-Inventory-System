@@ -8,18 +8,20 @@ vi.mock('@/lib/auth/password-session.server', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: async () => ({ auth: {} }),
 }));
-vi.mock('@/components/auth/auth-form', () => ({
-  AuthForm: ({ emailedCompletion }: { emailedCompletion: boolean }) => (
-    <form
-      aria-label={
-        emailedCompletion ? 'Email completion' : 'Current password required'
-      }
-    />
-  ),
+vi.mock('@/lib/auth/actions', () => ({
+  login: vi.fn(),
+  recover: vi.fn(),
+  confirmAuth: vi.fn(),
+  setPassword: vi.fn(),
+  signOutSession: vi.fn(),
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 import SetPasswordPage from './page';
 beforeEach(() => {
   vi.resetAllMocks();
+  sessionStorage.clear();
 });
 it.each([true, false])(
   'uses the verified session result to render completion=%s',
@@ -27,18 +29,21 @@ it.each([true, false])(
     mocks.session.mockResolvedValue({ emailedCompletion });
     render(await SetPasswordPage());
     expect(
-      screen.getByRole('form', {
-        name: emailedCompletion
-          ? 'Email completion'
-          : 'Current password required',
+      await screen.findByRole('form', {
+        name: 'Set password',
       }),
     ).toBeInTheDocument();
+    expect(!!screen.queryByLabelText('Current password')).toBe(
+      !emailedCompletion,
+    );
   },
 );
 it('shows recoverable verification failure without a password form', async () => {
   mocks.session.mockResolvedValue(null);
   render(await SetPasswordPage());
-  expect(screen.getByRole('alert')).toHaveTextContent('Unable to verify');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Unable to verify',
+  );
   expect(screen.queryByRole('form')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Sign in again' })).toHaveAttribute(
     'href',
@@ -52,7 +57,7 @@ it('rejects unusable emailed sessions without offering the current-password form
     emailProof: 'unusable',
   });
   render(await SetPasswordPage());
-  expect(screen.getByRole('alert')).toHaveTextContent('Sign in again');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Sign in again');
   expect(screen.queryByRole('form')).not.toBeInTheDocument();
   expect(
     screen.getByRole('link', { name: 'Request a new reset email' }),
@@ -64,7 +69,7 @@ it.each([null, { emailedCompletion: false, emailProof: 'unusable' }])(
     mocks.session.mockResolvedValue(session);
     const user = userEvent.setup();
     render(await SetPasswordPage());
-    const recovery = screen.getByRole('navigation', {
+    const recovery = await screen.findByRole('navigation', {
       name: 'Password recovery',
     });
     const links = within(recovery).getAllByRole('link');

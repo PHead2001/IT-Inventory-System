@@ -134,6 +134,7 @@ function AssignmentFields({
   const [batch, setBatch] = useState<AssignmentBatch | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const cancelPress = useRef<number | null>(null);
+  const abortedCancelClick = useRef<number | null>(null);
   const deferredReviewFocus = useRef<number | null>(null);
   const reviewRef = useRef<HTMLElement>(null);
   const chooserRef = useRef<HTMLUListElement>(null);
@@ -161,14 +162,18 @@ function AssignmentFields({
       cancelPress.current = null;
       // An inside pointerup must leave the target stationary for the native click.
       // Aborted/outside gestures have no Cancel click to finish the focus transfer.
-      if (
+      // Touch/pen implicit capture retargets an outside release to the button;
+      // only the actual release coordinates establish the current hit target.
+      const hit =
+        Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+          ? document.elementFromPoint(event.clientX, event.clientY)
+          : null;
+      const aborted =
         event.type === 'pointercancel' ||
-        !(
-          event.target instanceof Node &&
-          cancelRef.current?.contains(event.target)
-        )
-      )
-        resumeReviewFocus();
+        !hit ||
+        !cancelRef.current?.contains(hit);
+      abortedCancelClick.current = aborted ? event.pointerId : null;
+      if (aborted) resumeReviewFocus();
     };
     const leaveWindow = () => {
       cancelPress.current = null;
@@ -185,6 +190,7 @@ function AssignmentFields({
       window.removeEventListener('blur', leaveWindow);
       window.removeEventListener('focus', resumeReviewFocus);
       cancelPress.current = null;
+      abortedCancelClick.current = null;
       deferredReviewFocus.current = null;
     };
   }, [resumeReviewFocus]);
@@ -1393,8 +1399,15 @@ function AssignmentFields({
           type="button"
           disabled={unresolved || !freshReady}
           onPointerDown={(event) => {
-            if (event.button === 0 && cancelPress.current === null)
+            if (
+              event.button === 0 &&
+              Number.isInteger(event.pointerId) &&
+              event.pointerId >= 0 &&
+              cancelPress.current === null
+            ) {
+              abortedCancelClick.current = null;
               cancelPress.current = event.pointerId;
+            }
           }}
           onBlur={() => {
             cancelPress.current = null;
@@ -1402,7 +1415,18 @@ function AssignmentFields({
             if (document.activeElement !== cancelRef.current)
               deferredReviewFocus.current = null;
           }}
-          onClick={cancelInspection}
+          onClick={(event) => {
+            const aborted = abortedCancelClick.current;
+            abortedCancelClick.current = null;
+            if (
+              aborted !== null &&
+              (('pointerId' in event.nativeEvent &&
+                event.nativeEvent.pointerId === aborted) ||
+                (!('pointerId' in event.nativeEvent) && event.detail > 0))
+            )
+              return;
+            cancelInspection();
+          }}
         >
           {state.phase === 'lookup' || restoring
             ? 'Cancel inspection'

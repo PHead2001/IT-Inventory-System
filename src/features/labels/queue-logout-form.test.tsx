@@ -30,6 +30,7 @@ const snapshot = {
 beforeEach(() => {
   clearAllDesignerRecovery();
   vi.mocked(clearLabelQueueSession).mockClear();
+  vi.mocked(clearLabelQueueSession).mockReturnValue(true);
   vi.mocked(signOutSession).mockReset();
   vi.mocked(signOutSession).mockResolvedValue({ ok: true });
   sessionStorage.clear();
@@ -64,7 +65,7 @@ it('allows explicit confirmed signout and removes even non-durable original reco
   );
   await waitFor(() => expect(signOutSession).toHaveBeenCalledOnce());
   expect(readDesignerRecovery(id(1), id(2)).item).toBeNull();
-  expect(clearLabelQueueSession).toHaveBeenCalledOnce();
+  await waitFor(() => expect(clearLabelQueueSession).toHaveBeenCalledTimes(2));
 });
 it('retains the existing direct signout behavior for a definitely unsaved draft', () => {
   writeDesignerRecovery({ ...snapshot, uncertainSave: false });

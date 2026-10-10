@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 const actions = vi.hoisted(() => ({
   login: vi.fn(async () => ({ error: 'Unable to sign in.' })),
   recover: vi.fn(async () => ({})),
@@ -10,30 +10,32 @@ const actions = vi.hoisted(() => ({
   signOutSession: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => routing,
 }));
 import { AuthForm } from './auth-form';
+beforeEach(() => sessionStorage.clear());
 it('uses accessible login fields and presents action errors', async () => {
   render(<AuthForm mode="login" />);
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText('Email'), 'staff@example.test');
+  await user.type(await screen.findByLabelText('Email'), 'staff@example.test');
   await user.type(screen.getByLabelText('Password'), 'NotThePassword');
   await user.click(screen.getByRole('button', { name: 'Sign in' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'Unable to sign in.',
   );
 });
-it('requires explicit interaction to exchange an email token', () => {
+it('requires explicit interaction to exchange an email token', async () => {
   render(<AuthForm mode="confirm" tokenHash="abc123" tokenType="invite" />);
   expect(actions.confirmAuth).not.toHaveBeenCalled();
   expect(
-    screen.getByRole('button', { name: 'Continue securely' }),
+    await screen.findByRole('button', { name: 'Continue securely' }),
   ).toBeEnabled();
 });
-it('labels password confirmation and help text', () => {
+it('labels password confirmation and help text', async () => {
   render(<AuthForm mode="password" />);
-  expect(screen.getByLabelText('Confirm password')).toHaveAttribute(
+  expect(await screen.findByLabelText('Confirm password')).toHaveAttribute(
     'autocomplete',
     'new-password',
   );
@@ -45,10 +47,10 @@ it('labels password confirmation and help text', () => {
     'current-password',
   );
 });
-it('allows server-verified emailed completion without an old password', () => {
+it('allows server-verified emailed completion without an old password', async () => {
   render(<AuthForm mode="password" emailedCompletion />);
   expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Confirm password')).toBeRequired();
+  expect(await screen.findByLabelText('Confirm password')).toBeRequired();
 });
 it('replaces password retry with guarded sign-out after a committed change', async () => {
   actions.setPassword.mockResolvedValueOnce({
@@ -57,7 +59,10 @@ it('replaces password retry with guarded sign-out after a committed change', asy
   });
   render(<AuthForm mode="password" emailedCompletion />);
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText('Password'), 'Replacement123456');
+  await user.type(
+    await screen.findByLabelText('Password'),
+    'Replacement123456',
+  );
   await user.type(
     screen.getByLabelText('Confirm password'),
     'Replacement123456',

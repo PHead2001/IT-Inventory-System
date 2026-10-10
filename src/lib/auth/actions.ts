@@ -176,5 +176,7 @@ export async function setPassword(
         'Your password was updated, but sign-out failed. Sign out before continuing.',
       passwordUpdated: true,
     };
-  redirect('/login?password=updated');
+  // Browser privacy cleanup must acknowledge this confirmed logout before leaving.
+  // No password or provider/session material crosses this result boundary.
+  return { passwordUpdated: true, sessionClosed: true };
 }
