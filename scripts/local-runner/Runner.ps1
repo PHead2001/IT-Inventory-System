@@ -974,7 +974,13 @@ function Invoke-Supervisor {
     $supervisorMutex = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
     try {
         $mutex = Enter-RunnerLock
-        try { $stale = Get-RunnerState; if ($null -ne $stale) { Remove-RunnerInstance $stale } }
+        try {
+            # Publication uses this mutex too: validate the live installed
+            # artifact before stale cleanup or any registration reconciliation.
+            Assert-RunnerTransitionClear
+            [void](Get-CoherentInstalledRunnerBundle)
+            $stale = Get-RunnerState; if ($null -ne $stale) { Remove-RunnerInstance $stale }
+        }
         finally { Exit-RunnerLock $mutex }
         Invoke-SupervisorLoop
     } finally { Exit-RunnerLock $supervisorMutex }

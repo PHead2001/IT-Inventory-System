@@ -81,6 +81,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell unattended recovery r
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Task.Power.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell task power regression failed.' }
 
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Supervisor.Coherence.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell direct supervisor coherence regression failed.' }
+
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Jit.Demand.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT demand regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Jit.Registration.Tests.ps1')
@@ -621,17 +624,19 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'fail')) { throw 'synthetic 
     function Assert-Administrator {}
     function Assert-SecureRoot {}
     function Get-RunnerState { return $creating }
+    function Get-CoherentInstalledRunnerBundle { $script:events.Add('coherence'); return [pscustomobject]@{} }
     function Remove-RunnerInstance { param($State) $script:events.Add('recovery') }
     function Invoke-SupervisorLoop { $script:events.Add('pickup') }
     Invoke-Supervisor
-    if (($script:events -join ',') -ne 'recovery,pickup') { throw 'Supervisor pickup ran before stale-VM recovery.' }
+    if (($script:events -join ',') -ne 'coherence,recovery,pickup') { throw 'Supervisor cleanup/pickup ran before installed coherence.' }
     function Remove-RunnerInstance { param($State) throw 'recovery denied' }
     $script:events.Clear()
     $rejected = $false
     try { Invoke-Supervisor } catch { $rejected = $true }
-    if (-not $rejected -or $script:events.Count -ne 0) { throw 'Supervisor picked up a job after failed boot recovery.' }
+    if (-not $rejected -or ($script:events -join ',') -cne 'coherence') { throw 'Supervisor picked up a job after failed boot recovery.' }
     $recovered = Enter-RunnerLock 'Global\ITInventoryLocalRunner-Supervisor-v1'
     Exit-RunnerLock $recovered
+    Remove-Item -Path Function:\Get-CoherentInstalledRunnerBundle
 
     $script:converterRegistration = [pscustomobject]@{ DistributionName = $stage.helperName; BasePath = $helperRoot }
     $script:converterCalls = [Collections.Generic.List[string]]::new()
