@@ -197,6 +197,55 @@ describe('scene label placement', () => {
       assertPacking(input, result.placements, bounds, reserved);
     }
   });
+  it.each(['left', 'top'] as const)(
+    'never publishes a nonfinite %s anchor when the deadline interrupts placement validation',
+    (axis) => {
+      for (const coordinate of [NaN, Infinity, -Infinity]) {
+        const input = [
+          {
+            ...label('bad', 0, 0),
+            [axis]: coordinate,
+            width: 44,
+            height: 44,
+            mandatory: true,
+            compact: { width: 44, height: 44 },
+          },
+          {
+            ...label('good', 2, 2),
+            width: 44,
+            height: 44,
+            mandatory: true,
+            compact: { width: 44, height: 44 },
+          },
+        ];
+        // Sweep watchdog interruption points, including immediately after a
+        // rail assignment but before the final validation pass (old cutoff 41).
+        for (const cutoff of [
+          ...Array.from({ length: 100 }, (_, i) => i + 1),
+          Infinity,
+        ]) {
+          let calls = 0;
+          const result = layoutLabelsDetailed(
+            input,
+            { left: 0, top: 0, right: 100, bottom: 100 },
+            [],
+            {},
+            () => (++calls > cutoff ? 16 : 0),
+          );
+          expect(
+            result.placements.find((entry) => entry.id === 'bad')?.visible,
+            `coordinate=${coordinate}, cutoff=${cutoff}, status=${result.status}`,
+          ).toBe(false);
+          for (const placement of result.placements.filter(
+            (entry) => entry.visible,
+          )) {
+            expect(Number.isFinite(placement.dx)).toBe(true);
+            expect(Number.isFinite(placement.dy)).toBe(true);
+          }
+        }
+      }
+    },
+  );
   it('expires cooperatively on the injected clock and preserves an already validated focused action', () => {
     const input = [
       {
@@ -464,6 +513,29 @@ describe('scene label placement', () => {
       );
     },
   );
+  it('shares rail geometry and skips slots already rejected within a packing trial', () => {
+    const result = layoutLabelsDetailed(
+      capturedSelected,
+      narrowViewport,
+      morePanel,
+      { maxOperations: 60_000, maxCandidates: 8_000 },
+      () => 0,
+    );
+    expect(result.status, JSON.stringify(result.stats)).toBe('complete');
+    expect(result.placements.every((entry) => entry.visible)).toBe(true);
+    assertPacking(
+      capturedSelected,
+      result.placements,
+      narrowViewport,
+      morePanel,
+    );
+    expect(
+      result.placements.find(
+        (entry) =>
+          entry.id === capturedSelected.find((label) => label.selected)!.id,
+      ),
+    ).toMatchObject({ dx: 24, dy: -11.967041015625 });
+  });
   it('reuses each measured label offset tail across directional trials within the allocation budget', () => {
     const result = layoutLabelsDetailed(
       capturedSelected,

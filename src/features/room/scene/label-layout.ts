@@ -88,6 +88,11 @@ export const LABEL_PACKING_BUDGET: Readonly<LabelPackingBudget> = Object.freeze(
 );
 
 type Candidate = LabelPlacement & { area: LabelArea };
+// A viewport-space candidate must also have a representable anchor-relative
+// displacement. Validate anchors before either greedy or search construction;
+// the cooperative deadline may prevent the final defensive pass from running.
+const hasFiniteAnchor = (label: LabelRect) =>
+  Number.isFinite(label.left) && Number.isFinite(label.top);
 const logicalKey = (label: LabelRect) => label.locationCode ?? label.id;
 function areaOf(label: LabelRect, placement: LabelPlacement): LabelArea {
   const size = placement.compact ? label.compact! : label;
@@ -100,7 +105,10 @@ function areaOf(label: LabelRect, placement: LabelPlacement): LabelArea {
 }
 function inside(area: LabelArea, viewport: LabelArea) {
   return (
-    Object.values(area).every(Number.isFinite) &&
+    Number.isFinite(area.left) &&
+    Number.isFinite(area.top) &&
+    Number.isFinite(area.right) &&
+    Number.isFinite(area.bottom) &&
     area.right > area.left &&
     area.bottom > area.top &&
     area.left >= viewport.left + EDGE &&
@@ -206,6 +214,10 @@ function preferredLayout(
           area.bottom <= viewport.bottom - EDGE &&
           !reserved.some((other) => !take() || overlaps(area, other)),
       );
+  // Viewport rails depend on footprint dimensions, not a label's anchor. Share
+  // their immutable geometry; a trial advances its cursor past occupied slots
+  // because adding another placement can never make a rejected slot available.
+  const railCache = new Map<string, LabelArea[]>();
   const pack = (
     compactPacking: boolean,
     protectedPlacements: LabelPlacement[] = [],
@@ -223,6 +235,7 @@ function preferredLayout(
           },
       );
     const occupied = [...reserved];
+    const railCursors = new Map<string, number>();
     for (const result of protectedPlacements) {
       const label = labelById.get(result.id)!;
       const size = result.compact ? label.compact! : label;
@@ -235,6 +248,8 @@ function preferredLayout(
     }
     const placedCodes = new Set<string>();
     const placements = ordered.map((label) => {
+      if (!hasFiniteAnchor(label))
+        return { id: label.id, visible: false, dx: 0, dy: 0 };
       const protectedPlacement = protectedPlacements.find(
         (entry) => entry.id === label.id,
       );
@@ -246,6 +261,90 @@ function preferredLayout(
       if (label.locationCode && placedCodes.has(label.locationCode))
         return { id: label.id, visible: false, dx: 0, dy: 0 };
       if (!checkpoint()) return { id: label.id, visible: false, dx: 0, dy: 0 };
+      const sharedRails =
+        compactPacking && label.mandatory && !label.focused && !label.hovered;
+      if (sharedRails) {
+        const compact = !!label.compact && !label.selected;
+        const size = compact ? label.compact! : label;
+        const railKey = `${size.width}:${size.height}:${bottomFirst}:${rightFirst}`;
+        let rails = railCache.get(railKey);
+        if (!rails) {
+          rails = [];
+          const columns: number[] = [];
+          for (
+            let left = viewport.left + EDGE;
+            left + size.width <= viewport.right - EDGE;
+            left += size.width + GAP
+          ) {
+            if (!take()) break;
+            if (columns.length >= control.maxCandidatesPerLabel) {
+              control.stop();
+              break;
+            }
+            columns.push(left);
+          }
+          const mirrored = columns.map(
+            (left) =>
+              viewport.right -
+              EDGE -
+              size.width -
+              (left - viewport.left - EDGE),
+          );
+          const orderedColumns = rightFirst
+            ? [...mirrored, ...columns]
+            : [...columns, ...mirrored];
+          for (
+            let top = viewport.top + EDGE;
+            top + size.height <= viewport.bottom - EDGE && !exhausted();
+            top += size.height + GAP
+          ) {
+            for (const left of orderedColumns) {
+              // Keep the per-label domain cap, including its anchored tail.
+              if (
+                rails.length + offsets.length >=
+                control.maxCandidatesPerLabel
+              ) {
+                control.stop();
+                break;
+              }
+              if (!allocate(rails)) break;
+              const y = bottomFirst
+                ? viewport.bottom -
+                  EDGE -
+                  size.height -
+                  (top - viewport.top - EDGE)
+                : top;
+              rails.push({
+                left,
+                top: y,
+                right: left + size.width,
+                bottom: y + size.height,
+              });
+            }
+          }
+          railCache.set(railKey, rails);
+        }
+        let cursor = railCursors.get(railKey) ?? 0;
+        for (; cursor < rails.length; cursor++) {
+          if (!take()) break;
+          const area = rails[cursor];
+          if (occupied.some((other) => !take() || overlaps(area, other)))
+            continue;
+          railCursors.set(railKey, cursor + 1);
+          occupied.push(area);
+          if (label.locationCode) placedCodes.add(label.locationCode);
+          return {
+            id: label.id,
+            visible: true,
+            dx: area.left - label.left,
+            dy: area.top - label.top,
+            ...(label.compact ? { compact } : {}),
+          };
+        }
+        railCursors.set(railKey, cursor);
+        if (!checkpoint())
+          return { id: label.id, visible: false, dx: 0, dy: 0 };
+      }
       const key = JSON.stringify([
         label.id,
         compactPacking,
@@ -280,7 +379,7 @@ function preferredLayout(
               if (!allocate(candidates)) break;
               candidates.push({ dx, dy, compact });
             }
-          if (label.mandatory) {
+          if (label.mandatory && !sharedRails) {
             const dimension = compact ? label.compact! : label;
             // A finite deterministic viewport rail is allowed for mandatory labels.
             // It never changes geometry, shrinks targets or steals optional slots.
@@ -944,6 +1043,10 @@ export function layoutLabelsDetailed(
         return checkpoint() ? sorted : [];
       };
       for (const label of units) {
+        if (!hasFiniteAnchor(label)) {
+          domains.set(label.id, []);
+          continue;
+        }
         const pin = protectedPins.find((entry) => entry.id === label.id);
         if (pin) {
           domains.set(label.id, [{ ...pin, area: areaOf(label, pin) }]);
