@@ -1634,10 +1634,6 @@ function AssignmentFields({
                     if (!alive() || !receipt?.result.eventId || receiptLoading)
                       return;
                     const receiptToken = generation.current;
-                    dispatch({
-                      type: 'receipt-read-started',
-                      eventId: receipt.result.eventId,
-                    });
                     setReceiptLoading(true);
                     setReceiptIssue('');
                     try {
@@ -1665,8 +1661,13 @@ function AssignmentFields({
                           'Receipt details could not be loaded. The assignment remains confirmed.',
                         );
                     } finally {
-                      if (alive() && generation.current === receiptToken)
+                      if (alive() && generation.current === receiptToken) {
+                        dispatch({
+                          type: 'receipt-read-completed',
+                          eventId: receipt.result.eventId,
+                        });
                         setReceiptLoading(false);
+                      }
                     }
                   }}
                 >

@@ -77,7 +77,7 @@ export type AssignEvent =
   | { type: 'unknown'; message: string }
   | { type: 'rejected'; message: string }
   | { type: 'committed'; result: AssignmentSuccess }
-  | { type: 'receipt-read-started'; eventId: string }
+  | { type: 'receipt-read-completed'; eventId: string }
   | {
       type: 'receipt';
       eventId: string;
@@ -118,7 +118,7 @@ export function assignReducer(
     return unresolved
       ? { ...state, phase: 'unknown', message: event.message }
       : state;
-  if (event.type === 'receipt-read-started')
+  if (event.type === 'receipt-read-completed')
     return state.receipt?.result.eventId === event.eventId
       ? {
           ...state,

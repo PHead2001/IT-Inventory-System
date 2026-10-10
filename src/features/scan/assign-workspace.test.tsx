@@ -748,6 +748,161 @@ it('drops a late candidate-page response after the batch destination changes', a
 });
 
 it.each([
+  ['context', 'success', 'unrequested'],
+  ['context', 'error', 'unrequested'],
+  ['next', 'success', 'unrequested'],
+  ['next', 'error', 'unrequested'],
+  ['context', 'success', 'failed'],
+  ['context', 'error', 'failed'],
+  ['next', 'success', 'failed'],
+  ['next', 'error', 'failed'],
+] as const)(
+  'a canceled receipt read by %s ignores stale %s and preserves prior %s state',
+  async (resetAction, outcome, prior) => {
+    const saved = await mocks.submit();
+    mocks.submit.mockClear();
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    original.unmount();
+    mocks.find.mockClear();
+    mocks.inspect.mockClear();
+    render(<AssignmentWorkspace {...props} />);
+    const latest = await screen.findByRole('region', {
+      name: 'Latest assignment receipt',
+    });
+    const reload = screen.getByRole('button', {
+      name: 'Reload committed receipt',
+    });
+    if (prior === 'failed') {
+      mocks.receipt.mockRejectedValueOnce(new Error('earlier read failed'));
+      fireEvent.click(reload);
+      await waitFor(() =>
+        expect(latest).toHaveTextContent(
+          'Receipt details could not be loaded. The assignment remains confirmed.',
+        ),
+      );
+    }
+    let complete!: (value: typeof saved.custody) => void;
+    let fail!: (reason: Error) => void;
+    mocks.receipt.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        complete = resolve;
+        fail = reject;
+      }),
+    );
+    fireEvent.click(reload);
+    expect(latest).toHaveTextContent('Loading receipt details…');
+    if (resetAction === 'context')
+      fireEvent.change(
+        screen.getByLabelText('Ticket number reference (optional)'),
+        { target: { value: 'CHANGED-WHILE-READING' } },
+      );
+    else
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Rescan / choose another' }),
+      );
+    const expected =
+      prior === 'unrequested'
+        ? 'Receipt details have not been loaded.'
+        : 'Event receipt details could not be loaded.';
+    expect(latest).toHaveTextContent(expected);
+    expect(latest).not.toHaveTextContent('Loading receipt details');
+    expect(reload).toBeEnabled();
+    const raw = sessionStorage.getItem(batchKey(scope));
+    await act(async () => {
+      if (outcome === 'success') complete(saved.custody);
+      else fail(new Error('obsolete private read failure'));
+    });
+    expect(latest).toHaveTextContent(expected);
+    expect(latest).toHaveTextContent('Assignment confirmed · Adapters');
+    expect(latest).not.toHaveTextContent(
+      /obsolete private|Receipt details are unavailable|Loading receipt details/,
+    );
+    expect(
+      screen.queryByRole('region', { name: 'Committed custody receipt' }),
+    ).not.toBeInTheDocument();
+    expect(mocks.receipt).toHaveBeenCalledTimes(prior === 'failed' ? 2 : 1);
+    expect(mocks.receipt).toHaveBeenLastCalledWith({
+      kind: 'quantity',
+      entityId: candidate.id,
+      eventId: id(8),
+      expectedActorId: props.actorId,
+    });
+    expect(mocks.find).not.toHaveBeenCalled();
+    expect(mocks.inspect).not.toHaveBeenCalled();
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(batchKey(scope))).toBe(raw);
+    expect(readBatch(scope).value?.entries).toHaveLength(1);
+    expect(readBatch(scope).value?.entries[0]).toMatchObject({
+      status: 'success',
+      eventId: id(8),
+    });
+  },
+);
+
+it.each([
+  ['account', 'success'],
+  ['account', 'error'],
+  ['privacy', 'success'],
+  ['privacy', 'error'],
+  ['unmount', 'success'],
+  ['unmount', 'error'],
+] as const)(
+  'a %s cancellation ignores late receipt %s completion without exposing the original account receipt',
+  async (cancellation, outcome) => {
+    const saved = await mocks.submit();
+    mocks.submit.mockClear();
+    const original = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    original.unmount();
+    const view = render(<AssignmentWorkspace {...props} />);
+    await screen.findByRole('region', { name: 'Latest assignment receipt' });
+    let complete!: (value: typeof saved.custody) => void;
+    let fail!: (reason: Error) => void;
+    mocks.receipt.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        complete = resolve;
+        fail = reject;
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Reload committed receipt' }),
+    );
+    if (cancellation === 'account')
+      view.rerender(<AssignmentWorkspace {...props} actorId={id(19)} />);
+    else if (cancellation === 'privacy')
+      act(() => invalidateAssignmentPrivacy(true));
+    else view.unmount();
+    const raw = sessionStorage.getItem(batchKey(scope));
+    await act(async () => {
+      if (outcome === 'success') complete(saved.custody);
+      else fail(new Error('obsolete original-account read failure'));
+    });
+    expect(
+      screen.queryByRole('region', { name: 'Latest assignment receipt' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Committed custody receipt' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/obsolete original-account/),
+    ).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(batchKey(scope))).toBe(raw);
+    expect(mocks.receipt).toHaveBeenCalledExactlyOnceWith({
+      kind: 'quantity',
+      entityId: candidate.id,
+      eventId: id(8),
+      expectedActorId: props.actorId,
+    });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
   ['unavailable', 'context'],
   ['unavailable', 'next'],
   ['unavailable', 'finish'],

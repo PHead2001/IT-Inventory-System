@@ -30,7 +30,7 @@ export const candidate: AssignmentCandidate = {
   sources: [{ id: id(3), name: 'Red', active: false, quantity: 2 }],
 };
 describe('assignment review/commit state', () => {
-  it('marks only the exact current confirmed receipt as requested and preserves that state across receipt-preserving actions', () => {
+  it('marks only a completed read of the exact current confirmed receipt and preserves that state across receipt-preserving actions', () => {
     const state = {
       ...initialAssignState(context),
       receipt: {
@@ -52,16 +52,16 @@ describe('assignment review/commit state', () => {
       },
     };
     expect(
-      assignReducer(state, { type: 'receipt-read-started', eventId: id(9) }),
+      assignReducer(state, { type: 'receipt-read-completed', eventId: id(9) }),
     ).toBe(state);
     expect(
       assignReducer(initialAssignState(context), {
-        type: 'receipt-read-started',
+        type: 'receipt-read-completed',
         eventId: id(8),
       }).receipt,
     ).toBeNull();
     const requested = assignReducer(state, {
-      type: 'receipt-read-started',
+      type: 'receipt-read-completed',
       eventId: id(8),
     });
     expect(requested.receipt?.detailsUnrequested).toBe(false);
