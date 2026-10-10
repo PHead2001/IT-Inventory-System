@@ -141,6 +141,89 @@ Check 'fixed versioned precleanup record overwrites within bound and IO failure 
     Remove-RunnerInstance $script:state
     Require ($script:removed -and $script:warnings.Count -eq 1 -and $script:warnings[0] -ceq 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE')
 }
+Check 'initial and creating unrecorded VM identities retain attached complete and unavailable observations' {
+    foreach ($phase in @('initial', 'creating')) {
+        foreach ($unavailable in @($false, $true)) {
+            Reset-Fixture
+            $script:state.PSObject.Properties.Remove('vmId')
+            if ($phase -ceq 'initial') { $script:state.PSObject.Properties.Remove('phase') } else { $script:state.phase = 'creating' }
+            if ($unavailable) { $script:state.networkRecovery.progressUtc = 'malformed SECRET' }
+            $captured = New-RunnerFailureObservation 'session-current' 'stop' $script:state $script:now 'state-absent'
+            $original = New-RunnerObservedFailure 'original sentinel' $captured
+            $failure = Get-Failure { throw $original }
+            Write-RunnerSessionFailureObservation $script:state $failure
+            Require ($script:writes -eq 1 -and $script:journal.schema -eq 3 -and $null -eq $script:journal.identity.vmId)
+            Require ($script:journal.identity.phase -ceq $phase -and $script:journal.identity.sessionId -ceq ('1' * 32))
+            Require ($script:journal.identity.ownerStartedUtc -ceq $script:state.supervisorStartUtc -and $script:journal.first.atUtc -ceq $script:now.ToString('o'))
+            Require ($script:journal.first.capture -ceq $(if ($unavailable) { 'unavailable' } else { 'complete' }))
+            if (-not $unavailable) { Require ($script:journal.first.phase -ceq $phase -and $script:journal.first.stopReason -ceq 'state-absent') }
+            Assert-RunnerCleanupJournal $script:journal
+            Require (($script:journal | ConvertTo-Json -Depth 6 -Compress) -cnotmatch 'SECRET|original sentinel|synthetic-runner')
+        }
+    }
+}
+Check 'VM identity promotion preserves first and refuses same-owner downgrade or cross-known merge' {
+    Reset-Fixture
+    $script:state.PSObject.Properties.Remove('vmId'); $script:state.PSObject.Properties.Remove('phase')
+    Write-RunnerCleanupObservation 'session-initial' 'stop' $script:state $script:now 'instance-marker'
+    Require ($script:writes -eq 1)
+    $first = $script:journal.first | ConvertTo-Json -Depth 4 -Compress
+    $script:state | Add-Member vmId '11111111-1111-1111-1111-111111111111'
+    $script:state | Add-Member phase 'owned'
+    Write-RunnerCleanupObservation 'guardian-catch' 'guard-exception' $script:state $script:now.AddSeconds(1)
+    Require ($script:journal.identity.vmId -ceq $script:state.vmId -and $script:journal.identity.phase -ceq 'owned')
+    Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first -and $script:journal.latest.origin -ceq 'guardian-catch')
+    $known = $script:journal | ConvertTo-Json -Depth 6 -Compress; $writes = $script:writes
+    $script:state.PSObject.Properties.Remove('vmId'); $script:state.phase = 'creating'
+    Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $script:state $script:now.AddSeconds(2)
+    Require ($script:writes -eq $writes -and ($script:journal | ConvertTo-Json -Depth 6 -Compress) -ceq $known -and $script:warnings[-1] -ceq 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE')
+    $script:state | Add-Member vmId '22222222-2222-2222-2222-222222222222'
+    $script:state.phase = 'owned'
+    Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $script:state $script:now.AddSeconds(3)
+    Require ($script:journal.first.origin -ceq 'watchdog' -and $script:journal.identity.vmId -ceq $script:state.vmId)
+    $script:state.supervisorStartUtc = $script:now.AddSeconds(4).ToString('o')
+    Write-RunnerCleanupObservation 'guardian-catch' 'guard-exception' $script:state $script:now.AddSeconds(5)
+    Require ($script:journal.first.origin -ceq 'guardian-catch' -and $script:journal.identity.ownerStartedUtc -ceq $script:state.supervisorStartUtc)
+}
+Check 'invalid present GUID or phase and missing owned GUID never produce diagnostic authority' {
+    foreach ($case in @('null', 'empty', 'malformed', 'owned-missing', 'sealed-missing', 'initial-present', 'unknown-phase', 'invalid-owner')) {
+        Reset-Fixture
+        switch ($case) {
+            'null' { $script:state.vmId = $null }
+            'empty' { $script:state.vmId = [guid]::Empty.ToString() }
+            'malformed' { $script:state.vmId = 'invalid SECRET' }
+            'owned-missing' { $script:state.PSObject.Properties.Remove('vmId'); $script:state.phase = 'owned' }
+            'sealed-missing' { $script:state.PSObject.Properties.Remove('vmId'); $script:state.phase = 'sealed-off' }
+            'initial-present' { $script:state.PSObject.Properties.Remove('vmId'); $script:state.phase = 'initial' }
+            'unknown-phase' { $script:state.phase = 'SECRET' }
+            'invalid-owner' { $script:state.supervisorStartUtc = 'SECRET' }
+        }
+        Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $script:state $script:now
+        Require ($script:writes -eq 0 -and $null -eq $script:journal -and $script:warnings.Count -eq 1)
+    }
+}
+Check 'strict schema2 remains readable and a same-identity write upgrades without losing first' {
+    Reset-Fixture
+    Write-RunnerCleanupObservation 'watchdog' 'watchdog-condition' $script:state $script:now
+    $legacy = $script:journal | ConvertTo-Json -Depth 6 | ConvertFrom-Json
+    $legacy.schema = 2; $legacy.identity.PSObject.Properties.Remove('phase')
+    Assert-RunnerCleanupJournal $legacy
+    $first = $legacy.first | ConvertTo-Json -Depth 4 -Compress
+    $script:journal = $legacy
+    Write-RunnerCleanupObservation 'guardian-catch' 'guard-exception' $script:state $script:now.AddSeconds(1)
+    Require ($script:journal.schema -eq 3 -and ($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first)
+    foreach ($case in @('legacy-null', 'new-owned-null', 'new-unknown-phase', 'new-extra-field', 'unknown-schema')) {
+        $invalid = $script:journal | ConvertTo-Json -Depth 6 | ConvertFrom-Json
+        switch ($case) {
+            'legacy-null' { $invalid = $legacy | ConvertTo-Json -Depth 6 | ConvertFrom-Json; $invalid.identity.vmId = $null }
+            'new-owned-null' { $invalid.identity.phase = 'owned'; $invalid.identity.vmId = $null }
+            'new-unknown-phase' { $invalid.identity.phase = 'SECRET' }
+            'new-extra-field' { $invalid.identity | Add-Member unknown 'SECRET' }
+            'unknown-schema' { $invalid.schema = 4 }
+        }
+        $null = Get-Failure { Assert-RunnerCleanupJournal $invalid }
+    }
+}
 Check 'actual watchdog records its evaluated reasons under the existing lock before cleanup' {
     Reset-Fixture
     $script:ownerAlive = $false; $script:state.networkRecovery.progressUtc = $script:now.AddSeconds(-31).ToString('o')
@@ -189,7 +272,7 @@ Check 'initiating watchdog evidence survives cleanup throw, guardian catch and r
     $work = [scriptblock]::Create('try { Invoke-Watchdog } catch ' + $handler.Body.Extent.Text)
     $failure = Get-Failure $work
     Require ($failure.Exception.Message -ceq 'SECRET cleanup failure')
-    Require ($script:journal.schema -eq 2 -and $script:journal.first.origin -ceq 'watchdog' -and $script:journal.latest.origin -ceq 'guardian-catch')
+    Require ($script:journal.schema -eq 3 -and $script:journal.first.origin -ceq 'watchdog' -and $script:journal.latest.origin -ceq 'guardian-catch')
     $first = $script:journal.first | ConvertTo-Json -Depth 4 -Compress
     $null = Get-Failure $work
     Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first)

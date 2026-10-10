@@ -878,7 +878,7 @@ function Assert-RunnerJitAbandoned($Record) {
 function Assert-RunnerJitReconciliation($Expected, $Config) {
     $current = Get-RunnerJitRegistration
     if ($null -eq $current -or (Get-RunnerJsonEvidence $current).hash -cne (Get-RunnerJsonEvidence $Expected).hash -or
-        $current.repo -cne $Config.repo -or $current.phase -cnotin @('intent', 'registered', 'removal-intent') -or
+        $current.repo -cne $Config.repo -or (Get-RunnerConfig).repo -cne $Config.repo -or $current.phase -cnotin @('intent', 'registered', 'handed-off', 'removal-intent') -or
         (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { throw 'JIT reconciliation operation, repository or Stop changed.' }
     Assert-RunnerJitAbandoned $current
     return $current
@@ -905,19 +905,20 @@ function Invoke-RunnerJitReconciliation($Config) {
         $mutex = Enter-RunnerLock
         try {
             $record = Get-RunnerJitRegistration
-            if ($null -eq $record -or $record.phase -cin @('handed-off', 'complete')) { return $true }
+            if ($null -eq $record -or $record.phase -ceq 'complete') { return $true }
             [void](Assert-RunnerJitReconciliation $record $Config)
         } finally { Exit-RunnerLock $mutex }
         $stage = 'transport'; $token = Get-OwnerToken
         $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
         $byName = @($inventory | Where-Object { $_.name -ceq $record.vmName })
         $byId = @($inventory | Where-Object { $_.id -eq $record.runnerId })
-        if ($record.phase -ceq 'removal-intent' -and $byId.Count -eq 0 -and $byName.Count -eq 0) {
-            # A lost DELETE response is reconciled by authoritative absence.
+        if ($record.phase -cin @('handed-off', 'removal-intent') -and $record.runnerId -gt 0 -and $byId.Count -eq 0 -and $byName.Count -eq 0) {
+            # Known handoff/DELETE identities retire only after authoritative
+            # local abandonment and a complete remote ID/name absence snapshot.
             $mutex = Enter-RunnerLock
             try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
             finally { Exit-RunnerLock $mutex }
-            Write-Host 'JIT predispatch registration retirement completed.'
+            Write-Host 'JIT registration retirement completed.'
             return $true
         }
         $runner = Assert-RunnerJitRetirementEligible $record $inventory
@@ -933,7 +934,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
         [void](Assert-RunnerJitRetirementEligible $record $inventory)
         # Native/API IO stays outside the state mutex. The supervisor lifetime
-        # mutex owns this bounded operation; the predispatch claim stays shut.
+        # mutex owns this bounded operation; the unresolved claim stays shut.
         $mutex = Enter-RunnerLock
         try { [void](Assert-RunnerJitReconciliation $record $Config) }
         finally { Exit-RunnerLock $mutex }
@@ -944,7 +945,7 @@ function Invoke-RunnerJitReconciliation($Config) {
         $mutex = Enter-RunnerLock
         try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
         finally { Exit-RunnerLock $mutex }
-        Write-Host 'JIT predispatch registration retirement completed.'
+        Write-Host 'JIT registration retirement completed.'
         return $true
     } catch {
         # No API exception, PAT or JIT configuration is persisted or printed.

@@ -51,7 +51,7 @@ function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State
         }
         if ($null -ne $State) {
             $record.purpose = if ($State.PSObject.Properties.Name -contains 'purpose' -and $State.purpose -cin @('job', 'prepare', 'verify-image')) { $State.purpose } else { 'other' }
-            $record.phase = if ($State.PSObject.Properties.Name -contains 'phase' -and $State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { 'other' }
+            $record.phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { 'other' }
             if ($State.PSObject.Properties.Name -contains 'deadlineUtc') {
                 $record.deadlineRemainingMs = ($([DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) - $NowUtc).TotalMilliseconds
             }
@@ -86,7 +86,7 @@ function Assert-RunnerFailureRecord($Record) {
         stopReason = @('', 'none', 'instance-marker', 'state-absent', 'claim-mismatch', 'purpose-ineligible', 'unavailable', 'other')
         expiry = @('', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'other')
         purpose = @('job', 'prepare', 'verify-image', 'other')
-        phase = @('creating', 'owned', 'sealed-off', 'other')
+        phase = @('initial', 'creating', 'owned', 'sealed-off', 'other')
         recoveryPhase = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation', 'other')
         recoveryFailure = @('stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired', 'other')
         errorSource = @('Runner.ps1', 'Common.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'other')
@@ -123,13 +123,17 @@ function Assert-RunnerFailureRecord($Record) {
 }
 
 function Assert-RunnerCleanupJournal($Journal) {
-    if ($Journal -isnot [pscustomobject] -or $Journal.schema -isnot [int] -or $Journal.schema -ne 2 -or
+    if ($Journal -isnot [pscustomobject] -or $Journal.schema -isnot [int] -or $Journal.schema -notin @(2, 3) -or
         (@($Journal.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'first,identity,latest,schema' -or
-        (@($Journal.identity.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'ownerStartedUtc,sessionId,vmId' -or
-        $Journal.identity.sessionId -cnotmatch '^[0-9a-f]{32}$' -or
-        $Journal.identity.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or
-        [guid]$Journal.identity.vmId -eq [guid]::Empty -or
+        $Journal.identity -isnot [pscustomobject] -or $Journal.identity.sessionId -isnot [string] -or
+        $Journal.identity.sessionId -cnotmatch '^[0-9a-f]{32}$' -or $Journal.identity.ownerStartedUtc -isnot [string] -or
         [DateTime]::Parse($Journal.identity.ownerStartedUtc).ToUniversalTime().ToString('o') -cne $Journal.identity.ownerStartedUtc) { throw 'Invalid diagnostic journal.' }
+    $identityFields = if ($Journal.schema -eq 2) { 'ownerStartedUtc,sessionId,vmId' } else { 'ownerStartedUtc,phase,sessionId,vmId' }
+    if ((@($Journal.identity.PSObject.Properties.Name | Sort-Object) -join ',') -cne $identityFields) { throw 'Invalid diagnostic journal identity.' }
+    if ($Journal.schema -eq 3 -and ($Journal.identity.phase -isnot [string] -or $Journal.identity.phase -cnotin @('initial', 'creating', 'owned', 'sealed-off'))) { throw 'Invalid diagnostic identity phase.' }
+    if ($null -eq $Journal.identity.vmId) {
+        if ($Journal.schema -ne 3 -or $Journal.identity.phase -cnotin @('initial', 'creating')) { throw 'Unrecorded diagnostic VM ID is not eligible.' }
+    } elseif ($Journal.identity.vmId -isnot [string] -or $Journal.identity.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$Journal.identity.vmId -eq [guid]::Empty) { throw 'Invalid diagnostic VM ID.' }
     Assert-RunnerFailureRecord $Journal.first
     Assert-RunnerFailureRecord $Journal.latest
     if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 4096) { throw 'Diagnostic journal bound.' }
@@ -158,14 +162,22 @@ function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $Sta
         $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'failure-cleanup.json')
         Assert-StateIdentity $State
         if ($State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Invalid diagnostic instance.' }
-        $identity = [ordered]@{ sessionId = $State.vmName.Substring(5); vmId = ([guid]$State.vmId).ToString(); ownerStartedUtc = [DateTime]::Parse($State.supervisorStartUtc).ToUniversalTime().ToString('o') }
-        $journal = [ordered]@{ schema = 2; identity = $identity; first = $record; latest = $record }
+        $phase = if ($State.PSObject.Properties.Name -notcontains 'phase') { 'initial' } elseif ($State.phase -cin @('creating', 'owned', 'sealed-off')) { $State.phase } else { throw 'Invalid diagnostic state phase.' }
+        $vmId = $null
+        if ($State.PSObject.Properties.Name -contains 'vmId') {
+            if ([string]$State.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or [guid]$State.vmId -eq [guid]::Empty) { throw 'Invalid recorded diagnostic VM ID.' }
+            $vmId = ([guid]$State.vmId).ToString()
+        } elseif ($phase -cnotin @('initial', 'creating')) { throw 'Owned diagnostic state requires its recorded VM ID.' }
+        # Null means the GUID was not recorded yet, never authoritative VM absence.
+        $identity = [ordered]@{ sessionId = $State.vmName.Substring(5); vmId = $vmId; ownerStartedUtc = [DateTime]::Parse($State.supervisorStartUtc).ToUniversalTime().ToString('o'); phase = $phase }
+        $journal = [ordered]@{ schema = 3; identity = $identity; first = $record; latest = $record }
         if (Test-Path -LiteralPath $path) {
             Assert-RunnerProtectedPath $path
             $existing = Read-RunnerJson $path
             Assert-RunnerCleanupJournal $existing
-            if ($existing.identity.sessionId -ceq $identity.sessionId -and $existing.identity.vmId -ceq $identity.vmId -and $existing.identity.ownerStartedUtc -ceq $identity.ownerStartedUtc) {
-                $journal.first = $existing.first
+            if ($existing.identity.sessionId -ceq $identity.sessionId -and $existing.identity.ownerStartedUtc -ceq $identity.ownerStartedUtc) {
+                if ($null -ne $existing.identity.vmId -and $null -eq $identity.vmId) { throw 'Diagnostic VM identity may not be downgraded.' }
+                if ($null -eq $existing.identity.vmId -or $existing.identity.vmId -ceq $identity.vmId) { $journal.first = $existing.first }
             }
         }
         # Roundtrip to validate exactly the JSON property representation read by
@@ -861,7 +873,7 @@ function Get-RunnerJitRegistration {
 
 function Assert-RunnerJitRegistrationClear {
     $record = Get-RunnerJitRegistration
-    if ($null -ne $record -and $record.phase -cnotin @('handed-off', 'complete')) {
+    if ($null -ne $record -and $record.phase -cne 'complete') {
         throw 'Unresolved JIT registration blocks new claims and pilot retry; supervisor reconciliation is required.'
     }
 }

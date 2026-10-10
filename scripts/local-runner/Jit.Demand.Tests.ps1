@@ -43,6 +43,7 @@ function Change-GuardianDuringDemand {
     $script:lookupChanges++
 }
 function Assert-SessionAlive($State) {
+    if ($script:case -ceq 'handoff-before-ssh' -and $script:RunnerOperationStage -ceq 'job-execution' -and $script:nativeCalls -ge 3) { throw 'Bounded fixture session ended after uncertain SSH dispatch.' }
     if ($script:case -in @('recovery-cancelled', 'pilot-recovery-cancelled') -and $script:RunnerOperationStage -ceq 'jit-registration') {
         $script:recoveryWaits++
         if ($script:case -ceq 'pilot-recovery-cancelled') { $script:pilotJob.status = 'completed' }
@@ -77,6 +78,7 @@ function Get-SshArgs { return @() }
 function Invoke-RunnerNative($Executable, $Arguments, $InputText = $null, $TimeoutSeconds = 0) {
     $script:nativeCalls++
     if ($null -ne $InputText) {
+        if ($script:case -ceq 'handoff-before-ssh') { throw 'SENTINEL_SECRET: SSH transport failed before guest dispatch.' }
         $command = $Arguments[-1]
         if ($command -cnotmatch 'printf ''%s'' ([A-Za-z0-9+/=]+) \| base64 -d') { throw 'Detached fixed wrapper missing.' }
         $wrapper = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Matches[1]))
@@ -133,6 +135,10 @@ try {
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:jobCount = 1
     foreach ($case in @('cancelled', 'recovery-cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow', 'recovery-lookup', 'dead-guardian-lookup', 'not-ready-lookup', 'expired-lookup', 'new-generation-lookup')) {
+        # Independent synthetic sessions have independent fixture lifetimes.
+        # Repeated admission below deliberately retains its previous barrier.
+        $registrationPath = Join-Path $base 'jit-registration.json'
+        if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
         $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0; $script:recoveryWaits = 0
         $script:lookupChanges = 0; $script:intentPresent = $false
         $script:badReadback = $case -eq 'unexpected-readback'
@@ -156,6 +162,17 @@ try {
         if ($case -ceq 'recovery-cancelled' -and $script:recoveryWaits -ne 1) { throw 'Cancellation did not occur at the pre-JIT recovery wait.' }
         if ($case -match 'lookup$' -and ($script:lookupChanges -ne 1 -or $script:jits -ne 0 -or $script:intentPresent -or $script:nativeCalls -ne 2)) { throw 'Changed guardian during queued evidence admitted JIT intent or launch.' }
     }
+    # Actual handoff followed by failed SSH still survives finally cleanup and
+    # blocks another POST, even though no guest job execution was proven.
+    if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
+    $script:case = 'handoff-before-ssh'; $script:jobs = @((New-Job 1 'it-inventory-heavy')); $script:jobCount = 1
+    $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0; $script:badReadback = $false
+    Set-Item Function:Assert-RunnerClaimOpen $script:actualClaimOpen
+    Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' }
+    Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' }
+    $barrier = Read-RunnerJson $registrationPath
+    if ($script:jits -ne 1 -or $script:allocations -ne 1 -or $script:cleanups -ne 1 -or $script:nativeCalls -ne 3 -or $barrier.phase -cne 'handed-off' -or $barrier.runnerId -ne 42 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Uncertain handed-off SSH permitted another actual-session JIT.' }
+    if ((Get-Content -LiteralPath $registrationPath -Raw).Contains('SENTINEL_SECRET')) { throw 'SSH exception leaked into registration evidence.' }
     # Actual session POST ambiguity survives its finally cleanup. Simulate the
     # next admission/restart without resetting the protected registration file.
     $registrationPath = Join-Path $base 'jit-registration.json'
