@@ -19,6 +19,26 @@ Local ports: app 3000, API 54321, PostgreSQL 54322, Studio 54323, email capture 
 
 Use the repository `db:start` command for a clean checkout. It writes the ignored local Supabase Storage version override (`v1.77.9`) before starting the pinned CLI and verifies that the running Storage container uses that exact tag from one of the CLI's official registries. Local reset and database tests fail before running against a different Storage image. If an older local stack is already running, use `npm run db:stop` followed by `npm run db:start`; this local image override does not change a linked or hosted Supabase project. A CLI `link` may refresh the ignored cache, so the next `db:start` restores the local override.
 
+Before the CLI starts or resets the disposable stack, `db:start` and `db:reset`
+validate and read both exact configured public email files,
+`supabase/templates/invite.html` and `supabase/templates/recovery.html`. Linked
+directories, symlinks, hardlinks, nonregular files and other configured paths fail
+before permission changes. On Unix, the opened files receive mode `0644` so the
+local Kong worker can read a checkout created with a restrictive umask. Windows
+validates the same files without applying POSIX permission changes. File bytes,
+the process/runner umask and unrelated files such as `.env` stay unchanged.
+Permission reports include only the fixed template kind and numeric mode, UID,
+GID and process umask; they do not expose paths or file content. The existing
+post-start/reset and password-policy replacement checks still require HTTP 200
+and exact matching template bodies from the validated local services.
+
+PR44 CI run `38015431606`, job `114104521090`, observed invitation-template HTTP
+403 during startup. The prepared runner's inherited `077` umask and the pinned
+CLI's static-file mounts into Kong support a file-permission hypothesis. That run
+did not establish mounted file modes or effective worker readability. Permission
+normalization establishes a local prerequisite; actual Linux service checks and
+the existing real email E2E assertions must establish the result.
+
 Production compilation can use nonsecret URL/key placeholders without Supabase running. Runtime authentication needs a working backend.
 
 Private inventory files additionally need local Supabase Storage and a server-only `INVENTORY_FILE_KEYS_JSON` entry matching an active row in `private.file_keys`; the migration deliberately installs no secret. For ordinary local browser use, keep the JSON map in ignored `.env.local` and add a distinct local key through the local database, never through browser code. `npm run test:e2e` provisions its own ephemeral loopback-only key for the child build/browser run, then disables it and replaces the database secret in `finally`. An inert key-ID tombstone may remain because published test files retain a foreign-key reference. See [private inventory files](../inventory-files.md) for the attestation, Storage and cleanup contract.

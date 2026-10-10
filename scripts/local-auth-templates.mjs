@@ -1,7 +1,17 @@
 // Disposable-local prerequisite diagnostics. Never fetch Auth emails or log bodies.
 import assert from 'node:assert/strict';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
+import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { localDockerSocket } from './local-docker-socket.mjs';
@@ -13,35 +23,125 @@ const LIMIT = 65_536;
 const PHASES = new Set(['startup', 'reset', 'password-policy-replacement']);
 const digest = (body) => createHash('sha256').update(body).digest('hex');
 
-export function localAuthTemplateFiles(cwd = process.cwd()) {
+const KINDS = ['invite', 'recovery'];
+const sameIdentity = (a, b) => a.dev === b.dev && a.ino === b.ino;
+
+function readBoundedTemplate(fd) {
+  const buffer = Buffer.alloc(LIMIT + 1);
+  let length = 0;
+  while (length < buffer.length) {
+    const count = readSync(fd, buffer, length, buffer.length - length, null);
+    if (count === 0) break;
+    length += count;
+  }
+  assert.ok(length > 0 && length <= LIMIT);
+  return buffer.subarray(0, length);
+}
+
+// Keep descriptors open through preparation: chmod never follows a replacement
+// pathname. Reject linked ancestors and hardlinks as well as final symlinks.
+function openLocalAuthTemplates(cwd) {
+  const opened = [];
+  const base = realpathSync(cwd);
+  const directories = ['supabase', 'supabase/templates'].map((relative) => {
+    const path = resolve(base, relative);
+    const stat = lstatSync(path);
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink());
+    return { path, stat };
+  });
   const config = readFileSync(resolve(cwd, 'supabase/config.toml'), 'utf8');
-  const root = realpathSync(resolve(cwd, 'supabase/templates')) + sep;
-  return ['invite', 'recovery'].map((kind) => {
-    const sections = [
-      ...config.matchAll(
-        new RegExp(
-          `^\\[auth\\.email\\.template\\.${kind}\\]\\s*$([\\s\\S]*?)(?=^\\[|$(?![\\s\\S]))`,
-          'gm',
+  try {
+    for (const kind of KINDS) {
+      const sections = [
+        ...config.matchAll(
+          new RegExp(
+            `^\\[auth\\.email\\.template\\.${kind}\\]\\s*$([\\s\\S]*?)(?=^\\[|$(?![\\s\\S]))`,
+            'gm',
+          ),
         ),
-      ),
-    ];
-    assert.equal(sections.length, 1);
-    const paths = [
-      ...sections[0][1].matchAll(/^content_path\s*=\s*("[^"\r\n]+")\s*$/gm),
-    ];
-    assert.equal(paths.length, 1);
-    const file = realpathSync(resolve(cwd, JSON.parse(paths[0][1])));
-    assert.ok(file.startsWith(root) && file.endsWith('.html'));
-    assert.ok(statSync(file).size > 0 && statSync(file).size <= LIMIT);
-    const body = readFileSync(file);
-    assert.ok(body.length > 0 && body.length <= LIMIT);
-    return {
+      ];
+      assert.equal(sections.length, 1);
+      const paths = [
+        ...sections[0][1].matchAll(/^content_path\s*=\s*("[^"\r\n]+")\s*$/gm),
+      ];
+      assert.equal(paths.length, 1);
+      assert.equal(
+        JSON.parse(paths[0][1]),
+        `./supabase/templates/${kind}.html`,
+      );
+      const path = resolve(base, `supabase/templates/${kind}.html`);
+      const stat = lstatSync(path);
+      assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1);
+      assert.ok(stat.size > 0 && stat.size <= LIMIT);
+      const fd = openSync(
+        path,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      );
+      opened.push({ fd });
+      const actual = fstatSync(fd);
+      assert.ok(
+        actual.isFile() && actual.nlink === 1 && sameIdentity(actual, stat),
+      );
+      const body = readBoundedTemplate(fd);
+      Object.assign(opened.at(-1), {
+        kind,
+        path,
+        stat: actual,
+        body,
+        hash: digest(body),
+        url: `http://${KONG}:8088/email/${kind}.html`,
+      });
+    }
+    // Recheck both paths and ancestors before allowing any permission mutation.
+    for (const entry of [...directories, ...opened]) {
+      const current = lstatSync(entry.path);
+      assert.ok(!current.isSymbolicLink() && sameIdentity(current, entry.stat));
+      if (entry.fd !== undefined) assert.equal(current.nlink, 1);
+    }
+    return opened;
+  } catch (error) {
+    for (const { fd } of opened) closeSync(fd);
+    throw error;
+  }
+}
+
+export function localAuthTemplateFiles(cwd = process.cwd()) {
+  const opened = openLocalAuthTemplates(cwd);
+  try {
+    return opened.map(({ kind, body, hash, url }) => ({
       kind,
       body,
-      hash: digest(body),
-      url: `http://${KONG}:8088/email/${kind}.html`,
-    };
-  });
+      hash,
+      url,
+    }));
+  } finally {
+    for (const { fd } of opened) closeSync(fd);
+  }
+}
+
+export function prepareLocalAuthTemplates({
+  cwd = process.cwd(),
+  platform = process.platform,
+  report = console.log,
+} = {}) {
+  let opened;
+  try {
+    opened = openLocalAuthTemplates(cwd);
+    const umask = process.umask(); // Read only; never relax the process/runner mask.
+    for (const file of opened) {
+      if (platform !== 'win32') fchmodSync(file.fd, 0o644);
+      const after = fstatSync(file.fd);
+      report(
+        `Local Auth template permissions: template=${file.kind} modeBefore=${file.stat.mode & 0o7777} modeAfter=${after.mode & 0o7777} uid=${after.uid} gid=${after.gid} umask=${umask}.`,
+      );
+    }
+  } catch {
+    throw new Error(
+      'Local Auth templates: category=template-permissions. Validate the two canonical local static template files before starting or resetting Supabase.',
+    );
+  } finally {
+    for (const { fd } of opened ?? []) closeSync(fd);
+  }
 }
 
 function validateContainer(container, name, image) {

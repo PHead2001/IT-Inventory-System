@@ -81,9 +81,14 @@ container replacement. It validates the local Docker endpoint and exact project,
 containers, network and template URLs before requesting only the two static Kong
 template paths. It allows up to 30 seconds of template readiness, bounds each
 command and response, rejects HTTP redirects, and compares the responses with the
-actual files selected by `supabase/config.toml`. Reports contain only a phase and
-fixed match/failure categories; they never include email links, tokens, environment
-values, response bodies or raw daemon errors. A failed prerequisite still restores
+actual canonical files selected by `supabase/config.toml`. Before start/reset,
+both files are validated and read before either permission change; Unix prepares
+only these public files with mode `0644`, while Windows validates without POSIX
+chmod. Permission reports contain only fixed template kinds and numeric file
+modes, UID/GID and the unchanged process umask. Service reports contain only a
+phase and fixed match/failure categories (plus validated failure HTTP status);
+neither includes paths, email links, tokens, environment values, response bodies
+or raw daemon errors. A failed prerequisite still restores
 the original Auth container through the existing fixture cleanup.
 
 `npm run test:auth:policy:contract` covers these diagnostics with mocked services,

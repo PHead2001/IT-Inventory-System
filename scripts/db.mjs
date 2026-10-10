@@ -4,7 +4,10 @@ import {
   installLocalStorageVersion,
   verifyLocalStorageRuntime,
 } from './local-storage-version.mjs';
-import { verifyLocalAuthTemplates } from './local-auth-templates.mjs';
+import {
+  prepareLocalAuthTemplates,
+  verifyLocalAuthTemplates,
+} from './local-auth-templates.mjs';
 const command = process.argv[2];
 const cli = (...args) => npm(['exec', '--', 'supabase', ...args]);
 const types = (check) => {
@@ -42,6 +45,7 @@ const types = (check) => {
 const reset = async () => {
   localStatus();
   verifyLocalStorageRuntime();
+  prepareLocalAuthTemplates();
   cli('db', 'reset', '--local');
   await verifyLocalAuthTemplates('reset');
 };
@@ -103,6 +107,7 @@ const test = () => {
 try {
   if (command === 'start') {
     installLocalStorageVersion();
+    prepareLocalAuthTemplates();
     cli('start');
     verifyLocalStorageRuntime();
     await verifyLocalAuthTemplates('startup');

@@ -1,10 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import {
   localAuthTemplateFiles,
   localAuthTemplateDocker,
   localAuthTemplateResponse,
   verifyLocalAuthTemplates,
+  prepareLocalAuthTemplates,
 } from '../scripts/local-auth-templates.mjs';
 import {
   localDockerSocket,
@@ -40,6 +56,259 @@ const snapshot = () => ({
       },
     },
   },
+});
+
+function templateFixture(t) {
+  const cwd = mkdtempSync(join(tmpdir(), 'local-auth-templates-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'supabase/templates'), { recursive: true });
+  writeFileSync(
+    join(cwd, 'supabase/config.toml'),
+    ['invite', 'recovery']
+      .map(
+        (kind) =>
+          `[auth.email.template.${kind}]\ncontent_path = "./supabase/templates/${kind}.html"\n`,
+      )
+      .join('\n'),
+  );
+  for (const kind of ['invite', 'recovery'])
+    writeFileSync(
+      join(cwd, `supabase/templates/${kind}.html`),
+      `${kind} public fixture`,
+      { mode: 0o600 },
+    );
+  return cwd;
+}
+
+test(
+  'restrictive Unix umask prepares only both public templates without changing bytes or mask',
+  { skip: process.platform === 'win32' },
+  (t) => {
+    const cwd = templateFixture(t);
+    const script = `
+    import assert from 'node:assert/strict';
+    import { writeFileSync, statSync } from 'node:fs';
+    import { join } from 'node:path';
+    import { localAuthTemplateFiles, prepareLocalAuthTemplates } from ${JSON.stringify(new URL('../scripts/local-auth-templates.mjs', import.meta.url).href)};
+    const cwd = process.argv[1];
+    process.umask(0o077);
+    for (const kind of ['invite', 'recovery'])
+      writeFileSync(join(cwd, 'supabase/templates/' + kind + '.html'), kind + ' public fixture', { mode: 0o600 });
+    writeFileSync(join(cwd, '.env'), 'PRIVATE_SECRET', { mode: 0o600 });
+    const before = localAuthTemplateFiles(cwd);
+    for (const kind of ['invite', 'recovery']) assert.equal(statSync(join(cwd, 'supabase/templates/' + kind + '.html')).mode & 0o777, 0o600);
+    const reports = [];
+    prepareLocalAuthTemplates({ cwd, report: line => reports.push(line) });
+    assert.equal(process.umask(), 0o077);
+    assert.equal(statSync(join(cwd, '.env')).mode & 0o777, 0o600);
+    const after = localAuthTemplateFiles(cwd);
+    assert.deepEqual(after, before);
+    for (const kind of ['invite', 'recovery']) assert.equal(statSync(join(cwd, 'supabase/templates/' + kind + '.html')).mode & 0o777, 0o644);
+    assert.equal(reports.length, 2);
+    for (const line of reports) assert.match(line, /^Local Auth template permissions: template=(invite|recovery) modeBefore=384 modeAfter=420 uid=\\d+ gid=\\d+ umask=63\\.$/);
+    assert.ok(!reports.join('').includes(cwd));
+    assert.ok(!reports.join('').includes('PRIVATE_SECRET'));
+  `;
+    execFileSync(process.execPath, ['--input-type=module', '-e', script, cwd], {
+      stdio: 'pipe',
+    });
+  },
+);
+
+test('Windows preparation validates canonical files and leaves POSIX mode untouched', (t) => {
+  const cwd = templateFixture(t);
+  const before = localAuthTemplateFiles(cwd);
+  const modes = ['invite', 'recovery'].map(
+    (kind) => statSync(join(cwd, `supabase/templates/${kind}.html`)).mode,
+  );
+  const mask = process.umask(),
+    reports = [];
+  prepareLocalAuthTemplates({
+    cwd,
+    platform: 'win32',
+    report: (line) => reports.push(line),
+  });
+  assert.deepEqual(localAuthTemplateFiles(cwd), before);
+  assert.deepEqual(
+    ['invite', 'recovery'].map(
+      (kind) => statSync(join(cwd, `supabase/templates/${kind}.html`)).mode,
+    ),
+    modes,
+  );
+  assert.equal(process.umask(), mask);
+  assert.equal(reports.length, 2);
+});
+
+for (const invalid of [
+  'other-path',
+  'traversal',
+  'directory',
+  'empty',
+  'oversized',
+  'hardlink',
+])
+  test(`rejects ${invalid} recovery before changing the valid invite file`, (t) => {
+    const cwd = templateFixture(t);
+    const recovery = join(cwd, 'supabase/templates/recovery.html');
+    const invite = join(cwd, 'supabase/templates/invite.html');
+    if (invalid === 'other-path' || invalid === 'traversal') {
+      writeFileSync(join(cwd, 'supabase/templates/other.html'), 'other');
+      const config = join(cwd, 'supabase/config.toml');
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          './supabase/templates/recovery.html',
+          invalid === 'traversal'
+            ? './supabase/templates/../templates/recovery.html'
+            : './supabase/templates/other.html',
+        ),
+      );
+    } else {
+      rmSync(recovery);
+      if (invalid === 'directory') mkdirSync(recovery);
+      if (invalid === 'empty') writeFileSync(recovery, '');
+      if (invalid === 'oversized')
+        writeFileSync(recovery, Buffer.alloc(65_537));
+      if (invalid === 'hardlink') linkSync(invite, recovery);
+    }
+    const mode = statSync(invite).mode,
+      reports = [];
+    assert.throws(
+      () =>
+        prepareLocalAuthTemplates({
+          cwd,
+          report: (line) => reports.push(line),
+        }),
+      (error) => {
+        assert.match(error.message, /category=template-permissions/);
+        assert.ok(!error.message.includes(cwd));
+        return true;
+      },
+    );
+    assert.equal(statSync(invite).mode, mode);
+    assert.deepEqual(reports, []);
+  });
+
+for (const target of ['file', 'directory'])
+  test(
+    `rejects symlink ${target} without changing the target mode`,
+    { skip: process.platform === 'win32' },
+    (t) => {
+      const cwd = templateFixture(t);
+      const external = join(cwd, 'external');
+      mkdirSync(external);
+      const secret = join(external, 'secret.html');
+      writeFileSync(secret, 'PRIVATE_SECRET', { mode: 0o600 });
+      if (target === 'file') {
+        rmSync(join(cwd, 'supabase/templates/recovery.html'));
+        symlinkSync(secret, join(cwd, 'supabase/templates/recovery.html'));
+      } else {
+        rmSync(join(cwd, 'supabase/templates'), { recursive: true });
+        symlinkSync(external, join(cwd, 'supabase/templates'));
+      }
+      assert.throws(
+        () =>
+          prepareLocalAuthTemplates({
+            cwd,
+            report: () => assert.fail('Unsafe template reported success'),
+          }),
+        /category=template-permissions/,
+      );
+      assert.equal(statSync(secret).mode & 0o777, 0o600);
+    },
+  );
+
+test('a template that grows after path stat is read within a fixed budget and rejected before chmod', (t) => {
+  const cwd = templateFixture(t);
+  const recovery = join(cwd, 'supabase/templates/recovery.html');
+  const invite = join(cwd, 'supabase/templates/invite.html');
+  writeFileSync(recovery, Buffer.alloc(1_048_576));
+  const mode = statSync(invite).mode;
+  const originalStat = fs.lstatSync,
+    originalRead = fs.readSync;
+  const reads = [];
+  const pathStat = t.mock.method(fs, 'lstatSync', (path, ...args) => {
+    const stat = originalStat(path, ...args);
+    // Model an in-place append between lstat and descriptor read; identity stays
+    // unchanged while the earlier path observation still sees a small file.
+    if (path === recovery) stat.size = 1;
+    return stat;
+  });
+  const descriptorRead = t.mock.method(fs, 'readSync', (...args) => {
+    const count = originalRead(...args);
+    reads.push({ capacity: args[1].length, count });
+    return count;
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(
+      () =>
+        prepareLocalAuthTemplates({
+          cwd,
+          report: () => assert.fail('Oversized template prepared'),
+        }),
+      /category=template-permissions/,
+    );
+    assert.equal(statSync(invite).mode, mode);
+    assert.ok(reads.every(({ capacity }) => capacity <= 65_537));
+    assert.equal(reads.at(-1).count, 65_537);
+  } finally {
+    pathStat.mock.restore();
+    descriptorRead.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('database start/reset prepare templates before CLI and permission failure blocks CLI', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'local-auth-db-order-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const scripts = join(cwd, 'scripts');
+  mkdirSync(scripts);
+  writeFileSync(
+    join(scripts, 'db.mjs'),
+    readFileSync(new URL('../scripts/db.mjs', import.meta.url)),
+  );
+  writeFileSync(
+    join(scripts, 'runtime.mjs'),
+    `export const npm = args => console.log('cli:' + args.slice(3).join(' ')); export const localStatus = () => ({}); export const node = () => {}; export const localTestEnv = () => ({});`,
+  );
+  writeFileSync(
+    join(scripts, 'local-storage-version.mjs'),
+    `export const installLocalStorageVersion = () => {}; export const verifyLocalStorageRuntime = () => {};`,
+  );
+  writeFileSync(
+    join(scripts, 'local-auth-templates.mjs'),
+    `export const prepareLocalAuthTemplates = () => { console.log('prepare'); if (process.env.FIXTURE_REJECT) throw new Error('fixture rejected'); }; export const verifyLocalAuthTemplates = async phase => console.log('verify:' + phase);`,
+  );
+  for (const [command, cli, phase] of [
+    ['start', 'start', 'startup'],
+    ['reset', 'db reset --local', 'reset'],
+  ]) {
+    const output = execFileSync(
+      process.execPath,
+      [join(scripts, 'db.mjs'), command],
+      { encoding: 'utf8', cwd },
+    );
+    assert.deepEqual(output.trim().split(/\r?\n/), [
+      'prepare',
+      'cli:' + cli,
+      'verify:' + phase,
+    ]);
+    assert.throws(
+      () =>
+        execFileSync(process.execPath, [join(scripts, 'db.mjs'), command], {
+          env: { ...process.env, FIXTURE_REJECT: '1' },
+          encoding: 'utf8',
+          stdio: 'pipe',
+          cwd,
+        }),
+      (error) => {
+        assert.equal(error.stdout.trim(), 'prepare');
+        assert.match(error.stderr, /fixture rejected/);
+        return true;
+      },
+    );
+  }
 });
 test('preserves configuration, mounts, health check, aliases and existing environment', () => {
   const original = snapshot();
