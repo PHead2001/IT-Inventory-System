@@ -2,12 +2,12 @@
 
 ## C403 live-search timing coverage
 
-`tests/e2e/audit-three-discovery.spec.ts` uses applied URL, input, row count,
+`tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,
 filter chips and idle status for live-search readiness, including Clear filters.
 Its immediate request-negative checks verify browser wiring; they no longer
 claim that a real debounce deadline elapsed. The held real response, rapid edits,
 composition commit, Back/Forward, competing chip/pagination/Clear navigation,
-page-99 reconciliation and actual full-filter CSV download remain in that spec.
+page-99 reconciliation and actual full-filter CSV download remain in that feature spec.
 
 The original elapsed-time exclusions are retained deterministically in
 `src/features/inventory/components/search-form.test.tsx`:
@@ -23,11 +23,46 @@ The original elapsed-time exclusions are retained deterministically in
   duplicate request** proves the 249+1 ms boundary and immediate submission
   without a later duplicate replacement.
 
-Removing the four fixed 350 ms browser sleeps is only partial C403 progress.
-Broader milestone-to-feature consolidation still requires mapping each failure
-check to retained coverage; no CI gate, security/race coverage or runner configuration is
-relaxed by this change. Component proof does not replace the retained browser
-integration gate.
+The three Audit 3 milestone specs are consolidated into feature owners. The
+original failure checks map below; splitting mixed tests changes fixture allocation,
+not their assertions. The only removed standalone test duplicated route visits and
+title assertions now retained in the populated feature tests. This is source-level
+coverage ownership, not a measured runtime improvement or browser acceptance.
+
+| Original spec and test (pre-consolidation line)                  | Retained feature coverage                                                                    | Preserved failure checks                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit-three-acceptance` Restore / ambiguous Receive (11)        | `custody.spec.ts` Restore; `inventory.spec.ts` ambiguous Receive                             | Eligible last-storage default; explicit reason and destination; inactive/storage-ineligible and site-held locations do not default; real independent balance change rejects stale confirmation; refresh retains destination/quantity and clears confirmation. |
+| `audit-three-acceptance` local mapped storage rename (167)       | `locations-reference.spec.ts` local mapped storage rename                                    | Keyboard focus before/after save; case/trim sibling collision and retained input; unchanged UUID/code/parent; renamed location/room label; selected-code and camera framing; exact original name/code/parent restored in `finally`.                           |
+| `audit-three-acceptance` custody Done / revisit (368)            | `custody.spec.ts` custody Done / revisit                                                     | Done enables second operation; revisit/reload cannot resurrect receipts; final version 3 and storage/site state; exactly two issued/returned events.                                                                                                          |
+| `audit-three-discovery` live inventory typing (185)              | `inventory-search.spec.ts` live inventory typing                                             | Held real RSC; applied rows/chips/CSV during pending response; rapid edits/composition/history; chip/page/Clear cancellation; page 99 reconciliation; 26 owned names in actual downloaded CSV.                                                                |
+| `audit-three-discovery` Settings hierarchy / search picker (374) | `custody.spec.ts` Settings hierarchy; `inventory.spec.ts` search location picker             | Collapse/expand, rendered first-child/parent navigation, Home/End, flat Settings search and detail link; picker active descendant, arrow navigation/search/select/Escape focus return; viewport containment and no overflow.                                  |
+| `audit-three-interface` local fonts on location label (136)      | `labels-stock.spec.ts` local UI and code fonts                                               | Exact mapped label code; UI/mono computed families and loaded faces; at least two same-origin local WOFF2 resources.                                                                                                                                          |
+| `audit-three-interface` populated phone flows (197)              | `labels-stock.spec.ts` fonts / scan / labels; `metadata-designer.spec.ts` populated designer | Owned quantity code and fonts; 375/390 px labels, enabled size selector, manual same-origin scan Open and exact destination; populated designer/panels; exact quantity/category titles; viewport fit and screenshots.                                         |
+| `audit-three-interface` designer dialog focus (309)              | `metadata-designer.spec.ts` designer dialog focus                                            | New field selected; desktop field focus / phone inspector focus; Cancel returns to trigger; existing standard Name selected and properties visible at desktop/phone.                                                                                          |
+| `audit-three-interface` history timezone disclosure (397)        | `scope-accessibility.spec.ts` relative history                                               | Keyboard disclosure, visible UTC/GMT timezone, exact displayed instant, original timestamp precision/`datetime`, clipboard detail and screenshot.                                                                                                             |
+| `audit-three-interface` synthetic missing RSC (429)              | `navigation-workflow.spec.ts` synthetic RSC missing response                                 | Real owned NextLink; scoped non-prefetch request rewrite, RSC response content type/status attachment, unavailable boundary; private IDs/name absent; zero document fallback; ordinary NextLink recovery and title.                                           |
+| `audit-three-interface` direct missing resources (526)           | `inventory.spec.ts` direct missing resources; `foundation.spec.ts` anonymous missing asset   | Public/quantity/asset document HTTP 404, one main, unavailable headings, title excludes path identity, screenshots/client recovery; anonymous login redirect/title and no resource disclosure; scan/labels/history route titles and valid image icon.         |
+| `audit-three-interface` generic owned route titles (589)         | Merged into populated phone quantity / designer tests above                                  | Exact Quantity item / Category forms titles and absence of **each** owned quantity UUID, category UUID and record name in both titles.                                                                                                                        |
+
+`inventory-discovery-fixtures.ts` retains its loopback-only API/port guard,
+26 uniquely prefixed owned rows, archive cleanup and local fixture sign-out.
+`interface-fixtures.ts` retains test-scoped unique categories/items, loopback-only
+browser/API guards, record/category cleanup and local sign-out. Each consumer gets
+its own fixture; sharing the helper does not share records between tests.
+The mapped `ITC-RED` rename remains outside the existing parallel allowlist in
+`locations-reference.spec.ts`: it must finish and restore the canonical reference
+before parallel reference readers run. The live-search fixture also remains exclusive in `inventory-search.spec.ts` because
+parallel designer specs may publish required fields on shared categories. Custody,
+metadata-designer and foundation retain their existing exclusive ownership. No CI, project gate, runner, concurrency,
+security, race or accounting coverage is relaxed.
+
+D304 still requires caller-scoped authenticated record-name titles in a future
+product change. The generic successful-route title assertions retained here describe
+current behavior; update them with that implementation and its authorization tests.
+Missing-resource titles and synthetic unavailable boundaries must remain private-safe;
+do not weaken their privacy assertions to accommodate successful record-name titles.
+Browser execution, clean database certification and exact-SHA remote acceptance remain
+required separately. Component and discovery checks do not replace those gates.
 
 ## U403 choice identity proof
 
@@ -341,7 +376,7 @@ flows through the authorized application.
 F307 checks branded route-kind titles without private record names or UUIDs.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
-The interface E2E uses a clearly synthetic navigation-boundary fixture: a real
+The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,
 private-safe metadata, no document fallback, and recovery through an ordinary

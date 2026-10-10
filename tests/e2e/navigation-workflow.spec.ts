@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { Route } from '@playwright/test';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -576,3 +579,107 @@ test('viewer controls personal motion in Settings and retains it across routes w
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduced');
 });
+
+// Synthetic navigation-boundary fixture: rewrite only a real owned NextLink's
+// non-prefetch RSC request. The record remains intact; this is not deletion proof.
+interfaceTest(
+  'synthetic RSC missing-resource response uses the client navigation boundary and private-safe recovery',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    const ownedPath = `/inventory/quantity/${interfaceRecord.id}`;
+    const missingId = randomUUID();
+    const missingPath = `/inventory/quantity/${missingId}`;
+    const navigations: string[] = [];
+    const prefetches: string[] = [];
+    const intercepted: Request[] = [];
+    let responseStatus: number | undefined;
+    let responseTitle: string | undefined;
+    const matches = (url: URL) => url.pathname === ownedPath;
+    const handler = async (route: Route) => {
+      const request = route.request();
+      const headers = request.headers();
+      const prefetch =
+        headers['next-router-prefetch'] === '1' ||
+        headers.purpose === 'prefetch' ||
+        headers['sec-purpose']?.includes('prefetch');
+      if (prefetch) prefetches.push(request.url());
+      if (!prefetch && request.method() === 'GET' && headers.rsc === '1') {
+        const target = new URL(request.url());
+        target.pathname = missingPath;
+        intercepted.push(request);
+        await route.continue({ url: target.href });
+      } else await route.continue();
+    };
+    const recordDocument = (request: Request) => {
+      if (request.resourceType() === 'document')
+        navigations.push(request.url());
+    };
+    await page.route(matches, handler);
+    try {
+      await page.goto(
+        '/inventory?q=' + encodeURIComponent(interfaceRecord.name),
+      );
+      const link = page.getByRole('link', {
+        name: interfaceRecord.name,
+        exact: true,
+      });
+      await expect(link).toBeVisible();
+      expect(
+        new URL((await link.getAttribute('href'))!, page.url()).pathname,
+      ).toBe(ownedPath);
+      page.on('request', recordDocument);
+      const arrived = page.waitForResponse((response) =>
+        intercepted.includes(response.request()),
+      );
+      await link.click();
+      const response = await arrived;
+      responseStatus = response.status();
+      expect(response.headers()['content-type']).toContain('text/x-component');
+      expect(intercepted.length).toBeGreaterThan(0);
+      await expect(
+        page.getByRole('heading', {
+          name: 'Inventory record unavailable',
+          exact: true,
+        }),
+      ).toBeVisible();
+      // Successful static layout metadata may remain when page-data notFound
+      // activates the client boundary independently of metadata resolution.
+      await expect(page).toHaveTitle('Quantity item · IT Inventory');
+      responseTitle = await page.title();
+      for (const privateValue of [
+        interfaceRecord.id,
+        missingId,
+        interfaceRecord.name,
+      ]) {
+        await expect(page.locator('head title')).not.toContainText(
+          privateValue,
+        );
+        await expect(page.locator('main')).not.toContainText(privateValue);
+      }
+      expect(
+        navigations,
+        'Client RSC arrival must not fall back to document navigation',
+      ).toEqual([]);
+      await page
+        .getByRole('link', { name: 'Search inventory', exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/inventory$/);
+      await expect(page).toHaveTitle('Inventory · IT Inventory');
+      expect(navigations).toEqual([]);
+    } finally {
+      page.off('request', recordDocument);
+      await page.unroute(matches, handler);
+      await info.attach('synthetic RSC navigation evidence', {
+        body: JSON.stringify({
+          synthetic: true,
+          observedNavigationRsc: intercepted.length,
+          untouchedPrefetches: prefetches,
+          rscResponseStatus: responseStatus,
+          observedClientTitle: responseTitle,
+          documentNavigations: navigations,
+        }),
+        contentType: 'application/json',
+      });
+    }
+  },
+);
