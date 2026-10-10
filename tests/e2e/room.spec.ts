@@ -1968,9 +1968,11 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   expect(counts.counts['ITC-D01']).toBe(
     String((await contents.json()).result.total),
   );
-  await expect(
-    page.getByText(/Counts are a snapshot of active items/),
-  ).toBeVisible();
+  const countsExplanation = page.getByRole('status').filter({
+    hasText:
+      'Counts show quantity items with stock and active individual assets at each storage location.',
+  });
+  await expect(countsExplanation).toBeVisible();
   const refreshed = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/occupancy?') &&
@@ -1988,7 +1990,5 @@ test('optional room counts reconcile with active leaf contents and refresh as un
   await refreshedContents;
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(
-    page.getByText(/Counts are a snapshot of active items/),
-  ).toHaveCount(0);
+  await expect(countsExplanation).toHaveCount(0);
 });
