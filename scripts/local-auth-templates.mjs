@@ -86,9 +86,10 @@ export function validateLocalAuthTemplateServices(auth, kong, files) {
   }
 }
 
-function responseFailure(category) {
+function responseFailure(category, httpStatus) {
   const error = new Error('Static local template response rejected');
   error.category = category;
+  if (httpStatus !== undefined) error.httpStatus = httpStatus;
   throw error;
 }
 
@@ -98,9 +99,12 @@ export function localAuthTemplateResponse(response) {
   const end = raw.indexOf('\r\n\r\n');
   if (end < 0 || end > 8_192) responseFailure('http-response');
   const headers = raw.subarray(0, end).toString('ascii');
-  const status = /^HTTP\/1\.[01] (\d{3})(?: |\r\n)/.exec(headers)?.[1];
-  if (status?.startsWith('3')) responseFailure('http-redirect');
-  if (status !== '200') responseFailure('http-status');
+  const status = /^HTTP\/1\.[01] ([1-5]\d{2})(?: |\r\n)/.exec(headers)?.[1];
+  if (!status) responseFailure('http-status-malformed');
+  const httpStatus = Number(status);
+  if (httpStatus >= 300 && httpStatus < 400)
+    responseFailure('http-redirect', httpStatus);
+  if (httpStatus !== 200) responseFailure('http-status', httpStatus);
   // HTTP/1.0 with Connection: close gives an unencoded static file body.
   if (/^transfer-encoding:|^content-encoding:/im.test(headers))
     responseFailure('http-response');
@@ -189,9 +193,9 @@ export async function verifyLocalAuthTemplates(
   assert.ok(
     Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 30_000,
   );
-  const fail = (kind, category) => {
+  const fail = (kind, category, httpStatus) => {
     throw new Error(
-      `Local Auth templates: phase=${phase} template=${kind} category=${category}. Inspect the disposable local Auth/Kong template service; application confirmation links must remain enabled.`,
+      `Local Auth templates: phase=${phase} template=${kind} category=${category}${httpStatus === undefined ? '' : ` status=${httpStatus}`}. Inspect the disposable local Auth/Kong template service; application confirmation links must remain enabled.`,
     );
   };
   let files;
@@ -233,12 +237,20 @@ export async function verifyLocalAuthTemplates(
           'http-response',
           'http-redirect',
           'http-status',
+          'http-status-malformed',
           'probe-client',
         ]);
-        failure = [
-          file.kind,
-          allowed.has(error.category) ? error.category : 'listener-unavailable',
-        ];
+        const category = allowed.has(error?.category)
+          ? error.category
+          : 'listener-unavailable';
+        const httpStatus =
+          ['http-status', 'http-redirect'].includes(category) &&
+          Number.isInteger(error?.httpStatus) &&
+          error.httpStatus >= 100 &&
+          error.httpStatus <= 599
+            ? error.httpStatus
+            : undefined;
+        failure = [file.kind, category, httpStatus];
         break;
       }
       if (!Buffer.isBuffer(body)) body = Buffer.from(body);

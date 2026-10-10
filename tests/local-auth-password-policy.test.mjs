@@ -431,6 +431,111 @@ for (const [category, fetch] of [
     );
     assert.deepEqual(f.reports, []);
   });
+test('response parser preserves only validated HTTP status through the verifier diagnostic', async () => {
+  for (const status of [100, 199, 201, 299, 300, 302, 399, 400, 404, 599]) {
+    const category =
+      status >= 300 && status < 400 ? 'http-redirect' : 'http-status';
+    const fetch = () =>
+      localAuthTemplateResponse(
+        response(
+          Buffer.from('PRIVATE_BODY'),
+          `${status} PRIVATE_REASON`,
+          'Location: https://hosted.example/?token=PRIVATE\r\nX-Private: PRIVATE_HEADER\r\n',
+        ),
+      );
+    assert.throws(fetch, (error) => {
+      assert.equal(error.category, category);
+      assert.equal(error.httpStatus, status);
+      assert.doesNotMatch(String(error), /PRIVATE|hosted|token=/);
+      return true;
+    });
+    const f = probe(fetch);
+    await assert.rejects(
+      verifyLocalAuthTemplates('startup', f.options),
+      (error) => {
+        assert.match(
+          error.message,
+          new RegExp(
+            `phase=startup template=invite category=${category} status=${status}\\.`,
+          ),
+        );
+        assert.doesNotMatch(error.message, /PRIVATE|hosted|token=/);
+        return true;
+      },
+    );
+    assert.deepEqual(f.reports, []);
+  }
+});
+
+test('malformed and out-of-range HTTP status has a distinct sanitized category', async () => {
+  for (const status of [
+    '099 PRIVATE',
+    '600 PRIVATE',
+    '999 PRIVATE',
+    '4040 PRIVATE',
+    '200PRIVATE',
+    'PRIVATE',
+  ]) {
+    const fetch = () =>
+      localAuthTemplateResponse(response(Buffer.from('PRIVATE_BODY'), status));
+    assert.throws(fetch, (error) => {
+      assert.equal(error.category, 'http-status-malformed');
+      assert.equal(error.httpStatus, undefined);
+      assert.doesNotMatch(String(error), /PRIVATE/);
+      return true;
+    });
+    const f = probe(fetch);
+    await assert.rejects(
+      verifyLocalAuthTemplates('reset', f.options),
+      (error) => {
+        assert.match(error.message, /category=http-status-malformed\./);
+        assert.doesNotMatch(error.message, /status=|PRIVATE/);
+        return true;
+      },
+    );
+    assert.deepEqual(f.reports, []);
+  }
+});
+
+test('forged fetch failures cannot inject status, category or private error details', async () => {
+  for (const error of [
+    ...[
+      '404 PRIVATE',
+      '404',
+      99,
+      600,
+      NaN,
+      Infinity,
+      { toString: () => 'PRIVATE' },
+    ].map((httpStatus) => ({
+      category: 'http-status',
+      httpStatus,
+      message: 'PRIVATE_BODY',
+      headers: 'PRIVATE_HEADER',
+    })),
+    { category: 'http-status-malformed', httpStatus: 404, message: 'PRIVATE' },
+    { category: 'PRIVATE_CATEGORY', httpStatus: 404, message: 'PRIVATE' },
+    null,
+    undefined,
+  ]) {
+    const f = probe(() => {
+      throw error;
+    });
+    await assert.rejects(
+      verifyLocalAuthTemplates('reset', f.options),
+      (failure) => {
+        assert.match(
+          failure.message,
+          /category=(?:http-status|http-status-malformed|listener-unavailable)\./,
+        );
+        assert.doesNotMatch(failure.message, /status=|PRIVATE/);
+        return true;
+      },
+    );
+    assert.deepEqual(f.reports, []);
+  }
+});
+
 test('wrong project, network, database port and template URL fail before any fetch', async () => {
   for (const alter of [
     (auth) => {
