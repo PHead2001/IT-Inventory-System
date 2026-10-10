@@ -15,6 +15,7 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
+import { waitForHeldActionResponse } from './held-action-response';
 
 async function signIn(page: Page, role: 'staff' | 'viewer' = 'staff') {
   await page.goto('/login');
@@ -617,12 +618,14 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         signalRestore = resolve;
       });
       let restoreDelayed = false;
+      let heldRestoreRequest: Request | undefined;
       let touch: CDPSession | undefined;
       let touchActive = false;
       let fixtureFailed = false;
       await page.route('**/scan?mode=assign*', async (route) => {
         if (!restoreDelayed && isFixtureInspection(route.request())) {
           restoreDelayed = true;
+          heldRestoreRequest = route.request();
           signalRestore();
           await heldRestore;
         }
@@ -725,13 +728,15 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         }
         await expect(cancel).toBeFocused();
         await expectStationaryCancel();
-        const restoredResponse = page.waitForResponse(
-          (response) =>
-            response.url().includes('/scan?mode=assign') &&
-            isFixtureInspection(response.request()),
+        expect(heldRestoreRequest).toBeDefined();
+        const restoredResponse = waitForHeldActionResponse(
+          page,
+          heldRestoreRequest!,
         );
         releaseRestore();
-        expect(await (await restoredResponse).finished()).toBeNull();
+        await restoredResponse;
+        // A usable decoded restoration is the completion contract. Waiting for
+        // the enclosing Flight stream's EOF can hang after the action resolves.
         await expect(inspection).toHaveAttribute('aria-busy', 'false');
         await expect(
           page.getByText(
