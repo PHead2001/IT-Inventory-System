@@ -8,16 +8,31 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthPrivacyBoundary, PasswordLogoutCompletion } from './auth-privacy';
 import { AuthForm } from './auth-form';
-const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+import { useState } from 'react';
+import { PrivateRestorationGate } from './privacy-readiness';
+const routing = vi.hoisted(() => ({
+  replace: vi.fn(),
+  refresh: vi.fn(),
+  pathname: '/login',
+  query: '',
+}));
 const actions = vi.hoisted(() => ({
   login: vi.fn(),
   recover: vi.fn(),
   confirmAuth: vi.fn(),
   setPassword: vi.fn(),
   signOutSession: vi.fn(),
+  readLogoutPrivacyGeneration: vi.fn(),
+  acknowledgeLogoutPrivacyGeneration: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => routing }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(routing.query),
+  usePathname: () => routing.pathname,
+  useRouter: () => routing,
+}));
 vi.mock('@/lib/auth/actions', () => actions);
+const generation = '00000000-0000-4000-8000-000000000001';
+const receipt = { logoutGeneration: generation };
 const batch = 'inventory-assign-batch-v1:private';
 const recovery = 'inventory-assign-v1:private';
 const labels = 'it-inventory-label-queue:v1:private';
@@ -29,7 +44,13 @@ function seed() {
 }
 beforeEach(() => {
   sessionStorage.clear();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  routing.pathname = '/login';
+  routing.query = '';
+  actions.readLogoutPrivacyGeneration.mockResolvedValue({ status: 'absent' });
+  actions.acknowledgeLogoutPrivacyGeneration.mockResolvedValue({
+    status: 'match',
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 it('clears all acknowledged password logout namespaces before navigating without retaining password fields', async () => {
@@ -37,6 +58,7 @@ it('clears all acknowledged password logout namespaces before navigating without
   actions.setPassword.mockResolvedValueOnce({
     passwordUpdated: true,
     sessionClosed: true,
+    logoutGeneration: generation,
   });
   render(<AuthForm mode="password" emailedCompletion />);
   const password = await screen.findByLabelText('Password');
@@ -68,7 +90,7 @@ it.each([batch, recovery, labels])(
         if (target === key) return; // A silent failure must be verified too.
         remove.call(this, target);
       });
-    render(<PasswordLogoutCompletion />);
+    render(<PasswordLogoutCompletion receipt={receipt} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'could not clear',
     );
@@ -96,7 +118,7 @@ it('blocks auth entry after failed cleanup/remount until its existing all marker
       if (key === labels) throw new Error('Denied');
       remove.call(this, key);
     });
-  const first = render(<PasswordLogoutCompletion />);
+  const first = render(<PasswordLogoutCompletion receipt={receipt} />);
   await screen.findByRole('alert');
   first.unmount();
   render(
@@ -181,6 +203,7 @@ it('retains the password action owner across verified-to-unavailable props while
   let complete!: (value: {
     passwordUpdated: true;
     sessionClosed: true;
+    logoutGeneration: string;
   }) => void;
   actions.setPassword.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -213,7 +236,11 @@ it('retains the password action owner across verified-to-unavailable props while
     'exact uncertain command and receipt',
   );
   await act(async () =>
-    complete({ passwordUpdated: true, sessionClosed: true }),
+    complete({
+      passwordUpdated: true,
+      sessionClosed: true,
+      logoutGeneration: generation,
+    }),
   );
   await waitFor(() =>
     expect(routing.replace).toHaveBeenCalledWith('/login?password=updated'),
@@ -293,4 +320,249 @@ it('fails closed without deleting anything when auth-entry cleanup markers canno
   expect(sessionStorage.getItem(recovery)).toBe(
     'exact uncertain command and receipt',
   );
+});
+
+it('blocks a confirmed logout reminder failure without replaying password or signout', async () => {
+  render(
+    <PasswordLogoutCompletion receipt={{ cleanupReminderUnavailable: true }} />,
+  );
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'reminder could not be saved',
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  expect(routing.replace).not.toHaveBeenCalled();
+  expect(actions.setPassword).not.toHaveBeenCalled();
+  expect(actions.signOutSession).not.toHaveBeenCalled();
+});
+it('checks a fresh generation on reactivation before presenting the auth form again', async () => {
+  seed();
+  render(<AuthForm mode="login" />);
+  await screen.findByLabelText('Email');
+  actions.readLogoutPrivacyGeneration.mockResolvedValue({
+    status: 'valid',
+    generation,
+  });
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  await screen.findByLabelText('Email');
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+  expect(actions.readLogoutPrivacyGeneration).toHaveBeenCalledTimes(2);
+});
+it('preserves editable auth state when a reactivation check observes the same generation', async () => {
+  render(<AuthForm mode="login" />);
+  fireEvent.change(await screen.findByLabelText('Email'), {
+    target: { value: 'staff@example.test' },
+  });
+  fireEvent.change(screen.getByLabelText('Password'), {
+    target: { value: 'typed password' },
+  });
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(screen.getByLabelText('Email')).toHaveValue('staff@example.test');
+  expect(screen.getByLabelText('Password')).toHaveValue('typed password');
+});
+
+it('withholds new route restoration until a fresh check in the retained protected boundary completes', async () => {
+  const view = render(
+    <AuthPrivacyBoundary>
+      <p>Existing route</p>
+    </AuthPrivacyBoundary>,
+  );
+  await screen.findByText('Existing route');
+  seed();
+  let finish!: (value: { status: 'valid'; generation: string }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  routing.pathname = '/scan';
+  function NewPrivateConsumer() {
+    return <p>{sessionStorage.getItem(recovery) ?? 'New route is clean'}</p>;
+  }
+  view.rerender(
+    <AuthPrivacyBoundary>
+      <NewPrivateConsumer />
+    </AuthPrivacyBoundary>,
+  );
+  expect(
+    screen.queryByText('exact uncertain command and receipt'),
+  ).not.toBeInTheDocument();
+  await act(async () => finish({ status: 'valid', generation }));
+  expect(await screen.findByText('New route is clean')).toBeVisible();
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+});
+it('gates email confirmation outside the auth route group on the retained generation', async () => {
+  seed();
+  actions.readLogoutPrivacyGeneration.mockResolvedValue({
+    status: 'valid',
+    generation,
+  });
+  render(
+    <AuthForm mode="confirm" tokenHash="email-token" tokenType="recovery" />,
+  );
+  await screen.findByRole('button', { name: 'Continue securely' });
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+  expect(actions.confirmAuth).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole('form').querySelector('input[name="logout_generation"]'),
+  ).toHaveValue(generation);
+});
+
+it('withholds query-only navigation consumers until the deferred fresh read completes', async () => {
+  routing.pathname = '/scan';
+  const view = render(
+    <AuthPrivacyBoundary>
+      <p>Scan to open</p>
+    </AuthPrivacyBoundary>,
+  );
+  await screen.findByText('Scan to open');
+  seed();
+  let finish!: (value: { status: 'valid'; generation: string }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  routing.query = 'mode=assign';
+  const storageRead = vi.fn();
+  function NewPrivateConsumer() {
+    storageRead(sessionStorage.getItem(recovery));
+    return <p>Assigned route released</p>;
+  }
+  view.rerender(
+    <AuthPrivacyBoundary>
+      <NewPrivateConsumer />
+    </AuthPrivacyBoundary>,
+  );
+  expect(storageRead).not.toHaveBeenCalled();
+  await act(async () => finish({ status: 'valid', generation }));
+  expect(await screen.findByText('Assigned route released')).toBeVisible();
+  expect(storageRead).toHaveBeenCalledWith(null);
+});
+it.each(['server generation', 'action revision'] as const)(
+  'blocks same-path incoming children for a changed %s before its deferred read completes',
+  async (change) => {
+    const firstServer = { status: 'valid', generation } as const;
+    actions.readLogoutPrivacyGeneration.mockResolvedValue(firstServer);
+    const view = render(
+      <AuthPrivacyBoundary serverGeneration={firstServer} revision={0}>
+        <p>Accepted form</p>
+      </AuthPrivacyBoundary>,
+    );
+    await screen.findByText('Accepted form');
+    seed();
+    const newer = '00000000-0000-4000-8000-000000000002';
+    let finish!: (value: { status: 'valid'; generation: string }) => void;
+    actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const storageRead = vi.fn();
+    function NewPrivateConsumer() {
+      storageRead(sessionStorage.getItem(recovery));
+      return <p>Verified changed entry</p>;
+    }
+    view.rerender(
+      <AuthPrivacyBoundary
+        serverGeneration={
+          change === 'server generation'
+            ? { status: 'valid', generation: newer }
+            : firstServer
+        }
+        revision={change === 'action revision' ? 1 : 0}
+      >
+        <NewPrivateConsumer />
+      </AuthPrivacyBoundary>,
+    );
+    expect(storageRead).not.toHaveBeenCalled();
+    expect(screen.getByText('Accepted form')).not.toBeVisible();
+    await act(async () => finish({ status: 'valid', generation: newer }));
+    expect(await screen.findByText('Verified changed entry')).toBeVisible();
+    expect(storageRead).toHaveBeenCalledWith(null);
+  },
+);
+it('holds direct incoming consumers during reactivation without losing unchanged field nodes', async () => {
+  const view = render(
+    <AuthPrivacyBoundary>
+      <input aria-label="Unchanged field" defaultValue="typed work" />
+    </AuthPrivacyBoundary>,
+  );
+  const field = await screen.findByLabelText('Unchanged field');
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(field).not.toBeVisible();
+  expect(field).toHaveValue('typed work');
+  const storageRead = vi.fn();
+  function NewPrivateConsumer() {
+    storageRead(sessionStorage.getItem(recovery));
+    return <p>New consumer</p>;
+  }
+  view.rerender(
+    <AuthPrivacyBoundary>
+      <input aria-label="Unchanged field" defaultValue="typed work" />
+      <NewPrivateConsumer />
+    </AuthPrivacyBoundary>,
+  );
+  expect(storageRead).not.toHaveBeenCalled();
+  await act(async () => finish({ status: 'absent' }));
+  expect(await screen.findByText('New consumer')).toBeVisible();
+});
+it('blocks a newly mounted restoration gate inside retained internally updating children during a pending reactivation', async () => {
+  let expose!: () => void;
+  const storageRead = vi.fn();
+  function StorageConsumer() {
+    storageRead(sessionStorage.getItem(recovery));
+    return <p>Internally mounted private consumer</p>;
+  }
+  function InternalRouter() {
+    const [show, setShow] = useState(false);
+    expose = () => setShow(true);
+    return (
+      <>
+        <input aria-label="Retained field" defaultValue="pending values" />
+        {show && (
+          <PrivateRestorationGate scope="synthetic actor">
+            <StorageConsumer />
+          </PrivateRestorationGate>
+        )}
+      </>
+    );
+  }
+  render(
+    <AuthPrivacyBoundary>
+      <InternalRouter />
+    </AuthPrivacyBoundary>,
+  );
+  const field = await screen.findByLabelText('Retained field');
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+    expose();
+  });
+  expect(storageRead).not.toHaveBeenCalled();
+  expect(field).toHaveValue('pending values');
+  await act(async () => finish({ status: 'absent' }));
+  expect(
+    await screen.findByText('Internally mounted private consumer'),
+  ).toBeVisible();
+  expect(screen.getByLabelText('Retained field')).toBe(field);
+  expect(screen.getByLabelText('Retained field')).toHaveValue('pending values');
 });

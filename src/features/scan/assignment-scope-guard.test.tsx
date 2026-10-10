@@ -153,3 +153,32 @@ it('detects persisted backend scope drift before loading a new shell even withou
   expect(readBatch(scope).value).toBeNull();
   expect(sessionStorage.getItem('inventory-assign-v1:old')).toBe('original');
 });
+it('withholds scope adoption during verification and retains the authoritative logout observer', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  sessionStorage.setItem('inventory-assign-v1:pending', 'exact command');
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  const view = render(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentScopeGuard actorId={id} backend={scope.backend} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  expect(mocks.subscribed).toHaveBeenCalledOnce();
+  act(() => mocks.changed?.('SIGNED_OUT', null));
+  expect(sessionStorage.getItem('inventory-assign-v1:pending')).toBeNull();
+  get.mockClear();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentScopeGuard actorId="new actor" backend={scope.backend} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <AssignmentScopeGuard actorId="new actor" backend={scope.backend} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).toHaveBeenCalledWith('inventory-assign-scope-v1');
+  expect(mocks.subscribed).toHaveBeenCalledTimes(2);
+});

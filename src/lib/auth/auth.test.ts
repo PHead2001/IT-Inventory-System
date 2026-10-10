@@ -13,12 +13,22 @@ const mocks = vi.hoisted(() => ({
   member: vi.fn(),
   from: vi.fn(),
   eq: vi.fn(),
+  privacyRead: vi.fn(),
+  privacyRecord: vi.fn(),
+  privacyCompare: vi.fn(),
+  privacyMayEstablish: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: vi.fn(async () => ({
     auth: mocks,
     from: mocks.from,
   })),
+}));
+vi.mock('./privacy-barrier.server', () => ({
+  readLogoutGeneration: mocks.privacyRead,
+  recordConfirmedLogout: mocks.privacyRecord,
+  compareLogoutGeneration: mocks.privacyCompare,
+  mayEstablishSession: mocks.privacyMayEstablish,
 }));
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((url: string) => {
@@ -40,6 +50,11 @@ const form = (data: Record<string, string>) => {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.privacyRead.mockResolvedValue({ status: 'absent' });
+  mocks.privacyRecord.mockResolvedValue({
+    logoutGeneration: '00000000-0000-4000-8000-000000000001',
+  });
+  mocks.privacyMayEstablish.mockResolvedValue(true);
   vi.stubEnv('APP_ORIGIN', 'http://localhost:3000');
   vi.stubEnv('VERCEL_BRANCH_URL', undefined);
   vi.stubEnv('VERCEL_URL', undefined);
@@ -406,7 +421,11 @@ describe('auth boundaries', () => {
           role: 'staff',
         }),
       ),
-    ).resolves.toEqual({ passwordUpdated: true, sessionClosed: true });
+    ).resolves.toEqual({
+      passwordUpdated: true,
+      sessionClosed: true,
+      logoutGeneration: '00000000-0000-4000-8000-000000000001',
+    });
     expect(mocks.updateUser).toHaveBeenCalledWith({
       password: 'Password123456',
     });
@@ -438,7 +457,11 @@ describe('auth boundaries', () => {
         {},
         form({ ...values, current_password: 'CurrentPassword123456' }),
       ),
-    ).resolves.toEqual({ passwordUpdated: true, sessionClosed: true });
+    ).resolves.toEqual({
+      passwordUpdated: true,
+      sessionClosed: true,
+      logoutGeneration: '00000000-0000-4000-8000-000000000001',
+    });
     expect(mocks.updateUser).toHaveBeenCalledWith({
       password: values.password,
       current_password: 'CurrentPassword123456',
@@ -594,7 +617,10 @@ describe('auth boundaries', () => {
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
   });
   it('returns only sanitized verified signout status for browser privacy clearing', async () => {
-    expect(await signOutSession()).toEqual({ ok: true });
+    expect(await signOutSession()).toEqual({
+      ok: true,
+      logoutGeneration: '00000000-0000-4000-8000-000000000001',
+    });
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
     mocks.signOut.mockResolvedValue({
       error: { message: 'private provider details', token: 'private' },
@@ -626,4 +652,64 @@ describe('auth boundaries', () => {
         .success,
     ).toBe(true);
   });
+});
+
+it.each(['login', 'confirm'] as const)(
+  'rejects a stale rendered %s before the provider can establish a new session',
+  async (action) => {
+    mocks.privacyMayEstablish.mockResolvedValue(false);
+    const result =
+      action === 'login'
+        ? await login(
+            {},
+            form({
+              email: 'staff@example.test',
+              password: 'test',
+              logout_generation: 'old',
+            }),
+          )
+        : await confirmAuth(
+            {},
+            form({
+              token_hash: 'token',
+              type: 'recovery',
+              logout_generation: 'old',
+            }),
+          );
+    expect(result).toMatchObject({ cleanupRequired: true });
+    expect(mocks.signInWithPassword).not.toHaveBeenCalled();
+    expect(mocks.verifyOtp).not.toHaveBeenCalled();
+  },
+);
+it('does not allocate a new privacy generation after failed signout', async () => {
+  mocks.signOut.mockResolvedValue({ error: { message: 'failed' } });
+  await signOutSession();
+  await setPassword(
+    {},
+    form({ password: 'NewPassword123456', confirmation: 'NewPassword123456' }),
+  );
+  expect(mocks.privacyRecord).not.toHaveBeenCalled();
+});
+it('retains a committed password and confirmed logout when the reminder is unavailable', async () => {
+  mocks.privacyRecord.mockResolvedValue({ cleanupReminderUnavailable: true });
+  expect(
+    await setPassword(
+      {},
+      form({
+        password: 'NewPassword123456',
+        confirmation: 'NewPassword123456',
+      }),
+    ),
+  ).toEqual({
+    passwordUpdated: true,
+    sessionClosed: true,
+    cleanupReminderUnavailable: true,
+  });
+  expect(mocks.updateUser).toHaveBeenCalledOnce();
+});
+it('does not let the redirecting logout wrapper hide a signed-out reminder failure', async () => {
+  mocks.privacyRecord.mockResolvedValue({ cleanupReminderUnavailable: true });
+  await expect(logout()).rejects.toThrow(
+    'browser cleanup reminder could not be saved',
+  );
 });

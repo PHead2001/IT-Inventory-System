@@ -87,17 +87,64 @@ obtain an ordinary password session or request a new reset email. Mixed stale-em
 and password AMR also fails closed; unavailable verification never mutates the password.
 
 After a successful password update and confirmed caller-scoped sign-out, the action
-returns only a typed password-updated/session-closed acknowledgement. A password-free
+returns a typed password-updated/session-closed acknowledgement and a fresh opaque
+logout generation. Confirmed ordinary sign-out uses the same generation helper.
+Only confirmed local Supabase sign-out creates the versioned browser-wide HttpOnly
+cookie (SameSite=Lax, Path=/, no Domain, one-year Max-Age); configured HTTPS uses
+Secure and the `__Host-` name, while local HTTP uses a separate cookie name.
+A cookie-preparation failure is a distinct already-signed-out reminder-unavailable
+result: close the tab, rather than replaying the committed password change.
+A password-free
 client completion clears and verifies this tab's assignment batch, exact uncertain
 commands and label queues before navigating to normal sign-in. Failed cleanup keeps
 the strongest durable all-cleanup tombstone and offers cleanup retry without another
-password mutation. Auth forms resume only an existing valid all-cleanup marker and
-block use until verified removal; URL flags, anonymous landing, private or invalid
-markers never authorize deletion of uncertain recovery. Server logout and browser
-cleanup are not atomic: response loss or closing the window before acknowledgement
-is not guaranteed to deliver browser cleanup absent an existing authoritative Auth
-session event. That delivery boundary still needs real-browser acceptance.
-The password page keeps the same client action owner when cookie writes trigger
+password mutation. Auth entry and the protected shell read the current generation
+before mounting private restoration consumers, and recheck on entry/reactivation.
+Readiness is bound to pathname, full query, known server generation and the
+explicit action revision. Reactivation immediately marks verification pending.
+The boundary retains accepted direct child nodes hidden and inert while checking,
+so unchanged form fields and their action owner survive; this does not freeze
+internal component updates or effects. Assignment and label bootstrap gates
+independently consult readiness before a new instance or actor/backend scope can
+restore storage, including when Next's retained route slot updates internally.
+Existing unchanged instances do not rehydrate merely because focus returned;
+label storage persistence waits during verification. Scope adoption is gated
+separately from the authoritative Auth observer, which stays subscribed during
+checks. A pending read grants no logout/discard authority and does not invalidate
+already-running mutation reconciliation. Confirmed generation changes remount
+the cleared private workspaces under the newly verified generation. A separate
+shared in-memory cleanup revision advances only after a verified authoritative wipe
+at the common storage cleanup path, including successful Auth observer cleanup;
+this also resets private workspace state when a pending all-cleanup marker is
+cleared under an already acknowledged cookie generation. A matching generation
+cannot revive a previously hydrated label queue after cleanup. Unchanged checks
+and non-authoritative invalidation do not advance this revision, and the password
+action-state owner remains outside these private workspace reset bindings.
+Each tab keeps a verified generation in a separate sessionStorage key outside the
+cleanup namespaces. A new valid generation invalidates callbacks, verifies all
+cleanup, compares the exact expected generation with the current server cookie,
+then writes and reads back the tab acknowledgement before release. A changed
+generation restarts cleanup; unavailable storage, invalid markers and invalid or
+unavailable cookies block release. A matching tab acknowledgement never overrides
+an outstanding all-cleanup marker. The comparison action never writes or deletes
+the retained cookie, so one tab's completion cannot consume another tab's reminder
+or overwrite a later logout. Login and email-confirmation actions compare the
+rendered verified generation before creating a new session; mismatch returns a
+cleanup-required state, not a claim that the server verified browser erasure.
+An already authenticated member landing on login cleans/checks the tab and resumes
+the existing safe destination without another credential exchange.
+With no server reminder, only an existing valid all-cleanup marker authorizes this
+deletion; URL flags, anonymous landing and private markers never grant authority.
+The cookie is a privacy reminder, not an Auth/RLS credential or cryptographic proof.
+Server logout and browser cleanup are not atomic. A delivered reminder survives
+first-storage-read failure and page destruction without a tab tombstone. Cookie
+expiry/eviction or deliberate browser-data removal, never-delivered Set-Cookie
+headers, and inaccessible cookie plus tab storage leave no durable coordination
+guarantee; close affected tabs before signing in again. Server acknowledgement
+compares a request snapshot, so a concurrent later logout is also checked before
+new session creation and at the next protected entry/reactivation. Browser
+acceptance remains separately required for these delivery and Flight boundaries.
+The password form keeps its action-state owner outside the privacy gate when cookie writes trigger
 a server rerender, while refreshing the server-verified sessionAvailable prop.
 An unavailable/expired session hides editable fields without clearing recovery;
 only the action's genuine session-closed result permits the completion cleanup.

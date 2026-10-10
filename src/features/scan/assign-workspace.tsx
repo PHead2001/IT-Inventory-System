@@ -9,6 +9,10 @@ import {
   useState,
 } from 'react';
 import Link from 'next/link';
+import {
+  PrivateRestorationGate,
+  usePrivacyReadiness,
+} from '@/components/auth/privacy-readiness';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { field, panel } from '@/features/inventory/components/read-ui';
@@ -72,7 +76,9 @@ type Props = {
 };
 export function AssignmentWorkspace(props: Props) {
   return (
-    <AssignmentFields key={props.actorId + ':' + props.backend} {...props} />
+    <PrivateRestorationGate scope={props.actorId + ':' + props.backend}>
+      <AssignmentFields key={props.actorId + ':' + props.backend} {...props} />
+    </PrivateRestorationGate>
   );
 }
 function AssignmentFields({
@@ -83,6 +89,8 @@ function AssignmentFields({
   initialSiteId,
   siteIssue,
 }: Props) {
+  const privacy = usePrivacyReadiness();
+  const bootstrapped = useRef(false);
   const initialSite = sites.find(
     (site) => site.id === initialSiteId && site.active,
   );
@@ -309,6 +317,8 @@ function AssignmentFields({
   };
   /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
+    if (!privacy.ready || bootstrapped.current) return;
+    bootstrapped.current = true;
     let environment: string;
     try {
       environment = new URL(backend).origin;
@@ -535,7 +545,7 @@ function AssignmentFields({
     // Bootstrap exactly once per keyed actor/backend. Fresh catalog props are
     // checked before each new confirmation; they must not restart recovery.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actorId, backend]);
+  }, [actorId, backend, privacy.ready]);
   /* eslint-enable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     mounted.current = true;

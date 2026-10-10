@@ -5,6 +5,7 @@ import { login, recover, confirmAuth, setPassword } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AuthState } from '@/lib/auth/schemas';
+import { logoutGenerationField } from '@/lib/auth/privacy-barrier';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { AuthPrivacyBoundary, PasswordLogoutCompletion } from './auth-privacy';
 const actions = { login, recover, confirm: confirmAuth, password: setPassword };
@@ -17,9 +18,35 @@ type Props = {
   sessionAvailable?: boolean;
 };
 export function AuthForm(props: Props) {
+  // This owner must survive privacy gating and cookie-driven Flight updates.
+  const [state, action, pending] = useActionState<AuthState, FormData>(
+    actions[props.mode],
+    {},
+  );
+  if (props.mode === 'password' && state.passwordUpdated && state.sessionClosed)
+    return <PasswordLogoutCompletion receipt={state} />;
+  if (state.passwordUpdated)
+    return (
+      <div className="space-y-5">
+        <p role="alert" className="experience-feedback" data-tone="error">
+          {state.error}
+        </p>
+        <QueueLogoutForm />
+      </div>
+    );
   return (
-    <AuthPrivacyBoundary>
-      <AuthFields {...props} />
+    <AuthPrivacyBoundary
+      revision={'cleanupRequired' in state && state.cleanupRequired ? state : 0}
+    >
+      {(generation) => (
+        <AuthFields
+          {...props}
+          state={state}
+          action={action}
+          pending={pending}
+          generation={generation}
+        />
+      )}
     </AuthPrivacyBoundary>
   );
 }
@@ -30,28 +57,22 @@ function AuthFields({
   next,
   emailedCompletion = false,
   sessionAvailable = true,
-}: Props) {
-  const [state, action, pending] = useActionState<AuthState, FormData>(
-    actions[mode],
-    {},
-  );
+  state,
+  action,
+  pending,
+  generation,
+}: Props & {
+  state: AuthState;
+  action: (form: FormData) => void;
+  pending: boolean;
+  generation: string;
+}) {
   const label = {
     login: 'Sign in',
     recover: 'Send reset email',
     confirm: 'Continue securely',
     password: 'Set password',
   }[mode];
-  if (mode === 'password' && state.passwordUpdated && state.sessionClosed)
-    return <PasswordLogoutCompletion />;
-  if (state.passwordUpdated)
-    return (
-      <div className="space-y-5">
-        <p role="alert" className="experience-feedback" data-tone="error">
-          {state.error}
-        </p>
-        <QueueLogoutForm />
-      </div>
-    );
   if (mode === 'password' && !sessionAvailable)
     return (
       <div role="alert">
@@ -71,6 +92,7 @@ function AuthFields({
     );
   return (
     <form action={action} className="space-y-5 text-sm" aria-label={label}>
+      <input type="hidden" name={logoutGenerationField} value={generation} />
       {mode === 'login' && next && (
         <input type="hidden" name="next" value={next} />
       )}

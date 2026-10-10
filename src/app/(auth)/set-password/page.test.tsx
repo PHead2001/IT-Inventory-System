@@ -14,8 +14,12 @@ vi.mock('@/lib/auth/actions', () => ({
   confirmAuth: vi.fn(),
   setPassword: vi.fn(),
   signOutSession: vi.fn(),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
 }));
 vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/test',
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 import SetPasswordPage from './page';

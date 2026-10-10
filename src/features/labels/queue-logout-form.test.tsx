@@ -10,9 +10,17 @@ import {
 import { clearLabelQueueSession } from './queue-model';
 import { assignmentEpoch } from '@/features/scan/assign-batch';
 const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => routing }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/test',
+  useRouter: () => routing,
+}));
 
-vi.mock('@/lib/auth/actions', () => ({ signOutSession: vi.fn() }));
+vi.mock('@/lib/auth/actions', () => ({
+  signOutSession: vi.fn(),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+}));
 vi.mock('./queue-model', () => ({ clearLabelQueueSession: vi.fn() }));
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -32,7 +40,10 @@ beforeEach(() => {
   vi.mocked(clearLabelQueueSession).mockClear();
   vi.mocked(clearLabelQueueSession).mockReturnValue(true);
   vi.mocked(signOutSession).mockReset();
-  vi.mocked(signOutSession).mockResolvedValue({ ok: true });
+  vi.mocked(signOutSession).mockResolvedValue({
+    ok: true,
+    logoutGeneration: '00000000-0000-4000-8000-000000000001',
+  });
   sessionStorage.clear();
 });
 afterEach(() => vi.restoreAllMocks());
@@ -80,7 +91,10 @@ it('retains the existing direct signout behavior for a definitely unsaved draft'
 it('clears uncertain scan recovery only after successful server signout away from Scan', async () => {
   sessionStorage.setItem('inventory-assign-batch-v1:old', 'private ticket');
   sessionStorage.setItem('inventory-assign-v1:old', 'exact original command');
-  let finish!: (result: { ok: true }) => void;
+  let finish!: (result: {
+    ok: true;
+    logoutGeneration: '00000000-0000-4000-8000-000000000001';
+  }) => void;
   vi.mocked(signOutSession).mockReturnValue(
     new Promise((resolve) => {
       finish = resolve;
@@ -99,7 +113,10 @@ it('clears uncertain scan recovery only after successful server signout away fro
   expect(sessionStorage.getItem('inventory-assign-v1:old')).toBe(
     'exact original command',
   );
-  finish({ ok: true });
+  finish({
+    ok: true,
+    logoutGeneration: '00000000-0000-4000-8000-000000000001',
+  });
   await waitFor(() =>
     expect(sessionStorage.getItem('inventory-assign-v1:old')).toBeNull(),
   );
@@ -131,7 +148,10 @@ it.each(['server', 'transport'])(
       'exact original command',
     );
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled();
-    vi.mocked(signOutSession).mockResolvedValue({ ok: true });
+    vi.mocked(signOutSession).mockResolvedValue({
+      ok: true,
+      logoutGeneration: '00000000-0000-4000-8000-000000000001',
+    });
     fireEvent.submit(
       screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
     );
@@ -141,3 +161,29 @@ it.each(['server', 'transport'])(
     expect(sessionStorage.getItem('inventory-assign-batch-v1:old')).toBeNull();
   },
 );
+it('retries only privacy cleanup after confirmed signout when a private command removal fails', async () => {
+  const command = 'inventory-assign-v1:cleanup-retry';
+  sessionStorage.setItem(command, 'exact original command');
+  const remove = Storage.prototype.removeItem;
+  const denied = vi
+    .spyOn(Storage.prototype, 'removeItem')
+    .mockImplementation(function (this: Storage, key) {
+      if (key === command) return;
+      remove.call(this, key);
+    });
+  render(<QueueLogoutForm />);
+  fireEvent.submit(
+    screen.getByRole('button', { name: 'Sign out' }).closest('form')!,
+  );
+  expect(await screen.findByRole('alert')).toHaveTextContent('could not clear');
+  expect(
+    screen.queryByRole('button', { name: 'Sign out' }),
+  ).not.toBeInTheDocument();
+  expect(signOutSession).toHaveBeenCalledOnce();
+  denied.mockRestore();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+  );
+  await waitFor(() => expect(sessionStorage.getItem(command)).toBeNull());
+  expect(signOutSession).toHaveBeenCalledOnce();
+});

@@ -9,6 +9,10 @@ import {
   type SetStateAction,
 } from 'react';
 import Link from 'next/link';
+import {
+  PrivateRestorationGate,
+  usePrivacyReadiness,
+} from '@/components/auth/privacy-readiness';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
@@ -155,10 +159,14 @@ type LabelDesignerProps = {
 
 export function LabelDesigner(props: LabelDesignerProps) {
   return (
-    <LabelDesignerWorkspace
-      key={queueStorageKey(props.origin, props.memberId)}
-      {...props}
-    />
+    <PrivateRestorationGate
+      scope={queueStorageKey(props.origin, props.memberId)}
+    >
+      <LabelDesignerWorkspace
+        key={queueStorageKey(props.origin, props.memberId)}
+        {...props}
+      />
+    </PrivateRestorationGate>
   );
 }
 
@@ -172,6 +180,8 @@ function LabelDesignerWorkspace({
   addIntent = emptyIntent,
   defaults = defaultJob,
 }: LabelDesignerProps) {
+  const privacy = usePrivacyReadiness();
+  const restoredStorageKey = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const query = useSearchParams().toString();
@@ -269,11 +279,13 @@ function LabelDesignerWorkspace({
   );
 
   useEffect(() => {
+    if (!privacy.ready || restoredStorageKey.current === storageKey) return;
     let current = true;
     // Hydration is asynchronous so React does not render a second, synchronous
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
       if (!current) return;
+      restoredStorageKey.current = storageKey;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
         stored = parseStoredQueue(
@@ -304,9 +316,9 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [storageKey, setEntries]);
+  }, [storageKey, setEntries, privacy.ready]);
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !privacy.ready) return;
     try {
       sessionStorage.setItem(
         storageKey,
@@ -316,7 +328,7 @@ function LabelDesignerWorkspace({
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job]);
+  }, [storageKey, hydrated, entries, filters, job, privacy.ready]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.

@@ -597,6 +597,8 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       });
       let restoreDelayed = false;
       let touch: CDPSession | undefined;
+      let touchActive = false;
+      let fixtureFailed = false;
       await page.route('**/scan?mode=assign*', async (route) => {
         if (
           !restoreDelayed &&
@@ -699,6 +701,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
               { ...point, id: 11, radiusX: 1, radiusY: 1, force: 1 },
             ],
           });
+          touchActive = true;
         } else {
           await page.mouse.move(point.x, point.y);
           await page.mouse.down();
@@ -763,6 +766,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
             type: 'touchEnd',
             touchPoints: [],
           });
+          touchActive = false;
           expect(
             await page.evaluate(
               () =>
@@ -800,21 +804,44 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
           page.getByRole('region', { name: 'Batch checklist' }),
         ).toContainText('Skipped before confirmation.');
         expect(await count()).toBe(0);
+      } catch (error) {
+        fixtureFailed = true;
+        throw error;
       } finally {
         releaseRestore();
+        const cleanupErrors: unknown[] = [];
+        const cleanup = async (action: () => Promise<unknown>) => {
+          try {
+            await action();
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        };
         if (touch) {
-          await touch.send('Input.dispatchTouchEvent', {
-            type: 'touchEnd',
-            touchPoints: [],
-          });
-          await touch.send('Emulation.setTouchEmulationEnabled', {
-            enabled: false,
-          });
-          await touch.detach();
+          const session = touch;
+          if (touchActive) {
+            await cleanup(async () => {
+              await session.send('Input.dispatchTouchEvent', {
+                type: 'touchCancel',
+                touchPoints: [],
+              });
+              touchActive = false;
+            });
+          }
+          await cleanup(() =>
+            session.send('Emulation.setTouchEmulationEnabled', {
+              enabled: false,
+            }),
+          );
+          await cleanup(() => session.detach());
         }
-        await page.mouse.up();
-        await page.unrouteAll({ behavior: 'wait' });
-        if (originalViewport) await page.setViewportSize(originalViewport);
+        await cleanup(() => page.mouse.up());
+        await cleanup(() => page.unrouteAll({ behavior: 'wait' }));
+        if (originalViewport)
+          await cleanup(() => page.setViewportSize(originalViewport));
+        // Keep the original assertion/protocol failure if teardown also fails,
+        // but do not hide a cleanup failure after an otherwise successful run.
+        if (!fixtureFailed && cleanupErrors.length) throw cleanupErrors[0];
       }
     }
     await inspect(page);

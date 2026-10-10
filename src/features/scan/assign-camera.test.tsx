@@ -14,8 +14,14 @@ const mocks = vi.hoisted(() => ({
   stop: vi.fn(),
   signOut: vi.fn(),
 }));
-vi.mock('@/lib/auth/actions', () => ({ signOutSession: mocks.signOut }));
+vi.mock('@/lib/auth/actions', () => ({
+  signOutSession: mocks.signOut,
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+}));
 vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/test',
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock('./inventory-code-reader', () => ({

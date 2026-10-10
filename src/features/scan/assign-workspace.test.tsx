@@ -43,8 +43,14 @@ vi.mock('@/lib/supabase/browser', () => ({
     },
   }),
 }));
-vi.mock('@/lib/auth/actions', () => ({ signOutSession: mocks.signOut }));
+vi.mock('@/lib/auth/actions', () => ({
+  signOutSession: mocks.signOut,
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+}));
 vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/test',
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock('./assign-actions', () => ({
@@ -2583,4 +2589,103 @@ it('retains an inactive preferred source across refresh but blocks confirmation 
   });
   expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeEnabled();
   expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('defers assignment bootstrap and scope rebinding while privacy verification is pending', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  const view = render(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('form', { name: 'Inspect equipment' }),
+  ).not.toBeInTheDocument();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  await screen.findByRole('form', { name: 'Inspect equipment' });
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'typed lookup' },
+  });
+  get.mockClear();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(screen.getByLabelText('Scan, paste, or search inventory')).toHaveValue(
+    'typed lookup',
+  );
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentWorkspace {...props} actorId={id(98)} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('form', { name: 'Inspect equipment' }),
+  ).not.toBeInTheDocument();
+  get.mockRestore();
+});
+it('retains the original in-flight mutation and reconciles it once while privacy verification is pending', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  await inspect();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  const original = mocks.submit.mock.calls[0][0];
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(readAssignmentRecovery(scope).value?.command.requestId).toBe(
+    original.requestId,
+  );
+  await act(async () =>
+    finish({
+      ok: true,
+      entityId: candidate.id,
+      version: '8',
+      changed: true,
+      eventId: id(8),
+    }),
+  );
+  expect(readBatch(scope).value?.entries[0]).toMatchObject({
+    status: 'success',
+    requestId: original.requestId,
+  });
+  expect(readAssignmentRecovery(scope).value).toBeNull();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <AssignmentWorkspace {...props} />
+    </PrivacyReadinessContext>,
+  );
+  await screen.findByRole('region', { name: 'Latest assignment receipt' });
+  expect(mocks.submit).toHaveBeenCalledOnce();
+  expect(readBatch(scope).value?.entries).toHaveLength(1);
 });

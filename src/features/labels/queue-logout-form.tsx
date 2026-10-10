@@ -1,22 +1,29 @@
 'use client';
 import { signOutSession } from '@/lib/auth/actions';
-import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { clearLabelQueueSession } from './queue-model';
-import {
-  invalidateAssignmentCallbacks,
-  invalidateAssignmentPrivacy,
-} from '@/features/scan/assign-batch';
+import { invalidateAssignmentCallbacks } from '@/features/scan/assign-batch';
+import { PasswordLogoutCompletion } from '@/components/auth/auth-privacy';
+import type { LogoutPrivacyReceipt } from '@/lib/auth/privacy-barrier';
 import {
   clearAllDesignerRecovery,
   hasUnresolvedDesignerRecovery,
 } from '@/features/metadata/designer-recovery';
 export function QueueLogoutForm() {
-  const router = useRouter();
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState('');
+  const [receipt, setReceipt] = useState<LogoutPrivacyReceipt | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  if (receipt)
+    return <PasswordLogoutCompletion receipt={receipt} destination="/login" />;
   return (
     <form
       action={async () => {
@@ -28,25 +35,20 @@ export function QueueLogoutForm() {
         invalidateAssignmentCallbacks();
         try {
           const result = await signOutSession();
+          if (!mounted.current) return;
           if (!result.ok) {
             setIssue(result.message);
             return;
           }
-          if (!invalidateAssignmentPrivacy(true)) {
-            setIssue(
-              'Signed out, but this tab could not clear its saved batch. Close this tab to remove its private session data.',
-            );
-            return;
-          }
-          router.replace('/login');
-          router.refresh();
+          setReceipt(result);
         } catch {
-          setIssue(
-            'Sign-out could not be confirmed. Retry when your connection is available.',
-          );
+          if (mounted.current)
+            setIssue(
+              'Sign-out could not be confirmed. Retry when your connection is available.',
+            );
         } finally {
           submitting.current = false;
-          setBusy(false);
+          if (mounted.current) setBusy(false);
         }
       }}
       onSubmit={(event) => {

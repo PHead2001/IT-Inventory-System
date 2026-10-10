@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { LogoutPrivacyReceipt } from './privacy-barrier';
 export const emailSchema = z.string().trim().email().max(254);
 export const loginSchema = z.object({
   email: emailSchema,
@@ -22,7 +23,7 @@ export const passwordSchema = z
     path: ['confirmation'],
   });
 /** Only the password action's confirmed caller-scoped logout returns this shape. */
-export type PasswordLogoutAcknowledgement = {
+export type PasswordLogoutAcknowledgement = LogoutPrivacyReceipt & {
   passwordUpdated: true;
   sessionClosed: true;
   error?: never;
@@ -34,5 +35,6 @@ export type AuthState =
       message?: string;
       passwordUpdated?: boolean;
       sessionClosed?: never;
+      cleanupRequired?: boolean;
     }
   | PasswordLogoutAcknowledgement;

@@ -104,6 +104,15 @@ not inspect or change hosted Auth configuration.
 
 ## Proof by layer
 
+The logout privacy regression also mounts a populated label queue with an already
+acknowledged generation, fails authoritative logout cleanup, then retries under
+the same cookie generation. It verifies that cleared entries disappear from the
+workspace and are never persisted again from the old hydrated instance. A sibling
+test delivers successful first-attempt SIGNED_OUT through the mounted Auth observer,
+then rechecks the matching generation after its cleanup marker is gone. Shared
+cleanup revision tests distinguish successful authoritative wipes from ordinary checks
+and failed removal attempts.
+
 Audit 4.2 P02 scan-batch regressions cover bounded UTF-8/schema/CAS storage, compact immutable operation snapshots, request/event deduplication, exact uncertain replay, legacy recovery and terminal cleanup reconciliation, restored historical reviews and nonmutating current availability reads, inactive destinations and evacuation-source preferences, safe Finish/End, capacity and privacy generation invalidation. Component checks include immediate inspection status/busy state, deliberate Cancel focus, chooser/review/error focus, deferred responses after ticket/source/destination/account changes, terminal storage failures and logout success/error/transport paths away from Scan. Auth tests preserve the caller-scoped local signout contract and sanitized acknowledgements. These tests do not replace actual browser/database proof.
 
 `tests/e2e/scan-assign.spec.ts` uses real local Auth/custody actions and ordinary controls for record visit + actual Back, reload + automatic availability refresh, immutable checklist/event links, deliberate repeat assignments, Finish/End, cancellation, independent writer stale stock, blocked command persistence, an actual server-action fetch with a lost browser response, exact replay with one event, terminal cleanup failure + clear-only reload, and successful signout from another route. Run through the canonical `npm run test:e2e` disposable loopback environment; do not point fixtures at a hosted backend. A Docker-unavailable host may run focused unit/component checks and typecheck, but must record real E2E and the complete DB/application gate as pending CI. Full/Reduced desktop and 390 px hands-on candidate acceptance, real devices and P10 Light-mode acceptance are separately required.
@@ -331,3 +340,25 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## Logout-generation privacy barrier
+
+Focused Auth tests cover retained HttpOnly generation creation only after confirmed
+local sign-out, read-only exact-generation comparison, stale login/confirmation
+submission, first storage read failure before tombstone creation followed by module
+reload, independent tab acknowledgement, newer-generation restarts, invalid/absent
+markers, acknowledgement write/readback failures, cleanup-only retries, stable
+password action ownership through refreshed session props, protected restoration
+withholding and reactivation without losing unchanged editable state.
+Deferred-read regressions additionally cover query-only navigation, changed known
+server generation/action revision, newly mounted bootstrap under an internally
+updating retained route slot, and unchanged field node/value preservation.
+Assignment, label and scope-guard fixtures verify that pending readiness defers
+storage restoration and actor rebinding while the Auth logout observer remains
+subscribed; unchanged reactivation never restarts hydrated workspaces.
+`tests/e2e/logout-privacy.spec.ts` authors real Next logout/reload and two-tab
+same-actor protected-entry checks using synthetic per-tab recovery. The existing
+foundation password test exercises cookie-driven password Flight completion.
+These tests require the approved local E2E environment and must be reported as
+unrun until executed; unit fixtures do not prove delivered browser headers,
+cross-tab Auth broadcast timing or actual Next Flight behavior.

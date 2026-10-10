@@ -6,12 +6,16 @@ const actions = vi.hoisted(() => ({
   recover: vi.fn(async () => ({})),
   confirmAuth: vi.fn(async () => ({})),
   setPassword: vi.fn(async () => ({})),
+  readLogoutPrivacyGeneration: vi.fn(async () => ({ status: 'absent' })),
+  acknowledgeLogoutPrivacyGeneration: vi.fn(async () => ({ status: 'match' })),
   logout: vi.fn(async () => ({})),
   signOutSession: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock('@/lib/auth/actions', () => actions);
 const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/test',
   useRouter: () => routing,
 }));
 import { AuthForm } from './auth-form';

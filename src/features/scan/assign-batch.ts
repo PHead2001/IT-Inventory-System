@@ -247,6 +247,16 @@ export function historicalInspection(
 let epoch = 0;
 let activeScope: string | null = null;
 let cleanupRequired: 'all' | 'private' | null = null;
+let authoritativeCleanupRevision = 0;
+const cleanupListeners = new Set<() => void>();
+export const readAuthoritativeCleanupRevision = () =>
+  authoritativeCleanupRevision;
+export function subscribeAuthoritativeCleanup(listener: () => void) {
+  cleanupListeners.add(listener);
+  return () => {
+    cleanupListeners.delete(listener);
+  };
+}
 export const assignmentEpoch = () => epoch;
 export function adoptAssignmentScope(scope: AssignmentScope) {
   const identity = batchKey(scope);
@@ -378,6 +388,12 @@ function clearAssignmentPrivacyStorage(mode: 'all' | 'private') {
     if (sessionStorage.getItem('inventory-assign-cleanup-v1') !== null)
       return false;
     cleanupRequired = null;
+    // Publish only a complete authoritative wipe, including observer and scope-
+    // adoption paths. Callback invalidation alone is not storage erasure authority.
+    if (mode === 'all') {
+      authoritativeCleanupRevision++;
+      for (const listener of cleanupListeners) listener();
+    }
     return true;
   } catch {
     return false;
