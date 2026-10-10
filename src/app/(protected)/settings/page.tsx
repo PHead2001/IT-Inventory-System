@@ -1,3 +1,4 @@
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { MotionToggle } from '@/components/experience/motion-preference';
@@ -47,44 +48,46 @@ export default async function SettingsPage({
     redirect(`/settings/forms/${encodeURIComponent(legacyCategory)}`);
   }
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="experience-eyebrow">Workspace · Configuration</p>
-        <h1 className="experience-heading mt-3">Settings</h1>
-        <p className="experience-muted mt-2 text-sm">
-          Choose the configuration area you need.
-        </p>
+    <ProtectedPrivacyContent>
+      <div className="space-y-6">
+        <div>
+          <p className="experience-eyebrow">Workspace · Configuration</p>
+          <h1 className="experience-heading mt-3">Settings</h1>
+          <p className="experience-muted mt-2 text-sm">
+            Choose the configuration area you need.
+          </p>
+        </div>
+        <section
+          aria-labelledby="appearance-heading"
+          className="experience-surface p-5 space-y-3"
+        >
+          <h2 id="appearance-heading" className="text-lg font-semibold">
+            Appearance & preferences
+          </h2>
+          <p className="experience-muted text-sm">
+            Motion is your personal preference for this browser. Your
+            system&apos;s reduced-motion preference always applies.
+          </p>
+          <MotionToggle />
+        </section>
+        <ul className="grid gap-3 md:grid-cols-2">
+          {sections.map((section) => (
+            <li key={section.href}>
+              <Link
+                href={section.href}
+                className="experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
+              >
+                <span className="block text-lg font-semibold text-cyan-200">
+                  {section.title}
+                </span>
+                <span className="experience-muted mt-1 block text-sm">
+                  {section.description}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       </div>
-      <section
-        aria-labelledby="appearance-heading"
-        className="experience-surface p-5 space-y-3"
-      >
-        <h2 id="appearance-heading" className="text-lg font-semibold">
-          Appearance & preferences
-        </h2>
-        <p className="experience-muted text-sm">
-          Motion is your personal preference for this browser. Your
-          system&apos;s reduced-motion preference always applies.
-        </p>
-        <MotionToggle />
-      </section>
-      <ul className="grid gap-3 md:grid-cols-2">
-        {sections.map((section) => (
-          <li key={section.href}>
-            <Link
-              href={section.href}
-              className="experience-surface block h-full min-w-0 p-5 transition-colors hover:border-cyan-400/60 hover:bg-slate-800/70 focus-visible:outline-2 focus-visible:outline-cyan-300"
-            >
-              <span className="block text-lg font-semibold text-cyan-200">
-                {section.title}
-              </span>
-              <span className="experience-muted mt-1 block text-sm">
-                {section.description}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
+    </ProtectedPrivacyContent>
   );
 }

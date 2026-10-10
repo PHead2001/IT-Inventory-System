@@ -325,26 +325,48 @@ test('a lost committed designer response survives authorization denial and repla
     { id: committedEvent, revision_id: committedRevision, actor_id: actorId },
   ]);
   const other = await context.newPage();
+  let primaryFailure: unknown;
   try {
     await other.goto('/settings');
     await other.getByRole('button', { name: 'Sign out' }).click();
     await signIn(other, 'viewer');
-    await designer.getByRole('button', { name: 'Retry original save' }).click();
     await expect(
-      designer
-        .getByRole('status')
-        .filter({ hasText: 'Configuration access changed' }),
-    ).toContainText('Configuration access changed');
-    expect(commands).toHaveLength(2);
-    expect(commands[1]).toBe(commands[0]);
-    await expect(
-      designer.getByRole('button', { name: 'Save changes' }),
-    ).toHaveCount(0);
+      page.getByRole('alert').filter({ hasText: 'original account access' }),
+    ).toBeVisible();
+    await expect(designer).toHaveCount(0);
+    expect(commands).toHaveLength(1);
+    expect(await publications()).toEqual(committedPublications);
     await page.screenshot({
       path: testInfo.outputPath('unknown-save-authorization-mask.png'),
     });
     await other.getByRole('button', { name: 'Sign out' }).click();
     await signIn(other);
+    const workspaceRetry = page.getByRole('button', {
+      name: 'Retry privacy cleanup',
+      exact: true,
+    });
+    const deniedDesigner = designer
+      .getByRole('status')
+      .filter({ hasText: 'Configuration access changed' });
+    // A fresh external check may already verify the restored original binding.
+    // Otherwise explicitly finish workspace verification before touching its owner.
+    await expect
+      .poll(
+        async () =>
+          (await workspaceRetry.isVisible()) ||
+          (await deniedDesigner.isVisible()),
+      )
+      .toBe(true);
+    if (await workspaceRetry.isVisible()) await workspaceRetry.click();
+    await expect(
+      designer
+        .getByRole('status')
+        .filter({ hasText: 'Configuration access changed' }),
+    ).toContainText('Configuration access changed');
+    expect(commands).toHaveLength(1);
+    await expect(
+      designer.getByRole('button', { name: 'Save changes' }),
+    ).toHaveCount(0);
     await designer
       .getByRole('button', { name: 'Retry access', exact: true })
       .click();
@@ -355,8 +377,8 @@ test('a lost committed designer response survives authorization denial and repla
         .getByRole('status')
         .filter({ hasText: 'Saved active form revision' }),
     ).toContainText('Saved active form revision');
-    expect(commands).toHaveLength(3);
-    expect(commands[2]).toBe(commands[0]);
+    expect(commands).toHaveLength(2);
+    expect(commands[1]).toBe(commands[0]);
     try {
       const current = await client.rpc('metadata_form_get_v2', {
         p_category_id: categoryId,
@@ -370,9 +392,21 @@ test('a lost committed designer response survives authorization denial and repla
     } finally {
       await client.auth.signOut({ scope: 'local' });
     }
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
   } finally {
-    await page.unroute('**/settings/forms/**');
-    await other.close();
+    const cleanup = await Promise.allSettled([
+      page.isClosed()
+        ? Promise.resolve()
+        : page.unroute('**/settings/forms/**'),
+      other.isClosed() ? Promise.resolve() : other.close(),
+    ]);
+    // Preserve the earlier assertion/timeout if teardown closes its targets.
+    if (primaryFailure === undefined) {
+      for (const result of cleanup)
+        if (result.status === 'rejected') throw result.reason;
+    }
   }
 });
 

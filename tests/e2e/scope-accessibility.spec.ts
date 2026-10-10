@@ -254,7 +254,9 @@ test('location status, holding scope, matching rows and real CSV agree across na
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Current scope: Active only')).toBeVisible();
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     const split = page.locator('li').filter({
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
     });
@@ -287,23 +289,31 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await all.click({ noWaitAfter: true });
     await expect.poll(() => slowStarted).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await active.click({ noWaitAfter: true });
     releaseScope();
     await expect.poll(() => slowDelivered).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.unroute('**/locations/ITC-BLACK?**');
     await all.click();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await expect(active).not.toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('29 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('29 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/status=all/);
     await page.reload();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await page.goBack();
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
@@ -328,11 +338,34 @@ test('location status, holding scope, matching rows and real CSV agree across na
       .getByLabel('Search inventory', { exact: true })
       .fill(setup.prefix);
     await search.getByRole('button', { name: 'Search', exact: true }).click();
-    await expect(page.getByText('30 matching rows')).toBeVisible();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/inventory' &&
+        url.searchParams.get('q') === setup.prefix &&
+        !url.searchParams.has('page'),
+    );
+    await expect(
+      page.getByText('30 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(/^On this page:/)).toBeVisible();
-    await page.getByRole('link', { name: 'Next', exact: true }).click();
-    await expect(page.getByText('Page 2 of 2')).toBeVisible();
-    await expect(page.getByText('30 matching rows')).toBeVisible();
+    const next = page
+      .getByRole('navigation', { name: 'Pagination' })
+      .getByRole('link', { name: 'Next', exact: true });
+    await expect(next).toHaveAttribute(
+      'href',
+      '/inventory?' + new URLSearchParams({ q: setup.prefix, page: '2' }),
+    );
+    await next.click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/inventory' &&
+        url.searchParams.get('q') === setup.prefix &&
+        url.searchParams.get('page') === '2',
+    );
+    await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('30 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Next', exact: true }),
     ).toHaveCount(0);
@@ -345,9 +378,13 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await expect(
       search.getByLabel('Search inventory', { exact: true }),
     ).toHaveValue(setup.prefix);
-    await expect(page.getByText('31 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('31 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.goto('/inventory?q=' + encodeURIComponent(setup.splitName));
-    await expect(page.getByText('2 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('2 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByText('On this page: 2 quantity rows with stock'),
     ).toBeVisible();

@@ -4,6 +4,10 @@ import {
   installLocalStorageVersion,
   verifyLocalStorageRuntime,
 } from './local-storage-version.mjs';
+import {
+  prepareLocalAuthTemplates,
+  verifyLocalAuthTemplates,
+} from './local-auth-templates.mjs';
 const command = process.argv[2];
 const cli = (...args) => npm(['exec', '--', 'supabase', ...args]);
 const types = (check) => {
@@ -38,10 +42,12 @@ const types = (check) => {
     );
   }
 };
-const reset = () => {
+const reset = async () => {
   localStatus();
   verifyLocalStorageRuntime();
+  prepareLocalAuthTemplates();
   cli('db', 'reset', '--local');
+  await verifyLocalAuthTemplates('reset');
 };
 const test = () => {
   const status = localStatus();
@@ -101,10 +107,12 @@ const test = () => {
 try {
   if (command === 'start') {
     installLocalStorageVersion();
+    prepareLocalAuthTemplates();
     cli('start');
     verifyLocalStorageRuntime();
+    await verifyLocalAuthTemplates('startup');
   } else if (command === 'stop') cli('stop');
-  else if (command === 'reset') reset();
+  else if (command === 'reset') await reset();
   else if (command === 'types') types(false);
   else if (command === 'types-check') types(true);
   else if (command === 'test') test();
@@ -123,7 +131,7 @@ try {
       localTestEnv(status),
     );
   } else if (command === 'validate') {
-    reset();
+    await reset();
     test();
     types(true);
   } else throw new Error('Unknown local database command');

@@ -90,11 +90,25 @@ export function updateCopies(
 export function queueStorageKey(origin: string, memberId: string): string {
   return `it-inventory-label-queue:v1:${encodeURIComponent(origin)}:${memberId}`;
 }
-export function clearLabelQueueSession(): void {
-  for (let i = sessionStorage.length - 1; i >= 0; i--) {
-    const key = sessionStorage.key(i);
-    if (key?.startsWith('it-inventory-label-queue:v1:'))
-      sessionStorage.removeItem(key);
+export function clearLabelQueueSession(): boolean {
+  try {
+    const targets: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith('it-inventory-label-queue:v1:')) targets.push(key);
+    }
+    let absent = true;
+    for (const key of targets) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        /* Verify independently. */
+      }
+      if (sessionStorage.getItem(key) !== null) absent = false;
+    }
+    return absent;
+  } catch {
+    return false;
   }
 }
 

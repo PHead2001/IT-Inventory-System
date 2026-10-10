@@ -34,6 +34,25 @@ async function choose(form: Locator, label: string, code: string) {
 async function openForm(page: Page, name: string) {
   return openRecordTask(page, name);
 }
+async function openRecordHistory(
+  page: Page,
+  name: 'View all item history' | 'View all asset history',
+) {
+  const link = page.getByRole('link', { name, exact: true });
+  const href = await link.getAttribute('href');
+  expect(href).toBeTruthy();
+  const target = new URL(href!, page.url()).href;
+  await link.click();
+  await expect(page).toHaveURL(target);
+  // The outgoing detail timeline remains usable during same-binding admission.
+  // Its event headings/disclosures also exist on the incoming history page.
+  await expect(
+    page.getByRole('heading', { name: 'Inventory history', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('form', { name: 'Filter history' }),
+  ).toBeVisible();
+}
 async function confirm(form: Locator, name: string) {
   if (
     name === 'Add quantity item' ||
@@ -173,6 +192,12 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       .getByLabel('Reason (required)')
       .fill('Second holding fixture');
     await confirm(receive, 'Receive stock');
+    // Confirm clicks dispatch the action; wait for its committed result before
+    // a new document reads the holdings used to choose the next Receive default.
+    await expect(
+      receive.getByRole('status').filter({ hasText: 'Saved successfully.' }),
+    ).toBeVisible();
+    await version(page, 2);
     await page.goto(detailUrl);
     const multiple = await openForm(page, 'Receive stock');
     await expect(
@@ -421,7 +446,7 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(
       form.getByText('Previous move receipt', { exact: true }),
     ).toHaveCount(0);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(2);
@@ -488,7 +513,7 @@ test('a separate authenticated writer changes stock after move review and reject
       form.getByRole('button', { name: 'Confirm move stock' }),
     ).toHaveCount(0);
     await page.reload();
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(0);
@@ -591,7 +616,7 @@ test('a real committed move with a lost response retries the original command on
     expect(commands).toHaveLength(2);
     expect(commands[1]).toBe(commands[0]);
     await version(page, 2);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(1);
@@ -649,7 +674,7 @@ test('archiving stocked quantity clears every location in one reviewed operation
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expectRecordStatus(page, 'archived');
   await expectRecordVersion(page, 3);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   const event = page.locator('li').filter({
     has: page.getByRole('heading', { name: 'Quantity item archived' }),
   });
@@ -872,7 +897,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
       name: 'Current stock — 0 available in storage',
     }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Stock received', exact: true }),
   ).toBeVisible();
@@ -1005,7 +1030,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
       })
       .getByText(/Managed switch/),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all asset history' }).click();
+  await openRecordHistory(page, 'View all asset history');
   await expect(
     page.getByRole('heading', { name: 'Physically moved', exact: true }),
   ).toHaveCount(1);
@@ -1105,7 +1130,7 @@ test('overlapping two-page edits renew field choices after further races and vie
       name: /^(Receive stock|Move stock|Edit details)$/,
     }),
   ).toHaveCount(0);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Details updated', exact: true }),
   ).toHaveCount(4);
