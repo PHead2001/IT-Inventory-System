@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { isLogoutGeneration } from '../../src/lib/auth/privacy-barrier';
 // No credentials or private token URLs in browser artifacts.
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 const command = 'inventory-assign-v1:logout-generation-e2e';
@@ -42,15 +43,25 @@ async function reminder(page: Page) {
       cookie.name === '__Host-inventory-logout-v1',
   );
 }
+function reminderGeneration(value: string) {
+  // Browser cookie APIs expose the encoded wire value; Next decodes it on read.
+  const decoded = decodeURIComponent(value);
+  expect(decoded.startsWith('v1:')).toBe(true);
+  const generation = decoded.slice(3);
+  expect(isLogoutGeneration(generation)).toBe(true);
+  return generation;
+}
 test('real logout survives a first cleanup read failure and a hard reload before tab acknowledgement', async ({
   page,
 }) => {
   await signIn(page);
   await seedAndBlockFirstRead(page);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText(
-    /could not clear|cannot be verified/,
-  );
+  await expect(
+    page.getByRole('alert').filter({
+      hasText: /could not clear|cannot be verified/,
+    }),
+  ).toBeVisible();
   const retained = await reminder(page);
   expect(retained?.httpOnly).toBe(true);
   expect(
@@ -64,7 +75,7 @@ test('real logout survives a first cleanup read failure and a hard reload before
     ).toBeNull();
   expect(
     await page.evaluate((key) => sessionStorage.getItem(key), acknowledgement),
-  ).toBe(retained!.value.slice(3));
+  ).toBe(reminderGeneration(retained!.value));
   expect((await reminder(page))?.value).toBe(retained!.value);
 });
 test('one tab acknowledgement cannot consume another tab reminder before same-actor protected reload', async ({
@@ -82,7 +93,7 @@ test('one tab acknowledgement cannot consume another tab reminder before same-ac
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
   const retained = await reminder(page);
-  expect(retained).toBeTruthy();
+  expect(retained?.httpOnly).toBe(true);
   await signIn(page);
   // Both tabs share new Auth cookies; the old tab enters a protected URL directly.
   await other.reload();
@@ -95,7 +106,7 @@ test('one tab acknowledgement cannot consume another tab reminder before same-ac
   ).toBeNull();
   expect(
     await other.evaluate((key) => sessionStorage.getItem(key), acknowledgement),
-  ).toBe(retained!.value.slice(3));
+  ).toBe(reminderGeneration(retained!.value));
   expect((await reminder(other))?.value).toBe(retained!.value);
   // A member arriving at login cleans/checks this tab then resumes its safe destination.
   await other.goto('/login?next=%2Fdashboard');
@@ -129,11 +140,18 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
   let held = false;
   await page.route('**/scan*', async (route) => {
     const request = route.request();
-    if (
-      !held &&
-      request.method() === 'POST' &&
-      request.headers()['next-action']
-    ) {
+    // This fixture deliberately defers the no-argument privacy-generation read.
+    // Inspection/search actions carry business arguments and must pass through.
+    let privacyRead = false;
+    if (request.method() === 'POST' && request.headers()['next-action']) {
+      try {
+        const args: unknown = request.postDataJSON();
+        privacyRead = Array.isArray(args) && args.length === 0;
+      } catch {
+        privacyRead = false;
+      }
+    }
+    if (!held && privacyRead) {
       held = true;
       await deferred;
     }

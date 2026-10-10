@@ -365,3 +365,65 @@ foundation password test exercises cookie-driven password Flight completion.
 These tests require the approved local E2E environment and must be reported as
 unrun until executed; unit fixtures do not prove delivered browser headers,
 cross-tab Auth broadcast timing or actual Next Flight behavior.
+
+## Protected page content gates
+
+Protected server pages resolve existing authorization/read/validation decisions
+before returning gated private content. The shared controller and all layout
+providers must keep the opaque route slot rendered, without an ancestor Suspense
+or accepted-content gate. No resource preflight, duplicate query or extra logout
+generation read is needed. Keep every success, empty and access-denied return
+gated when adding or changing a page.
+
+`auth-privacy.test.tsx` exercises the actual retained route-slot/content-gate
+pattern with deferred initial checks, query changes, known generation/action
+changes, focus reactivation, newly mounted consumers and retained field nodes.
+`privacy-content.test.tsx` proves that pending server rendering never mounts a
+private bootstrap consumer. `tests/unit/protected-page-gates.test.ts` additionally
+checks every JSX return branch of every protected server page, including future
+pages. This structural guard supplements runtime proof; it does not establish
+HTTP status, database authorization, delivered Flight or visual acceptance.
+
+The scoped production fixture used installed Next.js 16.3.6/React 19.2.8, a
+delayed async `notFound()`, the actual privacy components and PageArrival, and
+private shell/body probes that throw if mounted before readiness. The old
+route-omitting boundary returned HTTP 200 even without Suspense. The structural
+page-gate pattern returned HTTP 404 for the missing page and HTTP 200 for the
+successful page without mounting those private probes. This is DB-free local
+transport evidence, not full-application or hosted browser acceptance. Preserve
+the real direct missing-resource document assertions in the interface E2E, and
+run the complete application/browser gates for the final change. Inspect desktop
+and phone-width layout after the gates release; unit visibility checks alone do
+not establish that new wrappers preserve the rendered layout.
+
+Current mapping below is relative to `src/app/(protected)/`. “Missing” identifies
+pages with existing `notFound()` decisions; other routes retain their original
+redirect, empty and access-denied branches.
+
+| Server page                            | Content-gated return branches | Missing |
+| -------------------------------------- | ----------------------------: | ------- |
+| `dashboard/page.tsx`                   |                             1 |         |
+| `history/page.tsx`                     |                             3 | Yes     |
+| `history/events/[kind]/[id]/page.tsx`  |                             1 | Yes     |
+| `inventory/page.tsx`                   |                             1 |         |
+| `inventory/assets/new/page.tsx`        |                             3 |         |
+| `inventory/assets/[id]/page.tsx`       |                             1 | Yes     |
+| `inventory/quantity/new/page.tsx`      |                             3 |         |
+| `inventory/quantity/[id]/page.tsx`     |                             1 | Yes     |
+| `labels/page.tsx`                      |                             2 |         |
+| `locations/page.tsx`                   |                             1 |         |
+| `locations/[code]/page.tsx`            |                             1 | Yes     |
+| `room/page.tsx`                        |                             2 |         |
+| `scan/page.tsx`                        |                             1 |         |
+| `settings/page.tsx`                    |                             1 |         |
+| `settings/categories/page.tsx`         |                             1 |         |
+| `settings/forms/page.tsx`              |                             1 |         |
+| `settings/forms/[categoryId]/page.tsx` |                             1 | Yes     |
+| `settings/labels/page.tsx`             |                             1 |         |
+| `settings/locations/page.tsx`          |                             1 |         |
+| `settings/locations/[code]/page.tsx`   |                             1 | Yes     |
+| `settings/sites/page.tsx`              |                             1 |         |
+| `settings/sites/[code]/page.tsx`       |                             1 | Yes     |
+| `sites/page.tsx`                       |                             1 |         |
+| `sites/[code]/page.tsx`                |                             1 | Yes     |
+| `sites/[code]/open/[kind]/page.tsx`    |                             3 | Yes     |

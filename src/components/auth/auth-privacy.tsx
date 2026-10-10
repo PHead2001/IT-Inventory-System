@@ -25,6 +25,7 @@ import {
   PrivacyReadinessContext,
   useAuthoritativeCleanupRevision,
 } from './privacy-readiness';
+import { AcceptedPrivacyContent } from './privacy-content';
 
 export function CleanupStatus({
   issue,
@@ -60,11 +61,19 @@ export function AuthPrivacyBoundary(props: BoundaryProps) {
     </Suspense>
   );
 }
+/** Always pass the opaque server route slot through so its status can settle. */
+export function ProtectedPrivacyBoundary(
+  props: Omit<BoundaryProps, 'children'> & { children: ReactNode },
+) {
+  return <PrivacyController {...props} protectedRoute />;
+}
+
 function PrivacyController({
   children,
   revision = 0,
   serverGeneration,
-}: BoundaryProps) {
+  protectedRoute = false,
+}: BoundaryProps & { protectedRoute?: boolean }) {
   const pathname = usePathname() ?? '';
   const cleanupRevision = useAuthoritativeCleanupRevision();
   const query = useSearchParams()?.toString() ?? '';
@@ -166,49 +175,21 @@ function PrivacyController({
     }),
     [ready, state.generation, cleanupRevision],
   );
+  const cleanup = !ready && (
+    <CleanupStatus issue={state.issue} retry={() => void retry()} />
+  );
   return (
     <PrivacyReadinessContext value={privacy}>
-      <AcceptedPrivacyContent ready={ready} generation={state.generation}>
-        {children}
-      </AcceptedPrivacyContent>
-      {!ready && (
-        <CleanupStatus issue={state.issue} retry={() => void retry()} />
+      {protectedRoute && cleanup}
+      {protectedRoute ? (
+        (children as ReactNode)
+      ) : (
+        <AcceptedPrivacyContent ready={ready} generation={state.generation}>
+          {children}
+        </AcceptedPrivacyContent>
       )}
+      {!protectedRoute && cleanup}
     </PrivacyReadinessContext>
-  );
-}
-
-/** Preserve only accepted direct children. Inert/hidden is not an internal-effect freeze;
- * private bootstrap components independently consult the readiness context. */
-function AcceptedPrivacyContent({
-  ready,
-  generation,
-  children,
-}: {
-  ready: boolean;
-  generation: string;
-  children: BoundaryProps['children'];
-}) {
-  const [accepted, setAccepted] = useState<{
-    source: BoundaryProps['children'];
-    generation: string;
-    node: ReactNode;
-  } | null>(null);
-  if (
-    ready &&
-    (accepted === null ||
-      accepted.source !== children ||
-      accepted.generation !== generation)
-  )
-    setAccepted({
-      source: children,
-      generation,
-      node: typeof children === 'function' ? children(generation) : children,
-    });
-  return (
-    <div hidden={!ready} inert={!ready}>
-      {accepted?.node}
-    </div>
   );
 }
 

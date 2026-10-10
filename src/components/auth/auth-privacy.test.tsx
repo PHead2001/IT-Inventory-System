@@ -6,9 +6,14 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AuthPrivacyBoundary, PasswordLogoutCompletion } from './auth-privacy';
+import {
+  AuthPrivacyBoundary,
+  PasswordLogoutCompletion,
+  ProtectedPrivacyBoundary,
+} from './auth-privacy';
+import { ProtectedPrivacyContent } from './privacy-content';
 import { AuthForm } from './auth-form';
-import { useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { PrivateRestorationGate } from './privacy-readiness';
 const routing = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -41,6 +46,16 @@ function seed() {
   sessionStorage.setItem(recovery, 'exact uncertain command and receipt');
   sessionStorage.setItem(labels, 'private queued label identifiers');
   sessionStorage.setItem('unrelated-application', 'retain');
+}
+function ProtectedTestBoundary({
+  children,
+  ...props
+}: ComponentProps<typeof ProtectedPrivacyBoundary>) {
+  return (
+    <ProtectedPrivacyBoundary {...props}>
+      <ProtectedPrivacyContent>{children}</ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>
+  );
 }
 beforeEach(() => {
   sessionStorage.clear();
@@ -366,11 +381,61 @@ it('preserves editable auth state when a reactivation check observes the same ge
   expect(screen.getByLabelText('Password')).toHaveValue('typed password');
 });
 
+it('renders the retained server route slot while withholding its successful private body', async () => {
+  routing.pathname = '/scan';
+  const slotRendered = vi.fn();
+  const bootstrap = vi.fn();
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  function PrivateBody() {
+    bootstrap();
+    return <input aria-label="Private page field" defaultValue="typed work" />;
+  }
+  function RouteSlot() {
+    slotRendered();
+    return (
+      <ProtectedPrivacyContent>
+        <PrivateBody />
+      </ProtectedPrivacyContent>
+    );
+  }
+  render(
+    <ProtectedPrivacyBoundary>
+      <RouteSlot />
+    </ProtectedPrivacyBoundary>,
+  );
+  expect(slotRendered).toHaveBeenCalled();
+  expect(bootstrap).not.toHaveBeenCalled();
+  await act(async () => finish({ status: 'absent' }));
+  const field = await screen.findByLabelText('Private page field');
+  expect(field).toBeVisible();
+  expect(bootstrap).toHaveBeenCalledOnce();
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(field).not.toBeVisible();
+  expect(field.closest('[inert]')).not.toBeNull();
+  await act(async () => finish({ status: 'absent' }));
+  expect(screen.getByLabelText('Private page field')).toBe(field);
+  expect(field).toHaveValue('typed work');
+  expect(field).toBeVisible();
+  expect(bootstrap).toHaveBeenCalledOnce();
+});
+
 it('withholds new route restoration until a fresh check in the retained protected boundary completes', async () => {
   const view = render(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <p>Existing route</p>
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   await screen.findByText('Existing route');
   seed();
@@ -385,9 +450,9 @@ it('withholds new route restoration until a fresh check in the retained protecte
     return <p>{sessionStorage.getItem(recovery) ?? 'New route is clean'}</p>;
   }
   view.rerender(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <NewPrivateConsumer />
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   expect(
     screen.queryByText('exact uncertain command and receipt'),
@@ -416,9 +481,9 @@ it('gates email confirmation outside the auth route group on the retained genera
 it('withholds query-only navigation consumers until the deferred fresh read completes', async () => {
   routing.pathname = '/scan';
   const view = render(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <p>Scan to open</p>
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   await screen.findByText('Scan to open');
   seed();
@@ -435,9 +500,9 @@ it('withholds query-only navigation consumers until the deferred fresh read comp
     return <p>Assigned route released</p>;
   }
   view.rerender(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <NewPrivateConsumer />
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   expect(storageRead).not.toHaveBeenCalled();
   await act(async () => finish({ status: 'valid', generation }));
@@ -450,9 +515,9 @@ it.each(['server generation', 'action revision'] as const)(
     const firstServer = { status: 'valid', generation } as const;
     actions.readLogoutPrivacyGeneration.mockResolvedValue(firstServer);
     const view = render(
-      <AuthPrivacyBoundary serverGeneration={firstServer} revision={0}>
+      <ProtectedTestBoundary serverGeneration={firstServer} revision={0}>
         <p>Accepted form</p>
-      </AuthPrivacyBoundary>,
+      </ProtectedTestBoundary>,
     );
     await screen.findByText('Accepted form');
     seed();
@@ -469,7 +534,7 @@ it.each(['server generation', 'action revision'] as const)(
       return <p>Verified changed entry</p>;
     }
     view.rerender(
-      <AuthPrivacyBoundary
+      <ProtectedTestBoundary
         serverGeneration={
           change === 'server generation'
             ? { status: 'valid', generation: newer }
@@ -478,7 +543,7 @@ it.each(['server generation', 'action revision'] as const)(
         revision={change === 'action revision' ? 1 : 0}
       >
         <NewPrivateConsumer />
-      </AuthPrivacyBoundary>,
+      </ProtectedTestBoundary>,
     );
     expect(storageRead).not.toHaveBeenCalled();
     expect(screen.getByText('Accepted form')).not.toBeVisible();
@@ -489,9 +554,9 @@ it.each(['server generation', 'action revision'] as const)(
 );
 it('holds direct incoming consumers during reactivation without losing unchanged field nodes', async () => {
   const view = render(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <input aria-label="Unchanged field" defaultValue="typed work" />
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   const field = await screen.findByLabelText('Unchanged field');
   let finish!: (value: { status: 'absent' }) => void;
@@ -511,10 +576,10 @@ it('holds direct incoming consumers during reactivation without losing unchanged
     return <p>New consumer</p>;
   }
   view.rerender(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <input aria-label="Unchanged field" defaultValue="typed work" />
       <NewPrivateConsumer />
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   expect(storageRead).not.toHaveBeenCalled();
   await act(async () => finish({ status: 'absent' }));
@@ -529,7 +594,9 @@ it('blocks a newly mounted restoration gate inside retained internally updating 
   }
   function InternalRouter() {
     const [show, setShow] = useState(false);
-    expose = () => setShow(true);
+    useEffect(() => {
+      expose = () => setShow(true);
+    }, []);
     return (
       <>
         <input aria-label="Retained field" defaultValue="pending values" />
@@ -542,9 +609,9 @@ it('blocks a newly mounted restoration gate inside retained internally updating 
     );
   }
   render(
-    <AuthPrivacyBoundary>
+    <ProtectedTestBoundary>
       <InternalRouter />
-    </AuthPrivacyBoundary>,
+    </ProtectedTestBoundary>,
   );
   const field = await screen.findByLabelText('Retained field');
   let finish!: (value: { status: 'absent' }) => void;

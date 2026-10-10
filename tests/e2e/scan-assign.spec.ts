@@ -1,6 +1,12 @@
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { randomUUID } from 'node:crypto';
-import { test, expect, type CDPSession, type Page } from '@playwright/test';
+import {
+  test,
+  expect,
+  type CDPSession,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import { PNG } from 'pngjs';
@@ -449,6 +455,29 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     expect(result.error).toBeNull();
     return result.count;
   };
+  // Hold the actual inspection, not privacy verification or identifier lookup.
+  // Its business arguments are stable across Next action-ID/build changes.
+  const isFixtureInspection = (request: Request) => {
+    if (request.method() !== 'POST' || !request.headers()['next-action'])
+      return false;
+    try {
+      const args: unknown = request.postDataJSON();
+      if (!Array.isArray(args) || args.length !== 1) return false;
+      const input: unknown = args[0];
+      return (
+        typeof input === 'object' &&
+        input !== null &&
+        'path' in input &&
+        input.path === path &&
+        'siteId' in input &&
+        input.siteId === siteId &&
+        'actorId' in input &&
+        typeof input.actorId === 'string'
+      );
+    } catch {
+      return false;
+    }
+  };
   const inspect = async (target: Page) => {
     const input = target.getByLabel('Scan, paste, or search inventory');
     await input.fill(path);
@@ -472,11 +501,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     });
     let delayed = false;
     await page.route('**/scan?mode=assign*', async (route) => {
-      if (
-        !delayed &&
-        route.request().method() === 'POST' &&
-        route.request().headers()['next-action']
-      ) {
+      if (!delayed && isFixtureInspection(route.request())) {
         delayed = true;
         signalIntercepted();
         await held;
@@ -517,11 +542,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     });
     let interruptedDelayed = false;
     await page.route('**/scan?mode=assign*', async (route) => {
-      if (
-        !interruptedDelayed &&
-        route.request().method() === 'POST' &&
-        route.request().headers()['next-action']
-      ) {
+      if (!interruptedDelayed && isFixtureInspection(route.request())) {
         interruptedDelayed = true;
         signalInterrupted();
         await interruptedRead;
@@ -600,11 +621,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       let touchActive = false;
       let fixtureFailed = false;
       await page.route('**/scan?mode=assign*', async (route) => {
-        if (
-          !restoreDelayed &&
-          route.request().method() === 'POST' &&
-          route.request().headers()['next-action']
-        ) {
+        if (!restoreDelayed && isFixtureInspection(route.request())) {
           restoreDelayed = true;
           signalRestore();
           await heldRestore;
@@ -711,8 +728,7 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         const restoredResponse = page.waitForResponse(
           (response) =>
             response.url().includes('/scan?mode=assign') &&
-            response.request().method() === 'POST' &&
-            !!response.request().headers()['next-action'],
+            isFixtureInspection(response.request()),
         );
         releaseRestore();
         expect(await (await restoredResponse).finished()).toBeNull();

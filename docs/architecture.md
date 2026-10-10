@@ -102,6 +102,25 @@ password mutation. Auth entry and the protected shell read the current generatio
 before mounting private restoration consumers, and recheck on entry/reactivation.
 Readiness is bound to pathname, full query, known server generation and the
 explicit action revision. Reactivation immediately marks verification pending.
+The protected controller always renders the opaque server route slot without
+an ancestor Suspense or accepted-content gate. Each async protected server page
+completes its existing authorization, reads, validation, `notFound()` and
+`redirect()` decisions before returning a `ProtectedPrivacyContent` success body.
+That content gate shares the controller's readiness and accepted-child retention;
+it performs no additional generation or resource read. Keep all success, empty
+and access-denied JSX branches gated. Gating the unresolved route slot itself
+lets the shell send HTTP 200 before an async missing-resource decision settles.
+Static Auth routes keep their query-aware Suspense boundary.
+Private shell siblings (scope guard, header/account/logout, navigation and
+telemetry) and Settings navigation have separate content gates. Layout/context
+providers and PageArrival pass route children through continuously. The gated
+wrapper uses `display: contents` only when ready; while pending it loses that
+display rule and is hidden/inert. This preserves layout boxes after release and
+retains unchanged editable nodes while blocking pending interaction. Existing
+inventory-specific unavailable boundaries and route-kind titles stay independent
+of private success content. Adding a protected page requires the same server
+checks-before-content-gate contract; see the route map and proof limits in
+[validation](validation.md#protected-page-content-gates).
 The boundary retains accepted direct child nodes hidden and inert while checking,
 so unchanged form fields and their action owner survive; this does not freeze
 internal component updates or effects. Assignment and label bootstrap gates
