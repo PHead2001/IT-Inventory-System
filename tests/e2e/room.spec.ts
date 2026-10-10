@@ -2353,7 +2353,7 @@ async function assertOccupiedWitnessActions(
           box.y + box.height <= other.y,
       ).toBe(true);
   await expect(
-    page.getByRole('list', { name: 'Locations whose markers do not fit' }),
+    page.getByRole('list', { name: 'Locations with unavailable room labels' }),
   ).toHaveCount(0);
   return witnesses;
 }
@@ -2405,7 +2405,39 @@ test('375px populated room gives every independently witnessed opaque target an 
     name: 'More map controls',
     exact: true,
   });
+  const assertMoreOutsideCanvasWhenAboveFits = async () => {
+    const panel = page.getByRole('region', {
+      name: 'More map controls',
+      exact: true,
+    });
+    const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
+    const [bar, popup, frame, visual] = await Promise.all([
+      toolbar.boundingBox(),
+      panel.boundingBox(),
+      canvas.boundingBox(),
+      panel.evaluate((element) => ({
+        top: window.visualViewport?.offsetTop ?? 0,
+        fullHeight: Math.min(
+          parseFloat(
+            getComputedStyle(element).getPropertyValue('--room-menu-height'),
+          ) || 200,
+          (window.visualViewport?.height ?? window.innerHeight) * 0.35,
+          element.scrollHeight + 2,
+        ),
+      })),
+    ]);
+    expect(bar).not.toBeNull();
+    expect(popup).not.toBeNull();
+    expect(frame).not.toBeNull();
+    if (bar!.y - visual.top - 9 >= visual.fullHeight) {
+      await expect(panel).toHaveAttribute('data-placement', 'above');
+      expect(popup!.y).toBeGreaterThanOrEqual(visual.top + 4);
+      expect(popup!.y + popup!.height).toBeLessThanOrEqual(bar!.y - 5);
+      expect(popup!.y + popup!.height).toBeLessThanOrEqual(frame!.y);
+    }
+  };
   await more.click();
+  await assertMoreOutsideCanvasWhenAboveFits();
   const initialSnapshot = page.waitForResponse(
     (response) =>
       response.url().includes('/api/room/occupancy?') && response.ok(),
@@ -2480,6 +2512,7 @@ test('375px populated room gives every independently witnessed opaque target an 
       await more.click();
     await canvas.scrollIntoViewIfNeeded();
     await settledLabels(page);
+    if (open) await assertMoreOutsideCanvasWhenAboveFits();
     const scene = await captureRoomWitness(page);
     expect(scene.frame.width).toBe(initialSize!.width);
     expect(scene.frame.height).toBe(initialSize!.height);
@@ -2531,6 +2564,7 @@ test('375px populated room gives every independently witnessed opaque target an 
         await more.click();
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
+      await assertMoreOutsideCanvasWhenAboveFits();
       const selectedScene = await captureRoomWitness(page);
       const selectedWitnesses =
         await assertOccupiedWitnessActionsWithDiagnostics(

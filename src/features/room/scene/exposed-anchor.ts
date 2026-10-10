@@ -8,47 +8,68 @@ import {
 } from 'three';
 import { visibleRoomHit } from './visible-hover';
 import type { LabelArea } from './label-layout';
+import {
+  ProjectedVisibleSurface,
+  type SurfaceWork,
+} from './projected-visible-surface';
 
-/** Real exposed face samples, not a DOM anchor or transparent picking box,
- * establish whether a location is physically in the current camera view. */
-export function exposedTargetAnchor(
+export type ExposedAnchorResult =
+  | { status: 'visible'; anchor: Vector3; stats: SurfaceWork }
+  | { status: 'hidden'; stats: SurfaceWork }
+  | { status: 'unresolved'; reason: string; stats: SurfaceWork };
+
+const witnesses = new WeakMap<Group, Vector3>();
+
+/** Preferred and previous verified rays are inexpensive witnesses only.
+ * Exhaustive fallback uses actual projected surfaces, never box samples. A
+ * caller-owned context is refreshed once before all labels in a demand frame. */
+export function resolveExposedTargetAnchor(
   scene: Object3D,
   camera: Camera,
   origin: Group,
-  size: [number, number, number],
   code: string,
   preferred: Vector3,
   viewport?: LabelArea,
   obstructions: LabelArea[] = [],
-) {
+  context?: ProjectedVisibleSurface,
+  signal?: AbortSignal,
+): ExposedAnchorResult {
   const ray = new Raycaster();
   const ndc = new Vector2();
-  const candidates = [preferred.clone()];
-  // Scene axes are [room X, room Z, -room Y]. Include corners inset from
-  // seams, so a partially exposed face can survive a hidden center anchor.
-  for (let axis = 0; axis < 3; axis++) {
-    const other = [0, 1, 2].filter((value) => value !== axis);
-    for (const sign of [-1, 1])
-      for (const u of [0, -0.85, 0.85])
-        for (const v of [0, -0.85, 0.85]) {
-          const point = new Vector3();
-          point.setComponent(axis, (sign * size[axis]) / 2);
-          point.setComponent(other[0], (u * size[other[0]]) / 2);
-          point.setComponent(other[1], (v * size[other[1]]) / 2);
-          candidates.push(point);
-        }
-  }
-  origin.updateWorldMatrix(true, false);
-  camera.updateMatrixWorld();
-  for (const local of candidates) {
-    const world = origin.localToWorld(local.clone());
-    const projected = world.clone().project(camera);
+  let anchor: Vector3 | null = null;
+  const emptyStats: SurfaceWork = {
+    triangles: 0,
+    overlaps: 0,
+    fragments: 0,
+    operations: 0,
+    revisionReused: false,
+    rays: 0,
+    elapsedMilliseconds: 0,
+  };
+  if (signal?.aborted)
+    return { status: 'unresolved', reason: 'cancelled', stats: emptyStats };
+  const projection = context ?? new ProjectedVisibleSurface(scene, camera);
+  if (projection.scene !== scene || projection.camera !== camera)
+    return {
+      status: 'unresolved',
+      reason: 'projection context belongs to another scene or camera',
+      stats: emptyStats,
+    };
+  if (!context) projection.refresh(signal);
+  let budgetFailure = projection.checkpoint();
+  if (budgetFailure)
+    return {
+      status: 'unresolved',
+      reason: budgetFailure,
+      stats: projection.stats,
+    };
+  const verify = (projected: { x: number; y: number; z: number }) => {
     if (
       Math.abs(projected.x) > 1 ||
       Math.abs(projected.y) > 1 ||
       Math.abs(projected.z) > 1
     )
-      continue;
+      return false;
     if (viewport) {
       const x =
         viewport.left +
@@ -65,17 +86,60 @@ export function exposedTargetAnchor(
             y <= rect.bottom,
         )
       )
-        continue;
+        return false;
     }
     ndc.set(projected.x, projected.y);
+    budgetFailure = projection.checkpoint(true);
+    if (budgetFailure) return false;
     ray.setFromCamera(ndc, camera);
     const visible = visibleRoomHit(ray.intersectObject(scene, true));
-    if (visible?.target?.code !== code) continue;
-    // Move towards the camera along this tested ray, retaining Html occlusion
-    // against other opaque furniture while avoiding self-occlusion at a seam.
-    return origin.worldToLocal(
+    budgetFailure = projection.checkpoint();
+    if (budgetFailure) return false;
+    if (visible?.target?.code !== code) return false;
+    const depth = visible.hit.point.clone().project(camera).z;
+    if (depth < -1 || depth > 1) return false;
+    witnesses.set(origin, origin.worldToLocal(visible.hit.point.clone()));
+    anchor = origin.worldToLocal(
       visible.hit.point.clone().addScaledVector(ray.ray.direction, -0.3),
     );
+    return true;
+  };
+  for (const local of [preferred, witnesses.get(origin)]) {
+    if (local && verify(origin.localToWorld(local.clone()).project(camera)))
+      return { status: 'visible', anchor: anchor!, stats: projection.stats };
   }
-  return null;
+  if (budgetFailure)
+    return {
+      status: 'unresolved',
+      reason: budgetFailure,
+      stats: projection.stats,
+    };
+  const result = projection.find(code, verify, viewport, obstructions, signal);
+  if (result.status === 'visible')
+    return { status: 'visible', anchor: anchor!, stats: result.stats };
+  return result;
+}
+
+/** Compatibility for existing geometry callers. Production consumers must use
+ * resolveExposedTargetAnchor so incomplete work is not classified as hidden. */
+export function exposedTargetAnchor(
+  scene: Object3D,
+  camera: Camera,
+  origin: Group,
+  _size: [number, number, number],
+  code: string,
+  preferred: Vector3,
+  viewport?: LabelArea,
+  obstructions: LabelArea[] = [],
+) {
+  const result = resolveExposedTargetAnchor(
+    scene,
+    camera,
+    origin,
+    code,
+    preferred,
+    viewport,
+    obstructions,
+  );
+  return result.status === 'visible' ? result.anchor : null;
 }

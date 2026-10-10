@@ -1,7 +1,12 @@
 'use client';
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
-import { layoutLabels, type LabelRect } from './label-layout';
+import {
+  layoutLabelsDetailed,
+  LABEL_PACKING_BUDGET,
+  type LabelPackingBudget,
+  type LabelRect,
+} from './label-layout';
 import { createLabelLayoutDiagnostics } from './label-layout-diagnostics';
 
 export type LabelOptions = {
@@ -47,6 +52,8 @@ function sceneLabelVisible(element: HTMLElement, host: HTMLElement) {
 export function createRoomLabelRegistry(
   onSuppressionChange: (count: number, missingCodes?: string[]) => void,
   onReadSummaryChange?: (summary: string | null) => void,
+  onPlacementIssueChange?: (codes: string[]) => void,
+  options: { clock?: () => number; limits?: Partial<LabelPackingBudget> } = {},
 ) {
   const entries = new Map<string, Entry>();
   let canvas: HTMLCanvasElement | null = null;
@@ -57,22 +64,80 @@ export function createRoomLabelRegistry(
   let lastMissing = '';
   let revision = 0;
   let lastSummary: string | null = null;
+  let lastIssue = '';
+  let failedMeasurement = '';
+  const clock = options.clock ?? (() => performance.now());
+  const limits = { ...LABEL_PACKING_BUDGET, ...options.limits };
+  const reportIssue = (codes: string[]) => {
+    const key = [...new Set(codes)].sort().join('|');
+    if (key !== lastIssue) {
+      lastIssue = key;
+      onPlacementIssueChange?.(key ? key.split('|') : []);
+    }
+  };
   const diagnostics = createLabelLayoutDiagnostics(
     typeof window === 'undefined' ? undefined : window,
   );
+  const releaseFocus = (element: HTMLElement) => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && element.contains(focused))
+      focused.blur();
+  };
+  const hideEntry = (entry: Entry) => {
+    releaseFocus(entry.element);
+    entry.element.dataset.roomExposed = 'false';
+    entry.element.dataset.labelSuppressed = 'true';
+    entry.element.style.visibility = 'hidden';
+    entry.element.style.pointerEvents = 'none';
+    entry.element.tabIndex = -1;
+    entry.element.setAttribute('aria-hidden', 'true');
+    entry.leader.style.display = 'none';
+    entry.placed = false;
+  };
   const place = () => {
     pending = null;
+    const deadline = clock() + limits.maxMilliseconds;
+    const remaining = { ...limits };
+    let measurementExhausted = false;
+    const charge = () => {
+      remaining.maxOperations -= 1;
+      if (remaining.maxOperations < 0 || clock() >= deadline)
+        measurementExhausted = true;
+      return !measurementExhausted;
+    };
     const host = canvas?.parentElement;
     const viewport = canvas?.getBoundingClientRect();
-    if (!host || !viewport || viewport.width <= 0 || viewport.height <= 0)
+    if (!host || !viewport) return;
+    if (
+      !Number.isFinite(viewport.width) ||
+      !Number.isFinite(viewport.height) ||
+      viewport.width <= 0 ||
+      viewport.height <= 0
+    ) {
+      const codes: string[] = [];
+      for (const entry of entries.values()) {
+        hideEntry(entry);
+        if (entry.options.interactive !== false && entry.options.locationCode)
+          codes.push(entry.options.locationCode);
+      }
+      reportIssue(codes);
+      if (canvas) {
+        canvas.dataset.labelLayoutStatus = 'budget-exhausted';
+        canvas.dataset.labelLayoutError = 'Room viewport is not measured';
+        canvas.dataset.labelLayoutPending = 'false';
+      }
       return;
+    }
     const measure = () => {
       const labels: LabelRect[] = [];
       for (const [id, entry] of entries) {
+        if (!charge()) break;
         if (
           !sceneLabelVisible(entry.element, host) ||
           entry.options.isVisible?.() === false
         ) {
+          // Blur while still exposed, before a hidden action can retain keys.
+          releaseFocus(entry.element);
           entry.element.dataset.roomExposed = 'false';
           entry.element.dataset.labelSuppressed = 'true';
           entry.element.style.visibility = 'hidden';
@@ -84,11 +149,13 @@ export function createRoomLabelRegistry(
           continue;
         }
         const rect = entry.element.getBoundingClientRect();
+        charge();
         entry.element.dataset.roomExposed = 'true';
         const full = entry.element.querySelector<HTMLElement>(
           '[data-room-label-full]',
         );
         const fullRect = full?.getBoundingClientRect();
+        charge();
         const pointer = entry.options.pointer?.();
         const hovered = entry.options.inspection === 'hover';
         const witnessedPointer =
@@ -152,26 +219,104 @@ export function createRoomLabelRegistry(
         ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? [],
     )
       .filter((element) => element.getClientRects().length > 0)
-      .map((element) => element.getBoundingClientRect());
+      .map((element) => {
+        charge();
+        return element.getBoundingClientRect();
+      });
+    const measuredKey = (labels: LabelRect[]) =>
+      JSON.stringify([
+        {
+          left: viewport.left,
+          top: viewport.top,
+          right: viewport.right,
+          bottom: viewport.bottom,
+        },
+        reserved.map(({ left, top, right, bottom }) => ({
+          left,
+          top,
+          right,
+          bottom,
+        })),
+        labels.map((label) => ({ ...label, previous: undefined })),
+      ]);
+    const hideUnverified = (message: string, labels: LabelRect[]) => {
+      const codes: string[] = [];
+      for (const entry of entries.values()) {
+        const { element, leader } = entry;
+        releaseFocus(element);
+        element.style.visibility = 'hidden';
+        element.style.pointerEvents = 'none';
+        element.tabIndex = -1;
+        element.setAttribute('aria-hidden', 'true');
+        element.dataset.labelSuppressed = 'true';
+        leader.style.display = 'none';
+        entry.placed = false;
+        if (
+          entry.options.locationCode &&
+          entry.options.interactive !== false &&
+          entry.options.isVisible?.() !== false
+        )
+          codes.push(entry.options.locationCode);
+      }
+      failedMeasurement = measuredKey(labels);
+      reportIssue(codes);
+      if (canvas) {
+        canvas.dataset.labelLayoutError = message;
+        canvas.dataset.labelLayoutStatus = 'budget-exhausted';
+      }
+    };
     let suppressed = 0;
     const missing: string[] = [];
     let summary: string | null = null;
     let focusedSummary = false;
     let settled = false;
+    let finalLabels: LabelRect[] = [];
+    let finalStatus: 'complete' | 'candidate-infeasible' | 'budget-exhausted' =
+      'complete';
     // CSS changes a centered Html wrapper immediately. Reflow/validate those
     // real dimensions before exposing a settled revision, without idle frames.
     diagnostics?.begin();
     for (let pass = 0; pass < 4; pass++) {
       const labels = measure();
+      finalLabels = labels;
+      if (measurementExhausted) {
+        hideUnverified('Label measurement work budget exhausted', labels);
+        diagnostics?.finish(false);
+        return;
+      }
+      if (pass === 0 && failedMeasurement === measuredKey(labels)) {
+        if (canvas) canvas.dataset.labelLayoutPending = 'false';
+        diagnostics?.finish(false);
+        return;
+      }
       diagnostics?.input(labels, viewport, reserved);
       let variantChanged = false;
       suppressed = 0;
       missing.length = 0;
       summary = null;
       focusedSummary = false;
-      const placements = layoutLabels(labels, viewport, reserved);
+      const outcome = layoutLabelsDetailed(
+        labels,
+        viewport,
+        reserved,
+        { ...remaining, maxMilliseconds: Math.max(0, deadline - clock()) },
+        clock,
+      );
+      const placements = outcome.placements;
+      finalStatus = outcome.status;
+      remaining.maxOperations -= outcome.stats.operations;
+      remaining.maxCandidates -= outcome.stats.candidates;
+      remaining.maxNodes -= outcome.stats.nodes;
+      // An oversized request returns no partial placements. No old action may
+      // remain exposed as if it had been checked against this measured view.
+      if (placements.length !== labels.length) {
+        hideUnverified('Label placement work budget exhausted', labels);
+        diagnostics?.finish(false);
+        return;
+      }
       diagnostics?.output(placements);
       for (const result of placements) {
+        charge();
         const entry = entries.get(result.id);
         if (!entry) continue;
         const { element, leader, options } = entry;
@@ -212,6 +357,7 @@ export function createRoomLabelRegistry(
           element.dataset.labelDy = String(entry.dy);
           element.style.transform = `translate(${entry.dx}px, ${entry.dy}px)`;
         }
+        if (!result.visible) releaseFocus(element);
         element.style.visibility = result.visible ? 'visible' : 'hidden';
         element.style.pointerEvents =
           result.visible && options.interactive !== false ? 'auto' : 'none';
@@ -222,7 +368,6 @@ export function createRoomLabelRegistry(
           suppressed += 1;
           if (options.mandatory && options.locationCode)
             missing.push(options.locationCode);
-          if (document.activeElement === element) element.blur();
           element.setAttribute('aria-hidden', 'true');
         }
         const distance = Math.hypot(entry.dx, entry.dy);
@@ -236,6 +381,8 @@ export function createRoomLabelRegistry(
       // Force a final real measurement even when the chosen CSS variant stayed
       // unchanged. A subsequent size-dependent pass is required after a change.
       const after = measure();
+      finalLabels = after;
+      if (measurementExhausted) break;
       const dimensionsStable =
         labels.length === after.length &&
         labels.every(
@@ -250,10 +397,21 @@ export function createRoomLabelRegistry(
     }
     diagnostics?.finish(settled);
     if (!settled) {
-      if (canvas)
-        canvas.dataset.labelLayoutError =
-          'Unstable label dimensions after four placement passes';
+      hideUnverified(
+        measurementExhausted
+          ? 'Label remeasurement work budget exhausted'
+          : 'Unstable label dimensions after four placement passes',
+        finalLabels,
+      );
       return;
+    }
+    if (canvas) canvas.dataset.labelLayoutStatus = finalStatus;
+    if (finalStatus === 'complete') {
+      failedMeasurement = '';
+      reportIssue([]);
+    } else {
+      failedMeasurement = measuredKey(finalLabels);
+      reportIssue(missing);
     }
     if (lastSummary !== summary) {
       lastSummary = summary;
@@ -278,6 +436,14 @@ export function createRoomLabelRegistry(
   };
   return {
     schedule,
+    hide(id: string) {
+      const entry = entries.get(id);
+      if (entry) hideEntry(entry);
+    },
+    retry() {
+      failedMeasurement = '';
+      schedule();
+    },
     register(
       id: string,
       element: HTMLElement,
@@ -344,6 +510,7 @@ export function createRoomLabelRegistry(
         delete element.dataset.labelLayoutPending;
         delete element.dataset.labelLayoutRevision;
         delete element.dataset.labelLayoutError;
+        delete element.dataset.labelLayoutStatus;
         canvas = null;
         observer?.disconnect();
         observer = null;

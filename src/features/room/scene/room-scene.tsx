@@ -52,7 +52,10 @@ import {
   type RoomOccupancy,
   type LocationOccupancy,
 } from '../occupancy-contract';
-import { exposedTargetAnchor } from './exposed-anchor';
+import {
+  RoomVisibilityProvider,
+  useRoomVisibilityBatch,
+} from './room-visibility-runtime';
 import { createInitialFramePolicy, hasMeasuredViewport } from './initial-frame';
 import { RoomLabelHtml } from './room-label-html';
 import { SafeCanvas as Canvas } from './safe-canvas';
@@ -285,7 +288,9 @@ function CameraFacingLabel({
   label: string;
   onSelect: (code: string) => void;
 }) {
-  const { camera, scene, gl, invalidate } = useThree();
+  const { camera, invalidate } = useThree();
+  const visibility = useRoomVisibilityBatch();
+  const registry = useRoomLabelRegistry();
   const exposed = useRef(false);
   const isVisible = useCallback(() => exposed.current, []);
   const origin = useRef<Group>(null);
@@ -297,33 +302,24 @@ function CameraFacingLabel({
     const preferred = labelAnchor
       ? cameraFacingLabelPosition(size, localView, labelAnchor)
       : ([0, size[2] / 2 + 0.15, 0] as [number, number, number]);
-    const obstructions = Array.from(
-      gl.domElement
-        .closest('[data-room-surface]')
-        ?.querySelectorAll<HTMLElement>('[data-room-obstruction]') ?? [],
-    )
-      .filter((element) => element.getClientRects().length > 0)
-      .map((element) => element.getBoundingClientRect());
-    const visible = exposedTargetAnchor(
-      scene,
-      camera,
+    const result = visibility.resolve(
       origin.current,
-      toSceneSize(size),
       node.locationCode!,
       new Vector3(...preferred),
-      gl.domElement.getBoundingClientRect(),
-      obstructions,
     );
-    exposed.current = visible !== null;
-    if (!visible) return;
-    const next = visible.toArray();
+    exposed.current = result.status === 'visible';
+    if (result.status !== 'visible') {
+      registry.hide(node.id);
+      return;
+    }
+    const next = result.anchor.toArray();
     if (
       anchor.current.position.distanceToSquared(new Vector3(...next)) > 1e-6
     ) {
       anchor.current.position.set(...next);
       invalidate();
     }
-  });
+  }, -0.25);
   const initial = labelAnchor
     ? toScenePosition(labelAnchor)
     : ([0, size[2] / 2 + 0.15, 0] as [number, number, number]);
@@ -332,7 +328,6 @@ function CameraFacingLabel({
       <group ref={anchor} position={initial}>
         <RoomLabelHtml
           center
-          occlude
           style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}
           zIndexRange={[20, 0]}
         >
@@ -629,9 +624,15 @@ export function CameraRig({
     viewCallback.current = onViewChange;
   }, [onViewChange]);
   useEffect(() => {
-    if (modeValue.current !== orbitMode) initialFrame.current.manual();
+    if (
+      modeValue.current !== orbitMode &&
+      hasMeasuredViewport(size.width, size.height) &&
+      initializedRoom.current === room
+    )
+      initialFrame.current.manual();
+    // Retain the newest mode while the first measured frame is still pending.
     modeValue.current = orbitMode;
-  }, [orbitMode]);
+  }, [orbitMode, room, size.width, size.height]);
   const reduced = useEffectiveReducedMotion();
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
@@ -661,7 +662,12 @@ export function CameraRig({
     );
   }, [camera, roomBounds, initialTarget, size, room.camera.fitPadding]);
   const writeTelemetry = useCallback(() => {
-    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    if (
+      !controls.current ||
+      !(camera instanceof OrthographicCamera) ||
+      initializedRoom.current !== room
+    )
+      return;
     const offset = camera.position.clone().sub(controls.current.target);
     const azimuth = Math.atan2(offset.x, offset.z);
     if (lastAzimuth.current === null) unwrappedAzimuth.current = azimuth;
@@ -694,9 +700,14 @@ export function CameraRig({
     // Mark placement pending in the same turn as the camera transform, before
     // a caller can treat the previous projected labels as settled.
     labelRegistry.schedule();
-  }, [camera, gl, labelRegistry]);
+  }, [camera, gl, labelRegistry, room]);
   const emitView = useCallback(() => {
-    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    if (
+      !controls.current ||
+      !(camera instanceof OrthographicCamera) ||
+      initializedRoom.current !== room
+    )
+      return;
     const view: CameraView = {
       position: camera.position.toArray() as [number, number, number],
       target: controls.current.target.toArray() as [number, number, number],
@@ -706,7 +717,7 @@ export function CameraRig({
     if (!validCameraView(view)) return;
     gl.domElement.dataset.cameraView = JSON.stringify(view);
     viewCallback.current?.(view);
-  }, [camera, gl]);
+  }, [camera, gl, room]);
   useEffect(
     () => () => {
       if (!animation.current) emitView();
@@ -822,7 +833,13 @@ export function CameraRig({
     gl.domElement.dataset.orbitMode = orbitMode;
     if (animation.current) onFocusCancel?.();
     animation.current = null;
-    if (!(camera instanceof OrthographicCamera) || !controls.current) return;
+    if (
+      !(camera instanceof OrthographicCamera) ||
+      !controls.current ||
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
+    )
+      return;
     if (orbitMode !== 'guided') {
       emitView();
       return;
@@ -859,6 +876,8 @@ export function CameraRig({
     writeTelemetry,
     emitView,
     onFocusCancel,
+    size.width,
+    size.height,
   ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
@@ -948,7 +967,8 @@ export function CameraRig({
       command.id === lastCommandId.current ||
       !(camera instanceof OrthographicCamera) ||
       !controls.current ||
-      !hasMeasuredViewport(size.width, size.height)
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
     )
       return;
     initialFrame.current.manual();
@@ -1060,13 +1080,13 @@ export function CameraRig({
       emitView();
       onFocusComplete(motion.code);
     } else invalidate();
-  });
+  }, -0.75);
   return (
     <OrbitControls
       ref={controls}
       makeDefault
       domElement={gl.domElement}
-      enabled={active}
+      enabled={active && hasMeasuredViewport(size.width, size.height)}
       enableDamping={false}
       minAzimuthAngle={
         orbitMode === 'free'
@@ -1093,6 +1113,11 @@ export function CameraRig({
       screenSpacePanning
       zoomSpeed={0.7}
       onStart={() => {
+        if (
+          !hasMeasuredViewport(size.width, size.height) ||
+          initializedRoom.current !== room
+        )
+          return;
         initialFrame.current.manual();
         if (animation.current) onFocusCancel?.();
         animation.current = null;
@@ -1106,6 +1131,11 @@ export function CameraRig({
           };
       }}
       onChange={() => {
+        if (
+          !hasMeasuredViewport(size.width, size.height) ||
+          initializedRoom.current !== room
+        )
+          return;
         if (
           manualStart.current &&
           controls.current &&
@@ -1123,7 +1153,11 @@ export function CameraRig({
         manualGesture.current.active = false;
         onDraggingChange(false);
         manualStart.current = null;
-        emitView();
+        if (
+          hasMeasuredViewport(size.width, size.height) &&
+          initializedRoom.current === room
+        )
+          emitView();
       }}
     />
   );
@@ -1208,6 +1242,9 @@ export default function RoomScene(props: RoomSceneProps) {
     props.selectedCode;
   const [suppressedLabels, setSuppressedLabels] = useState(0);
   const [overflowCodes, setOverflowCodes] = useState<string[]>([]);
+  const [unresolvedCodes, setUnresolvedCodes] = useState<string[]>([]);
+  const [placementCodes, setPlacementCodes] = useState<string[]>([]);
+  const visibilityRetry = useRef<(() => void) | null>(null);
   const [inspectedSummary, setInspectedSummary] = useState<string | null>(null);
   const onSuppressionChange = useCallback(
     (count: number, codes: string[] = []) => {
@@ -1284,7 +1321,12 @@ export default function RoomScene(props: RoomSceneProps) {
     [],
   );
   const registry = useMemo(
-    () => createRoomLabelRegistry(onSuppressionChange, setInspectedSummary),
+    () =>
+      createRoomLabelRegistry(
+        onSuppressionChange,
+        setInspectedSummary,
+        setPlacementCodes,
+      ),
     [onSuppressionChange],
   );
   const hoverLeader = useRef<HTMLSpanElement>(null);
@@ -1385,56 +1427,61 @@ export default function RoomScene(props: RoomSceneProps) {
           <ScenePaletteProvider>
             <ScenePaletteLighting />
             <LabelLayoutProvider registry={registry}>
-              <LabelLayoutDriver registry={registry} />
-              <SceneDepth room={props.room} />
-              <Envelope
-                room={props.room}
-                onRecenter={() => requestCommand('recenter')}
-                canRecenter={(delta) =>
-                  floorDoubleClickAllowed(
-                    delta,
-                    manualGesture.current.active,
-                    manualGesture.current.lastMotionAt,
-                    performance.now(),
-                  )
-                }
-                showAllLabels={showAllLabels}
-              />
-              {props.room.nodes.map((node) => (
-                <NodeVisual
-                  key={node.id}
-                  node={node}
-                  locationNames={props.locationNames}
-                  selectedCode={props.selectedCode}
-                  hasRenderedSelection={renderedSelection}
-                  highlighted={highlighted}
-                  onSelect={props.onSelect}
-                  profiles={props.room.rackFaceProfiles}
+              <RoomVisibilityProvider
+                onUnresolvedChange={setUnresolvedCodes}
+                retryRef={visibilityRetry}
+              >
+                <LabelLayoutDriver registry={registry} />
+                <SceneDepth room={props.room} />
+                <Envelope
+                  room={props.room}
+                  onRecenter={() => requestCommand('recenter')}
+                  canRecenter={(delta) =>
+                    floorDoubleClickAllowed(
+                      delta,
+                      manualGesture.current.active,
+                      manualGesture.current.lastMotionAt,
+                      performance.now(),
+                    )
+                  }
                   showAllLabels={showAllLabels}
-                  hoveredCode={activeHover?.target.code ?? null}
-                  locationOccupancy={props.locationOccupancy}
-                  showCounts={showCounts}
-                  canSelect={canSelect}
                 />
-              ))}
-              <CameraRig
-                {...props}
-                command={command}
-                orbitMode={orbitMode}
-                manualGesture={manualGesture}
-                active={active}
-                selectionGesture={selectionGesture}
-                onDraggingChange={setDragging}
-                onPassiveDrag={showDragHint}
-              />
-              <VisibleHoverTracker
-                showAllLabels={showAllLabels}
-                active={active}
-                suspended={active && dragging}
-                retainDuringLabelHandoff={retainDuringLabelHandoff}
-                onHit={onVisibleHover}
-                onCanvasLeave={onCanvasHoverLeave}
-              />
+                {props.room.nodes.map((node) => (
+                  <NodeVisual
+                    key={node.id}
+                    node={node}
+                    locationNames={props.locationNames}
+                    selectedCode={props.selectedCode}
+                    hasRenderedSelection={renderedSelection}
+                    highlighted={highlighted}
+                    onSelect={props.onSelect}
+                    profiles={props.room.rackFaceProfiles}
+                    showAllLabels={showAllLabels}
+                    hoveredCode={activeHover?.target.code ?? null}
+                    locationOccupancy={props.locationOccupancy}
+                    showCounts={showCounts}
+                    canSelect={canSelect}
+                  />
+                ))}
+                <CameraRig
+                  {...props}
+                  command={command}
+                  orbitMode={orbitMode}
+                  manualGesture={manualGesture}
+                  active={active}
+                  selectionGesture={selectionGesture}
+                  onDraggingChange={setDragging}
+                  onPassiveDrag={showDragHint}
+                />
+                <VisibleHoverTracker
+                  showAllLabels={showAllLabels}
+                  active={active}
+                  suspended={active && dragging}
+                  retainDuringLabelHandoff={retainDuringLabelHandoff}
+                  onHit={onVisibleHover}
+                  onCanvasLeave={onCanvasHoverLeave}
+                />
+              </RoomVisibilityProvider>
             </LabelLayoutProvider>
           </ScenePaletteProvider>
         </Canvas>
@@ -1501,29 +1548,51 @@ export default function RoomScene(props: RoomSceneProps) {
       )}
       {(showAllLabels || showCounts) && suppressedLabels > 0 && (
         <p role="status" className={styles.sceneNote}>
-          Some optional labels do not fit this view. Use the location browser or
-          Center selected.
+          Some optional labels are unavailable in this view. Use the location
+          browser or Center selected.
         </p>
       )}
-      {overflowCodes.length > 0 && (
+      {(overflowCodes.length > 0 ||
+        unresolvedCodes.length > 0 ||
+        placementCodes.length > 0) && (
         <div className={styles.sceneNote}>
           <p role="status">
-            This view cannot fit all occupied markers at readable touch size.
-            Close More controls, enlarge the map, or choose a location below.
+            Some room labels could not be checked or placed. Choose a location
+            below.
           </p>
-          <ul aria-label="Locations whose markers do not fit">
-            {overflowCodes.map((code) => (
-              <li key={code}>
-                <button
-                  className={styles.commandButton}
-                  onClick={() => props.onSelect(code)}
-                >
-                  {props.locationNames?.[code] ?? code}
-                  {props.locationOccupancy?.[code] &&
-                    ` · ${occupancyText(props.locationOccupancy[code])}`}
-                </button>
-              </li>
-            ))}
+          <button
+            type="button"
+            className={styles.commandButton}
+            onClick={() => {
+              visibilityRetry.current?.();
+              registry.retry();
+            }}
+          >
+            Retry label placement
+          </button>
+          <ul aria-label="Locations with unavailable room labels">
+            {[
+              ...new Set([
+                ...overflowCodes,
+                ...unresolvedCodes,
+                ...placementCodes,
+              ]),
+            ]
+              .sort()
+              .map((code) => (
+                <li key={code}>
+                  <button
+                    type="button"
+                    className={styles.commandButton}
+                    aria-pressed={props.selectedCode === code}
+                    onClick={() => props.onSelect(code)}
+                  >
+                    {props.locationNames?.[code] ?? code}
+                    {props.locationOccupancy?.[code] &&
+                      ` · ${occupancyText(props.locationOccupancy[code])}`}
+                  </button>
+                </li>
+              ))}
           </ul>
         </div>
       )}

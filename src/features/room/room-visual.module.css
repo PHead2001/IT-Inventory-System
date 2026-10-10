@@ -267,15 +267,17 @@
   gap: 4px;
 }
 .moreMenu {
+  --room-menu-width: 240px;
+  --room-menu-height: 220px;
   position: absolute;
   top: 49px;
   right: 0;
   z-index: 30;
   display: grid;
   gap: 8px;
-  width: min(240px, 100%);
+  width: min(var(--room-menu-width), 100%);
   min-width: 0;
-  max-height: min(35dvh, 220px);
+  max-height: min(35dvh, var(--room-menu-height));
   overflow: auto;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--room-border) 48%, transparent);
@@ -440,8 +442,8 @@
 }
 @media (max-width: 720px) {
   .moreMenu {
-    width: min(220px, 100%);
-    max-height: min(35dvh, 200px);
+    --room-menu-width: 220px;
+    --room-menu-height: 200px;
   }
   .canvasFrame {
     height: 410px;

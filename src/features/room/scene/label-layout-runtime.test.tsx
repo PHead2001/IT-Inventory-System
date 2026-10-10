@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import * as placement from './label-layout';
 import { createRoomLabelRegistry } from './label-layout-runtime';
 
@@ -70,12 +71,227 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('shares one deadline and operation allowance across centered reflow passes', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    let now = 0;
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      now += 1;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    const packing = vi
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels) => {
+        now += 5;
+        return {
+          placements: labels.map(({ id }) => ({
+            id,
+            visible: true,
+            dx: 0,
+            dy: 0,
+            compact: true,
+          })),
+          status: 'complete',
+          stats: {
+            operations: 200,
+            candidates: 12,
+            nodes: 2,
+            backtracks: 0,
+            elapsedMs: 5,
+            greedyComplete: true,
+          },
+        };
+      });
+    const registry = createRoomLabelRegistry(vi.fn(), undefined, undefined, {
+      clock: () => now,
+      limits: { maxOperations: 1000, maxMilliseconds: 100 },
+    });
+    const cleanup = registry.connect(canvas);
+    registry.register('shared', item.element, item.leader, {
+      priority: 3,
+      compact: true,
+      mandatory: true,
+    });
+    flush();
+    expect(packing).toHaveBeenCalledTimes(2);
+    const first = packing.mock.calls[0][3]!,
+      second = packing.mock.calls[1][3]!;
+    expect(second.maxMilliseconds).toBeLessThan(first.maxMilliseconds! - 5);
+    expect(second.maxOperations).toBeLessThan(first.maxOperations! - 200);
+    expect(second.maxCandidates).toBe(first.maxCandidates! - 12);
+    expect(second.maxNodes).toBe(first.maxNodes! - 2);
+    expect(canvas.dataset.labelLayoutPending).toBe('false');
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
+  it('counts DOM remeasurement against the deadline and blurs before concealing unverified results', () => {
+    const host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    host.append(canvas);
+    document.body.append(host);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host),
+      full = document.createElement('span');
+    full.dataset.roomLabelFull = 'true';
+    item.element.append(full);
+    let now = 0,
+      slow = false;
+    vi.spyOn(full, 'getBoundingClientRect').mockImplementation(() => {
+      if (slow) now += 9;
+      return { ...viewport, width: 27, height: 32 };
+    });
+    const issues = vi.fn(),
+      registry = createRoomLabelRegistry(vi.fn(), undefined, issues, {
+        clock: () => now,
+      });
+    const cleanup = registry.connect(canvas);
+    registry.register('deadline', item.element, item.leader, {
+      priority: 4,
+      locationCode: 'ITC-S1A',
+      mandatory: true,
+    });
+    flush();
+    item.element.focus();
+    const blur = vi.fn(() =>
+      expect(item.element.style.visibility).toBe('visible'),
+    );
+    item.element.addEventListener('blur', blur);
+    slow = true;
+    registry.schedule();
+    flush();
+    expect(blur).toHaveBeenCalledOnce();
+    expect(item.element).toHaveAttribute('aria-hidden', 'true');
+    expect(item.element.tabIndex).toBe(-1);
+    expect(issues).toHaveBeenLastCalledWith(['ITC-S1A']);
+    expect(canvas.dataset.labelLayoutStatus).toBe('budget-exhausted');
+    expect(queue).toHaveLength(0);
+    cleanup();
+  });
+  it.each(['candidate-infeasible', 'budget-exhausted'] as const)(
+    'latches %s for the same measurement and retries only explicitly or after view changes',
+    (status) => {
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas');
+      host.append(canvas);
+      document.body.append(host);
+      let bounds = viewport;
+      vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(
+        () => bounds,
+      );
+      const item = label(host),
+        issues = vi.fn();
+      const packing = vi
+        .spyOn(placement, 'layoutLabelsDetailed')
+        .mockImplementation((labels) => ({
+          placements: labels.map(({ id }) => ({
+            id,
+            visible: false,
+            dx: 0,
+            dy: 0,
+          })),
+          status,
+          stats: {
+            operations: 1,
+            candidates: 0,
+            nodes: 0,
+            backtracks: 0,
+            elapsedMs: 0,
+            greedyComplete: false,
+          },
+        }));
+      const registry = createRoomLabelRegistry(vi.fn(), undefined, issues, {
+          clock: () => 0,
+        }),
+        cleanup = registry.connect(canvas);
+      registry.register('unplaced', item.element, item.leader, {
+        priority: 4,
+        locationCode: 'ITC-S1A',
+        mandatory: true,
+      });
+      flush();
+      expect(issues).toHaveBeenCalledExactlyOnceWith(['ITC-S1A']);
+      expect(canvas.dataset.labelLayoutStatus).toBe(status);
+      for (let frame = 0; frame < 3; frame++) {
+        registry.schedule();
+        flush();
+      }
+      expect(packing).toHaveBeenCalledOnce();
+      expect(queue).toHaveLength(0);
+      registry.retry();
+      flush();
+      expect(packing).toHaveBeenCalledTimes(2);
+      bounds = { ...viewport, right: 170, width: 170 };
+      registry.schedule();
+      flush();
+      expect(packing).toHaveBeenCalledTimes(3);
+      cleanup();
+    },
+  );
+  it.each(['exposure', 'ancestor visibility'])(
+    'blurs a focused action before hiding it after losing %s and stops keyboard activation',
+    async (reason) => {
+      const host = document.createElement('div'),
+        canvas = document.createElement('canvas'),
+        wrapper = document.createElement('div');
+      host.append(canvas, wrapper);
+      document.body.append(host);
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+      const item = label(wrapper),
+        activate = vi.fn(),
+        blurred = vi.fn();
+      item.element.addEventListener('click', activate);
+      item.element.addEventListener('blur', () => {
+        blurred({
+          visibility: item.element.style.visibility,
+          hidden: item.element.getAttribute('aria-hidden'),
+          exposed: item.element.dataset.roomExposed,
+        });
+      });
+      let exposed = true;
+      const registry = createRoomLabelRegistry(vi.fn()),
+        cleanup = registry.connect(canvas);
+      registry.register('focused', item.element, item.leader, {
+        priority: 4,
+        locationCode: 'ITC-S1A',
+        isVisible: () => exposed,
+      });
+      flush();
+      item.element.focus();
+      const user = userEvent.setup();
+      await user.keyboard('{Enter}');
+      expect(activate).toHaveBeenCalledOnce();
+      if (reason === 'exposure') exposed = false;
+      else wrapper.style.visibility = 'hidden';
+      registry.schedule();
+      flush();
+      expect(blurred).toHaveBeenCalledExactlyOnceWith({
+        visibility: 'visible',
+        hidden: null,
+        exposed: 'true',
+      });
+      expect(document.body).toHaveFocus();
+      expect(item.element).toHaveAttribute('aria-hidden', 'true');
+      expect(item.element.tabIndex).toBe(-1);
+      expect(item.element.style.visibility).toBe('hidden');
+      expect(item.element.style.pointerEvents).toBe('none');
+      await user.keyboard('{Enter} ');
+      expect(activate).toHaveBeenCalledOnce();
+      cleanup();
+    },
+  );
   it('observes exact inputs before placement without changing registry output or scheduling', () => {
-    const original = placement.layoutLabels;
+    const original = placement.layoutLabelsDetailed;
     let enabled = false;
     const spy = vi
-      .spyOn(placement, 'layoutLabels')
-      .mockImplementation((labels, bounds, reserved) => {
+      .spyOn(placement, 'layoutLabelsDetailed')
+      .mockImplementation((labels, bounds, reserved, limits, clock) => {
         if (enabled) {
           expect(window.__roomLabelLayoutSnapshot!.passes.at(-1)).toEqual({
             labels,
@@ -93,7 +309,7 @@ describe('unified room label registry', () => {
             })),
           });
         }
-        return original(labels, bounds, reserved);
+        return original(labels, bounds, reserved, limits, clock);
       });
     const run = () => {
       const host = document.createElement('div'),
@@ -355,7 +571,7 @@ describe('unified room label registry', () => {
     const item = label(host),
       child = document.createElement('span');
     item.element.append(child);
-    const layout = vi.spyOn(placement, 'layoutLabels');
+    const layout = vi.spyOn(placement, 'layoutLabelsDetailed');
     const descriptor = Object.getOwnPropertyDescriptor(
       document,
       'elementFromPoint',

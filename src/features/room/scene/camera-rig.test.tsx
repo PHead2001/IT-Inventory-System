@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
-import { OrthographicCamera, Vector3 } from 'three';
+import { act, render } from '@testing-library/react';
+import { MathUtils, OrthographicCamera, Vector3 } from 'three';
 import rawRoom from '../../../../data/rooms/it-closet.json';
 import { roomSchema } from '../schema';
 import { CameraRig } from './room-scene';
@@ -12,6 +12,12 @@ import {
 const mocks = vi.hoisted(() => ({
   state: null as unknown,
   control: null as unknown,
+  orbit: null as {
+    enabled: boolean;
+    onStart: () => void;
+    onChange: () => void;
+    onEnd: () => void;
+  } | null,
 }));
 vi.mock('@react-three/fiber', () => ({
   useThree: () => mocks.state,
@@ -21,7 +27,8 @@ vi.mock('./safe-canvas', () => ({ SafeCanvas: () => null }));
 vi.mock('@react-three/drei', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
-    OrbitControls: forwardRef(function MockControls(_props, ref) {
+    OrbitControls: forwardRef(function MockControls(props, ref) {
+      mocks.orbit = props as NonNullable<typeof mocks.orbit>;
       useImperativeHandle(ref, () => mocks.control);
       return null;
     }),
@@ -54,6 +61,7 @@ beforeEach(() => {
     invalidate: vi.fn(),
   };
   mocks.control = control;
+  mocks.orbit = null;
 });
 function harness() {
   const registry = createRoomLabelRegistry(vi.fn());
@@ -81,11 +89,15 @@ function harness() {
     id: number,
     kind: 'fit' | 'zoom-in' = 'fit',
     restored = false,
+    orbitMode: 'free' | 'guided' = 'free',
+    active = false,
   ) {
     return (
       <LabelLayoutProvider registry={registry}>
         <CameraRig
           {...props}
+          orbitMode={orbitMode}
+          active={active}
           command={{ id, kind }}
           initialView={restored ? initialView : undefined}
         />
@@ -93,6 +105,93 @@ function harness() {
     );
   };
 }
+function expectCanonicalFirstFrame() {
+  const offset = camera.position.clone().sub(control.target);
+  expect(Math.atan2(offset.x, offset.z)).toBeCloseTo(
+    MathUtils.degToRad(room.camera.azimuthDegrees),
+  );
+  expect(Math.asin(offset.y / offset.length())).toBeCloseTo(
+    MathUtils.degToRad(room.camera.elevationDegrees),
+  );
+  expect(camera.zoom).toBeGreaterThan(0);
+  expect(camera.zoom).not.toBe(3);
+  expect(Number.isFinite(camera.zoom)).toBe(true);
+}
+it.each([0, NaN, Infinity])(
+  'retains the latest orbit mode through width %s and fits the canonical first frame before applying it',
+  (width) => {
+    size.width = width;
+    const ui = harness(),
+      view = render(ui(0, 'fit', false, 'free'));
+    const original = camera.position.clone();
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expect(camera.position).toEqual(original);
+    expect(camera.zoom).toBe(3);
+    expect(control.update).not.toHaveBeenCalled();
+    expect(
+      (mocks.state as { gl: { domElement: HTMLCanvasElement } }).gl.domElement
+        .dataset.cameraView,
+    ).toBeUndefined();
+    size.width = 375;
+    size.height = 400;
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expectCanonicalFirstFrame();
+    const stored = JSON.parse(
+      (mocks.state as { gl: { domElement: HTMLCanvasElement } }).gl.domElement
+        .dataset.cameraView!,
+    );
+    expect(stored.mode).toBe('guided');
+    const fitted = camera.zoom;
+    camera.zoom *= 1.4;
+    size.width = 400;
+    view.rerender(ui(0, 'fit', false, 'guided'));
+    expect(camera.zoom).toBeCloseTo(fitted * 1.4);
+  },
+);
+it('ignores a gesture before measurement and preserves the first fit before later manual interaction', () => {
+  const ui = harness(),
+    view = render(ui(0, 'fit', false, 'free', true));
+  expect(mocks.orbit!.enabled).toBe(false);
+  act(() => {
+    mocks.orbit!.onStart();
+    mocks.orbit!.onChange();
+    mocks.orbit!.onEnd();
+  });
+  expect(control.update).not.toHaveBeenCalled();
+  expect(camera.zoom).toBe(3);
+  size.width = 375;
+  size.height = 400;
+  view.rerender(ui(0, 'fit', false, 'free', true));
+  expect(mocks.orbit!.enabled).toBe(true);
+  expectCanonicalFirstFrame();
+  const fitted = camera.zoom;
+  act(() => {
+    mocks.orbit!.onStart();
+    camera.zoom *= 1.4;
+    mocks.orbit!.onChange();
+    mocks.orbit!.onEnd();
+  });
+  size.width = 400;
+  view.rerender(ui(0, 'fit', false, 'free', true));
+  expect(camera.zoom).toBeCloseTo(fitted * 1.4);
+});
+it('applies the newest pending zoom after the canonical first fit despite a pending mode change', () => {
+  const ui = harness(),
+    view = render(ui(1, 'fit', false, 'free'));
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expect(camera.zoom).toBe(3);
+  expect(control.update).not.toHaveBeenCalled();
+  size.width = 375;
+  size.height = 400;
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expectCanonicalFirstFrame();
+  const fitted = control.minZoom / room.camera.zoomLimits[0];
+  expect(camera.zoom).toBeCloseTo(fitted * 1.2);
+  const count = control.update.mock.calls.length;
+  view.rerender(ui(2, 'zoom-in', false, 'guided'));
+  expect(camera.zoom).toBeCloseTo(fitted * 1.2);
+  expect(control.update).toHaveBeenCalledTimes(count);
+});
 it('defers the newest Fit command until measurement without consuming it or poisoning camera state', () => {
   const ui = harness(),
     view = render(ui(1));

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import captured from '../../../../tests/fixtures/room/ci-phone-selected-capacity.json';
 import {
   layoutLabels,
+  layoutLabelsDetailed,
+  LABEL_PACKING_BUDGET,
   type LabelArea,
   type LabelPlacement,
   type LabelRect,
@@ -29,10 +31,8 @@ function modeledPhonePanel(): LabelArea[] {
     phone,
     'canonical phone breakpoint overrides the popup footprint',
   ).toBeTruthy();
-  const width = Number(phone![1].match(/width: min\((\d+)px, 100%\)/)?.[1]);
-  const height = Number(
-    phone![1].match(/max-height: min\(35dvh, (\d+)px\)/)?.[1],
-  );
+  const width = Number(phone![1].match(/--room-menu-width: (\d+)px/)?.[1]);
+  const height = Number(phone![1].match(/--room-menu-height: (\d+)px/)?.[1]);
   expect(Number.isFinite(width) && width > 0).toBe(true);
   expect(Number.isFinite(height) && height > 0).toBe(true);
   return baseline.reserved.map((panel) => ({
@@ -45,25 +45,32 @@ function modeledPhonePanel(): LabelArea[] {
 function assertPhysicalPlacement(
   result: LabelPlacement[],
   reserved: LabelArea[],
+  input: LabelRect[] = labels,
+  complete = true,
 ) {
-  expect(result).toHaveLength(22);
-  expect(result.every((entry) => entry.visible)).toBe(true);
-  const areas = result.map((placed) => {
-    const source = labels.find((entry) => entry.id === placed.id)!;
-    const size = placed.compact ? source.compact! : source;
-    expect(size.width).toBeGreaterThanOrEqual(44);
-    expect(size.height).toBeGreaterThanOrEqual(44);
-    if (source.selected) {
-      expect(placed.compact ?? false).toBe(false);
-      expect(size).toMatchObject({ width: 238, height: 62 });
-    }
-    return {
-      left: source.left + placed.dx,
-      top: source.top + placed.dy,
-      right: source.left + placed.dx + size.width,
-      bottom: source.top + placed.dy + size.height,
-    };
-  });
+  expect(result).toHaveLength(input.length);
+  if (complete) expect(result.every((entry) => entry.visible)).toBe(true);
+  const areas = result
+    .filter((entry) => entry.visible)
+    .map((placed) => {
+      const source = input.find((entry) => entry.id === placed.id)!;
+      const size = placed.compact ? source.compact! : source;
+      expect(size.width).toBeGreaterThanOrEqual(44);
+      expect(size.height).toBeGreaterThanOrEqual(44);
+      if (source.selected) {
+        expect(placed.compact ?? false).toBe(false);
+        expect(size).toMatchObject({
+          width: source.width,
+          height: source.height,
+        });
+      }
+      return {
+        left: source.left + placed.dx,
+        top: source.top + placed.dy,
+        right: source.left + placed.dx + size.width,
+        bottom: source.top + placed.dy + size.height,
+      };
+    });
   for (const [index, area] of areas.entries()) {
     expect(area.left).toBeGreaterThanOrEqual(baseline.viewport.left + 2);
     expect(area.top).toBeGreaterThanOrEqual(baseline.viewport.top + 2);
@@ -81,7 +88,7 @@ function assertPhysicalPlacement(
 }
 
 describe('captured CI phone selected-label capacity', () => {
-  it('preserves the exact settled 22-input transaction and its three suppressed actions', () => {
+  it('retains the historical deficient output as evidence, with bounded honest search on its original geometry', () => {
     expect(captured).toMatchObject({
       schema: 1,
       transaction: 221,
@@ -94,12 +101,106 @@ describe('captured CI phone selected-label capacity', () => {
         (entry) => entry.mandatory && !entry.focused && !entry.hovered,
       ),
     ).toBe(true);
-    const result = layoutLabels(labels, baseline.viewport, baseline.reserved);
-    expect(result).toEqual(baseline.output);
-    expect(result.filter((entry) => entry.visible)).toHaveLength(19);
+    expect(baseline.output.filter((entry) => entry.visible)).toHaveLength(19);
     expect(
-      result.filter((entry) => !entry.visible).map((entry) => entry.id),
+      baseline.output
+        .filter((entry) => !entry.visible)
+        .map((entry) => entry.id),
     ).toEqual(['shelf-3c', 'shelf-4b', 'shelf-4c']);
+    const result = layoutLabelsDetailed(
+      labels,
+      baseline.viewport,
+      baseline.reserved,
+    );
+    expect(result.status === 'complete').toBe(
+      result.placements.every((entry) => entry.visible),
+    );
+    assertPhysicalPlacement(
+      result.placements,
+      baseline.reserved,
+      labels,
+      false,
+    );
+    expect(result.stats.operations).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    expect(result.stats.elapsedMs).toBeLessThan(2000);
+  });
+
+  it('packs a constructive 27-action supplementary long-text stress case once More is outside the canvas', () => {
+    // Modeled from the retained transaction-306 shape/counts, not a claimed
+    // full-precision browser fixture. All 26 compact actions remain mandatory.
+    const selected = labels.find((entry) => entry.selected)!;
+    const input: LabelRect[] = [
+      { ...selected, left: -25, top: 565, height: 116, previous: undefined },
+      ...Array.from({ length: 26 }, (_, index) => ({
+        id: `occupied-${index}`,
+        locationCode: `O-${index}`,
+        left: 80 + index * 7,
+        top: 575 + index * 3,
+        width: 144,
+        height: 44,
+        compact: { width: 44, height: 44 },
+        mandatory: true,
+        selected: false,
+      })),
+    ];
+    const left = baseline.viewport.left + 2,
+      top = baseline.viewport.top + 2;
+    const certificate: LabelPlacement[] = [
+      {
+        id: selected.id,
+        visible: true,
+        dx: left - input[0].left,
+        dy: top - input[0].top,
+      },
+      ...input.slice(1).map((entry, index) => {
+        const x = index < 2 ? left + 241 : left + ((index - 2) % 6) * 47;
+        const y =
+          index < 2
+            ? top + index * 47
+            : top + 119 + Math.floor((index - 2) / 6) * 47;
+        return {
+          id: entry.id,
+          visible: true,
+          dx: x - entry.left,
+          dy: y - entry.top,
+          compact: true,
+        };
+      }),
+    ];
+    assertPhysicalPlacement(certificate, [], input);
+    const result = layoutLabelsDetailed(input, baseline.viewport);
+    expect(result.status).toBe('complete');
+    assertPhysicalPlacement(result.placements, [], input);
+    expect(
+      layoutLabelsDetailed([...input].reverse(), baseline.viewport).placements,
+    ).toEqual(result.placements);
+    expect(result.stats.elapsedMs).toBeLessThan(2000);
+
+    const obstructed = layoutLabelsDetailed(
+      input,
+      baseline.viewport,
+      modeledPhonePanel(),
+    );
+    expect(obstructed.status).not.toBe('complete');
+    assertPhysicalPlacement(
+      obstructed.placements,
+      modeledPhonePanel(),
+      input,
+      false,
+    );
+    expect(obstructed.stats.operations).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    expect(obstructed.stats.nodes).toBeLessThanOrEqual(
+      LABEL_PACKING_BUDGET.maxNodes,
+    );
+    expect(obstructed.stats.elapsedMs).toBeLessThan(2000);
+    // Independent upper bound: inflate targets by the required 3px gap.
+    // A 94px strip for 194px + one-marker remainder beside 241x119 selected
+    // text + six-marker width over remaining 94px cannot hold 26x47px.
+    expect(2 * 194 + 119 + 6 * 94).toBeLessThan(26 * 47);
   });
 
   it('models all 22 actions beside the CSS phone popup without shrinking selected text or touch targets', () => {

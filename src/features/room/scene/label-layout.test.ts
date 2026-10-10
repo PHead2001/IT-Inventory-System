@@ -3,7 +3,14 @@ import capturedActive from '../../../../tests/fixtures/room/more-active-labels.j
 import capturedSelected from '../../../../tests/fixtures/room/more-selected-labels.json';
 import capturedMore from '../../../../tests/fixtures/room/more-labels.json';
 import { describe, expect, it } from 'vitest';
-import { layoutLabels, type LabelRect } from './label-layout';
+import {
+  LABEL_PACKING_BUDGET,
+  layoutLabels,
+  layoutLabelsDetailed,
+  type LabelRect,
+  type LabelArea,
+  type LabelPlacement,
+} from './label-layout';
 
 const viewport = { left: 0, top: 0, right: 160, bottom: 100 };
 const label = (
@@ -21,14 +28,270 @@ const label = (
 });
 
 describe('scene label placement', () => {
+  function assertPacking(
+    input: LabelRect[],
+    placements: LabelPlacement[],
+    viewport: LabelArea,
+    reserved: LabelArea[] = [],
+  ) {
+    const areas = placements
+      .filter((entry) => entry.visible)
+      .map((entry) => {
+        const source = input.find((label) => label.id === entry.id)!;
+        const size = entry.compact ? source.compact! : source;
+        return {
+          left: source.left + entry.dx,
+          top: source.top + entry.dy,
+          right: source.left + entry.dx + size.width,
+          bottom: source.top + entry.dy + size.height,
+        };
+      });
+    for (const [index, area] of areas.entries()) {
+      expect(area.left).toBeGreaterThanOrEqual(viewport.left + 2);
+      expect(area.top).toBeGreaterThanOrEqual(viewport.top + 2);
+      expect(area.right).toBeLessThanOrEqual(viewport.right - 2);
+      expect(area.bottom).toBeLessThanOrEqual(viewport.bottom - 2);
+      for (const other of [...reserved, ...areas.slice(index + 1)])
+        expect(
+          area.left >= other.right + 3 ||
+            area.right + 3 <= other.left ||
+            area.top >= other.bottom + 3 ||
+            area.bottom + 3 <= other.top,
+        ).toBe(true);
+    }
+  }
+  it('finds an off-rail 44px pocket adjacent to reserved edges', () => {
+    const input = [
+      { ...label('pocket', 300, 300), width: 44, height: 44, mandatory: true },
+    ];
+    const reserved = [
+      { left: 0, top: 0, right: 20, bottom: 100 },
+      { left: 70, top: 0, right: 160, bottom: 100 },
+      { left: 0, top: 0, right: 160, bottom: 14 },
+      { left: 0, top: 64, right: 160, bottom: 100 },
+    ];
+    const result = layoutLabelsDetailed(input, viewport, reserved);
+    expect(result.status).toBe('complete');
+    expect(result.stats.greedyComplete).toBe(false);
+    expect(result.placements[0]).toMatchObject({
+      visible: true,
+      dx: 23 - 300,
+      dy: 17 - 300,
+    });
+    assertPacking(input, result.placements, viewport, reserved);
+  });
+  it('never reuses a compact selected footprint even when a compact variant was supplied', () => {
+    const input = [
+      {
+        ...label('selected', 2, 2, true),
+        width: 91,
+        height: 44,
+        compact: { width: 44, height: 44 },
+        focused: true,
+        previous: { dx: 0, dy: 0, compact: true },
+        mandatory: true,
+      },
+    ];
+    const result = layoutLabelsDetailed(input, viewport);
+    expect(result.status).toBe('complete');
+    expect(result.placements[0]).toMatchObject({
+      visible: true,
+      compact: false,
+    });
+    assertPacking(input, result.placements, viewport);
+  });
+  function offRailBacktrackingCase() {
+    return {
+      bounds: { left: 0, top: 0, right: 144, bottom: 125 },
+      reserved: [
+        { left: 0, top: 0, right: 144, bottom: 14 },
+        { left: 0, top: 111, right: 144, bottom: 125 },
+      ],
+      input: [
+        {
+          ...label('wide', 26, 17),
+          width: 91,
+          height: 44,
+          mandatory: true,
+          priority: 10,
+        },
+        ...Array.from({ length: 4 }, (_, index) => ({
+          ...label('marker-' + index, 50, 64),
+          width: 180,
+          height: 44,
+          compact: { width: 44, height: 44 },
+          mandatory: true,
+        })),
+        { ...label('optional', 2, 64), width: 44, height: 44 },
+      ],
+    };
+  }
+  it('backtracks and relocates an ordinary full label to recover a certified feasible off-rail packing', () => {
+    const { bounds, reserved, input } = offRailBacktrackingCase();
+    // A constructive certificate is independent of candidate search.
+    const certificate = [
+      { id: 'wide', visible: true, dx: -24, dy: 0 },
+      ...[
+        [96, 17],
+        [2, 64],
+        [49, 64],
+        [96, 64],
+      ].map(([left, top], index) => ({
+        id: 'marker-' + index,
+        visible: true,
+        dx: left - 50,
+        dy: top - 64,
+        compact: true,
+      })),
+    ];
+    assertPacking(input, certificate, bounds, reserved);
+    const result = layoutLabelsDetailed(input, bounds, reserved);
+    expect(result.status).toBe('complete');
+    expect(result.stats.greedyComplete).toBe(false);
+    expect(result.stats.backtracks).toBeGreaterThan(0);
+    expect(result.placements.find((entry) => entry.id === 'wide')!.dx).not.toBe(
+      0,
+    );
+    expect(result.placements.filter((entry) => entry.visible)).toHaveLength(5);
+    expect(
+      result.placements.find((entry) => entry.id === 'optional')!.visible,
+    ).toBe(false);
+    assertPacking(input, result.placements, bounds, reserved);
+    expect(
+      layoutLabelsDetailed([...input].reverse(), bounds, reserved).placements,
+    ).toEqual(result.placements);
+  });
+  it('distinguishes exhausted budgets from candidate infeasibility without claiming physical impossibility', () => {
+    const input = [
+      { ...label('target', 300, 300), width: 44, height: 44, mandatory: true },
+    ];
+    const exhausted = layoutLabelsDetailed(input, viewport, [], {
+      maxOperations: 0,
+    });
+    expect(exhausted.status).toBe('budget-exhausted');
+    expect(exhausted.stats.operations).toBe(0);
+    expect(exhausted.placements[0].visible).toBe(false);
+    const infeasible = layoutLabelsDetailed(input, {
+      left: 0,
+      top: 0,
+      right: 47,
+      bottom: 47,
+    });
+    expect(infeasible.status).toBe('candidate-infeasible');
+    expect(infeasible.stats.operations).toBeLessThan(
+      LABEL_PACKING_BUDGET.maxOperations,
+    );
+    expect(infeasible.placements[0].visible).toBe(false);
+  });
+  it('bounds nodes and candidates across the entire recovery while retaining a valid partial greedy result', () => {
+    const { bounds, reserved, input } = offRailBacktrackingCase();
+    for (const limits of [{ maxNodes: 0 }, { maxCandidates: 1 }]) {
+      const result = layoutLabelsDetailed(input, bounds, reserved, limits);
+      expect(result.status).toBe('budget-exhausted');
+      expect(result.stats.nodes).toBeLessThanOrEqual(
+        limits.maxNodes ?? LABEL_PACKING_BUDGET.maxNodes,
+      );
+      expect(result.stats.candidates).toBeLessThanOrEqual(
+        limits.maxCandidates ?? LABEL_PACKING_BUDGET.maxCandidates,
+      );
+      assertPacking(input, result.placements, bounds, reserved);
+    }
+  });
+  it('expires cooperatively on the injected clock and preserves an already validated focused action', () => {
+    const input = [
+      {
+        ...label('focused', 2, 2),
+        width: 91,
+        height: 44,
+        mandatory: true,
+        focused: true,
+        previous: { dx: 0, dy: 0, compact: false },
+      },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        ...label('other-' + index, 50, 50),
+        width: 44,
+        height: 44,
+        mandatory: true,
+      })),
+    ];
+    let ticks = 0;
+    const result = layoutLabelsDetailed(
+      input,
+      viewport,
+      [],
+      { maxMilliseconds: 0.5 },
+      () => ticks++ * 0.01,
+    );
+    expect(result.status).toBe('budget-exhausted');
+    expect(
+      result.placements.find((entry) => entry.id === 'focused'),
+    ).toMatchObject({ visible: true, dx: 0, dy: 0 });
+    assertPacking(input, result.placements, viewport);
+  });
+  it('does not treat near but different candidate domains and footprints as interchangeable', () => {
+    const bounds = { left: 0, top: 0, right: 200, bottom: 100 };
+    const reserved = [
+      { left: 0, top: 0, right: 20, bottom: 100 },
+      { left: 70, top: 0, right: 120, bottom: 100 },
+      { left: 171, top: 0, right: 200, bottom: 100 },
+      { left: 0, top: 0, right: 200, bottom: 14 },
+      { left: 0, top: 64, right: 200, bottom: 100 },
+    ];
+    const input = [
+      {
+        ...label('small', 123, 17),
+        width: 44,
+        height: 44,
+        mandatory: true,
+        priority: 10,
+      },
+      { ...label('wide', 300, 300), width: 45, height: 44, mandatory: true },
+    ];
+    const result = layoutLabelsDetailed(input, bounds, reserved);
+    expect(result.status).toBe('complete');
+    expect(result.stats.greedyComplete).toBe(false);
+    expect(
+      result.placements.find((entry) => entry.id === 'small'),
+    ).toMatchObject({ visible: true, dx: -100, dy: 0 });
+    expect(
+      result.placements.find((entry) => entry.id === 'wide'),
+    ).toMatchObject({ visible: true, dx: 123 - 300, dy: 17 - 300 });
+    assertPacking(input, result.placements, bounds, reserved);
+  });
+  it('checks the clock after native sorting and refuses oversized inputs before candidate allocation', () => {
+    const input = [
+      { ...label('mandatory', 2, 2), width: 44, height: 44, mandatory: true },
+    ];
+    let reads = 0;
+    const sorted = layoutLabelsDetailed(input, viewport, [], {}, () =>
+      ++reads >= 3 ? 100 : 0,
+    );
+    expect(sorted.status).toBe('budget-exhausted');
+    expect(sorted.stats.candidates).toBe(0);
+    expect(sorted.placements.every((entry) => !entry.visible)).toBe(true);
+    const oversized = layoutLabelsDetailed(
+      Array.from(
+        { length: LABEL_PACKING_BUDGET.maxInputs + 1 },
+        (_, index) => ({ ...input[0], id: String(index) }),
+      ),
+      viewport,
+    );
+    expect(oversized.status).toBe('budget-exhausted');
+    expect(oversized.placements).toEqual([]);
+    expect(oversized.stats.candidates).toBe(0);
+  });
   const narrowViewport = { left: 30, top: 404, right: 345, bottom: 812 };
   const morePanel = [{ left: 106, top: 397, right: 346, bottom: 617 }];
   it('recovers all 22 exposed real-scene targets from fragmented prior placements with More open', () => {
     // Captured production RoomScene, room JSON, CSS and Inter font at 375x812.
     const input: LabelRect[] = capturedMore;
     expect(input).toHaveLength(22);
-    const result = layoutLabels(input, narrowViewport, morePanel);
-    expect(result.every((entry) => entry.visible)).toBe(true);
+    const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+    const result = detailed.placements;
+    expect(
+      result.every((entry) => entry.visible),
+      JSON.stringify(detailed.stats),
+    ).toBe(true);
     const areas = result.map((entry) => {
       const source = input.find((item) => item.id === entry.id)!;
       const size = entry.compact ? source.compact! : source;
@@ -71,8 +334,12 @@ describe('scene label placement', () => {
   it('realigns inactive selected text to recover all 22 targets and remains stable on the next frame', () => {
     const input: LabelRect[] = capturedSelected;
     expect(input).toHaveLength(22);
-    const result = layoutLabels(input, narrowViewport, morePanel);
-    expect(result.every((entry) => entry.visible)).toBe(true);
+    const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+    const result = detailed.placements;
+    expect(
+      result.every((entry) => entry.visible),
+      JSON.stringify(detailed.stats),
+    ).toBe(true);
     const selected = input.find((entry) => entry.selected)!;
     // Same minimum-displacement result as exhaustive candidate traversal.
     expect(result.find((entry) => entry.id === selected.id)).toMatchObject({
@@ -106,8 +373,12 @@ describe('scene label placement', () => {
     const input: LabelRect[] = capturedActive;
     const active = input.filter((entry) => entry.focused || entry.hovered);
     expect(active).toHaveLength(2);
-    const result = layoutLabels(input, narrowViewport, morePanel);
-    expect(result.every((entry) => entry.visible)).toBe(true);
+    const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+    const result = detailed.placements;
+    expect(
+      result.every((entry) => entry.visible),
+      JSON.stringify(detailed.stats),
+    ).toBe(true);
     for (const entry of active)
       expect(result.find((item) => item.id === entry.id)).toMatchObject({
         visible: true,
@@ -155,8 +426,12 @@ describe('scene label placement', () => {
               }
             : entry,
       );
-      const result = layoutLabels(input, narrowViewport, morePanel);
-      expect(result.every((entry) => entry.visible)).toBe(true);
+      const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+      const result = detailed.placements;
+      expect(
+        result.every((entry) => entry.visible),
+        JSON.stringify(detailed.stats),
+      ).toBe(true);
       const selected = input.find((entry) => entry.selected)!;
       const full = result.find((entry) => entry.id === selected.id)!;
       expect(full.compact ?? false).toBe(false);
@@ -189,6 +464,69 @@ describe('scene label placement', () => {
       );
     },
   );
+  it('reuses each measured label offset tail across directional trials within the allocation budget', () => {
+    const result = layoutLabelsDetailed(
+      capturedSelected,
+      narrowViewport,
+      morePanel,
+      { maxCandidates: 20_000 },
+      () => 0,
+    );
+    expect(result.status, JSON.stringify(result.stats)).toBe('complete');
+    expect(result.placements.every((entry) => entry.visible)).toBe(true);
+    expect(
+      result.placements.find(
+        (entry) =>
+          entry.id === capturedSelected.find((label) => label.selected)!.id,
+      ),
+    ).toMatchObject({
+      dx: 24,
+      dy: -11.967041015625,
+    });
+  });
+  it('reserves mandatory actions before spending the search budget preserving optional full hover text', () => {
+    const input: LabelRect[] = capturedTransition.map((entry) =>
+      entry.hovered
+        ? {
+            ...entry,
+            pointer: {
+              x: entry.left + entry.previous!.dx + entry.width / 2,
+              y: entry.top + entry.previous!.dy + entry.height / 2,
+              bounds: {
+                left: entry.left + entry.previous!.dx,
+                top: entry.top + entry.previous!.dy,
+                right: entry.left + entry.previous!.dx + entry.width,
+                bottom: entry.top + entry.previous!.dy + entry.height,
+              },
+            },
+          }
+        : entry,
+    );
+    // An operation cap makes the priority regression deterministic across hosts.
+    // The real-clock transition cases above independently retain the 16ms gate.
+    const result = layoutLabelsDetailed(
+      input,
+      narrowViewport,
+      morePanel,
+      { maxOperations: 150_000 },
+      () => 0,
+    );
+    expect(result.status, JSON.stringify(result.stats)).toBe('complete');
+    expect(result.placements.every((entry) => entry.visible)).toBe(true);
+    const hovered = input.find((entry) => entry.hovered)!;
+    expect(
+      result.placements.find((entry) => entry.id === hovered.id),
+    ).toMatchObject({
+      visible: true,
+      compact: true,
+      yielded: true,
+    });
+    const selected = input.find((entry) => entry.selected)!;
+    expect(
+      result.placements.find((entry) => entry.id === selected.id)?.compact ??
+        false,
+    ).toBe(false);
+  });
   it('keeps a prior full hovered action pinned without a valid pointer witness even if coverage is incomplete', () => {
     const input: LabelRect[] = capturedTransition;
     const hovered = input.find((entry) => entry.hovered)!;
@@ -282,8 +620,12 @@ describe('scene label placement', () => {
         compact: { width: 44, height: 44 },
       })),
     ];
-    const result = layoutLabels(input, narrowViewport, morePanel);
-    expect(result.every((entry) => entry.visible)).toBe(true);
+    const detailed = layoutLabelsDetailed(input, narrowViewport, morePanel);
+    const result = detailed.placements;
+    expect(
+      result.every((entry) => entry.visible),
+      JSON.stringify(detailed.stats),
+    ).toBe(true);
     expect(result.find((entry) => entry.id === 'focused')).toMatchObject({
       visible: true,
       dx: 0,

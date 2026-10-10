@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { attachMapInput } from './map-input';
 import { OrthographicCamera, Vector3 } from 'three';
 import { Children, isValidElement, type ReactNode } from 'react';
 import type { RoomNode } from '../schema';
+import type { RoomLabelRegistry } from './label-layout-runtime';
 import RoomScene, {
   finishFocusAnimation,
   hasRenderedSelection,
@@ -371,4 +372,65 @@ it('shows the live authorized display name for a bound location without changing
   render(<RoomScene {...props} />);
   expect(screen.getByText(/Selected location: Adapters shelf/)).toBeVisible();
   expect(props.room).toBe(room);
+});
+
+it('offers unresolved room locations as native keyboard/touch actions and retries both shared transactions', async () => {
+  const props = sceneProps({
+    selectedCode: 'ITC-S1A',
+    locationNames: { 'ITC-S1A': 'Adapters shelf', 'ITC-D01': 'Spare adapters' },
+  });
+  const user = userEvent.setup();
+  render(<RoomScene {...props} />);
+  let notify: ((codes: string[]) => void) | undefined;
+  let retryRef: { current: (() => void) | null } | undefined;
+  let registry: RoomLabelRegistry | undefined;
+  const find = (children: ReactNode) =>
+    Children.forEach(children, (child) => {
+      if (!isValidElement<Record<string, unknown>>(child)) return;
+      if (child.props.onUnresolvedChange) {
+        notify = child.props.onUnresolvedChange as typeof notify;
+        retryRef = child.props.retryRef as typeof retryRef;
+      }
+      if (child.props.registry)
+        registry = child.props.registry as RoomLabelRegistry;
+      find(child.props.children as ReactNode);
+    });
+  find(sceneCanvas.children);
+  const retryVisibility = vi.fn(),
+    retryPlacement = vi.spyOn(registry!, 'retry');
+  retryRef!.current = retryVisibility;
+  act(() => notify!(['ITC-S1A', 'ITC-D01', 'ITC-S1A']));
+  expect(
+    screen.getByText(/Some room labels could not be checked or placed/),
+  ).toHaveAttribute('role', 'status');
+  const actions = within(
+    screen.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+    }),
+  );
+  expect(actions.getAllByRole('button')).toHaveLength(2);
+  const selected = actions.getByRole('button', { name: 'Adapters shelf' });
+  expect(selected).toHaveAttribute('aria-pressed', 'true');
+  selected.focus();
+  await user.keyboard('{Enter}');
+  expect(props.onSelect).toHaveBeenLastCalledWith('ITC-S1A');
+  await user.pointer([
+    {
+      keys: '[TouchA>]',
+      target: actions.getByRole('button', { name: 'Spare adapters' }),
+    },
+    { keys: '[/TouchA]' },
+  ]);
+  expect(props.onSelect).toHaveBeenLastCalledWith('ITC-D01');
+  await user.click(
+    screen.getByRole('button', { name: 'Retry label placement' }),
+  );
+  expect(retryVisibility).toHaveBeenCalledOnce();
+  expect(retryPlacement).toHaveBeenCalledOnce();
+  act(() => notify!([]));
+  expect(
+    screen.queryByRole('list', {
+      name: 'Locations with unavailable room labels',
+    }),
+  ).toBeNull();
 });
