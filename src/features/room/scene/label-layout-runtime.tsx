@@ -60,6 +60,7 @@ export function createRoomLabelRegistry(
   let observer: ResizeObserver | null = null;
   let overlays: MutationObserver | null = null;
   let pending: number | null = null;
+  let invalidateGeometry: (() => void) | undefined;
   let lastSuppressed = -1;
   let lastMissing = '';
   let revision = 0;
@@ -434,8 +435,13 @@ export function createRoomLabelRegistry(
       pending = requestAnimationFrame(place);
     }
   };
+  const invalidateLayout = () => {
+    invalidateGeometry?.();
+    schedule();
+  };
   return {
     schedule,
+    invalidateLayout,
     hide(id: string) {
       const entry = entries.get(id);
       if (entry) hideEntry(entry);
@@ -479,13 +485,13 @@ export function createRoomLabelRegistry(
         schedule();
       };
     },
-    connect(element: HTMLCanvasElement, invalidateGeometry?: () => void) {
+    connect(element: HTMLCanvasElement, invalidateScene?: () => void) {
       canvas = element;
+      invalidateGeometry = invalidateScene;
       let connected = true;
       const changed = () => {
         if (!connected) return;
-        invalidateGeometry?.();
-        schedule();
+        invalidateLayout();
       };
       observer = new ResizeObserver(changed);
       observer.observe(element);
@@ -504,9 +510,15 @@ export function createRoomLabelRegistry(
       }
       document.fonts?.addEventListener('loadingdone', changed);
       void document.fonts?.ready.then(changed);
+      const visual = window.visualViewport;
+      window.addEventListener('scroll', changed, true);
+      window.addEventListener('resize', changed);
+      visual?.addEventListener('scroll', changed);
+      visual?.addEventListener('resize', changed);
       schedule();
       return () => {
         connected = false;
+        invalidateGeometry = undefined;
         delete element.dataset.labelLayoutPending;
         delete element.dataset.labelLayoutRevision;
         delete element.dataset.labelLayoutError;
@@ -517,6 +529,10 @@ export function createRoomLabelRegistry(
         overlays?.disconnect();
         overlays = null;
         document.fonts?.removeEventListener('loadingdone', changed);
+        window.removeEventListener('scroll', changed, true);
+        window.removeEventListener('resize', changed);
+        visual?.removeEventListener('scroll', changed);
+        visual?.removeEventListener('resize', changed);
         if (pending !== null) cancelAnimationFrame(pending);
         pending = null;
       };

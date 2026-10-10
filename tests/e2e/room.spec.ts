@@ -2455,6 +2455,57 @@ test('375px populated room gives every independently witnessed opaque target an 
   await page.getByRole('button', { name: 'Fit room', exact: true }).click();
   await canvas.scrollIntoViewIfNeeded();
   await settledLabels(page);
+  // Page scrolling flips More across the canvas without moving the camera.
+  // Its old opaque mask must not keep independently visible actions hidden.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await more.click();
+  await settledLabels(page);
+  const menu = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+  });
+  const scrollFrame = await canvas.boundingBox();
+  expect(scrollFrame).not.toBeNull();
+  await page.mouse.move(5, 800);
+  await page.mouse.wheel(0, scrollFrame!.y - 149);
+  await expect
+    .poll(async () => Math.abs((await canvas.boundingBox())!.y - 149))
+    .toBeLessThan(5);
+  await expect(menu).toHaveAttribute('data-placement', 'below');
+  await settledLabels(page);
+  const coveredScene = await captureRoomWitness(page);
+  const coveredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
+    page,
+    coveredScene,
+    counts,
+    'scroll-more-overlapping-canvas',
+  );
+  const unchangedCamera = await camera(page);
+  const scrollRevision = Number(
+    await canvas.getAttribute('data-label-layout-revision'),
+  );
+  await page.mouse.wheel(0, -250);
+  await expect(menu).toHaveAttribute('data-placement', 'above');
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await settledLabels(page, scrollRevision);
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const restoredCamera = await camera(page);
+  near(restoredCamera.position, unchangedCamera.position);
+  near(restoredCamera.target, unchangedCamera.target);
+  expect(restoredCamera.zoom).toBeCloseTo(unchangedCamera.zoom, 5);
+  const uncoveredScene = await captureRoomWitness(page);
+  const restoredWitnesses = await assertOccupiedWitnessActionsWithDiagnostics(
+    page,
+    uncoveredScene,
+    counts,
+    'scroll-more-outside-canvas-without-reopening',
+  );
+  expect(restoredWitnesses.size).toBeGreaterThan(coveredWitnesses.size);
+  await more.click();
+  await page.setViewportSize({ width: 375, height: 812 });
+  await canvas.scrollIntoViewIfNeeded();
+  await settledLabels(page);
   const initialSize = await canvas.boundingBox();
   let selectedCode: string | null = null;
   const partialCodes = new Set<string>();

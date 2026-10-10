@@ -21,6 +21,7 @@ import {
   RoomVisibilityProvider,
   useRoomVisibilityBatch,
 } from './room-visibility-runtime';
+import { createRoomLabelRegistry } from './label-layout-runtime';
 
 const runtime = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
@@ -65,7 +66,10 @@ function fixture(limits = {}) {
     batch: new RoomVisibilityBatch(scene, camera, projection),
   };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 describe('shared room visibility transaction', () => {
   it('refreshes once and shares authoritative ray work across labels, then reuses proven same-view results', () => {
     const { scene, origin, batch, projection } = fixture();
@@ -194,6 +198,90 @@ describe('shared room visibility transaction', () => {
     batch.refresh(viewport, []);
     expect(batch.finish()).toEqual([]);
   });
+  it('refreshes the actual opaque-mask result on scroll and overlay movement while the camera stays fixed', () => {
+    const { scene, camera, origin } = fixture();
+    const surface = document.createElement('div'),
+      canvas = document.createElement('canvas'),
+      panel = document.createElement('div');
+    surface.dataset.roomSurface = 'true';
+    panel.dataset.roomObstruction = 'true';
+    surface.append(canvas, panel);
+    document.body.append(surface);
+    const rect = {
+      ...viewport,
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 400,
+      toJSON() {},
+    };
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(rect);
+    vi.spyOn(panel, 'getClientRects').mockReturnValue([
+      rect,
+    ] as unknown as DOMRectList);
+    let panelTop = 0;
+    vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => ({
+      ...rect,
+      top: panelTop,
+      bottom: panelTop + 400,
+      toJSON: () => ({ ...viewport, top: panelTop, bottom: panelTop + 400 }),
+    }));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1),
+    );
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const result = vi.fn();
+    const frame = () =>
+      runtime.frames
+        .sort((a, b) => a.priority - b.priority)
+        .forEach(({ frame }) => frame());
+    const invalidate = vi.fn(frame);
+    runtime.state = { scene, camera, gl: { domElement: canvas }, invalidate };
+    function Query() {
+      const batch = useRoomVisibilityBatch();
+      useFrame(
+        () => result(batch.resolve(origin, 'ITC-S1A', new Vector3(0, 0, 1))),
+        -0.25,
+      );
+      return null;
+    }
+    const view = render(
+      <RoomVisibilityProvider
+        onUnresolvedChange={() => {}}
+        retryRef={{ current: null }}
+      >
+        <Query />
+      </RoomVisibilityProvider>,
+    );
+    const registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas, invalidate);
+    act(frame);
+    expect(result.mock.lastCall?.[0].status).toBe('hidden');
+    const initialCamera = camera.matrixWorld.toArray();
+    panelTop = -500;
+    act(() => surface.dispatchEvent(new Event('scroll', { bubbles: false })));
+    expect(result.mock.lastCall?.[0].status).toBe('visible');
+    panelTop = 0;
+    act(() => registry.invalidateLayout());
+    expect(result.mock.lastCall?.[0].status).toBe('hidden');
+    panelTop = -500;
+    act(() => registry.invalidateLayout());
+    expect(result.mock.lastCall?.[0].status).toBe('visible');
+    expect(camera.matrixWorld.toArray()).toEqual(initialCamera);
+    cleanup();
+    view.unmount();
+    surface.remove();
+  });
+
   it('mounts one provider, snapshots DOM masks once, resolves all anchors before publishing, and invalidates only on explicit retry', () => {
     const { scene, camera, origin } = fixture();
     const surface = document.createElement('div'),

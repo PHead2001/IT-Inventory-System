@@ -1387,7 +1387,7 @@ export default function RoomScene(props: RoomSceneProps) {
     >
       <RoomToolbar
         interactionRef={interactionButton}
-        onOverlayChange={registry.schedule}
+        onOverlayChange={registry.invalidateLayout}
         active={active}
         onActiveChange={(next) => {
           setActive(next);

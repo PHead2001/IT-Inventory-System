@@ -71,6 +71,68 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('unified room label registry', () => {
+  it('refreshes cached scene exposure after viewport movement and overlay placement without camera motion', () => {
+    const surface = document.createElement('div'),
+      host = document.createElement('div'),
+      canvas = document.createElement('canvas');
+    surface.dataset.roomSurface = 'true';
+    host.append(canvas);
+    surface.append(host);
+    document.body.append(surface);
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue(viewport);
+    const item = label(host);
+    let overlayCoversTarget = true,
+      exposed = false;
+    const invalidate = vi.fn(() => {
+      // A demand frame refreshes the measured mask before label placement.
+      exposed = !overlayCoversTarget;
+    });
+    const visual = new EventTarget();
+    vi.stubGlobal('visualViewport', visual);
+    const registry = createRoomLabelRegistry(vi.fn());
+    const cleanup = registry.connect(canvas, invalidate);
+    registry.register('location', item.element, item.leader, {
+      priority: 1,
+      locationCode: 'ITC-S4C',
+      isVisible: () => exposed,
+    });
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('false');
+    invalidate.mockClear();
+    overlayCoversTarget = false;
+    host.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(invalidate).toHaveBeenCalledOnce();
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('true');
+    expect(item.element.dataset.labelSuppressed).toBe('false');
+    overlayCoversTarget = true;
+    registry.invalidateLayout();
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('false');
+    expect(item.element.tabIndex).toBe(-1);
+    overlayCoversTarget = false;
+    registry.invalidateLayout();
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('true');
+    overlayCoversTarget = true;
+    visual.dispatchEvent(new Event('resize'));
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('false');
+    overlayCoversTarget = false;
+    visual.dispatchEvent(new Event('scroll'));
+    flush();
+    expect(item.element.dataset.roomExposed).toBe('true');
+    cleanup();
+    invalidate.mockClear();
+    window.dispatchEvent(new Event('scroll'));
+    window.dispatchEvent(new Event('resize'));
+    visual.dispatchEvent(new Event('scroll'));
+    visual.dispatchEvent(new Event('resize'));
+    registry.invalidateLayout();
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(queue).toHaveLength(0);
+  });
+
   it('shares one deadline and operation allowance across centered reflow passes', () => {
     const host = document.createElement('div'),
       canvas = document.createElement('canvas');
