@@ -405,6 +405,10 @@ function Save-RunnerLaunchEvent($State, [string] $Event, [long] $RunnerId = 0, [
         if ($Event -ceq 'intent') {
             if ($null -eq $Admission) { throw 'JIT intent requires admission captured before the demand lookup.' }
             [void](Assert-RunnerJitAdmission $State $current $Admission)
+        } elseif ($Event -ceq 'dispatch') {
+            # Guardian quarantine may begin after the caller's liveness check.
+            # Fence the durable handoff against fresh state under this mutex.
+            [void](Assert-RunnerJitAdmission $State $current)
         }
         $journal = if ($current.PSObject.Properties.Name -contains 'runnerLaunch') { $current.runnerLaunch } else { $null }
         $next = Get-RunnerLaunchDecision $journal $Event $RunnerId $LaunchId $ExitCode

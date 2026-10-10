@@ -44,7 +44,8 @@ function New-RunnerNetworkPolicy($Capture) {
         $parsed = $null
         if ($prefix -notmatch '^(\d{1,3}(\.\d{1,3}){3})/(\d{1,2})$' -or [int]$Matches[3] -gt 32 -or -not [Net.IPAddress]::TryParse($Matches[1], [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'Network policy contains an invalid route.' }
     }
-    if (($privatePrefixes.Count + $hostIps.Count + $routes.Count + 1) -gt 4096) { throw 'Network policy exceeds the existing deny capacity.' }
+    # Count both default denies as well as the IPv6/private/host/route denies.
+    if ((2 + $privatePrefixes.Count + $hostIps.Count + $routes.Count + 1) -gt 4096) { throw 'Network policy exceeds the existing deny capacity.' }
     $rules = @(
         [pscustomobject]@{ Action = 'Deny'; Direction = 'Inbound'; Weight = 1 }
         [pscustomobject]@{ Action = 'Deny'; Direction = 'Outbound'; Weight = 2 }

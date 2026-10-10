@@ -1,6 +1,6 @@
 # Offline integration: TEMP state and fixed local subprocesses only. No VM,
 # credentials, GitHub or guest network operations are invoked.
-param([string] $CandidateRoot = $PSScriptRoot)
+param([string] $CandidateRoot = $PSScriptRoot, [switch] $DispatchAdmissionOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $CandidateRoot 'Common.ps1')
@@ -9,16 +9,24 @@ $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $CandidateR
 foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) { Invoke-Expression $definition.Extent.Text }
 $script:realReceiptNative = (Get-Command Invoke-RunnerReceiptNative).ScriptBlock
 $script:realWriteRunnerJson = (Get-Command Write-RunnerJson).ScriptBlock
+$script:realLaunchDecision = (Get-Command Get-RunnerLaunchDecision).ScriptBlock
 $script:RunnerGuardOutcome = $null
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-integration-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
 $script:RunnerRoot = $root; $script:RunnerStatePath = Join-Path $root 'state.json'
 $script:checks = 0; $script:locked = $false
-function Check([string] $Name, [scriptblock] $Work) { & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
+function Check([string] $Name, [scriptblock] $Work) { if ($DispatchAdmissionOnly -and $Name -cne 'locked dispatch rejects quarantine races before any decision or durable handoff') { return }; & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Integration case leaked state recursion.' }; $script:checks++; Write-Host "PASS $Name" }
 function Refuse([scriptblock] $Work) { $failed = $false; try { & $Work | Out-Null } catch { $failed = $true }; if (-not $failed) { throw 'Unsafe integration accepted.' } }
 # Windows state mutex recursion must retain locked=true until the outer release.
 $script:fixtureStateDepth = 0
-function Enter-RunnerLock { $script:fixtureStateDepth++; $script:locked = $true; return 'fixture' }
+$script:nextLockMutation = $null
+function Enter-RunnerLock {
+    $script:fixtureStateDepth++; $script:locked = $true
+    if ($script:fixtureStateDepth -eq 1 -and $script:nextLockMutation) {
+        $mutation = $script:nextLockMutation; $script:nextLockMutation = $null; & $mutation
+    }
+    return 'fixture'
+}
 function Exit-RunnerLock {
     if ($script:fixtureStateDepth -le 0) { throw 'Unbalanced fixture state release.' }
     $script:fixtureStateDepth--; $script:locked = $script:fixtureStateDepth -gt 0
@@ -31,9 +39,16 @@ if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture d
 function Get-RunnerState { $script:state }
 function Write-RunnerJson($Path, $Value) {
     if ($Path -ceq (Join-Path $script:RunnerRoot 'last-error.json')) { $script:failure = $Value }
-    elseif ($Path -ceq $script:RunnerStatePath) { $script:state = $Value }
-    else { & $script:realWriteRunnerJson $Path $Value }
+    elseif ($Path -ceq $script:RunnerStatePath) { $script:stateWrites++; $script:state = $Value }
+    else {
+        if ($Path -ceq (Join-Path $script:RunnerRoot 'jit-registration.json')) { $script:registrationWrites++ }
+        & $script:realWriteRunnerJson $Path $Value
+    }
 }
+function Get-RunnerLaunchDecision($Journal, $Event, $RunnerId, $LaunchId, $ExitCode) {
+    $script:decisions++; return & $script:realLaunchDecision $Journal $Event $RunnerId $LaunchId $ExitCode
+}
+function Invoke-RunnerTransitionCheckpoint($Name) { $script:checkpoints += $Name }
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
 function Test-RunnerProcessIdentity($ProcessId, $StartUtc) { if ($script:deadGuardian -and $ProcessId -eq 42) { return $false }; $script:alive }
 function Get-RunnerRecoveryNow { $script:now }
@@ -48,6 +63,7 @@ function New-Fixture {
     $registrationPath = Join-Path $root 'jit-registration.json'
     if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
     $script:now = [DateTime]::UtcNow; $script:alive = $true; $script:deadGuardian = $false; $script:sleeps = 0; $script:heartbeats = 0; $script:queries = 0; $script:badReceipt = $false
+    $script:nextLockMutation = $null; $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @()
     $script:state = [pscustomobject]@{ tag = $script:RunnerTag; purpose = 'job'; resourceLabel = 'it-inventory-heavy'; vmName = 'ITIR-' + ('a' * 32); vmId = '00000000-0000-0000-0000-000000000001'; instancePath = Join-Path $root ('ITIR-' + ('a' * 32)); deadlineUtc = $script:now.AddMinutes(5).ToString('o'); guardianPid = 42; guardianStartUtc = $script:now.ToString('o'); guardianReady = $true
         supervisorPid = 43; supervisorStartUtc = $script:now.ToString('o')
         networkRecovery = [pscustomobject]@{ phase = 'healthy'; generation = 0; failure = ''; hardDeadlineUtc = $script:now.AddMinutes(5).ToString('o'); episodeDeadlineUtc = ''; progressUtc = $script:now.ToString('o') } }
@@ -164,6 +180,49 @@ try {
             Refuse { Save-RunnerLaunchEvent $script:state 'dispatch' }
             if (($script:state.runnerLaunch | ConvertTo-Json -Depth 8 -Compress) -cne $before) { throw 'Cancelled dispatch advanced or replaced sole runner journal.' }
         } finally { Remove-Item -LiteralPath $marker }
+    }
+    Check 'locked dispatch rejects quarantine races before any decision or durable handoff' {
+        foreach ($change in @('quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'not-ready', 'dead', 'progress-expired', 'deadline', 'binding', 'claim', 'identity', 'root-stop', 'instance-stop')) {
+            New-Fixture
+            [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+            [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+            $caller = $script:state | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+            Assert-SessionAlive $caller # Healthy before mutex acquisition.
+            $beforeLaunch = $script:state.runnerLaunch | ConvertTo-Json -Depth 8 -Compress
+            $registrationPath = Join-Path $root 'jit-registration.json'; $beforeRegistration = (Get-FileHash $registrationPath).Hash
+            $script:stateWrites = 0; $script:registrationWrites = 0; $script:decisions = 0; $script:checkpoints = @(); $script:dispatchChange = $change
+            $script:nextLockMutation = {
+                switch ($script:dispatchChange) {
+                    'not-ready' { $script:state.guardianReady = $false }
+                    'dead' { $script:deadGuardian = $true }
+                    'progress-expired' { $script:state.networkRecovery.progressUtc = $script:now.AddSeconds(-31).ToString('o') }
+                    'deadline' { $script:now = $script:now.AddMinutes(6) }
+                    'binding' { $script:state.networkRecovery.binding.vmId = '00000000-0000-0000-0000-000000000002' }
+                    'claim' { $script:state.networkRecovery.binding.claimHash = 'b' * 64 }
+                    'identity' { $script:state.vmId = '00000000-0000-0000-0000-000000000002' }
+                    'root-stop' { [IO.File]::WriteAllText((Join-Path $root 'stop.requested'), '') }
+                    'instance-stop' { [void][IO.Directory]::CreateDirectory($script:state.instancePath); [IO.File]::WriteAllText((Join-Path $script:state.instancePath 'stop.requested'), '') }
+                    default { $script:state.networkRecovery.phase = $script:dispatchChange; $script:state.guardianReady = $false }
+                }
+            }
+            try {
+                $rejected = $false; try { [void](Save-RunnerLaunchEvent $caller 'dispatch') } catch { $rejected = $true }
+                if (-not $rejected) { throw 'Locked dispatch admitted quarantine before handoff.' }
+                if (($script:state.runnerLaunch | ConvertTo-Json -Depth 8 -Compress) -cne $beforeLaunch -or (Get-FileHash $registrationPath).Hash -cne $beforeRegistration -or
+                    (Get-RunnerJitRegistration).phase -cne 'registered' -or $script:stateWrites -ne 0 -or $script:registrationWrites -ne 0 -or $script:decisions -ne 0 -or $script:checkpoints.Count -ne 0 -or $script:queries -ne 0) { throw 'Unsafe dispatch changed its registered barrier, decided launch, emitted a checkpoint or queried SSH.' }
+            } finally {
+                foreach ($marker in @((Join-Path $root 'stop.requested'), (Join-Path $script:state.instancePath 'stop.requested'))) { if (Test-Path $marker) { Remove-Item -LiteralPath $marker } }
+            }
+        }
+        New-Fixture
+        [void](Save-RunnerLaunchEvent $script:state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $script:state))
+        $script:state.networkRecovery.phase = 'quarantining'; $script:state.guardianReady = $false
+        [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+        if ((Get-RunnerJitRegistration).phase -cne 'registered' -or $script:state.runnerLaunch.phase -cne 'registered') { throw 'Recovery discarded the validated POST response instead of preserving its barrier.' }
+        $script:state.networkRecovery.phase = 'healthy'; $script:state.guardianReady = $true
+        $script:state.networkRecovery.generation++
+        [void](Save-RunnerLaunchEvent $script:state 'dispatch')
+        if ((Get-RunnerJitRegistration).phase -cne 'handed-off' -or $script:state.runnerLaunch.phase -cne 'launch-intent') { throw 'Fresh healthy dispatch could not commit its sole handoff.' }
     }
     Check 'preparation purpose never grants JIT or guest launch admission' {
         New-Fixture; $admission = Get-RunnerJitAdmission $script:state; $script:state.purpose = 'prepare'

@@ -1,8 +1,9 @@
 # Offline recovery proof only. Every provider/network/state effect is mocked.
+param([string] $CandidateRoot = $PSScriptRoot, [switch] $PolicyCapacityOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Common.ps1')
-. (Join-Path $PSScriptRoot 'Network.Recovery.ps1')
+. (Join-Path $CandidateRoot 'Network.Recovery.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-network-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
 $script:RunnerRoot = $root
@@ -16,7 +17,7 @@ function Assert-Refused([scriptblock] $Work, [string] $Message) {
     $refused = $false; try { & $Work | Out-Null } catch { $refused = $true }
     if (-not $refused) { throw $Message }
 }
-function Check([string] $Name, [scriptblock] $Work) { & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Recovery case leaked state recursion.' }; $script:count++; Write-Host "PASS $Name" }
+function Check([string] $Name, [scriptblock] $Work) { if ($PolicyCapacityOnly -and $Name -cne 'final deny capacity includes defaults after actual group deduplication') { return }; & $Work; if ($script:fixtureStateDepth -ne 0 -or $script:locked) { throw 'Recovery case leaked state recursion.' }; $script:count++; Write-Host "PASS $Name" }
 function New-Capture([string] $Ip = '192.168.4.12', [string] $Route = '192.168.4.0/24') {
     [pscustomobject]@{
         addresses = @([pscustomobject]@{ AddressFamily = 'IPv4'; IPAddress = $Ip; PrefixLength = 24; InterfaceIndex = 3 })
@@ -146,6 +147,34 @@ function Set-FixtureVerifiedRules {
     $script:state.networkRecovery.verifiedRules = $script:rules
 }
 try {
+    Check 'final deny capacity includes defaults after actual group deduplication' {
+        foreach ($total in @(4095, 4096, 4097, 4098)) {
+            New-Fixture; $capture = New-Capture
+            $routeCount = $total - 13 # Two defaults + nine private + one host + IPv6.
+            $unique = @([pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = '10.0.0.0/8'; NextHop = '192.168.4.1'; InterfaceIndex = 3 }) +
+                @(0..($routeCount - 2) | ForEach-Object { [pscustomobject]@{ AddressFamily = 'IPv4'; DestinationPrefix = "10.12.$([Math]::Floor($_ / 256)).$($_ % 256)/32"; NextHop = '192.168.4.1'; InterfaceIndex = 3 } })
+            # Deduplicate host/route groups only; overlap with the private tier
+            # still creates its own rule and consumes capacity.
+            $capture.addresses += $capture.addresses[0]
+            $capture.addresses += [pscustomobject]@{ AddressFamily = 'IPv6'; IPAddress = '::1'; PrefixLength = 128; InterfaceIndex = 3 }
+            $capture.routes = @($capture.routes[0]) + $unique + @($unique[0], $unique[-1], $capture.routes[0]) +
+                @([pscustomobject]@{ AddressFamily = 'IPv6'; DestinationPrefix = '::/0'; NextHop = '::'; InterfaceIndex = 3 })
+            if ($total -le 4096) {
+                $rules = @(New-RunnerNetworkPolicy $capture)
+                Assert-Equal @($rules | Where-Object Action -CEQ 'Deny').Count $total 'Final deny count omitted defaults or changed group deduplication.'
+                Assert-Equal @($rules | Where-Object Action -CEQ 'Allow').Count 8 'Deny limit changed the allow scope.'
+                Assert-Equal @($rules | Where-Object { $_.Action -ceq 'Deny' -and $_.Weight -in @(1, 2) }).Count 2 'Default denies lost.'
+                Assert-Equal @($rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '10.0.0.0/8' }).Count 2 'Cross-tier denies were silently deduplicated.'
+            } else {
+                $reason = ''; try { New-RunnerNetworkPolicy $capture | Out-Null } catch { $reason = $_.Exception.Message }
+                if ($reason -cne 'Network policy exceeds the existing deny capacity.') { throw "Final $total deny rules were admitted or refused for an unrelated reason." }
+                $script:captures = @($capture); $script:readIndex = -1
+                $reason = ''; try { Get-RunnerNetworkObservation | Out-Null } catch { $reason = $_.Exception.Message }
+                if ($reason -cne 'Network policy exceeds the existing deny capacity.') { throw 'Oversized coherent observation was not refused by actual policy capacity.' }
+            }
+            if ($script:effects.Count -ne 0 -or $script:addCount -ne 0 -or $script:removeCount -ne 0) { throw 'Policy derivation touched provider ACLs.' }
+        }
+    }
     Check 'one coherent capture supplies fingerprint and policy' {
         New-Fixture; $actual = Get-RunnerNetworkObservation
         Assert-Equal @($actual.rules | Where-Object { $_.PSObject.Properties.Name -contains 'RemoteIPAddress' -and $_.RemoteIPAddress -ceq '192.168.4.12/32' }).Count 1 'Captured host IP was not denied.'

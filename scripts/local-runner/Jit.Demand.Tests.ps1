@@ -15,7 +15,21 @@ $script:actualClaimOpen = (Get-Command Assert-RunnerClaimOpen).ScriptBlock
 function Assert-RunnerProtectedPath($Path) { [void](Assert-OwnedPath $Path) }
 # Stub every host touch while retaining the actual session control flow/finally.
 foreach ($name in @('Assert-InstalledHost', 'Assert-RunnerClaimOpen', 'Invoke-RunnerTransitionCheckpoint', 'Copy-Item', 'Assert-SessionAlive', 'Set-VM', 'Assert-RunnerVmLifecycle', 'Set-VMProcessor', 'Set-VMMemory', 'Assert-RunnerVmResources', 'Set-VMFirmware', 'Disable-VMIntegrationService', 'New-SeedDisk', 'Add-VMHardDiskDrive', 'Start-SessionGuardian', 'Assert-RunnerGuestMac', 'Start-GuardedVm', 'Wait-Guest', 'Assert-AdapterRules', 'Assert-CurrentRunnerNetworkRules', 'Test-GuestIsolation')) { Set-Item -Path "Function:$name" -Value {} }
-function Enter-RunnerLock { return $null }
+$script:dispatchChanges = 0
+function Enter-RunnerLock {
+    # The caller already passed its liveness check. Reproduce guardian state
+    # changing just before the actual dispatch helper obtains its mutex.
+    if ($script:RunnerOperationStage -ceq 'job-execution' -and $script:dispatchChanges -eq 0 -and $script:case -cmatch '^dispatch-(quarantining|isolated|applying|verified|connecting|resuming|probing)$') {
+        $phase = $Matches[1]
+        $current = Read-RunnerJson $script:RunnerStatePath
+        if ($null -ne $current -and $current.runnerLaunch.phase -ceq 'registered') {
+            $script:dispatchChanges++
+            $current.networkRecovery.phase = $phase; $current.guardianReady = $false
+            Write-RunnerJson $script:RunnerStatePath $current
+        }
+    }
+    return $null
+}
 function Exit-RunnerLock {}
 function Get-OwnerToken { return 'fixture' }
 function Start-SessionGuardian($State) {
@@ -134,13 +148,14 @@ try {
     $script:runCount = 1; $script:jobCount = 101
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:jobCount = 1
-    foreach ($case in @('cancelled', 'recovery-cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow', 'recovery-lookup', 'dead-guardian-lookup', 'not-ready-lookup', 'expired-lookup', 'new-generation-lookup')) {
+    foreach ($case in @('cancelled', 'recovery-cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow', 'recovery-lookup', 'dead-guardian-lookup', 'not-ready-lookup', 'expired-lookup', 'new-generation-lookup', 'dispatch-quarantining', 'dispatch-isolated', 'dispatch-applying', 'dispatch-verified', 'dispatch-connecting', 'dispatch-resuming', 'dispatch-probing')) {
         # Independent synthetic sessions have independent fixture lifetimes.
         # Repeated admission below deliberately retains its previous barrier.
         $registrationPath = Join-Path $base 'jit-registration.json'
         if (Test-Path -LiteralPath $registrationPath) { Remove-Item -LiteralPath $registrationPath }
         $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0; $script:recoveryWaits = 0
         $script:lookupChanges = 0; $script:intentPresent = $false
+        $script:dispatchChanges = 0
         $script:badReadback = $case -eq 'unexpected-readback'
         $script:jobs = switch ($case) {
             'cancelled' { New-Job 1 'it-inventory-heavy' }
@@ -149,10 +164,17 @@ try {
             'same' { New-Job 1 'it-inventory-heavy' }
             'prepared' { New-Job 1 'it-inventory-heavy' }
             'unexpected-readback' { New-Job 1 'it-inventory-heavy' }
-            default { New-Job 1 $(if ($case -match 'lookup$') { 'it-inventory-heavy' } else { 'it-inventory-light' }) }
+            default { New-Job 1 $(if ($case -match 'lookup$' -or $case -cmatch '^dispatch-') { 'it-inventory-heavy' } else { 'it-inventory-light' }) }
         }
         $script:jobCount = if ($case -eq 'overflow') { 101 } else { 1 }
-        if ($case -in @('unexpected-readback', 'overflow') -or $case -match 'lookup$') { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
+        if ($case -cmatch '^dispatch-') {
+            $rejected = $false; try { [void](Invoke-RunnerSession $config $null 'it-inventory-heavy') } catch { $rejected = $true }
+            if (-not $rejected) {
+                if ($script:dispatchChanges -ne 1 -or $script:jits -ne 1 -or $script:nativeCalls -ne 3 -or
+                    (Read-RunnerJson $registrationPath).phase -cne 'handed-off') { throw 'Dispatch red fixture did not reach the registered mutex race and SSH.' }
+                throw 'Quarantine before dispatch mutex still sent SSH in the actual session.'
+            }
+        } elseif ($case -in @('unexpected-readback', 'overflow') -or $case -match 'lookup$') { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
         else {
             $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
             if ($case -in @('same', 'prepared')) { if ($result.id -ne 42 -or $result.outcome -cne 'runner-exited' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
@@ -161,6 +183,8 @@ try {
         if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }
         if ($case -ceq 'recovery-cancelled' -and $script:recoveryWaits -ne 1) { throw 'Cancellation did not occur at the pre-JIT recovery wait.' }
         if ($case -match 'lookup$' -and ($script:lookupChanges -ne 1 -or $script:jits -ne 0 -or $script:intentPresent -or $script:nativeCalls -ne 2)) { throw 'Changed guardian during queued evidence admitted JIT intent or launch.' }
+        if ($case -cmatch '^dispatch-' -and ($script:dispatchChanges -ne 1 -or $script:jits -ne 1 -or $script:nativeCalls -ne 2 -or
+            (Read-RunnerJson $registrationPath).phase -cne 'registered')) { throw 'Guardian quarantine race advanced handoff, sent JIT to SSH or lost registered evidence.' }
     }
     # Actual handoff followed by failed SSH still survives finally cleanup and
     # blocks another POST, even though no guest job execution was proven.
