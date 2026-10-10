@@ -2,6 +2,15 @@
 
 The repository routes normal CI jobs to fixed self-hosted resource labels described below. Foundation CI keeps the stable `required` job: every PR and main fallback runs full application/database/browser validation on heavy; a main-only light evidence probe can select light `required` only for verified identical-tree PR validation, with a fresh fail-closed recheck. See [validation](../validation.md) for the evidence and trust contract. Production database delivery and the two trusted preview-access jobs remain light. The separate diagnostic `Local runner pilot` remains restricted to its exact reviewed SHA through the `it-inventory-pilot-<headSha>` label. Repository routing records the intended job labels; it does not activate or certify an installation. Activation state, installed bundle version, owner acceptance of the residual detection window, pilot/recovery receipts and normal-workload results are installation-specific evidence recorded with the PR. A successful one-job pilot and recovery check apply only to their recorded revision and installation; they do not certify the full Supabase/Playwright workload or authorize automatic activation. Record transient job IDs and host evidence with the PR; follow the security and workload gates below.
 
+Pilot workflow runs share a concurrency group by PR number, while manual dispatches
+use their ref. A newer event cancels an older run in that group, including a run
+already executing, so stale SHA-specific pilot runs do not accumulate in the queue.
+Only runs carrying this group supersede one another; runs already queued under
+earlier workflow revisions without concurrency are not retroactively cancelled and
+require separate deliberate cleanup.
+This only coalesces workflow runs; it does not enable pilot pickup. The owner must
+still intentionally activate the pilot for the exact reviewed SHA.
+
 The design runs one repository-scoped, just-in-time GitHub runner in one fresh Ubuntu 24.04 Hyper-V VM at a time. A persistent Windows SYSTEM supervisor looks for queued jobs carrying one supported resource label, creates a full copy of the clean boot disk for one job, and deletes the VM and per-job files when the runner exits. The single boot-triggered supervisor first recovers the recorded old session under a lock, then begins pickup; recovery failure prevents pickup. A separate SYSTEM watchdog runs every minute and removes the recorded VM when its hard deadline expires or its supervisor/ready network guardian dies. Each VM explicitly disables automatic start and uses TurnOff at host shutdown; both settings are read back before boot. Restart always destroys the old VM before a new one can be launched. No host directory or cross-job package cache is mounted in the VM. The guest receives only its per-VM SSH public key and a one-job JIT configuration; the repository PAT stays on Windows.
 
 ## Unattended recovery and capacity status
