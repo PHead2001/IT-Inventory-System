@@ -79,6 +79,12 @@ vi.mock('./assign-camera', async (importOriginal) => {
 });
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+// jsdom does not expose PointerEvent; retain pointer identity on mouse-backed events.
+const pointer = (type: string, pointerId = 1, button = 0) => {
+  const event = new MouseEvent(type, { bubbles: true, button });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  return event;
+};
 const site = {
   id: id(1),
   name: 'Headquarters',
@@ -1604,6 +1610,247 @@ it('cancelled restoration ignores its late availability and finally after a new 
     screen.getByLabelText('Scan, paste, or search inventory'),
   ).toHaveFocus();
 });
+
+it.each(['success', 'failure'] as const)(
+  'accepts cancellation during restoration and ignores its late %s without reviving pending accounting or review',
+  async (outcome) => {
+    const first = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    first.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<AssignmentWorkspace {...props} />);
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    expect(cancel).toBeEnabled();
+    fireEvent.click(cancel);
+    expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+    expect(readBatch(scope).value?.historical).toBeNull();
+    await act(async () =>
+      finish(
+        outcome === 'success'
+          ? { ok: true, candidate }
+          : { ok: false, message: 'Late restoration failure' },
+      ),
+    );
+    expect(
+      screen.queryByRole('region', { name: 'Review assignment' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm assign' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'false');
+    expect(
+      screen.getByLabelText('Scan, paste, or search inventory'),
+    ).toHaveFocus();
+    expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+    expect(readBatch(scope).value?.historical).toBeNull();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
+it('accepts a delivered cancellation even when restoration completes immediately before click', async () => {
+  const first = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  first.unmount();
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+  await act(async () => finish({ ok: true, candidate }));
+  expect(cancel).toBe(
+    screen.getByRole('button', { name: 'Skip inspection / review' }),
+  );
+  fireEvent.click(cancel);
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+  expect(readBatch(scope).value?.historical).toBeNull();
+  expect(
+    screen.getByLabelText('Scan, paste, or search inventory'),
+  ).toHaveFocus();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('does not steal focus from an in-progress primary Cancel press when restoration completes before release', async () => {
+  const first = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  first.unmount();
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<AssignmentWorkspace {...props} />);
+  const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+  expect(cancel).toHaveFocus();
+  fireEvent(cancel, pointer('pointerdown'));
+  await act(async () => finish({ ok: true, candidate }));
+  // Focus() scrolls by default in a browser. Moving it to the below-form review
+  // between press/release can move the physical cancellation target on phones.
+  expect(cancel).toHaveFocus();
+  expect(readBatch(scope).value?.entries[0].status).toBe('pending');
+  fireEvent(cancel, pointer('pointerup'));
+  fireEvent.click(cancel);
+  expect(
+    screen.getByLabelText('Scan, paste, or search inventory'),
+  ).toHaveFocus();
+  expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+  expect(readBatch(scope).value?.historical).toBeNull();
+  expect(
+    screen.queryByRole('button', { name: 'Confirm assign' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+it.each(['keyboard', 'secondary press', 'cancelled press', 'released press'])(
+  'keeps normal review focus after restoration for %s navigation',
+  async (navigation) => {
+    const first = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    first.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<AssignmentWorkspace {...props} />);
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    if (navigation !== 'keyboard') {
+      fireEvent(
+        cancel,
+        pointer('pointerdown', 1, navigation === 'secondary press' ? 2 : 0),
+      );
+      if (navigation === 'cancelled press')
+        fireEvent(cancel, pointer('pointercancel'));
+      if (navigation === 'released press')
+        fireEvent(cancel, pointer('pointerup'));
+    }
+    await act(async () => finish({ ok: true, candidate }));
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+    expect(readBatch(scope).value?.entries[0].status).toBe('pending');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['pointerup', 'pointercancel'])(
+  'releases a Cancel press on an outside sibling %s without accepting cancellation',
+  async (type) => {
+    const first = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    first.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(
+      <>
+        <AssignmentWorkspace {...props} />
+        <p data-testid="outside-release">Outside</p>
+      </>,
+    );
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    fireEvent(cancel, pointer('pointerdown', 7));
+    fireEvent(screen.getByTestId('outside-release'), pointer(type, 7));
+    // A nonfocusable release target leaves the button focused but is not a click.
+    expect(cancel).toHaveFocus();
+    expect(readBatch(scope).value?.entries[0].status).toBe('pending');
+    await act(async () => finish({ ok: true, candidate }));
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+    expect(readBatch(scope).value?.entries[0].status).toBe('pending');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['pointerup', 'pointercancel'])(
+  'does not release the held Cancel pointer for another pointer %s',
+  async (type) => {
+    const first = render(<AssignmentWorkspace {...props} />);
+    await inspect();
+    first.unmount();
+    let finish!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(
+      <>
+        <AssignmentWorkspace {...props} />
+        <p data-testid="outside-release">Outside</p>
+      </>,
+    );
+    const cancel = screen.getByRole('button', { name: 'Cancel inspection' });
+    fireEvent(cancel, pointer('pointerdown', 7));
+    fireEvent(screen.getByTestId('outside-release'), pointer(type, 8));
+    await act(async () => finish({ ok: true, candidate }));
+    expect(cancel).toHaveFocus();
+    expect(readBatch(scope).value?.entries[0].status).toBe('pending');
+    fireEvent(cancel, pointer('pointerup', 7));
+    fireEvent.click(cancel);
+    expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  },
+);
+
+it('removes outside Cancel release listeners on unmount while restoration is pending', async () => {
+  const first = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  first.unmount();
+  let finish!: (value: unknown) => void;
+  mocks.inspect.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const add = vi.spyOn(window, 'addEventListener');
+  const remove = vi.spyOn(window, 'removeEventListener');
+  try {
+    const restored = render(<AssignmentWorkspace {...props} />);
+    fireEvent(
+      screen.getByRole('button', { name: 'Cancel inspection' }),
+      pointer('pointerdown', 7),
+    );
+    const registrations = add.mock.calls.filter(
+      ([type, , capture]) =>
+        (type === 'pointerup' || type === 'pointercancel') && capture === true,
+    );
+    expect(registrations).toHaveLength(2);
+    const before = readBatch(scope).raw;
+    restored.unmount();
+    for (const registration of registrations)
+      expect(remove).toHaveBeenCalledWith(...registration);
+    fireEvent(document.body, pointer('pointerup', 7));
+    await act(async () => finish({ ok: true, candidate }));
+    expect(readBatch(scope).raw).toBe(before);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    render(<AssignmentWorkspace {...props} />);
+    expect(
+      await screen.findByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+  } finally {
+    add.mockRestore();
+    remove.mockRestore();
+  }
+});
+
 it('blocks mismatched terminal/recovery snapshots before cleanup or fresh assignment', async () => {
   const view = render(<AssignmentWorkspace {...props} />);
   await inspect();

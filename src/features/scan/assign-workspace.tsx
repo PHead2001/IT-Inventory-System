@@ -132,6 +132,26 @@ function AssignmentFields({
   const entryId = useRef<string | null>(null);
   const [batch, setBatch] = useState<AssignmentBatch | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const cancelPress = useRef<number | null>(null);
+  useEffect(() => {
+    const release = (event: PointerEvent) => {
+      if (cancelPress.current === event.pointerId) cancelPress.current = null;
+    };
+    const leaveWindow = () => {
+      cancelPress.current = null;
+    };
+    // Capture release anywhere, including a nonfocusable sibling after a drag.
+    // Do not capture the pointer: releasing outside must not accept Cancel.
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    window.addEventListener('blur', leaveWindow);
+    return () => {
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+      window.removeEventListener('blur', leaveWindow);
+      cancelPress.current = null;
+    };
+  }, []);
   const reviewRef = useRef<HTMLElement>(null);
   const chooserRef = useRef<HTMLUListElement>(null);
   const [ready, setReady] = useState(false);
@@ -175,6 +195,9 @@ function AssignmentFields({
     if (batch?.finished) summaryRef.current?.focus();
   }, [batch?.finished]);
   useLayoutEffect(() => {
+    // Keep the pressed Cancel target in place until release. Review focus can
+    // scroll the form away between pointerdown and the accepted click.
+    if (cancelPress.current !== null) return;
     if (state.phase === 'review') reviewRef.current?.focus();
     else if (state.phase === 'choose') chooserRef.current?.focus();
     else if (state.phase === 'ready' && state.message)
@@ -960,6 +983,7 @@ function AssignmentFields({
     sites.some((site) => site.id === state.context?.siteId && site.active);
   const freshReady = ready && !batch?.finished;
   const cancelInspection = () => {
+    cancelPress.current = null;
     if (submitting.current || unresolved) return;
     next();
     inputRef.current?.focus();
@@ -1320,6 +1344,13 @@ function AssignmentFields({
           variant="outline"
           type="button"
           disabled={unresolved || !freshReady}
+          onPointerDown={(event) => {
+            if (event.button === 0 && cancelPress.current === null)
+              cancelPress.current = event.pointerId;
+          }}
+          onBlur={() => {
+            cancelPress.current = null;
+          }}
           onClick={cancelInspection}
         >
           {state.phase === 'lookup' || restoring
