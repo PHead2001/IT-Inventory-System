@@ -912,9 +912,9 @@ function Invoke-RunnerJitReconciliation($Config) {
         $inventory = @(Get-RunnerJitInventory $record $token); $stage = 'evidence'
         $byName = @($inventory | Where-Object { $_.name -ceq $record.vmName })
         $byId = @($inventory | Where-Object { $_.id -eq $record.runnerId })
-        if ($record.phase -cin @('handed-off', 'removal-intent') -and $record.runnerId -gt 0 -and $byId.Count -eq 0 -and $byName.Count -eq 0) {
-            # Known handoff/DELETE identities retire only after authoritative
-            # local abandonment and a complete remote ID/name absence snapshot.
+        if ($record.phase -cin @('registered', 'handed-off', 'removal-intent') -and $record.runnerId -gt 0 -and $byId.Count -eq 0 -and $byName.Count -eq 0) {
+            # Known registration/handoff/DELETE identities retire only after
+            # authoritative local abandonment and complete remote ID/name absence.
             $mutex = Enter-RunnerLock
             try { $record = Assert-RunnerJitReconciliation $record $Config; $record.phase = 'complete'; Write-RunnerJitRegistration $record }
             finally { Exit-RunnerLock $mutex }

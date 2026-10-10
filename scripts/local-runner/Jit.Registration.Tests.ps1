@@ -100,8 +100,12 @@ function Add-OfflineRunner {
     $script:runners = @([pscustomobject]@{ id = 123; name = $script:state.vmName; status = 'offline'; busy = $false; labels = @('self-hosted', 'Linux', 'X64', 'it-inventory-heavy' | ForEach-Object { [pscustomobject]@{ name = $_ } }) })
     $script:total = 1
 }
-function Commit-Handoff {
+function Commit-Registered {
     [void](Save-RunnerLaunchEvent $script:state 'registered' 123)
+    if ((Get-RunnerJitRegistration).phase -cne 'registered') { throw 'Registration lacks durable known ID.' }
+}
+function Commit-Handoff {
+    Commit-Registered
     [void](Save-RunnerLaunchEvent $script:state 'dispatch')
     if ((Get-RunnerJitRegistration).phase -cne 'handed-off') { throw 'Dispatch lacks durable handoff.' }
 }
@@ -226,28 +230,35 @@ try {
         if (-not (Invoke-RunnerJitReconciliation $config) -or $script:reads -ne 1 -or $script:deletes -ne 0 -or (Get-RunnerJitRegistration).phase -cne 'complete') { throw 'Known handed-off ID/name absence was not authoritatively reconciled.' }
         Assert-RunnerClaimOpen
     }
-    Check 'handed-off offline registration is removed once and lost DELETE reconciles known absence' {
+    Check 'registered and handed-off offline registration removal and lost DELETE reconcile once' {
+        foreach ($registrationPhase in @('registered', 'handed-off')) {
         foreach ($lost in @($false, $true)) {
-            New-Fixture; Commit-Handoff; Abandon-Fixture; Add-OfflineRunner
+            New-Fixture
+            if ($registrationPhase -ceq 'registered') { Commit-Registered } else { Commit-Handoff }
+            Abandon-Fixture; Add-OfflineRunner
             $script:deleteLost = $lost
             $completed = Invoke-RunnerJitReconciliation $config
-            if ($completed -eq $lost -or $script:deletes -ne 1) { throw 'Handed-off retirement outcome or delete count changed.' }
+            if ($completed -eq $lost -or $script:deletes -ne 1) { throw 'Known registration retirement outcome or delete count changed.' }
             if ($lost) {
-                if ((Get-RunnerJitRegistration).phase -cne 'removal-intent') { throw 'Lost handed-off DELETE erased known intent.' }
+                if ((Get-RunnerJitRegistration).phase -cne 'removal-intent') { throw 'Lost registration DELETE erased known intent.' }
                 $script:deleteLost = $false
-                if (-not (Invoke-RunnerJitReconciliation $config) -or $script:deletes -ne 1) { throw 'Lost handed-off DELETE replayed removal.' }
+                if (-not (Invoke-RunnerJitReconciliation $config) -or $script:deletes -ne 1) { throw 'Lost registration DELETE replayed removal.' }
             }
-            if ((Get-RunnerJitRegistration).phase -cne 'complete' -or (Get-RunnerJitRegistration).runnerId -ne 123) { throw 'Handed-off retirement lost identity.' }
+            if ((Get-RunnerJitRegistration).phase -cne 'complete' -or (Get-RunnerJitRegistration).runnerId -ne 123) { throw 'Known registration retirement lost identity.' }
+        }
         }
     }
-    Check 'handed-off active collision incomplete transport and local changes never authorize replacement' {
-        foreach ($failure in @('state', 'vm', 'reference', 'online', 'busy', 'name-collision', 'id-collision', 'labels', 'incomplete', 'transport', 'stop-read', 'journal-read', 'config-read', 'vm-read', 'fresh-online')) {
-            New-Fixture; Commit-Handoff
+    Check 'registered and handed-off collision uncertainty and local changes never authorize replacement' {
+        foreach ($registrationPhase in @('registered', 'handed-off')) {
+        foreach ($failure in @('state', 'vm', 'reference', 'provider-uncertain', 'online', 'busy', 'name-collision', 'id-collision', 'labels', 'incomplete', 'transport', 'stop-read', 'journal-read', 'config-read', 'vm-read', 'fresh-online')) {
+            New-Fixture
+            if ($registrationPhase -ceq 'registered') { Commit-Registered } else { Commit-Handoff }
             if ($failure -cne 'state') { Abandon-Fixture }
             Add-OfflineRunner
             switch ($failure) {
                 'vm' { $script:vms = @([pscustomobject]@{ Name = $script:state.vmName; Id = [guid]$script:state.vmId; Path = $script:state.instancePath; disks = @() }) }
                 'reference' { $script:vms = @([pscustomobject]@{ Name = 'other'; Id = [guid]::NewGuid(); Path = Join-Path $root 'other'; disks = @((Join-Path $script:state.instancePath 'guest.vhdx')) }) }
+                'provider-uncertain' { $script:inventoryFailed = $true }
                 'online' { $script:runners[0].status = 'online' }
                 'busy' { $script:runners[0].busy = $true }
                 'name-collision' { $script:runners[0].id = 124 }
@@ -261,15 +272,16 @@ try {
                 'vm-read' { $script:runners = @(); $script:total = 0; $script:readEffect = { $script:vms = @([pscustomobject]@{ Name = $script:state.vmName; Id = [guid]$script:state.vmId; Path = $script:state.instancePath; disks = @() }) } }
                 'fresh-online' { $script:afterSnapshotEffect = { $script:runners[0].status = 'online' } }
             }
-            if (Invoke-RunnerJitReconciliation $config) { throw "Unsafe handed-off $failure evidence cleared the barrier." }
-            if ($script:deletes -ne 0) { throw 'Unsafe handed-off retirement issued DELETE.' }
+            if (Invoke-RunnerJitReconciliation $config) { throw "Unsafe $registrationPhase $failure evidence cleared the barrier." }
+            if ($script:deletes -ne 0) { throw 'Unsafe known registration retirement issued DELETE.' }
             Refuse-Barrier { Assert-RunnerJitRegistrationClear }
             Refuse { Assert-RunnerClaimOpen } # Explicit Stop may refuse even earlier.
             $config.repo = 'example/fixture'
         }
+        }
     }
     Check 'native process exit after durable intent retains barrier through restart cleanup' {
-        foreach ($crashPhase in @('intent', 'handed-off')) {
+        foreach ($crashPhase in @('intent', 'registered', 'handed-off')) {
         New-Fixture
         Remove-Item -LiteralPath (Join-Path $root 'jit-registration.json')
         $current = Get-RunnerState; $current.PSObject.Properties.Remove('runnerLaunch'); Write-RunnerJson $script:RunnerStatePath $current
@@ -293,9 +305,9 @@ $state.networkRecovery.binding.claimHash = Get-RunnerRecoveryClaimHash $state
 Write-RunnerJson $script:RunnerStatePath $state
 $config = [pscustomobject]@{ repo = 'example/fixture'; activation = 'active'; label = 'it-inventory-ephemeral'; runnerGroupId = 1 }
 [void](Save-RunnerLaunchEvent $state 'intent' 0 ('c' * 32) -Admission (Get-RunnerJitAdmission $state) -Config $config)
-if ($CrashPhase -ceq 'handed-off') {
+if ($CrashPhase -cin @('registered', 'handed-off')) {
     [void](Save-RunnerLaunchEvent $state 'registered' 123)
-    [void](Save-RunnerLaunchEvent $state 'dispatch')
+    if ($CrashPhase -ceq 'handed-off') { [void](Save-RunnerLaunchEvent $state 'dispatch') }
 }
 [Environment]::Exit(73) # No catch/finally/POST/SSH; abrupt owned fixture exit.
 '@
@@ -309,10 +321,15 @@ if ($CrashPhase -ceq 'handed-off') {
         Invoke-Watchdog
         if ($script:starts -ne 1) { throw 'Watchdog restarted an already running reconciler.' }
         Refuse { Assert-RunnerClaimOpen }
-        if ($crashPhase -ceq 'handed-off') { Add-OfflineRunner; $script:runners[0].status = 'online'; $script:runners[0].busy = $true }
-        Refuse { Invoke-SupervisorLoop }
-        if ($script:pollBoundary -ne 1 -or $script:reads -ne 1 -or $script:deletes -ne 0) { throw 'Restarted supervisor reached demand before authoritative reconciliation.' }
-        if ((Get-RunnerJitRegistration).phase -cne $crashPhase -or $null -ne (Get-RunnerState)) { throw 'Restart cleanup erased protected registration.' }
+        if ($crashPhase -ceq 'registered') {
+            if (-not (Invoke-RunnerJitReconciliation $config) -or $script:reads -ne 1 -or $script:deletes -ne 0 -or (Get-RunnerJitRegistration).phase -cne 'complete') { throw 'Crashed registered owner with known ID and authoritative ID/name absence remained blocked.' }
+            Assert-RunnerClaimOpen
+        } else {
+            if ($crashPhase -ceq 'handed-off') { Add-OfflineRunner; $script:runners[0].status = 'online'; $script:runners[0].busy = $true }
+            Refuse { Invoke-SupervisorLoop }
+            if ($script:pollBoundary -ne 1 -or $script:reads -ne 1 -or $script:deletes -ne 0) { throw 'Restarted supervisor reached demand before authoritative reconciliation.' }
+            if ((Get-RunnerJitRegistration).phase -cne $crashPhase -or $null -ne (Get-RunnerState)) { throw 'Restart cleanup erased protected registration.' }
+        }
         $record = Get-RunnerJitRegistration; $record.phase = 'malformed'; Write-RunnerJson (Join-Path $root 'jit-registration.json') $record
         $script:task.State = 'Ready'
         Refuse { Invoke-RunnerSupervisorRecovery }
