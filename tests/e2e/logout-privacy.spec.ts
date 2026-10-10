@@ -7,6 +7,44 @@ const command = 'inventory-assign-v1:logout-generation-e2e';
 const batch = 'inventory-assign-batch-v1:logout-generation-e2e';
 const labels = 'it-inventory-label-queue:v1:logout-generation-e2e';
 const acknowledgement = 'inventory-logout-acknowledgement-v1';
+
+test('same-tab sign-in after logout permits a second ordinary logout and protects inventory', async ({
+  page,
+}) => {
+  await signIn(page, fixture.emails.staff);
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    const login = page.getByRole('form', { name: 'Sign in', exact: true });
+    await expect(login).toBeVisible();
+    await expect(login.getByLabel('Email', { exact: true })).toBeEditable();
+    await expect(login.getByLabel('Password', { exact: true })).toBeEditable();
+    await expect(
+      login.getByRole('button', { name: 'Sign in', exact: true }),
+    ).toBeEnabled();
+    if (cycle === 0) {
+      // Use the resulting form in the retained tab, without navigating/reloading.
+      await login
+        .getByLabel('Email', { exact: true })
+        .fill(fixture.emails.staff);
+      await login
+        .getByLabel('Password', { exact: true })
+        .fill(fixture.password);
+      await login.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page).toHaveURL(/\/inventory$/);
+      await expect(
+        page.getByRole('button', { name: 'Sign out', exact: true }),
+      ).toBeVisible();
+    }
+  }
+  await page.goto('/inventory');
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
+  await expect(page.getByLabel('Email', { exact: true })).toBeEditable();
+  await expect(
+    page.getByRole('button', { name: 'Sign out', exact: true }),
+  ).toHaveCount(0);
+});
+
 async function signIn(page: Page, email: string = fixture.emails.viewer) {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(email);
