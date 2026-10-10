@@ -475,6 +475,10 @@ public class ArgvSink {
     # Provider coherence is tested separately by Cleanup.Integrity.Tests.ps1.
     function Get-RunnerVmInventory { return @(Get-VM) }
     function Get-VMHardDiskDrive { param($VM, $VMName) return $script:fakeDisks }
+    function Get-VHD($Path) {
+        if ($Path -inotmatch ('^' + [regex]::Escape($validInstance.TrimEnd('\') + '\') + '(guest|cidata|other)\.vhdx$')) { throw 'Disk lookup escaped the fixed provisional cleanup fixture.' }
+        return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
+    }
     function Remove-VM { param($VM, $Name, [switch]$Force) $script:deletions++; $script:fakeVmRemoved = $true }
     function Stop-VM { param($VM, $Name, [switch]$TurnOff, [switch]$Force) $script:fakeVm.State = 'Off' }
     Assert-RunnerVmLifecycle $validName

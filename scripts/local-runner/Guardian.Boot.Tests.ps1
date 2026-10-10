@@ -40,6 +40,15 @@ function Start-VM($VM, [switch] $AsJob) {
         }
         function Get-RunnerVmInventory { $entry = Read-RunnerJson (Join-Path $root 'vm.json'); if ($null -ne $entry) { $entry } }
         function Get-VMHardDiskDrive($VM) { return [pscustomobject]@{ Path = Join-Path (Get-RunnerState).instancePath 'guest.vhdx' } }
+        function Get-VHD($Path) {
+            $diskPath = [IO.Path]::GetFullPath($Path)
+            $instancePath = [IO.Path]::GetDirectoryName($diskPath)
+            if ([IO.Path]::GetDirectoryName($instancePath) -ine (Join-Path $script:RunnerRoot 'instances') -or
+                [IO.Path]::GetFileName($instancePath) -cnotmatch '^ITIR-[0-9a-f]{32}$' -or
+                [IO.Path]::GetFileName($diskPath) -cne 'guest.vhdx' -or
+                -not (Test-Path -LiteralPath $diskPath -PathType Leaf)) { throw 'Disk lookup escaped the fixed fixture disks.' }
+            return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
+        }
         function Remove-VM($VM, [switch] $Force) { if ($scenario -ceq 'cleanup-race') { Remove-Item -LiteralPath (Join-Path $root 'vm.json') } }
         # This must succeed while the supervisor waits for boot completion.
         $mutex = Enter-RunnerLock $lockName -FailFast

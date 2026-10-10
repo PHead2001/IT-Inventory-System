@@ -52,6 +52,10 @@ function Start-Sleep { $script:pollBoundary++; throw 'Bounded fixture poll bound
 function Get-RunnerMemoryAdmission { throw 'Unresolved registration reached memory/demand admission.' }
 function Get-RunnerVmInventory { if ($script:inventoryFailed) { throw 'Provider uncertain.' }; return $script:vms }
 function Get-VMHardDiskDrive($VM) { return @($VM.disks | ForEach-Object { [pscustomobject]@{ Path = $_ } }) }
+function Get-VHD($Path) {
+    if ($null -eq $script:state -or $Path -ine (Join-Path $script:state.instancePath 'guest.vhdx')) { throw 'Disk lookup escaped the fixed reconciliation fixture.' }
+    return [pscustomobject]@{ VhdType = 'Dynamic'; ParentPath = '' }
+}
 function Invoke-RunnerTransitionCheckpoint($Name) { if ($Name -ceq $script:interrupt) { throw 'Simulated process interruption.' } }
 function Invoke-GitHub($Uri, $Method, $Body, $Token) {
     if ($script:locked -or $null -ne $Body -or $Token -cne 'SENTINEL_PAT') { throw 'Remote IO escaped its fixed reconciliation contract.' }
