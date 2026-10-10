@@ -2393,6 +2393,8 @@ test('375px populated room gives every independently witnessed opaque target an 
   page,
 }, testInfo) => {
   test.setTimeout(180_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await enableRoomLayoutDiagnostics(page);
   await observeRoomScene(page);
   await page.setViewportSize({ width: 375, height: 812 });
@@ -2700,6 +2702,107 @@ test('375px populated room gives every independently witnessed opaque target an 
     partialCodes.size,
     'actual opaque blockers leave partially exposed witnessed faces across the camera poses',
   ).toBeGreaterThan(0);
+
+  // Keep the cold 375px scenarios above intact, then exercise the same mounted
+  // room through the hosted failure's 375 -> 390 resize with ordinary controls.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
+  await chooseMapMode(page, 'Guided');
+  await setRoomLabels(page, true);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  expect((await camera(page)).elevation).toBeCloseTo((35 * Math.PI) / 180, 3);
+  const red = viewer.locator('[data-room-label-code="ITC-RED"]');
+  expect(
+    roomVisibilityWitnesses(await captureRoomWitness(page)).has('ITC-RED'),
+  ).toBe(true);
+  await red.click();
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await expect(page).toHaveURL(/location=ITC-RED(?:&|$)/);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await more.click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await assertOccupiedWitnessActions(
+    page,
+    await captureRoomWitness(page),
+    counts,
+  );
+
+  const beforeResize = Number(
+    await canvas.getAttribute('data-label-layout-revision'),
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settledLabels(page, beforeResize);
+  await page.getByRole('button', { name: 'Fit room', exact: true }).click();
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await more.click();
+  await canvas.scrollIntoViewIfNeeded();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  await assertMoreOutsideCanvasWhenAboveFits();
+  await expect(viewer).toHaveAttribute('data-selected-code', 'ITC-RED');
+  await expect(red).toHaveAttribute('aria-pressed', 'true');
+  await expect(red).toHaveAttribute('data-label-compact', 'false');
+  expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
+  const resizedScene = await captureRoomWitness(page);
+  const resizedRequiredWitnesses = roomVisibilityWitnesses(resizedScene);
+  expect(
+    resizedRequiredWitnesses.has('ITC-S4C'),
+    'the previously missing action is independently exposed after mounted resize',
+  ).toBe(true);
+  const resizedWitnesses = await assertOccupiedWitnessActions(
+    page,
+    resizedScene,
+    counts,
+    resizedRequiredWitnesses,
+  );
+  await testInfo.attach('390-after-mounted-resize-opaque-witnesses', {
+    body: JSON.stringify({
+      viewport: page.viewportSize(),
+      frame: resizedScene.frame,
+      codeSamples: [...resizedWitnesses].map(([code, points]) => ({
+        code,
+        samples: points.length,
+      })),
+      triangleCount: resizedScene.triangles.length,
+      method:
+        'Fresh actual committed R3F world triangles after mounted resize; bounded samples, not exhaustive pixel proof.',
+    }),
+    contentType: 'application/json',
+  });
+  await page.screenshot({
+    path: testInfo.outputPath('390-after-mounted-resize-selected-more.png'),
+  });
+  const resizedUncovered = await uncoveredRoomWitnesses(page, resizedWitnesses);
+  const nextSelection = [...resizedUncovered].find(
+    ([code]) => code !== 'ITC-RED',
+  );
+  expect(
+    nextSelection,
+    'resized room exposes an independently witnessed new pointer selection',
+  ).toBeDefined();
+  const [resizedCode, resizedPoint] = nextSelection!;
+  await page.mouse.move(resizedPoint.x, resizedPoint.y);
+  await expect(canvas).toHaveAttribute('data-hover-visible-code', resizedCode);
+  await page.mouse.click(resizedPoint.x, resizedPoint.y);
+  await expect(viewer).toHaveAttribute('data-selected-code', resizedCode);
+  await expect(page).toHaveURL(
+    new RegExp('location=' + resizedCode + '(?:&|$)'),
+  );
+  await expect(
+    page
+      .getByRole('region', { name: 'Location inventory', exact: true })
+      .getByText(resizedCode, { exact: true }),
+  ).toBeVisible();
+  await page.mouse.move(15, 15);
+  await settledLabels(page);
+  expect(await canvas.getAttribute('data-label-layout-error')).toBeNull();
+  expect(pageErrors).toEqual([]);
 });
 
 test('real emulated touch tap remains selectable through normal pointerup and implicit capture release', async ({
