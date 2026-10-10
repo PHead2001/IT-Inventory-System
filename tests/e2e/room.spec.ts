@@ -11,6 +11,7 @@ import { measureRoomTarget, roomTargetMeetsMinimum } from './room-target-size';
 import {
   enableRoomLayoutDiagnostics,
   reportRoomLayoutFailure,
+  type RoomLayoutWitnessStage,
 } from './room-layout-diagnostics';
 import {
   observeRoomScene,
@@ -2357,6 +2358,37 @@ async function assertOccupiedWitnessActions(
   return witnesses;
 }
 
+async function assertOccupiedWitnessActionsWithDiagnostics(
+  page: Page,
+  scene: WitnessSnapshot,
+  counts: RoomOccupancy,
+  stage: RoomLayoutWitnessStage,
+  witnesses = roomVisibilityWitnesses(scene),
+) {
+  try {
+    const result = await assertOccupiedWitnessActions(
+      page,
+      scene,
+      counts,
+      witnesses,
+    );
+    await reportRoomLayoutFailure(
+      page,
+      bindingBounds.map((binding) => binding.code),
+      stage,
+      'measurement',
+    );
+    return result;
+  } catch (error) {
+    await reportRoomLayoutFailure(
+      page,
+      bindingBounds.map((binding) => binding.code),
+      stage,
+    );
+    throw error;
+  }
+}
+
 test('375px populated room gives every independently witnessed opaque target an action with More and selected long text', async ({
   page,
 }, testInfo) => {
@@ -2453,10 +2485,11 @@ test('375px populated room gives every independently witnessed opaque target an 
     expect(scene.frame.height).toBe(initialSize!.height);
     const report = roomVisibilityWitnessReport(scene);
     report.partiallyExposedCodes.forEach((code) => partialCodes.add(code));
-    const witnesses = await assertOccupiedWitnessActions(
+    const witnesses = await assertOccupiedWitnessActionsWithDiagnostics(
       page,
       scene,
       counts,
+      scenario,
       report.witnesses,
     );
     await testInfo.attach(scenario + '-opaque-witnesses', {
@@ -2499,23 +2532,13 @@ test('375px populated room gives every independently witnessed opaque target an 
       await canvas.scrollIntoViewIfNeeded();
       await settledLabels(page);
       const selectedScene = await captureRoomWitness(page);
-      let selectedWitnesses;
-      try {
-        selectedWitnesses = await assertOccupiedWitnessActions(
+      const selectedWitnesses =
+        await assertOccupiedWitnessActionsWithDiagnostics(
           page,
           selectedScene,
           counts,
+          'fit-open-selected-before-long-text',
         );
-      } catch (error) {
-        try {
-          await reportRoomLayoutFailure(
-            page,
-            bindingBounds.map((binding) => binding.code),
-          );
-        } finally {
-          throw error;
-        }
-      }
       expect(
         selectedWitnesses.has(code),
         'selected target is independently witnessed after reopening More',
@@ -2536,7 +2559,12 @@ test('375px populated room gives every independently witnessed opaque target an 
       await settledLabels(page);
       // Same captured physical scene and overlay: text-only stress cannot remove
       // neighbors from the independently required visible set.
-      await assertOccupiedWitnessActions(page, selectedScene, counts);
+      await assertOccupiedWitnessActionsWithDiagnostics(
+        page,
+        selectedScene,
+        counts,
+        'fit-open-selected-long-text',
+      );
       await expect(label).toBeVisible();
       await expect(label).toContainText(
         'carefully packed networking accessories',

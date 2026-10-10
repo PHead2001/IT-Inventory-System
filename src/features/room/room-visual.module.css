@@ -439,6 +439,10 @@
   }
 }
 @media (max-width: 720px) {
+  .moreMenu {
+    width: min(220px, 100%);
+    max-height: min(35dvh, 200px);
+  }
   .canvasFrame {
     height: 410px;
   }
