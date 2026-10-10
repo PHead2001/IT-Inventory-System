@@ -2,6 +2,8 @@ import type { Page } from '@playwright/test';
 
 const MAX_BYTES = 128 * 1024;
 export type RoomLayoutWitnessStage =
+  | 'scroll-more-overlapping-canvas'
+  | 'scroll-more-outside-canvas-without-reopening'
   | 'fit-closed'
   | 'fit-open'
   | 'oblique-open'
