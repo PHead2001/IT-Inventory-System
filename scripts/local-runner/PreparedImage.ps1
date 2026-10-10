@@ -380,6 +380,43 @@ function Invoke-RunnerImageBuild($State, $Config) {
     return New-RunnerPreparedImageCandidate $current $Config $binding $guest
 }
 
+function Copy-RunnerPreparedImageBytes([string] $Source, [string] $Destination, $State) {
+    # Copy-Item can carry a detached Hyper-V disk's explicit access entries.
+    # Create a fresh file under the checked protected directory instead; copy
+    # only bytes, leaving the destination's inherited security descriptor intact.
+    $Source = Assert-OwnedPath $Source
+    $Destination = Assert-OwnedPath $Destination
+    Assert-RunnerProtectedPath ([IO.Path]::GetDirectoryName($Destination))
+    $inputStream = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $outputStream = $null
+    try {
+        $outputStream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        Assert-RunnerProtectedPath $Destination
+        Invoke-RunnerTransitionCheckpoint 'image-copy-created'
+        $buffer = [byte[]]::new(1048576)
+        $checks = [Diagnostics.Stopwatch]::StartNew()
+        Assert-SessionAlive $State
+        do {
+            if ([DateTime]::UtcNow -ge [DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) { throw 'Prepared image copy reached its session deadline.' }
+            if ($checks.Elapsed.TotalSeconds -ge 1) {
+                Assert-SessionAlive $State
+                $current = Get-RunnerState
+                Assert-RunnerSealedPreparation $current (Get-RunnerRecoveryNow)
+                $checks.Restart()
+            }
+            $count = $inputStream.Read($buffer, 0, $buffer.Length)
+            if ($count -gt 0) { $outputStream.Write($buffer, 0, $count) }
+        } while ($count -gt 0)
+        $outputStream.Flush($true)
+        Assert-SessionAlive $State
+        Assert-RunnerSealedPreparation (Get-RunnerState) (Get-RunnerRecoveryNow)
+        Assert-RunnerProtectedPath $Destination
+    } finally {
+        try { if ($null -ne $outputStream) { $outputStream.Dispose() } }
+        finally { $inputStream.Dispose() }
+    }
+}
+
 function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     Assert-RunnerPreparationAuthorized
     Assert-RunnerPrepareState $State
@@ -418,7 +455,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     $receiptPath = Assert-OwnedPath (Join-Path $directory ($id + '.json'))
     $retained = $false
     try {
-        Copy-Item -LiteralPath $source -Destination $candidate -ErrorAction Stop
+        Copy-RunnerPreparedImageBytes $source $candidate $State
         Assert-RunnerProtectedPath $candidate
         Assert-RunnerImageDiskUnreferenced $candidate
         Invoke-RunnerTransitionCheckpoint 'image-copy'

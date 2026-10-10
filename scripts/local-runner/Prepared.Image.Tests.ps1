@@ -56,6 +56,14 @@ function New-VHD($Path, $ParentPath, [switch] $Differencing) {
 }
 function Get-VMHardDiskDrive($VM) { return @($VM.disks | ForEach-Object { [pscustomobject]@{ Path = $_ } }) }
 function Invoke-RunnerTransitionCheckpoint([string] $Name) {
+    if ($Name -ceq 'image-copy-created' -and $script:copyProbe -ceq 'source-sharing') {
+        $refused = $false; try { [IO.File]::AppendAllText($script:copyProbeSource, 'changed') } catch { $refused = $true }
+        if (-not $refused) { throw 'Candidate byte copy allowed a concurrent source writer.' }
+        $refused = $false; try { [IO.File]::Delete($script:copyProbeSource) } catch { $refused = $true }
+        if (-not $refused) { throw 'Candidate byte copy allowed concurrent source deletion.' }
+        $script:copyProbeObserved = $true
+    }
+    if ($Name -ceq 'image-copy-created') { Invoke-FixtureCandidateCopyCheckpoint }
     if ($Name -ceq $script:interrupt) { throw "Fixture interrupted $Name." }
     if ($Name -ceq 'image-clone-ready' -and $script:verifyFailure -ceq 'guardian-after-ready') {
         $fresh = Get-RunnerState; $fresh.guardianPid = 999999; Write-RunnerJson $script:RunnerStatePath $fresh
@@ -110,15 +118,15 @@ function Set-FixtureGuardian($State) {
     $binding = [pscustomobject]@{ vmId = $State.vmId; vmName = $State.vmName; claimHash = Get-RunnerRecoveryClaimHash $State }
     $State | Add-Member networkRecovery (New-RunnerNetworkRecovery $binding ('a' * 64) ([DateTime]::Parse($State.deadlineUtc).ToUniversalTime()) ([DateTime]::UtcNow)) -Force
 }
-$script:copyRace = ''
-function Copy-Item($LiteralPath, $Destination) {
-    if ($script:copyRace -ceq 'observe' -and [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Destination)) -ceq 'prepared-images') {
+$script:copyRace = ''; $script:copyProbe = ''; $script:copyProbeObserved = $false
+function Invoke-FixtureCandidateCopyCheckpoint {
+    if ($script:copyRace -ceq 'observe') {
         # Actual guardian ticks interleave after sealing and before/during bulk
         # copy while the preparation registration is authoritatively absent.
         $current = Get-RunnerState
         foreach ($unused in 1..3) { if (-not (Invoke-GuardCheck $current.vmName)) { throw 'Sealed preparation guardian stopped during copy.' } }
     }
-    if ($script:copyRace -and [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Destination)) -ceq 'prepared-images') {
+    if ($script:copyRace) {
         $lockName = 'Local\' + [IO.Path]::GetFileName($base) + '-Global-ITInventoryLocalRunner-v1'
         $job = Start-Job -ArgumentList $PSScriptRoot, $base, $lockName, $script:copyRace -ScriptBlock {
             param($source, $root, $lockName, $race)
@@ -151,9 +159,49 @@ function Copy-Item($LiteralPath, $Destination) {
             [void](Receive-Job $job -ErrorAction Stop)
         } finally { if ($job.State -in @('Completed', 'Failed', 'Stopped')) { Remove-Job $job } }
     }
-    Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -ErrorAction Stop
 }
 try {
+    # Native byte-copy regressions deliberately avoid ACL mutation. The source
+    # descriptor is never assigned to the newly inherited destination descriptor.
+    $state = New-SealedState
+    $copyFixture = Join-Path $base 'byte-copy-fixture'; [void][IO.Directory]::CreateDirectory($copyFixture)
+    $copySource = Join-Path $state.instancePath 'guest.vhdx'
+    $copyDestination = Join-Path $copyFixture 'candidate.vhdx'
+    $script:copyProbe = 'source-sharing'; $script:copyProbeSource = $copySource
+    try { Copy-RunnerPreparedImageBytes $copySource $copyDestination $state } finally { $script:copyProbe = '' }
+    if (-not $script:copyProbeObserved -or (Get-FileHash -LiteralPath $copySource).Hash -cne (Get-FileHash -LiteralPath $copyDestination).Hash) { throw 'Native byte-copy content/source-sharing proof failed.' }
+    $existingHash = (Get-FileHash -LiteralPath $copyDestination).Hash
+    Assert-Rejected { Copy-RunnerPreparedImageBytes $copySource $copyDestination $state } 'CreateNew refuses an existing candidate'
+    if ((Get-FileHash -LiteralPath $copyDestination).Hash -cne $existingHash) { throw 'CreateNew refusal overwrote existing candidate bytes.' }
+    $script:blocked = Join-Path $copyFixture 'acl-refused.vhdx'
+    Assert-Rejected { Copy-RunnerPreparedImageBytes $copySource $script:blocked $state } 'new destination ACL refusal'
+    if ((Get-Item -LiteralPath $script:blocked).Length -ne 0) { throw 'Destination ACL was checked after copying bytes.' }
+    $script:blocked = ''
+    $script:interrupt = 'image-copy-created'
+    Assert-Rejected { Copy-RunnerPreparedImageBytes $copySource (Join-Path $copyFixture 'interrupted.vhdx') $state } 'copy interruption disposes streams'
+    $script:interrupt = ''
+    [IO.File]::AppendAllText($copySource, 'released')
+    $expired = (ConvertTo-Json $state -Depth 10) | ConvertFrom-Json; $expired.deadlineUtc = [DateTime]::UtcNow.AddSeconds(-1).ToString('o')
+    Assert-Rejected { Copy-RunnerPreparedImageBytes $copySource (Join-Path $copyFixture 'expired.vhdx') $expired } 'copy deadline expiry'
+    $copyDefinition = (Get-Command Copy-RunnerPreparedImageBytes).ScriptBlock.ToString()
+    $copyAst = [Management.Automation.Language.Parser]::ParseInput($copyDefinition, [ref]$null, [ref]$null)
+    $copyCommands = @($copyAst.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $false) | ForEach-Object { $_.GetCommandName() })
+    if (@($copyCommands | Where-Object { $_ -cin @('Copy-Item', 'Set-Acl') }).Count -or $copyDefinition -match 'SetAccessControl' -or $copyDefinition -notmatch 'FileMode\]::CreateNew') { throw 'Candidate byte copy carries source security metadata or overwrites files.' }
+    # Inject only the two stream opens into the actual function body. An output
+    # disposal fault must still release the restrictive source handle.
+    $script:inputDisposed = $false
+    $script:faultInput = [pscustomobject]@{}
+    $script:faultInput | Add-Member ScriptMethod Read { param($buffer, $offset, $count) return 0 }
+    $script:faultInput | Add-Member ScriptMethod Dispose { $script:inputDisposed = $true }
+    $script:faultOutput = [pscustomobject]@{}
+    $script:faultOutput | Add-Member ScriptMethod Flush { param($flushToDisk) }
+    $script:faultOutput | Add-Member ScriptMethod Dispose { throw 'Fixture output disposal I/O failure.' }
+    $faultDefinition = $copyDefinition.Replace('[IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)', '$script:faultInput').Replace('[IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)', '$script:faultOutput')
+    if ($faultDefinition -ceq $copyDefinition -or $faultDefinition -match '\[IO.File\]::Open') { throw 'Copy fault fixture did not replace exactly its stream opens.' }
+    Assert-Rejected { & ([scriptblock]::Create($faultDefinition)) $copySource (Join-Path $copyFixture 'dispose-fault.vhdx') $state } 'output disposal I/O failure'
+    if (-not $script:inputDisposed) { throw 'Output disposal failure retained the restrictive source handle.' }
+    Remove-Item -LiteralPath $script:RunnerStatePath -Force
+    Write-Host 'Prepared candidate CreateNew bytes/source sharing/ACL-before-copy/deadline/stream cleanup regressions passed.'
     Assert-RunnerImageStorageReceipt $script:guest
     $guestBytes = ConvertTo-Json -InputObject $script:guest -Depth 10
     foreach ($invalid in @('missing-alias', 'wrong-id', 'wrong-version', 'other-registry', 'duplicate', 'unpulled-reference', 'no-digests')) {

@@ -93,6 +93,15 @@ out a PR or executes a job. Successful preparation resumes previously active
 pickup when no explicit Stop marker existed. Previously stopped or inactive
 pickup stays suspended; failed preparation stays suspended for investigation.
 
+The sealed builder disk is copied as bytes into a newly created candidate under
+the protected image directory. The candidate inherits that directory's ACL;
+the source disk's Hyper-V access entries are not copied. The destination ACL is
+checked before any bytes and again after copying. A held source read handle
+denies writes/deletion, and bounded copy buffers retain the session deadline and
+guardian/sealed-state checks without holding the state mutex during bulk I/O.
+Existing candidate paths are never overwritten. Unexpected ACLs on retained
+artifacts still stop preparation and require a separately reviewed owner repair.
+
 The trusted installed bundle contains five builder inputs: `Image.Prepare.sh`,
 `Image.Inputs.json`, `Image.Package.json`, `Image.PackageLock.json` and
 `Image.Supabase.toml`. The fixed recipe installs OS/Docker prerequisites, the
