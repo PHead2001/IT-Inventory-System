@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "tag": "it-inventory-local-runner-v1",
-  "version": "2026-10-10.1",
+  "version": "2026-10-10.2",
   "files": [
     {
       "name": "Common.ps1",
-      "hash": "3120F37BF73D0E90D7AA47093195158D3A4E3D2EE8E99F78BEEA5E31D0C05D66"
+      "hash": "FBAF554726AF2480B5A39BA66404FF35C8B066D1452C0BC30923546101C32335"
     },
     {
       "name": "Runner.ps1",
-      "hash": "CCE024817509B8163E0DF7967B659D8AB9A83AE8B35554147ED3A7FAADCCE86E"
+      "hash": "0EF8194E3582185C3713EE0AF0474035B9DF69C0CB9AC576C43EEDD1EFFC4DDD"
     },
     {
       "name": "Guest.Network.ps1",
@@ -29,7 +29,7 @@
     },
     {
       "name": "PreparedImage.ps1",
-      "hash": "6174641E292D34916214439CC88CB4DF20C61EBDE418A5F24E47C677E41C2813"
+      "hash": "00F7577F0C7D00EFD1AB7A42D73C29206CB80DB2054856FD6B38A886E1719666"
     },
     {
       "name": "Image.Prepare.sh",
@@ -37,7 +37,7 @@
     },
     {
       "name": "Image.Inputs.json",
-      "hash": "5AD903516D668D66E2CC214349C7C47E59223430B985D3E26D1FF3E1B3C8EBB6"
+      "hash": "2661F584DC7F5A9C444FCB9B7FE501193F60426EAD5FAAAC8CB3D8097CC902AC"
     },
     {
       "name": "Image.Package.json",

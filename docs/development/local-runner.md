@@ -11,7 +11,7 @@ require separate deliberate cleanup.
 This only coalesces workflow runs; it does not enable pilot pickup. The owner must
 still intentionally activate the pilot for the exact reviewed SHA.
 
-The design runs one repository-scoped, just-in-time GitHub runner in one fresh Ubuntu 24.04 Hyper-V VM at a time. A persistent Windows SYSTEM supervisor looks for queued jobs carrying one supported resource label, creates a full copy of the clean boot disk for one job, and deletes the VM and per-job files when the runner exits. The single boot-triggered supervisor first recovers the recorded old session under a lock, then begins pickup; recovery failure prevents pickup. A separate SYSTEM watchdog runs every minute and removes the recorded VM when its hard deadline expires or its supervisor/ready network guardian dies. Each VM explicitly disables automatic start and uses TurnOff at host shutdown; both settings are read back before boot. Restart always destroys the old VM before a new one can be launched. No host directory or cross-job package cache is mounted in the VM. The guest receives only its per-VM SSH public key and a one-job JIT configuration; the repository PAT stays on Windows.
+The design runs one repository-scoped, just-in-time GitHub runner in one fresh Ubuntu 24.04 Hyper-V VM at a time. A persistent Windows SYSTEM supervisor looks for queued jobs carrying one supported resource label, creates a disposable boot disk for one job, and deletes the VM and per-job files when the runner exits. The single boot-triggered supervisor first recovers the recorded old session under a lock, then begins pickup; recovery failure prevents pickup. A separate SYSTEM watchdog runs every minute and removes the recorded VM when its hard deadline expires or its supervisor/ready network guardian dies. Each VM explicitly disables automatic start and uses TurnOff at host shutdown; both settings are read back before boot. Restart always destroys the old VM before a new one can be launched. No host directory or cross-job package cache is mounted in the VM. The guest receives only its per-VM SSH public key and a one-job JIT configuration; the repository PAT stays on Windows.
 
 ## Unattended recovery and capacity status
 
@@ -117,20 +117,24 @@ The host requires successful scrub proof, the exact recorded VM identity in
 `Off` state, verified VM removal, and an offline disk with no registered VM
 references. It copies that disk to a new protected, unselected candidate and
 hashes it. While pickup remains suspended under the same owner control, a second
-credential-free `verify-image` session boots a full copy through the ordinary
-prepared path, with a fresh MAC, SSH key and NoCloud instance. The verifier must
+credential-free `verify-image` session boots a differencing child through the
+prepared path, with a fresh MAC, SSH key and NoCloud instance. Two successive
+children use the same retained, verified read-only parent handle. Each checks a
+fixed marker is absent, writes it only into its own guest disk, and verifies that
+write. Both must have distinct VM/MAC/key identities and verified cleanup; the
+second child must not see the first child's marker. Each verifier must
 pass the canonical cloud-init and runner prerequisites (including Docker for its
 fixed heavy profile), network isolation and live guardian checks. Its VM removal
 and unreferenced instance cleanup must then complete successfully. The original
 candidate is never booted: its hash is checked before verification and again
-after verifier cleanup, before publishing `prepared-image.json` last. Receipts
+after both verifier cleanups, before publishing `prepared-image.json` last. Receipts
 bind the complete installed bundle, five inputs, generic base hash, scrub proof,
 actual Docker image digests, browser/OS provenance, and the fresh verifier's
 identity, readiness and cleanup proof. Failed/interrupted builds or verification
 cannot replace the selected image. Retention keeps the selected image and one
 prior image, deleting only recognized protected unreferenced candidates.
 
-Each job still receives a **full fresh disk copy**, a new MAC/SSH key/NoCloud
+Each job still receives a **fresh disposable boot disk**, a new MAC/SSH key/NoCloud
 instance ID and its ordinary memory profile. Prepared copies omit apt installation
 only after all protection/provenance/content checks pass. Their cloud-config also
 omits creation of the existing Docker group while retaining the runner's sudo and
@@ -143,6 +147,51 @@ live in the guest's normal runner home. New PR pins download cache misses inside
 that one disposable guest. A job cannot write caches or disks back to the host;
 its entire disk is deleted after execution. The separate verified runner archive
 cache keeps its existing metadata/hash checks.
+
+Prepared job disks use Hyper-V differencing only when the current installed
+binding's clone receipt explicitly proves both isolated children, their matching
+parent file identity, restrictive lease and marker probes. Earlier clone proof
+authorizes the existing full-copy path only. Generic fallback and the image
+builder always use standalone full copies. A stale selected prepared image is
+still content-verified before generic fallback; corruption never becomes a miss.
+The new prepared clone gate must pass on the real host before accepting optimized
+pickup. If Hyper-V cannot create or boot the child while the restrictive parent
+handle remains open, preparation fails closed; no automatic sharing relaxation
+or alternative clone strategy is installed.
+
+The supervisor verifies image content through a noninheritable read-only file
+handle opened with `FileShare.Read`. It hashes that same handle once, then retains
+it across job child creation, execution and cleanup. Warm reuse requires the same
+live process owner, Windows volume/file identity, expected digest and complete
+selector/receipt/recipe/bundle binding. Every claim rechecks protected paths,
+ACLs and metadata. Length and timestamps never authorize reuse. Restart, binding
+or selector change invalidates verification; owner image replacement drains
+leases only while idle. Failed cleanup retains state/artifacts and live-owner
+leases and refuses another claim. Process death closes OS handles; protected
+parent storage, guardian/recovery and fresh verification on restart remain the
+boundary. This is no persistent verified flag or promise of protection after
+process death.
+
+Image preflight uses a ten-minute deadline and 4 MiB hashing chunks with Stop and
+deadline checks between reads, outside the guardian mutex. Protected
+`preflight-observation.json` records only fixed phases, process identity, start,
+deadline, progress bytes and observation time; Status labels this historical
+evidence. Synchronous filesystem/provider I/O is not forcibly preempted, so these
+checks do not prove a hard timeout for a hung OS call. Fresh queued-profile demand
+is checked before image work, before disk creation/copy and before boot, while
+the existing post-recovery pre-JIT demand check remains authoritative. Oldest
+workflow continuations, capacity admission and provisioning cancellation policy
+are unchanged.
+
+Reference checks follow registered VM disks and retained managed child disks
+through at most 32 ancestors, rejecting cycles, unknown parents/types and bounded
+inventory overflow. A parent or instance referenced indirectly is retained.
+No parent is merged, resized, compacted or attached directly by this job path.
+The owner preparation receipt records each child's preflight, creation, readiness
+and session durations. Offline tests prove control flow and real Windows file
+sharing, not Hyper-V compatibility or queue-to-registration speed. Acceptance
+still requires real successive-child isolation/cleanup, unchanged parent hash,
+and measured cold/warm light and heavy startup without skipped workload gates.
 
 Candidate copy and full hashes run outside the state lock, allowing the guardian
 to cancel the builder during this work. Staging requires a fresh builder
@@ -173,7 +222,7 @@ never trigger host image preparation or host writeback.
 
 Double-click `scripts/local-runner/Setup.cmd` and accept the Windows elevation prompt. Its small menu offers **Enable Hyper-V**, **Install or resume**, and **Store GitHub token**. Enabling the feature never restarts Windows automatically; restart if Windows requests it, then open Setup again and choose Install. A failed step stays visible and can be retried from the menu. The defaults target `PHead2001/IT-Inventory-System` and GitHub's default runner group ID `1`; the JIT API will reject an invalid group rather than silently choose another repository. Setup stops if another Windows NAT occupies the host, including one used by Rancher/WSL. It never removes or changes that NAT, the Rancher distribution, or an existing VM.
 
-Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: the generic [Noble cloud QCOW2 image](https://cloud-images.ubuntu.com/releases/noble/release-20260926/) and [Ubuntu 24.04.5 WSL image](https://releases.ubuntu.com/24.04/). A dedicated WSL image converter installs `qemu-utils` and converts the verified QCOW2 into a Hyper-V VHDX. WSL retains Windows host integration and is a trusted setup tool, not an isolated job sandbox. Its random distribution name is recorded in the protected setup stage before import; resume requires the same Windows WSL registration and owned base path. An unrecognized or preexisting converter is refused. Conversion writes a temporary VHDX, validates and resizes it, then records the completed output hash. Resume verifies both the source and output hashes; a partial or unreceipted VHDX is regenerated. Before setup completes or the token menu can run, setup verifies the exact owned converter registration, terminates it, verifies ownership again, unregisters it, and verifies its absence. Retirement failure keeps setup incomplete; retry uses the protected stage. The Azure VHD is intentionally excluded: [Canonical says it will not work on local Hyper-V](https://ubuntu.com/docs/public-images/public-images-reference/artifacts/). Canonical documents [generic image conversion and NoCloud on Hyper-V](https://ubuntu.com/blog/how-to-use-ubuntu-on-windows). The full converted VHDX is copied for each job, never attached as a shared parent disk.
+Setup downloads two fixed official Ubuntu artifacts with pinned SHA-256 values: the generic [Noble cloud QCOW2 image](https://cloud-images.ubuntu.com/releases/noble/release-20260926/) and [Ubuntu 24.04.5 WSL image](https://releases.ubuntu.com/24.04/). A dedicated WSL image converter installs `qemu-utils` and converts the verified QCOW2 into a Hyper-V VHDX. WSL retains Windows host integration and is a trusted setup tool, not an isolated job sandbox. Its random distribution name is recorded in the protected setup stage before import; resume requires the same Windows WSL registration and owned base path. An unrecognized or preexisting converter is refused. Conversion writes a temporary VHDX, validates and resizes it, then records the completed output hash. Resume verifies both the source and output hashes; a partial or unreceipted VHDX is regenerated. Before setup completes or the token menu can run, setup verifies the exact owned converter registration, terminates it, verifies ownership again, unregisters it, and verifies its absence. Retirement failure keeps setup incomplete; retry uses the protected stage. The Azure VHD is intentionally excluded: [Canonical says it will not work on local Hyper-V](https://ubuntu.com/docs/public-images/public-images-reference/artifacts/). Canonical documents [generic image conversion and NoCloud on Hyper-V](https://ubuntu.com/blog/how-to-use-ubuntu-on-windows). Generic fallback copies the converted VHDX; only a separately verified prepared image can serve as a read-only differencing parent.
 
 Setup creates `C:\ProgramData\ITInventoryLocalRunner`, a temporary image-converter WSL distribution, a dedicated internal switch/NAT on `172.30.240.0/29`, and two SYSTEM tasks. It protects the fixed data root with a non-inheriting SYSTEM/Administrators-only ACL and refuses an unexpected owner, reparse point, conflicting switch/NAT, or overlapping host address. Partial setup can be rerun for the same repository/group using its tagged setup stage; it never adopts a reserved switch/NAT that existed before its own stage. It leaves job pickup disabled. VM creation journals a provisional identity before New-VM; recovery accepts an untagged VM only while Off, with the exact recorded GUID name, exact nested configuration path (`instances\<vmName>\<vmName>`, since New-VM appends its name to the supplied path), and exactly the recorded boot disk. Tagged recovery also requires this exact configuration path. Tag readback advances that journal before any additional attachment or boot.
 
@@ -254,7 +303,7 @@ session returns `demand-withdrawn` and performs normal owned cleanup without cre
 an idle JIT runner. API uncertainty or queue overflow fails closed with cleanup.
 The pilot retains its exact binding and fresh exact-job registration check.
 
-Every guest remains a full disposable copy of the unchanged, verified Ubuntu base.
+Generic fallback guests remain full disposable copies of the unchanged, verified Ubuntu base; prepared job guests use independently verified disposable differencing children.
 Cloud-init installs common TLS/download, Git, SSH and unzip prerequisites for every
 profile. Light and mid omit Docker installation and its readiness probe: required
 aggregation uses Bash, preview discovery/provisioning use Node, production delivery

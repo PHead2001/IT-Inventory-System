@@ -990,6 +990,70 @@ function Assert-StateIdentity($State) {
     }
 }
 
+function Get-RunnerDiskChain([string] $Path) {
+    $seen = @{}
+    for ($depth = 0; $depth -lt 32; $depth++) {
+        if ([string]::IsNullOrEmpty($Path) -or -not [IO.Path]::IsPathRooted($Path)) { throw 'Disk ancestry path is unknown; retain files.' }
+        $Path = [IO.Path]::GetFullPath($Path)
+        if ($seen.ContainsKey($Path)) { throw 'Disk ancestry cycle; retain files.' }
+        $seen[$Path] = $true
+        $disk = Get-VHD -Path $Path -ErrorAction Stop
+        if ($null -eq $disk -or $disk.VhdType -cnotin @('Fixed','Dynamic','Differencing')) { throw 'Disk ancestry type is unknown; retain files.' }
+        $Path
+        if ($disk.VhdType -cne 'Differencing') {
+            if (-not [string]::IsNullOrEmpty($disk.ParentPath)) { throw 'Standalone disk has an unexpected parent; retain files.' }
+            return
+        }
+        $Path = $disk.ParentPath
+    }
+    throw 'Disk ancestry exceeds its bounded depth; retain files.'
+}
+
+function Get-RunnerManagedDiskRoots([string] $ExcludedInstance = '') {
+    $root = Assert-OwnedPath (Join-Path $script:RunnerRoot 'instances')
+    if (-not (Test-Path -LiteralPath $root)) { return }
+    $entries = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction Stop)
+    if ($entries.Count -gt 128) { throw 'Instance inventory exceeds its bounded view; retain files.' }
+    $count = 0
+    foreach ($entry in $entries) {
+        if (-not $entry.PSIsContainer -or $entry.Name -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Unknown managed instance entry; retain files.' }
+        [void](Assert-OwnedPath $entry.FullName)
+        if ($ExcludedInstance -and $entry.FullName -ieq $ExcludedInstance) { continue }
+        $pending = [Collections.Generic.Queue[string]]::new()
+        $pending.Enqueue($entry.FullName)
+        while ($pending.Count) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $pending.Dequeue() -Force -ErrorAction Stop)) {
+                $count++
+                if ($count -gt 2048) { throw 'Managed file inventory exceeds its bounded view; retain files.' }
+                [void](Assert-OwnedPath $file.FullName)
+                if ($file.PSIsContainer) { $pending.Enqueue($file.FullName) }
+                elseif ($file.Extension -imatch '^\.vhdx?$') { $file.FullName }
+            }
+        }
+    }
+}
+
+function Assert-RunnerDiskReferencesAbsent([string] $Path, [switch] $Directory, [string] $ExcludedInstance = '') {
+    $Path = Assert-OwnedPath $Path
+    $prefix = $Path.TrimEnd('\') + '\'
+    $roots = @()
+    foreach ($vm in @(Get-RunnerVmInventory)) {
+        foreach ($disk in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+            if ([string]::IsNullOrEmpty($disk.Path)) { throw 'VM disk reference is unknown; retain files.' }
+            $roots += $disk.Path
+            if ($roots.Count -gt 512) { throw 'VM disk view exceeds its bound; retain files.' }
+        }
+    }
+    # An offline managed file is not a reference to itself. VM attachments
+    # above still count, and every other managed child's ancestry is inspected.
+    $roots += @(Get-RunnerManagedDiskRoots $ExcludedInstance | Where-Object { $_ -ine $Path })
+    foreach ($root in $roots) {
+        foreach ($ancestor in @(Get-RunnerDiskChain $root)) {
+            if ($ancestor -ieq $Path -or ($Directory -and $ancestor.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase))) { throw 'A disk chain still references the protected target; retain files.' }
+        }
+    }
+}
+
 function Assert-RunnerInstanceUnreferenced($State) {
     $instancePath = Assert-OwnedPath $State.instancePath
     $instancePrefix = $instancePath.TrimEnd('\') + '\'
@@ -999,14 +1063,8 @@ function Assert-RunnerInstanceUnreferenced($State) {
         if ($configurationPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $configurationPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'A registered VM still references the recorded instance configuration path; runner files/state are retained.'
         }
-        foreach ($disk in @(Get-VMHardDiskDrive -VM $entry -ErrorAction Stop)) {
-            if ([string]::IsNullOrEmpty($disk.Path)) { throw 'VM disk path inspection failed; runner files/state are retained.' }
-            $diskPath = [IO.Path]::GetFullPath($disk.Path)
-            if ($diskPath.StartsWith($instancePrefix, [StringComparison]::OrdinalIgnoreCase) -or $diskPath.Equals($instancePath, [StringComparison]::OrdinalIgnoreCase)) {
-                throw 'A registered VM still references the recorded instance disk path; runner files/state are retained.'
-            }
-        }
     }
+    Assert-RunnerDiskReferencesAbsent $instancePath -Directory -ExcludedInstance $instancePath
 }
 
 function Remove-RunnerInstance($State) {

@@ -21,6 +21,8 @@ function Assert-SecureRoot {}
 function Assert-InstalledHost { param($Config) }
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Get-OwnerToken { 'dummy' }
+function Test-RunnerSessionDemand { return $true } # Demand behavior has its own actual-session suite.
+function Write-RunnerImageProgress {} # Reach the claim mutex; preflight Stop/deadline behavior has dedicated coverage.
 function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-RunnerVmInventory { return @(Get-VM) }
@@ -91,6 +93,8 @@ function Assert-SecureRoot {}
 function Assert-RunnerProtectedPath { param($Path) [void](Assert-OwnedPath $Path) }
 function Assert-InstalledHost { param($Config) }
 function Get-OwnerToken { 'dummy' }
+function Test-RunnerSessionDemand { return $true }
+function Write-RunnerImageProgress {} # Preserve the actual claim/publication mutex race after the read-only preflight boundary.
 function Get-RunnerImageSelection { return [pscustomobject]@{ path = 'fixture'; prepared = $false } }
 function Get-VM {}
 function Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }

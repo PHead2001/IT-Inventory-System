@@ -53,9 +53,8 @@ function Assert-InstalledHost($Config, [switch] $ForPreparation) {
         $nat.InternalIPInterfaceAddressPrefix -ne '172.30.240.0/29') {
         throw 'The dedicated internal switch/NAT is absent or differs from the installed contract.'
     }
-    if ((Get-FileHash -LiteralPath $Config.baseVhdx -Algorithm SHA256).Hash -ine $Config.baseSha256) {
-        throw 'The immutable Ubuntu base VHDX has changed.'
-    }
+    $binding = Get-RunnerImageBinding $Config
+    [void](Get-RunnerVerifiedImageLease $Config.baseVhdx $Config.baseSha256 $binding.hash 'base-verification')
     if (@(Get-RunnerVmInventory | Where-Object Name -Like "$($script:RunnerPrefix)*").Count -gt 0) {
         throw 'An owned-prefix VM already exists. Resolve it before launching another.'
     }
@@ -578,233 +577,279 @@ function Assert-RunnerVmResources([string] $Name, [string] $ProfileLabel) {
 }
 
 function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileLabel = '', [ValidateSet('job', 'prepare', 'verify-image')][string] $Purpose = 'job', $ImageCandidate = $null) {
+    $sessionWatch = [Diagnostics.Stopwatch]::StartNew()
     $preparing = $Purpose -cne 'job'
     if (($Purpose -ceq 'verify-image') -ne ($null -ne $ImageCandidate) -or ($preparing -and $null -ne $PilotAttempt)) { throw 'Image verification requires its explicit candidate and cannot carry a job claim.' }
     $profile = if ($preparing) { Get-RunnerResourceProfile 'it-inventory-heavy' } else { Get-RunnerSessionProfile $Config $ProfileLabel }
-    $script:RunnerOperationStage = 'preflight'
-    if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-InstalledHost $Config -ForPreparation }
-    else { Assert-InstalledHost $Config; [void](Get-OwnerToken) }
-    $image = if ($Purpose -ceq 'verify-image') {
-        $candidateReceipt = Assert-RunnerImageCandidate $ImageCandidate $Config
-        [pscustomobject]@{ path = $ImageCandidate.path; prepared = $true }
-    } elseif ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
-    $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
-    $script:RunnerSessionName = $name
-    $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
-    $state = [ordered]@{
-        tag = $script:RunnerTag; vmName = $name; instancePath = $instance
-        purpose = $Purpose; resourceLabel = $profile.label
-        createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
-        deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
-        supervisorPid = $PID
-        supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
-    }
-    if ($Purpose -ceq 'verify-image') { $state.imageCandidate = [ordered]@{ id = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash; bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId } }
-    if (-not $preparing) { $state.claimMode = $Config.activation }
-    $mutex = Enter-RunnerLock
+    Start-RunnerImagePreflight $Purpose
+    $preflightScope = $script:RunnerImagePreflight
     try {
-        if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-RunnerTransitionClear }
-        else { Assert-RunnerClaimOpen }
-        if (Get-RunnerState) { throw 'Another runner session is already recorded.' }
-        if (-not $preparing -and $Config.activation -eq 'pilot') {
-            if ($null -eq $PilotAttempt -or (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json'))) { throw 'Pilot claim requires a fresh bound receipt.' }
-            $PilotAttempt | Add-Member -NotePropertyName sessionName -NotePropertyValue $name -Force
-            $state.pilotClaim = Get-RunnerJsonEvidence $PilotAttempt
+        # Read-only demand checks precede hashes/copies and remain repeated after
+        # recovery immediately before the authoritative JIT intent.
+        if (-not $preparing) {
+            Write-RunnerImageProgress 'demand-inspection'
+            if (-not (Test-RunnerSessionDemand $Config $profile.label $PilotAttempt)) { return [pscustomobject]@{ name = ''; id = $null; outcome = 'demand-withdrawn' } }
         }
-        Write-RunnerJson $script:RunnerStatePath $state
-        Invoke-RunnerTransitionCheckpoint 'claim-state'
-        Complete-RunnerPilotClaim ([pscustomobject]$state)
-        Invoke-RunnerTransitionCheckpoint 'claim-receipt'
-    } finally { Exit-RunnerLock $mutex }
-    $verificationReady = $false
-    $sessionFailure = $null
-    try {
-        New-Item -ItemType Directory -Path $instance -Force | Out-Null
-        $script:RunnerOperationStage = 'disk-copy'
-        $disk = Join-Path $instance 'guest.vhdx'
-        Copy-Item -LiteralPath $image.path -Destination $disk -ErrorAction Stop
-        $script:RunnerOperationStage = 'key-generation'
-        New-RunnerSshKey (Join-Path $instance 'id_ed25519')
-        $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
-        Assert-SessionAlive $state
-        $mutex = Enter-RunnerLock
-        try {
-            $script:RunnerOperationStage = 'vm-creation'
-            $current = Get-RunnerState
-            if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
-            $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
-            $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
-            $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
-            Write-RunnerJson $script:RunnerStatePath $current
-            $vm = New-RunnerProfileVm $name $disk $instance $profile.label
-            $current | Add-Member -NotePropertyName vmId -NotePropertyValue ([guid]$vm.Id).ToString() -Force
-            Assert-StateIdentity $current
-            Write-RunnerJson $script:RunnerStatePath $current
-            Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
-            Assert-RunnerVmLifecycle $name
-            if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
-            $current.phase = 'owned'
-            Write-RunnerJson $script:RunnerStatePath $current
-        } finally { Exit-RunnerLock $mutex }
-        $script:RunnerOperationStage = 'vm-configuration'
-        Set-VMProcessor -VMName $name -Count 4
-        Set-VMMemory -VMName $name -DynamicMemoryEnabled $false
-        Assert-RunnerVmResources $name $profile.label
-        Set-VMFirmware -VMName $name -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
-        foreach ($service in @(Get-VMIntegrationService -VMName $name | Where-Object Name -Match 'Guest Service')) {
-            Disable-VMIntegrationService -VMName $name -Name $service.Name
+        $script:RunnerOperationStage = 'preflight'
+        Write-RunnerImageProgress 'host-inspection'
+        if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-InstalledHost $Config -ForPreparation }
+        else { Assert-InstalledHost $Config; [void](Get-OwnerToken) }
+        $image = if ($Purpose -ceq 'verify-image') {
+            $candidateReceipt = Assert-RunnerImageCandidate $ImageCandidate $Config
+            $lease = Get-RunnerVerifiedImageLease $ImageCandidate.path $candidateReceipt.diskHash ((Get-RunnerJsonEvidence $candidateReceipt).hash)
+            [pscustomobject]@{ path = $ImageCandidate.path; prepared = $true; differencing = $true; lease = $lease }
+        } elseif ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
+        $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
+        $script:RunnerSessionName = $name
+        $instance = Assert-OwnedPath (Join-Path (Join-Path $script:RunnerRoot 'instances') $name)
+        $state = [ordered]@{
+            tag = $script:RunnerTag; vmName = $name; instancePath = $instance
+            purpose = $Purpose; resourceLabel = $profile.label
+            createdUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = [DateTime]::UtcNow.ToString('o')
+            deadlineUtc = [DateTime]::UtcNow.AddMinutes($Config.maxMinutes).ToString('o')
+            supervisorPid = $PID
+            supervisorStartUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
         }
-        $guestMac = Set-RunnerGuestMac -VmName $name
+        if ($Purpose -ceq 'verify-image') { $state.imageCandidate = [ordered]@{ id = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash; bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId } }
+        if (-not $preparing) { $state.claimMode = $Config.activation }
         $mutex = Enter-RunnerLock
         try {
-            $current = Get-RunnerState
-            if ($null -eq $current -or $current.vmName -cne $name) { throw 'Session removed before guest MAC journaling.' }
-            $current | Add-Member -NotePropertyName guestMac -NotePropertyValue $guestMac.rawMac -Force
-            Write-RunnerJson $script:RunnerStatePath $current
+            if ($preparing) { Assert-RunnerPreparationAuthorized; Assert-RunnerTransitionClear }
+            else { Assert-RunnerClaimOpen }
+            if (Get-RunnerState) { throw 'Another runner session is already recorded.' }
+            if (-not $preparing -and $Config.activation -eq 'pilot') {
+                if ($null -eq $PilotAttempt -or (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'pilot-attempt.json'))) { throw 'Pilot claim requires a fresh bound receipt.' }
+                $PilotAttempt | Add-Member -NotePropertyName sessionName -NotePropertyValue $name -Force
+                $state.pilotClaim = Get-RunnerJsonEvidence $PilotAttempt
+            }
+            Write-RunnerJson $script:RunnerStatePath $state
+            Invoke-RunnerTransitionCheckpoint 'claim-state'
+            Complete-RunnerPilotClaim ([pscustomobject]$state)
+            Invoke-RunnerTransitionCheckpoint 'claim-receipt'
         } finally { Exit-RunnerLock $mutex }
-        $seed = Join-Path $instance 'cidata.vhdx'
-        New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
-        Add-VMHardDiskDrive -VMName $name -Path $seed
-        $script:RunnerOperationStage = 'network-isolation'
-        $observation = Get-RunnerNetworkObservation # Probe IO outside mutex.
-        $mutex = Enter-RunnerLock
+        $verificationReady = $false
+        $sessionFailure = $null
         try {
-            $current = Get-RunnerState
-            if ($null -eq $current -or $current.vmName -cne $name -or
-                (Test-RunnerSessionStopRequested $current) -or
-                (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Session removed/stopped before network isolation.' }
-            $rules = @(Set-IsolatedAdapter $current $observation)
-            $current | Add-Member networkFingerprint $observation.fingerprint -Force
-            $current | Add-Member networkRules $rules -Force
-            Write-RunnerJson $script:RunnerStatePath $current
-            $state = [pscustomobject]$current # Freeze the verified VM/MAC identity for later supervisor checks.
-        } finally { Exit-RunnerLock $mutex }
-        Start-SessionGuardian $state
-        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
-        $script:RunnerOperationStage = 'vm-boot'
-        Start-GuardedVm $state
-        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
-        $script:RunnerOperationStage = 'guest-readiness'
-        $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
-        Wait-Guest $state $Config $profile.label
-        Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
-        Assert-SessionAlive $state
-        Assert-CurrentRunnerNetworkRules $state
-        Test-GuestIsolation $state $Config
-
-        if ($Purpose -ceq 'verify-image') {
-            $script:RunnerOperationStage = 'image-clone-readiness'
+            New-Item -ItemType Directory -Path $instance -Force | Out-Null
+            $script:RunnerOperationStage = 'disk-copy'
+            $disk = Join-Path $instance 'guest.vhdx'
+            if (-not $preparing -and -not (Test-RunnerSessionDemand $Config $profile.label $PilotAttempt)) { return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' } }
+            if ($image.PSObject.Properties.Name -contains 'differencing' -and $image.differencing) {
+                $script:RunnerOperationStage = 'disk-clone'
+                $childWatch = [Diagnostics.Stopwatch]::StartNew()
+                [void](New-RunnerImageChild $disk $image.lease)
+                $childWatch.Stop()
+            } else { Copy-Item -LiteralPath $image.path -Destination $disk -ErrorAction Stop }
+            $preflightSeconds = $sessionWatch.Elapsed.TotalSeconds
+            Write-RunnerImageProgress 'complete'
+            $script:RunnerImagePreflight = $null
+            $script:RunnerOperationStage = 'key-generation'
+            New-RunnerSshKey (Join-Path $instance 'id_ed25519')
+            $key = (Get-Content -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Raw).Trim()
             Assert-SessionAlive $state
-            $verified = Get-RunnerState
-            Assert-StateIdentity $verified
-            if ($verified.purpose -cne 'verify-image' -or $verified.vmName -cne $state.vmName -or
-                [guid]$verified.vmId -ne [guid]$vm.Id -or
-                $verified.guardianReady -ne $true -or -not (Test-RunnerProcessIdentity $verified.guardianPid $verified.guardianStartUtc) -or
-                $verified.imageCandidate.id -cne $ImageCandidate.id -or $verified.imageCandidate.diskHash -cne $candidateReceipt.diskHash) { throw 'Image verifier session binding changed.' }
-            $verifiedVm = Get-VM -Id ([guid]$verified.vmId) -ErrorAction Stop
-            if ($verifiedVm.Name -cne $verified.vmName -or $verifiedVm.State -cne 'Running' -or $verifiedVm.Notes -cne $script:RunnerTag -or
-                [IO.Path]::GetFullPath($verifiedVm.Path) -ine (Join-Path $instance $verified.vmName)) { throw 'Image verifier VM identity changed after readiness.' }
-            $verificationReady = $true
-            Invoke-RunnerTransitionCheckpoint 'image-clone-ready'
-            return [pscustomobject]@{ schema = 1; candidateId = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash
-                bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId; bundleHash = $candidateReceipt.bundleHash
-                purpose = 'verify-image'; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
-                networkFingerprint = $verified.networkFingerprint
-                sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
-                readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
-        }
-        if ($preparing) {
-            $script:RunnerOperationStage = 'image-preparation'
-            return Invoke-RunnerImageBuild ([pscustomobject]$state) $Config
-        }
+            $mutex = Enter-RunnerLock
+            try {
+                $script:RunnerOperationStage = 'vm-creation'
+                $current = Get-RunnerState
+                if ($null -eq $current -or $current.vmName -ne $name) { throw 'Session removed before VM creation.' }
+                $current | Add-Member -NotePropertyName phase -NotePropertyValue 'creating' -Force
+                $current | Add-Member -NotePropertyName expectedBootDisk -NotePropertyValue $disk -Force
+                $current | Add-Member -NotePropertyName expectedVmPath -NotePropertyValue (Join-Path $instance $name) -Force
+                Write-RunnerJson $script:RunnerStatePath $current
+                $vm = New-RunnerProfileVm $name $disk $instance $profile.label
+                $current | Add-Member -NotePropertyName vmId -NotePropertyValue ([guid]$vm.Id).ToString() -Force
+                Assert-StateIdentity $current
+                Write-RunnerJson $script:RunnerStatePath $current
+                Set-VM -Name $name -Notes $script:RunnerTag -AutomaticCheckpointsEnabled $false -CheckpointType Disabled -AutomaticStartAction Nothing -AutomaticStopAction TurnOff
+                Assert-RunnerVmLifecycle $name
+                if ((Get-VM -Name $name -ErrorAction Stop).Notes -ne $script:RunnerTag) { throw 'VM ownership tag readback failed.' }
+                $current.phase = 'owned'
+                Write-RunnerJson $script:RunnerStatePath $current
+            } finally { Exit-RunnerLock $mutex }
+            $script:RunnerOperationStage = 'vm-configuration'
+            Set-VMProcessor -VMName $name -Count 4
+            Set-VMMemory -VMName $name -DynamicMemoryEnabled $false
+            Assert-RunnerVmResources $name $profile.label
+            Set-VMFirmware -VMName $name -EnableSecureBoot On -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
+            foreach ($service in @(Get-VMIntegrationService -VMName $name | Where-Object Name -Match 'Guest Service')) {
+                Disable-VMIntegrationService -VMName $name -Name $service.Name
+            }
+            $guestMac = Set-RunnerGuestMac -VmName $name
+            $mutex = Enter-RunnerLock
+            try {
+                $current = Get-RunnerState
+                if ($null -eq $current -or $current.vmName -cne $name) { throw 'Session removed before guest MAC journaling.' }
+                $current | Add-Member -NotePropertyName guestMac -NotePropertyValue $guestMac.rawMac -Force
+                Write-RunnerJson $script:RunnerStatePath $current
+            } finally { Exit-RunnerLock $mutex }
+            $seed = Join-Path $instance 'cidata.vhdx'
+            New-SeedDisk $seed $key $guestMac.seedMac $Config $profile.label $image.prepared
+            Add-VMHardDiskDrive -VMName $name -Path $seed
+            $script:RunnerOperationStage = 'network-isolation'
+            $observation = Get-RunnerNetworkObservation # Probe IO outside mutex.
+            $mutex = Enter-RunnerLock
+            try {
+                $current = Get-RunnerState
+                if ($null -eq $current -or $current.vmName -cne $name -or
+                    (Test-RunnerSessionStopRequested $current) -or
+                    (Get-RunnerRecoveryNow) -ge [DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) { throw 'Session removed/stopped before network isolation.' }
+                $rules = @(Set-IsolatedAdapter $current $observation)
+                $current | Add-Member networkFingerprint $observation.fingerprint -Force
+                $current | Add-Member networkRules $rules -Force
+                Write-RunnerJson $script:RunnerStatePath $current
+                $state = [pscustomobject]$current # Freeze the verified VM/MAC identity for later supervisor checks.
+            } finally { Exit-RunnerLock $mutex }
+            Start-SessionGuardian $state
+            Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
+            if (-not $preparing -and -not (Test-RunnerSessionDemand $Config $profile.label $PilotAttempt)) { return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' } }
+            $script:RunnerOperationStage = 'vm-boot'
+            Start-GuardedVm $state
+            Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
+            $script:RunnerOperationStage = 'guest-readiness'
+            $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
+            Wait-Guest $state $Config $profile.label
+            Write-Host ('Guest prerequisites ready in {0:N1}s for {1}.' -f $readinessWatch.Elapsed.TotalSeconds, $profile.label)
+            Assert-SessionAlive $state
+            Assert-CurrentRunnerNetworkRules $state
+            Test-GuestIsolation $state $Config
 
-        $script:RunnerOperationStage = 'runner-download'
-        $archiveWatch = [Diagnostics.Stopwatch]::StartNew()
-        $archive = Get-RunnerArchive $state
-        $sshArgs = Get-SshArgs $state
-        $script:RunnerOperationStage = 'runner-transfer'
-        $exitCode = Invoke-RunnerNative 'scp.exe' ($sshArgs + @($archive, "runner@$($Config.guestIp):/home/runner/runner.tar.gz"))
-        if ($exitCode -ne 0) { throw 'Runner archive transfer failed.' }
-        $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'mkdir -p ~/actions-runner && tar -xzf ~/runner.tar.gz -C ~/actions-runner && rm ~/runner.tar.gz'))
-        if ($exitCode -ne 0) { throw 'Runner archive extraction failed.' }
-        Write-Host ('Verified runner archive retrieval, transfer and extraction finished in {0:N1}s.' -f $archiveWatch.Elapsed.TotalSeconds)
-        Assert-SessionAlive $state
-        Assert-CurrentRunnerNetworkRules $state
+            if ($Purpose -ceq 'verify-image') {
+                $script:RunnerOperationStage = 'image-clone-readiness'
+                Assert-SessionAlive $state
+                $verified = Get-RunnerState
+                Assert-StateIdentity $verified
+                if ($verified.purpose -cne 'verify-image' -or $verified.vmName -cne $state.vmName -or
+                    [guid]$verified.vmId -ne [guid]$vm.Id -or
+                    $verified.guardianReady -ne $true -or -not (Test-RunnerProcessIdentity $verified.guardianPid $verified.guardianStartUtc) -or
+                    $verified.imageCandidate.id -cne $ImageCandidate.id -or $verified.imageCandidate.diskHash -cne $candidateReceipt.diskHash) { throw 'Image verifier session binding changed.' }
+                $verifiedVm = Get-VM -Id ([guid]$verified.vmId) -ErrorAction Stop
+                if ($verifiedVm.Name -cne $verified.vmName -or $verifiedVm.State -cne 'Running' -or $verifiedVm.Notes -cne $script:RunnerTag -or
+                    [IO.Path]::GetFullPath($verifiedVm.Path) -ine (Join-Path $instance $verified.vmName)) { throw 'Image verifier VM identity changed after readiness.' }
+                # The same fixed probe runs in each of two successive children.
+                # Reusing a written disk, or leaking writes into the parent, fails.
+                $markerCommand = 'sudo test ! -e /var/lib/it-inventory-clone-probe && sudo touch /var/lib/it-inventory-clone-probe && sudo test -f /var/lib/it-inventory-clone-probe'
+                if ((Invoke-RunnerNative 'ssh.exe' ((Get-SshArgs $state) + @("runner@$($Config.guestIp)", $markerCommand)) -TimeoutSeconds 15) -ne 0) { throw 'Fresh child marker isolation probe failed.' }
+                Assert-SessionAlive $state
+                $verificationReady = $true
+                Invoke-RunnerTransitionCheckpoint 'image-clone-ready'
+                return [pscustomobject]@{ schema = 1; candidateId = $ImageCandidate.id; diskHash = $candidateReceipt.diskHash
+                    bindingHash = $candidateReceipt.bindingHash; recipeId = $candidateReceipt.recipeId; bundleHash = $candidateReceipt.bundleHash
+                    purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = $image.lease.identity; markerProof = 'absent-then-written'
+                    preflightSeconds = $preflightSeconds; childCreationSeconds = $childWatch.Elapsed.TotalSeconds; sessionSeconds = $sessionWatch.Elapsed.TotalSeconds; vmName = $verified.vmName; vmId = $verified.vmId; guestMac = $verified.guestMac
+                    networkFingerprint = $verified.networkFingerprint
+                    sshPublicKeyHash = (Get-FileHash -LiteralPath (Join-Path $instance 'id_ed25519.pub') -Algorithm SHA256).Hash
+                    readiness = 'cloud-init-and-runner-prerequisites'; readyUtc = [DateTime]::UtcNow.ToString('o'); readinessSeconds = $readinessWatch.Elapsed.TotalSeconds }
+            }
+            if ($preparing) {
+                $script:RunnerOperationStage = 'image-preparation'
+                return Invoke-RunnerImageBuild ([pscustomobject]$state) $Config
+            }
 
-        # The repository-scoped PAT remains on Windows. Only the one-job JIT value enters the guest.
-        $token = Get-OwnerToken
-        $parts = $Config.repo.Split('/')
-        $script:RunnerOperationStage = 'jit-registration'
-        Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
-        # Recovery may wait for the whole outage episode. Demand evidence must
-        # be obtained after that wait, immediately before the one JIT intent.
-        Assert-SessionAlive $state
-        $admission = Get-RunnerJitAdmission $state
-        if ($Config.activation -eq 'pilot') {
-            $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
-            $evidence = Get-PilotEvidence $Config $attempt $token
-            if (-not (Test-QueuedRunnerJob $evidence.job $Config.pilotLabel)) { throw 'Bound pilot job is no longer queued before registration.' }
-        } elseif ($null -eq (Get-QueuedRunnerJob $Config $token -SessionProfileLabel $profile.label)) {
-            # Demand may have been canceled or taken during boot. The selected
-            # profile must still be queued; another profile cannot divert this VM.
+            $script:RunnerOperationStage = 'runner-download'
+            $archiveWatch = [Diagnostics.Stopwatch]::StartNew()
+            $archive = Get-RunnerArchive $state
+            $sshArgs = Get-SshArgs $state
+            $script:RunnerOperationStage = 'runner-transfer'
+            $exitCode = Invoke-RunnerNative 'scp.exe' ($sshArgs + @($archive, "runner@$($Config.guestIp):/home/runner/runner.tar.gz"))
+            if ($exitCode -ne 0) { throw 'Runner archive transfer failed.' }
+            $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", 'mkdir -p ~/actions-runner && tar -xzf ~/runner.tar.gz -C ~/actions-runner && rm ~/runner.tar.gz'))
+            if ($exitCode -ne 0) { throw 'Runner archive extraction failed.' }
+            Write-Host ('Verified runner archive retrieval, transfer and extraction finished in {0:N1}s.' -f $archiveWatch.Elapsed.TotalSeconds)
+            Assert-SessionAlive $state
+            Assert-CurrentRunnerNetworkRules $state
+
+            # The repository-scoped PAT remains on Windows. Only the one-job JIT value enters the guest.
+            $token = Get-OwnerToken
+            $parts = $Config.repo.Split('/')
+            $script:RunnerOperationStage = 'jit-registration'
+            Assert-RunnerGuestMac -VmName $name -ExpectedMac $guestMac.rawMac
+            # Recovery may wait for the whole outage episode. Demand evidence must
+            # be obtained after that wait, immediately before the one JIT intent.
+            Assert-SessionAlive $state
+            $admission = Get-RunnerJitAdmission $state
+            if ($Config.activation -eq 'pilot') {
+                $attempt = Read-RunnerJson (Join-Path $script:RunnerRoot 'pilot-attempt.json')
+                $evidence = Get-PilotEvidence $Config $attempt $token
+                if (-not (Test-QueuedRunnerJob $evidence.job $Config.pilotLabel)) { throw 'Bound pilot job is no longer queued before registration.' }
+            } elseif ($null -eq (Get-QueuedRunnerJob $Config $token -SessionProfileLabel $profile.label)) {
+                # Demand may have been canceled or taken during boot. The selected
+                # profile must still be queued; another profile cannot divert this VM.
+                $token = $null
+                return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
+            }
+            $launchId = [guid]::NewGuid().ToString('N')
+            [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId -Admission $admission -Config $Config)
+            $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
+                name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
+            } $token
             $token = $null
-            return [pscustomobject]@{ name = $name; id = $null; outcome = 'demand-withdrawn' }
-        }
-        $launchId = [guid]::NewGuid().ToString('N')
-        [void](Save-RunnerLaunchEvent $state 'intent' 0 $launchId -Admission $admission -Config $Config)
-        $jit = Invoke-GitHub "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions/runners/generate-jitconfig" 'POST' @{
-            name = $name; runner_group_id = $Config.runnerGroupId; labels = @(Get-RunnerJitLabels $Config $profile.label); work_folder = '_work'
-        } $token
-        $token = $null
-        if ($jit.runner.name -cne $name -or $null -eq $jit.runner.id -or [string]$jit.runner.id -cnotmatch '^[1-9][0-9]*$') {
-            throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
-        }
-        $runnerId = [long]$jit.runner.id
-        Assert-RunnerJitLabels $Config $jit.runner $profile.label
-        [void](Save-RunnerLaunchEvent $state 'registered' $runnerId)
-        if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$') { throw 'GitHub returned an invalid JIT runner configuration.' }
-        Assert-SessionAlive $state
-        Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
-        # The fixed JIT runner launches exactly once in a guest service. SSH is
-        # only dispatch/monitor transport; its loss never reruns the command.
-        $script:RunnerOperationStage = 'job-execution'
-        [void](Save-RunnerLaunchEvent $state 'dispatch')
-        $command = Get-RunnerDetachedCommand $image.prepared $launchId $runnerId
-        try {
-            $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $command)) $jit.encoded_jit_config -TimeoutSeconds 15
-            if ($exitCode -ne 0) { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
-        } catch { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
-        finally { $jit = $null }
-        Wait-DetachedRunner $state $Config
-        Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
-        return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
-    } catch {
-        $sessionFailure = $_
-        throw
-    } finally {
-        $verificationFailure = $null
-        if ($verificationReady) { try { Assert-SessionAlive $state } catch { $verificationFailure = $_ } }
-        $mutex = Enter-RunnerLock
-        try {
-            $current = Get-RunnerState
-            if ($verificationReady) {
-                if ($null -eq $current -or $current.vmName -cne $name -or [guid]$current.vmId -ne [guid]$vm.Id) { throw 'Verifier ownership was cancelled before cleanup.' }
+            if ($jit.runner.name -cne $name -or $null -eq $jit.runner.id -or [string]$jit.runner.id -cnotmatch '^[1-9][0-9]*$') {
+                throw 'GitHub returned an invalid or mismatched JIT runner configuration.'
             }
-            if ($null -ne $current -and $current.vmName -eq $name) {
-                Write-RunnerSessionFailureObservation $current $sessionFailure
-                if ($null -eq $sessionFailure) { Write-RunnerSessionFailureObservation $current $verificationFailure }
-                Remove-RunnerInstance $current
-            }
-            if ($null -ne $verificationFailure) { throw $verificationFailure }
+            $runnerId = [long]$jit.runner.id
+            Assert-RunnerJitLabels $Config $jit.runner $profile.label
+            [void](Save-RunnerLaunchEvent $state 'registered' $runnerId)
+            if ($jit.encoded_jit_config -notmatch '^[A-Za-z0-9+/=]+$') { throw 'GitHub returned an invalid JIT runner configuration.' }
+            Assert-SessionAlive $state
+            Write-Host "JIT runner $name is waiting for one GitHub job. Hard deadline: $($state.deadlineUtc) UTC."
+            # The fixed JIT runner launches exactly once in a guest service. SSH is
+            # only dispatch/monitor transport; its loss never reruns the command.
+            $script:RunnerOperationStage = 'job-execution'
+            [void](Save-RunnerLaunchEvent $state 'dispatch')
+            $command = Get-RunnerDetachedCommand $image.prepared $launchId $runnerId
+            try {
+                $exitCode = Invoke-RunnerNative 'ssh.exe' ($sshArgs + @("runner@$($Config.guestIp)", $command)) $jit.encoded_jit_config -TimeoutSeconds 15
+                if ($exitCode -ne 0) { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
+            } catch { [void](Save-RunnerLaunchEvent $state 'transport-lost') }
+            finally { $jit = $null }
+            Wait-DetachedRunner $state $Config
+            Write-Host 'Runner process ended; consult GitHub Actions for the actual job result.'
+            return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
         } catch {
-            Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
+            $sessionFailure = $_
             throw
-        } finally { Exit-RunnerLock $mutex }
+        } finally {
+            $verificationFailure = $null
+            if ($verificationReady) { try { Assert-SessionAlive $state } catch { $verificationFailure = $_ } }
+            $mutex = Enter-RunnerLock
+            try {
+                $current = Get-RunnerState
+                if ($verificationReady) {
+                    if ($null -eq $current -or $current.vmName -cne $name -or [guid]$current.vmId -ne [guid]$vm.Id) { throw 'Verifier ownership was cancelled before cleanup.' }
+                }
+                if ($null -ne $current -and $current.vmName -eq $name) {
+                    Write-RunnerSessionFailureObservation $current $sessionFailure
+                    if ($null -eq $sessionFailure) { Write-RunnerSessionFailureObservation $current $verificationFailure }
+                    Remove-RunnerInstance $current
+                }
+                if ($null -ne $verificationFailure) { throw $verificationFailure }
+            } catch {
+                Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
+                throw
+            } finally { Exit-RunnerLock $mutex }
+        }
+    } finally {
+        # Clear only this attempt, including preclaim failure and withdrawal.
+        # An expired abandoned scope must never poison later supervisor polls.
+        if ([object]::ReferenceEquals($script:RunnerImagePreflight, $preflightScope)) { $script:RunnerImagePreflight = $null }
     }
 }
 
 function Assert-RunnerPickupInspectionActive {
+    if ((Get-Variable RunnerImagePreflight -Scope Script -ErrorAction SilentlyContinue) -and $null -ne $script:RunnerImagePreflight -and
+        $script:RunnerImagePreflight.purpose -ceq 'job' -and [DateTime]::UtcNow -ge $script:RunnerImagePreflight.deadlineUtc) { throw 'Image preflight deadline reached during demand inspection.' }
     if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { throw 'Pickup suspension requested during read-only demand inspection.' }
+}
+
+function Test-RunnerSessionDemand($Config, [string] $ProfileLabel, $PilotAttempt = $null) {
+    $token = Get-OwnerToken
+    try {
+        if ($Config.activation -ceq 'pilot') {
+            $evidence = Get-PilotEvidence $Config $PilotAttempt $token -PickupInspection
+            return Test-QueuedRunnerJob $evidence.job $Config.pilotLabel
+        }
+        return $null -ne (Get-QueuedRunnerJob $Config $token -SessionProfileLabel $ProfileLabel)
+    } finally { $token = $null }
 }
 
 function Wait-RunnerPickupPoll([ValidateRange(1,30)][int] $Seconds = 30) {
@@ -1041,7 +1086,7 @@ function Invoke-Supervisor {
         }
         finally { Exit-RunnerLock $mutex }
         Invoke-SupervisorLoop
-    } finally { Exit-RunnerLock $supervisorMutex }
+    } finally { Close-RunnerImageLeases; Exit-RunnerLock $supervisorMutex }
 }
 
 function Get-RunnerMemoryAdmission([string] $ProfileLabel = 'it-inventory-ephemeral') {
@@ -1585,6 +1630,7 @@ try { switch ($Action) {
         $config = Get-RunnerConfig
         $state = Get-RunnerState
         Show-RunnerImageStatus $config
+        Show-RunnerImageProgress
         $supervisor = Get-ScheduledTask -TaskName $script:RunnerSupervisorTask -ErrorAction SilentlyContinue
         if ($null -eq $state) { Write-Host "Supervisor: $($supervisor.State). Idle. Activation: $($config.activation)." }
         else {

@@ -42,10 +42,11 @@ function Start-SessionGuardian($State) {
     $binding = [pscustomobject]@{ vmId = $current.vmId; vmName = $current.vmName; claimHash = Get-RunnerRecoveryClaimHash $current }
     $current | Add-Member networkRecovery (New-RunnerNetworkRecovery $binding ('a' * 64) ([DateTime]::Parse($current.deadlineUtc).ToUniversalTime()) ([DateTime]::UtcNow)) -Force
     Write-RunnerJson $script:RunnerStatePath $current
+    if ($script:case -ceq 'withdraw-before-boot') { $script:jobs[0].status = 'completed' }
 }
 function Change-GuardianDuringDemand {
     $current = Get-RunnerState
-    if ($null -eq $current -or $script:case -notmatch 'lookup$') { return }
+    if ($null -eq $current -or $script:case -notmatch 'lookup$' -or $script:RunnerOperationStage -cne 'jit-registration') { return }
     switch -Regex ($script:case) {
         'recovery-lookup$' { $current.networkRecovery.phase = 'isolated'; $current.guardianReady = $false }
         'dead-guardian-lookup$' { $current.guardianStartUtc = [DateTime]::UtcNow.AddYears(-1).ToString('o') }
@@ -64,7 +65,21 @@ function Assert-SessionAlive($State) {
         else { $script:jobs[0].status = 'completed' }
     }
 }
-function Get-RunnerImageSelection($Config) { return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $script:case -ceq 'prepared' } }
+function Assert-InstalledHost {
+    $script:preflights++
+    if ($script:case -ceq 'preflight-failed') {
+        $script:abandonedPreflight = $script:RunnerImagePreflight
+        $script:abandonedPreflight.deadlineUtc = [DateTime]::UtcNow.AddSeconds(-1)
+        throw 'Fixture failed preclaim image verification.'
+    }
+}
+function Copy-Item { $script:copies++ }
+function Start-GuardedVm { $script:boots++ }
+function Get-RunnerImageSelection($Config) {
+    $script:images++
+    if ($script:case -ceq 'withdraw-before-copy') { $script:jobs[0].status = 'completed' }
+    return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $script:case -ceq 'prepared' }
+}
 function Wait-Guest {
     param($State, $Config, $ProfileLabel)
     if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Selected profile did not reach guest readiness.' }
@@ -148,7 +163,7 @@ try {
     $script:runCount = 1; $script:jobCount = 101
     Assert-Rejected { Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy' }
     $script:jobCount = 1
-    foreach ($case in @('cancelled', 'recovery-cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow', 'recovery-lookup', 'dead-guardian-lookup', 'not-ready-lookup', 'expired-lookup', 'new-generation-lookup', 'dispatch-quarantining', 'dispatch-isolated', 'dispatch-applying', 'dispatch-verified', 'dispatch-connecting', 'dispatch-resuming', 'dispatch-probing')) {
+    foreach ($case in @('preflight-failed', 'withdraw-before-image', 'withdraw-before-copy', 'withdraw-before-boot', 'cancelled', 'recovery-cancelled', 'incompatible', 'lower', 'same', 'prepared', 'unexpected-readback', 'overflow', 'recovery-lookup', 'dead-guardian-lookup', 'not-ready-lookup', 'expired-lookup', 'new-generation-lookup', 'dispatch-quarantining', 'dispatch-isolated', 'dispatch-applying', 'dispatch-verified', 'dispatch-connecting', 'dispatch-resuming', 'dispatch-probing')) {
         # Independent synthetic sessions have independent fixture lifetimes.
         # Repeated admission below deliberately retains its previous barrier.
         $registrationPath = Join-Path $base 'jit-registration.json'
@@ -156,8 +171,13 @@ try {
         $script:allocations = 0; $script:cleanups = 0; $script:jits = 0; $script:nativeCalls = 0; $script:recoveryWaits = 0
         $script:lookupChanges = 0; $script:intentPresent = $false
         $script:dispatchChanges = 0
+        $script:preflights = 0; $script:images = 0; $script:copies = 0; $script:boots = 0
         $script:badReadback = $case -eq 'unexpected-readback'
         $script:jobs = switch ($case) {
+            'preflight-failed' { New-Job 1 'it-inventory-heavy' }
+            'withdraw-before-image' { New-Job 1 'it-inventory-heavy' 'completed' }
+            'withdraw-before-copy' { New-Job 1 'it-inventory-heavy' }
+            'withdraw-before-boot' { New-Job 1 'it-inventory-heavy' }
             'cancelled' { New-Job 1 'it-inventory-heavy' }
             'recovery-cancelled' { New-Job 1 'it-inventory-heavy' }
             'incompatible' { New-Job 1 'it-inventory-heavy' }
@@ -174,13 +194,24 @@ try {
                     (Read-RunnerJson $registrationPath).phase -cne 'handed-off') { throw 'Dispatch red fixture did not reach the registered mutex race and SSH.' }
                 throw 'Quarantine before dispatch mutex still sent SSH in the actual session.'
             }
-        } elseif ($case -in @('unexpected-readback', 'overflow') -or $case -match 'lookup$') { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
+        } elseif ($case -in @('preflight-failed', 'unexpected-readback', 'overflow') -or $case -match 'lookup$') { Assert-Rejected { Invoke-RunnerSession $config $null 'it-inventory-heavy' } }
         else {
             $result = Invoke-RunnerSession $config $null 'it-inventory-heavy'
             if ($case -in @('same', 'prepared')) { if ($result.id -ne 42 -or $result.outcome -cne 'runner-exited' -or $script:jits -ne 1 -or $script:nativeCalls -ne 3) { throw 'Exact profile demand did not execute the actual session.' } }
-            elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne 2) { throw 'Withdrawn demand registered or executed an idle JIT.' }
+            elseif ($result.outcome -cne 'demand-withdrawn' -or $script:jits -ne 0 -or $script:nativeCalls -ne $(if ($case -in @('lower','withdraw-before-image','withdraw-before-copy','withdraw-before-boot')) { 0 } else { 2 })) { throw "Withdrawn demand registered or executed an idle JIT ($case)." }
         }
-        if ($script:allocations -ne 1 -or $script:cleanups -ne 1 -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw 'Session did not perform its owned cleanup.' }
+        $early = $case -in @('preflight-failed','lower','overflow','withdraw-before-image')
+        $expectedAllocations = if ($early -or $case -ceq 'withdraw-before-copy') { 0 } else { 1 }
+        $expectedCleanups = if ($early) { 0 } else { 1 }
+        if ($script:allocations -ne $expectedAllocations -or $script:cleanups -ne $expectedCleanups -or (Test-Path -LiteralPath $script:RunnerStatePath)) { throw "Session did not perform its owned cleanup ($case)." }
+        if ($early -and ($script:preflights -ne $(if ($case -ceq 'preflight-failed') { 1 } else { 0 }) -or $script:images -or $script:copies -or $script:boots)) { throw 'Withdrawn demand reached expensive image work.' }
+        if ($null -ne $script:RunnerImagePreflight) { throw 'Attempt leaked its preflight deadline into later queue polling.' }
+        if ($case -in @('preflight-failed','withdraw-before-image','withdraw-before-copy')) {
+            $script:jobs = @((New-Job 1 'it-inventory-heavy'))
+            if ($null -eq (Get-QueuedRunnerJob $config 'fixture' -SessionProfileLabel 'it-inventory-heavy')) { throw 'Abandoned attempt blocked a later valid queue lookup.' }
+        }
+        if ($case -ceq 'withdraw-before-copy' -and $script:copies -ne 0) { throw 'Withdrawn demand copied a disk.' }
+        if ($case -ceq 'withdraw-before-boot' -and $script:boots -ne 0) { throw 'Withdrawn demand booted a VM.' }
         if ($case -ceq 'recovery-cancelled' -and $script:recoveryWaits -ne 1) { throw 'Cancellation did not occur at the pre-JIT recovery wait.' }
         if ($case -match 'lookup$' -and ($script:lookupChanges -ne 1 -or $script:jits -ne 0 -or $script:intentPresent -or $script:nativeCalls -ne 2)) { throw 'Changed guardian during queued evidence admitted JIT intent or launch.' }
         if ($case -cmatch '^dispatch-' -and ($script:dispatchChanges -ne 1 -or $script:jits -ne 1 -or $script:nativeCalls -ne 2 -or

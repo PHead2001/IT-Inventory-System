@@ -96,6 +96,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell JIT registration barr
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Runner.Latency.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell runner latency regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Image.Lease.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell image lease regression failed.' }
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Network.Recovery.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Network.Recovery.Tests.ps1 failed.' }
