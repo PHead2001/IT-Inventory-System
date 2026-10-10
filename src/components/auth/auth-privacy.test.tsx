@@ -17,6 +17,7 @@ import { useEffect, useState, type ComponentProps } from 'react';
 import { PrivateRestorationGate } from './privacy-readiness';
 import { invalidateAssignmentPrivacy } from '@/features/scan/assign-batch';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import { HistoryList } from '@/features/inventory/components/read-ui';
 const protectedBinding = {
   actorId: 'original-actor',
   backend: 'https://isolated.supabase.co',
@@ -1105,4 +1106,77 @@ it('does not admit initial opaque consumers after an external revocation denies 
   expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledWith(
     protectedBinding,
   );
+});
+
+it('distinguishes an outgoing history disclosure from its incoming page during held route admission', async () => {
+  const location = {
+    id: 'shelf',
+    code: 'ITC-S1A',
+    name: '1A',
+    breadcrumb: 'IT Closet / Shelf 1 / 1A',
+    active: true,
+    can_hold_inventory: true,
+    parentId: null,
+  };
+  const event = {
+    id: 'archive',
+    kind: 'quantity' as const,
+    entityId: 'item',
+    entityName: 'Adapters',
+    eventType: 'archived',
+    at: '2026-10-10T12:00:00Z',
+    actorName: 'Staff',
+    reason: 'Removed obsolete item',
+    assignment: null,
+    lines: [{ location, delta: -12, before: 12, after: 0 }],
+    fromLocation: null,
+    toLocation: null,
+    metadataChanges: [],
+    customMetadataPresent: false,
+    customMetadataChanged: false,
+  };
+  routing.pathname = '/inventory/quantity/item';
+  const view = render(
+    <ProtectedTestBoundary>
+      <article>
+        <h1>Quantity item details</h1>
+        <HistoryList compact events={[event]} />
+      </article>
+    </ProtectedTestBoundary>,
+  );
+  await screen.findByRole('heading', { name: 'Quantity item details' });
+  const oldDisclosure = screen.getByText('View event details');
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  routing.pathname = '/history';
+  view.rerender(
+    <ProtectedTestBoundary>
+      <section>
+        <h1>Inventory history</h1>
+        <form aria-label="Filter history" />
+        <HistoryList compact events={[event]} />
+      </section>
+    </ProtectedTestBoundary>,
+  );
+  expect(
+    screen.queryByRole('heading', { name: 'Inventory history' }),
+  ).not.toBeInTheDocument();
+  expect(oldDisclosure).toBeVisible();
+  fireEvent.click(oldDisclosure);
+  expect(screen.getByText('Removed 12 units across 1 location.')).toBeVisible();
+  await act(async () => finish({ status: 'absent' }));
+  expect(
+    await screen.findByRole('heading', { name: 'Inventory history' }),
+  ).toBeVisible();
+  expect(screen.getByRole('form', { name: 'Filter history' })).toBeVisible();
+  expect(oldDisclosure).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Removed 12 units across 1 location.'),
+  ).not.toBeVisible();
+  fireEvent.click(screen.getByText('View event details'));
+  expect(screen.getByText('Removed 12 units across 1 location.')).toBeVisible();
 });
