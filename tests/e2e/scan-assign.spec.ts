@@ -238,9 +238,10 @@ test('generated labels inspect and explicitly assign a repeat quantity and an as
       page.getByLabel('Preferred storage source (optional)'),
     ).toContainText(inactiveSource.code);
     await expect(
-      page.getByText(
-        'Availability refreshed. Review the source and units before confirming.',
-      ),
+      page.getByRole('status').filter({
+        hasText:
+          /^Availability refreshed\. Review the source and units before confirming\.$/,
+      }),
     ).toBeVisible();
     expect(await eventCount()).toBe(0);
     await page
@@ -513,8 +514,11 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     await page.getByLabel('Scan, paste, or search inventory').press('Enter');
     await intercepted; // Prove the real read is held before cancelling it.
     await expect(
-      page.getByText('Inspecting equipment…', { exact: true }),
+      page.getByRole('form', { name: 'Inspect equipment' }).getByRole('status'),
     ).toBeVisible();
+    await expect(
+      page.getByRole('form', { name: 'Inspect equipment' }).getByRole('status'),
+    ).toHaveText('Inspecting equipment…');
     await expect(
       page.getByRole('form', { name: 'Inspect equipment' }),
     ).toHaveAttribute('aria-busy', 'true');
@@ -739,10 +743,10 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
         // the enclosing Flight stream's EOF can hang after the action resolves.
         await expect(inspection).toHaveAttribute('aria-busy', 'false');
         await expect(
-          page.getByText(
-            'Availability refreshed. Review the source and units before confirming.',
-            { exact: true },
-          ),
+          page.getByRole('status').filter({
+            hasText:
+              /^Availability refreshed\. Review the source and units before confirming\.$/,
+          }),
         ).toBeVisible();
         await expect(cancel).toHaveText('Skip inspection / review');
         // These checks happen with the mouse still held. Review focus must not
@@ -910,7 +914,13 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     await page
       .getByRole('button', { name: 'Confirm assign', exact: true })
       .click();
-    await expect(page.getByText(/Nothing was submitted\./)).toBeVisible();
+    const blockedAssignment = page.getByRole('alert').filter({
+      hasText: /^This assignment could not be saved\./,
+    });
+    await expect(blockedAssignment).toBeVisible();
+    await expect(blockedAssignment).toHaveText(
+      'This assignment could not be saved. Keep the review open and retry when browser storage is available. Nothing was submitted.',
+    );
     expect(await count()).toBe(1);
     await page.evaluate(() =>
       (
@@ -964,9 +974,10 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
       .getByRole('button', { name: 'Confirm assign', exact: true })
       .click();
     await expect(
-      page.getByText(
-        /Assignment confirmed\. Reload to finish updating this batch/,
-      ),
+      page.getByRole('alert').filter({
+        hasText:
+          /^Assignment confirmed\. Reload to finish updating this batch before assigning more\.$/,
+      }),
     ).toBeVisible();
     expect(await count()).toBe(3);
     await page.reload(); // Clear-only reconciliation must not issue a new mutation.

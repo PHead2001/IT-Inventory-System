@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -1142,6 +1143,51 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
     mocks.submit.mock.calls[0][0].requestId,
   );
 });
+it('keeps a new blocked-assignment alert distinct from retained interrupted-inspection history', async () => {
+  mocks.find.mockReturnValueOnce(new Promise(() => {}));
+  const interrupted = render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: candidate.path },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await waitFor(() => expect(mocks.find).toHaveBeenCalledOnce());
+  interrupted.unmount();
+  render(<AssignmentWorkspace {...props} />);
+  const checklist = screen.getByRole('region', { name: 'Batch checklist' });
+  expect(
+    within(checklist).getByText(
+      'Inspection interrupted before confirmation. Nothing was submitted.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await inspect();
+  const set = Storage.prototype.setItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith('inventory-assign-v1:')) throw new Error('quota');
+      set.call(this, key, value);
+    });
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /^This assignment could not be saved\. Keep the review open and retry when browser storage is available\. Nothing was submitted\.$/,
+    );
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(checklist).toHaveTextContent(
+      'Inspection interrupted before confirmation. Nothing was submitted.',
+    );
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toBeVisible();
+    expect(readBatch(scope).value?.entries).toHaveLength(2);
+    expect(readBatch(scope).value?.entries[0].status).toBe('skipped');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  } finally {
+    blocked.mockRestore();
+  }
+});
 it('does not submit if durable storage fails and preserves success if only terminal cleanup fails', async () => {
   const view = render(<AssignmentWorkspace {...props} />);
   await inspect();
@@ -1151,7 +1197,9 @@ it('does not submit if durable storage fails and preserves success if only termi
       throw new Error('quota');
     });
   fireEvent.click(screen.getByRole('button', { name: 'Confirm assign' }));
-  await screen.findByText(/Nothing was submitted/);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    /^This assignment could not be saved\. Keep the review open and restore browser storage access\. Nothing was submitted\.$/,
+  );
   expect(mocks.submit).not.toHaveBeenCalled();
   store.mockRestore();
   const remove = vi
