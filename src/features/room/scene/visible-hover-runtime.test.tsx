@@ -9,16 +9,104 @@ import {
   Raycaster,
   Vector3,
 } from 'three';
-const mocks = vi.hoisted(() => ({ three: vi.fn(), frame: vi.fn() }));
+import {
+  createSceneEffectsStore,
+  type SceneEffectsStore,
+} from './scene-effects-state';
+const mocks = vi.hoisted(() => ({
+  three: vi.fn(),
+  frame: vi.fn(),
+  effects: null as SceneEffectsStore | null,
+}));
 vi.mock('@react-three/fiber', () => ({
   useThree: mocks.three,
   useFrame: mocks.frame,
 }));
+vi.mock('./scene-effects-context', () => ({
+  useOptionalSceneEffects: () => mocks.effects,
+}));
 import { VisibleHoverTracker } from './visible-hover-runtime';
 
 afterEach(() => {
+  mocks.effects = null;
   vi.restoreAllMocks();
   document.body.replaceChildren();
+});
+it('retains only a visual latch during its own lift while actual hover clears, then refreshes on pointer/camera/other geometry changes', () => {
+  const canvas = document.createElement('canvas');
+  document.body.append(canvas);
+  vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 200,
+    height: 200,
+  } as DOMRect);
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => canvas,
+  });
+  const scene = new Group(),
+    mesh = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+  mesh.userData.roomHoverTarget = { code: 'ITC-D01', label: 'Drawer 1' };
+  scene.add(mesh);
+  const camera = new OrthographicCamera();
+  const raycast = vi.spyOn(Raycaster.prototype, 'intersectObjects');
+  const hit = [
+    { object: mesh, distance: 1, point: new Vector3() },
+  ] as ReturnType<Raycaster['intersectObjects']>;
+  raycast.mockReturnValue(hit);
+  const effects = createSceneEffectsStore('hover-test');
+  mocks.effects = effects;
+  effects.registerVisual('drawer', 'ITC-D01', scene);
+  mocks.three.mockReturnValue({
+    camera,
+    gl: { domElement: canvas },
+    scene,
+    invalidate: vi.fn(),
+  });
+  const onHit = vi.fn();
+  render(
+    <VisibleHoverTracker
+      showAllLabels={false}
+      retainDuringLabelHandoff={false}
+      onHit={onHit}
+      onCanvasLeave={vi.fn()}
+    />,
+  );
+  const pointer = () =>
+    act(() =>
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { clientX: 50, clientY: 50 }),
+      ),
+    );
+  const frame = () =>
+    act(() => (mocks.frame.mock.calls.at(-1)?.[0] as () => void)());
+  pointer();
+  expect(effects.getSnapshot().hoverCode).toBe('ITC-D01');
+  const finish = effects.beginCasterMotion('hover:drawer', 'drawer', true);
+  raycast.mockReturnValue([]);
+  frame();
+  expect(onHit).toHaveBeenLastCalledWith(null);
+  expect(canvas.style.cursor).toBe('auto');
+  expect(canvas.dataset.hoverVisibleCode).toBe('');
+  expect(effects.getSnapshot().hoverCode).toBe('ITC-D01');
+  finish();
+  frame();
+  expect(effects.getSnapshot().hoverCode).toBe('ITC-D01');
+  pointer();
+  expect(effects.getSnapshot().hoverCode).toBeNull();
+  raycast.mockReturnValue(hit);
+  pointer();
+  raycast.mockReturnValue([]);
+  camera.position.x += 10;
+  frame();
+  expect(effects.getSnapshot().hoverCode).toBeNull();
+  raycast.mockReturnValue(hit);
+  pointer();
+  raycast.mockReturnValue([]);
+  effects.beginCasterMotion('reveal:other', 'other');
+  frame();
+  expect(effects.getSnapshot().hoverCode).toBeNull();
 });
 it('retains its own hover button handoff but clears hover and cursor behind unrelated opaque overlays', () => {
   const host = document.createElement('div');

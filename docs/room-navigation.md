@@ -98,7 +98,84 @@ SpacesWorkspace enables one uncached /api/room/occupancy request with space and 
 
 Navigation, page return, window focus and visibility restoration refresh enabled counts and selected contents; returning from an inventory operation reloads both. Refresh inventory provides an explicit retry. These are snapshots, not realtime occupancy: another session's changes appear on refresh/return. The contents row total remains active holding/asset entries, whereas the badge distinguishes products, units and assets; the reads may observe separate concurrent commits.
 
-Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. A reusable baked contact-alpha footprint and clipped floor grid add depth without dynamic shadow passes. Only controls, relevant hover changes, bounded focus transitions and the brief Full-motion pulse request extra frames. Nonessential pulses stop offscreen or in a hidden document. No heavy postprocessing or idle camera animation is needed. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
+Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. Nonessential pulses stop offscreen or in a hidden document. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
+
+## Scene effects and cached grounding
+
+One scene-session effects owner tracks actual furniture mesh and light references,
+caster motion, selection, quality and capture revisions. Each mesh registration
+contains the scene generation, scene node ID and stable logical location code.
+Hitboxes, labels, edges, the room envelope, floor and effect helpers are excluded.
+Registry identity prevents stale cleanup from removing a newer registration.
+
+Fine-pointer Full motion lifts only the visual child by 0.1 inch in local Z over
+120 ms and brightens its edge. The measured parent, logical child hierarchy and
+stationary logical hitboxes remain unchanged. Body decorations and label origins
+follow the lift. Reduced motion keeps the static edge cue. A separate visual hover
+latch survives the object's own lift; actual pointer movement, camera changes,
+selection or other geometry refresh it. It never supplies click eligibility or
+tooltip visibility, which still use the nearest actual visible surface.
+
+Selected-only bloom is lazy-loaded inside the existing Canvas through pinned
+`@react-three/postprocessing` 3.1.3 and `postprocessing` 6.39.5. The isolated
+Suspense/error boundary and actual composer render guard retain ordinary selection,
+labels and picking after import, allocation, shader, framebuffer or render failure.
+Only exact selected mesh references or the existing authorized aggregate descendant
+representation enter its reserved layer; hover does not. The composer uses zero
+multisampling, no normal pass, a depth buffer and half-resolution non-mipmap bloom.
+The core selective effect retains full-scene depth masking. The wrapper runs at
+priority 1 with `autoRenderToScreen=false`; it never draws a composed base image to
+the screen. At priority 2, exactly one ordinary scene draw uses the raw ACES,
+exposure and output color configuration captured before the wrapper mounts. A
+separate fullscreen overlay then adds only the selected bloom effect's texture
+from the same successful frame. It encodes the bloom contribution alone, applies
+intensity once and preserves destination alpha. Zero intensity, missing textures,
+failed or skipped composer frames cannot add stale glow. There is no fullscreen
+ToneMapping effect, base-image sampling or base-color transformation. Actual
+effects-off/on color equivalence still requires GPU visual proof.
+
+Composer success and failure restore target/cube face/mip, viewport/scissor/test,
+clear color/alpha and all auto-clear flags, tone mapping/exposure/output space,
+camera layers, scene background/override material, shadow enabled/auto-update and
+XR state in a finally block before the raw draw. The raw draw/overlay also restore
+their frame-entry wrapper state afterward. If the package's global material-swap
+workaround is unexpectedly enabled, bloom fails gracefully without changing that
+global setting. The wrapper owns the composer, effect and bloom texture; the
+overlay owns and disposes only its geometry/material/isolated scene.
+
+The contact adapter owns a 512-square floor capture, one intermediate target,
+depth material and separable blur resources. It copies actual caster world matrices
+into an isolated capture scene and shares source geometry without disposing it.
+Capture consists of one depth render and two blur passes. A finally block restores
+the renderer target, viewport, scissor, clear state and XR state after success or
+failure. Failure disposes owned resources and stops retrying. Room replacement and
+unmount dispose the resources as well.
+
+The contact cache key contains scene generation, geometry registration revision,
+settled caster revision, palette revision and shadow quality. Any caster motion,
+including the previous selection closing or a hover lift, immediately hides the
+old map. A single capture follows all settled transforms; motion frames do not
+capture. Camera, counts, label packing and bloom changes do not dirty floor-space
+contacts. Resting container alpha footprints have been removed, so moving bodies
+cannot leave those shadows behind. Small static corner patches remain during the
+dirty interval; there is no SSAO pass or continuous shadow light.
+
+Palette updates reread the existing supported hex/rgb root tokens after coalesced
+`documentElement` class/style/data-theme mutations or System color-scheme changes.
+Only changed color values advance the revision. Unsupported updates retain the last
+supported palette; cleanup discards queued reads and removes observers/listeners.
+W12 must commit root palette tokens before invalidating the scene. Theme changes do
+not replace the Canvas, and a change during motion captures only the latest settled
+geometry and palette. Integrated Light/Dark visual tuning remains required.
+
+The narrow `effectsQuality` input accepts standard, low or off. Low disables bloom;
+off also disables contact captures. Measured fallback samples only adjacent frames
+actually requested by camera or body/pulse activity, excludes idle gaps, capture
+frames and startup/lazy-composer warmup, and latches bloom off after two consecutive
+60-frame windows with p95 above 25 ms. This initial threshold needs reference-runtime
+tuning. Renderer names do not infer capability. `SCENE_EFFECTS.intensity` centrally
+scales reveal, hover, selection and grounding. Effects consume demand frames and
+request only bounded initialization/change/settling frames; none owns an idle loop.
 
 ## Validation
 
@@ -113,6 +190,20 @@ Input regression tests must exercise actual browser event ownership: passive pag
 Spatial performance acceptance compares baseline and candidate with matching browser/renderer, build mode, viewport, DPR and active interactions. Record graphics readiness, real draw-bearing frames or browser traces, interaction frame intervals and settled idle work; requestAnimationFrame callbacks alone are not rendered frames or GPU timing. Software rendering and emulated touch do not certify hardware frame rates or a physical phone. The general navigation performance gate does not by itself prove renderer readiness.
 
 For focused browser iteration use `npm run test:e2e -- tests/e2e/room.spec.ts`. This still builds with the local public backend environment. Final certification remains fresh `npm ci` followed by the complete `npm run validate`, exact-head CI, fresh Codex review and the configured nonproduction preview smoke.
+
+W15/W16 focused pure/component tests cover actual registry filtering, supersession,
+hover pre-frame reversal, Reduced/coarse endpoints, cache coalescing across old/new
+body motion, renderer-state restoration after failed blur, owned disposal and
+latched composer failures. Authored browser journeys use independent exposed
+triangles and passive actual mesh/resource/render counters to check hover ownership,
+selected/aggregate bloom, live palette updates, camera/count cache reuse, settled
+idle and resource plateaus. These journeys are not a browser pass until executed.
+Acceptance additionally requires blocked-object bloom/occlusion inspection, both
+themes, quality/failure controls, room/mount cycles and matched warmed effects-off/on
+camera/reveal traces on recorded reference hardware. Record active median/p95,
+capture spikes separately, viewport/DPR, exposure/output and actual renderer/runtime.
+Software rendering can prove behavior but cannot establish GPU performance or a
+claim of no measurable frame-time regression.
 
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.

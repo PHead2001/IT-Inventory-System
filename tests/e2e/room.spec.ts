@@ -17,6 +17,7 @@ import {
   observeRoomScene,
   captureRoomWitness,
   captureRoomReveal,
+  captureRoomEffects,
   roomWitnessCodeAtPoint,
   roomVisibilityWitnesses,
   roomVisibilityWitnessReport,
@@ -380,6 +381,178 @@ async function ready(page: Page) {
   await expect(viewer.locator('canvas')).toBeVisible();
   return viewer;
 }
+
+test('scene effects retain actual surface ownership and stop drawing after settled selection and palette changes', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  await ready(page);
+  const canvas = page.locator('[data-room-surface] canvas');
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const initial = await captureRoomEffects(page);
+  expect(initial.bloomStatus).toBe('unselected');
+  await canvas.evaluate((element) => {
+    element.dataset.effectsIdentityWitness = 'original';
+  });
+  await keyboardRoomLocation(page, 'ITC-RED');
+  await settledReveal(page, 'ITC-RED');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const opened = await captureRoomEffects(page);
+  expect(opened.bloomCodes).toEqual(['ITC-RED']);
+  expect(opened.bloomMeshes).toBeGreaterThan(1);
+  expect(opened.contactCaptures).toBe(initial.contactCaptures + 1);
+  const targets = await uncoveredRoomWitnesses(
+    page,
+    roomVisibilityWitnesses(await captureRoomWitness(page)),
+  );
+  const point = targets.get('ITC-RED');
+  expect(point, 'Independent exposed container surface').toBeDefined();
+  await page.mouse.move(point!.x, point!.y);
+  await expect(canvas).toHaveAttribute('data-visual-hover-code', 'ITC-RED');
+  await expect
+    .poll(async () =>
+      Object.values((await captureRoomEffects(page)).hoverOffsets).some(
+        (offset) => Math.abs(offset[1] - 0.1) < 0.0001,
+      ),
+    )
+    .toBe(true);
+  const visibleOwner = roomWitnessCodeAtPoint(
+    await captureRoomWitness(page),
+    point!,
+  );
+  await expect(canvas).toHaveAttribute(
+    'data-hover-visible-code',
+    visibleOwner ?? '',
+  );
+  await page.mouse.move(0, 0);
+  await expect
+    .poll(async () =>
+      Object.values((await captureRoomEffects(page)).hoverOffsets).every(
+        (offset) => offset[1] === 0,
+      ),
+    )
+    .toBe(true);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  const beforeCamera = await captureRoomEffects(page);
+  await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await settledLabels(page);
+  await page
+    .getByRole('button', { name: 'Show item counts', exact: true })
+    .click();
+  await settledLabels(page);
+  expect((await captureRoomEffects(page)).contactCaptures).toBe(
+    beforeCamera.contactCaptures,
+  );
+  const originalStyle = await page.locator('html').getAttribute('style');
+  // This exercises live token lifecycle, not acceptance of the forthcoming Light theme tuning.
+  await page.locator('html').evaluate((root) => {
+    root.style.setProperty('--room-canvas-background', '#f4f6f8');
+    root.style.setProperty('--room-grid', '#8793a4');
+  });
+  await expect
+    .poll(async () => (await captureRoomEffects(page)).paletteRevision)
+    .toBeGreaterThan(beforeCamera.paletteRevision);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await keyboardRoomLocation(page, 'ITC-D07');
+  await settledReveal(page, 'ITC-D07');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  expect((await captureRoomEffects(page)).bloomCodes).toEqual(['ITC-D07']);
+  await keyboardRoomLocation(page, 'ITC-L');
+  await settledReveal(page, 'ITC-L');
+  await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+  const aggregate = await captureRoomEffects(page);
+  expect(aggregate.bloomCodes.length).toBeGreaterThan(1);
+  expect(
+    aggregate.bloomCodes.every((code) =>
+      /^ITC-(S[12][ABC]|D0[1-6])$/.test(code),
+    ),
+  ).toBe(true);
+  await page.locator('html').evaluate((root, style) => {
+    if (style === null) root.removeAttribute('style');
+    else root.setAttribute('style', style);
+  }, originalStyle);
+  await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+  await expect(canvas).toHaveAttribute(
+    'data-effects-identity-witness',
+    'original',
+  );
+  await page.waitForTimeout(750);
+  const idleStart = await captureRoomEffects(page);
+  await page.waitForTimeout(500);
+  const idleEnd = await captureRoomEffects(page);
+  expect([
+    idleEnd.sceneFrames,
+    idleEnd.composerFrames,
+    idleEnd.drawFrame,
+    idleEnd.contactCaptures,
+  ]).toEqual([
+    idleStart.sceneFrames,
+    idleStart.composerFrames,
+    idleStart.drawFrame,
+    idleStart.contactCaptures,
+  ]);
+  await testInfo.attach('scene-effects-behavior', {
+    body: JSON.stringify({ initial, opened, aggregate, idleStart, idleEnd }),
+    contentType: 'application/json',
+  });
+});
+
+test('scene effects resources plateau across repeated settled selection and palette cycles', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await observeRoomScene(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await login(page);
+  await page.goto('/room?space=it-closet');
+  await ready(page);
+  const canvas = page.locator('[data-room-surface] canvas');
+  const originalStyle = await page.locator('html').getAttribute('style');
+  const samples: Awaited<ReturnType<typeof captureRoomEffects>>[] = [];
+  for (let cycle = 0; cycle < 10; cycle++) {
+    for (const code of ['ITC-RED', 'ITC-D07']) {
+      await keyboardRoomLocation(page, code);
+      await settledReveal(page, code);
+      await expect(canvas).toHaveAttribute('data-bloom-status', 'active');
+    }
+    const previous = (await captureRoomEffects(page)).paletteRevision;
+    await page
+      .locator('html')
+      .evaluate(
+        (root, light) =>
+          root.style.setProperty(
+            '--room-canvas-background',
+            light ? '#f4f6f8' : '#101827',
+          ),
+        cycle % 2 === 0,
+      );
+    await expect
+      .poll(async () => (await captureRoomEffects(page)).paletteRevision)
+      .toBeGreaterThan(previous);
+    await expect(canvas).toHaveAttribute('data-contact-status', 'cached');
+    samples.push(await captureRoomEffects(page));
+  }
+  const warm = samples[3].memory,
+    final = samples.at(-1)!.memory;
+  expect(final.geometries).toBeLessThanOrEqual(warm.geometries);
+  expect(final.textures).toBeLessThanOrEqual(warm.textures);
+  expect(final.programs).toBeLessThanOrEqual(warm.programs + 1);
+  await page.locator('html').evaluate((root, style) => {
+    if (style === null) root.removeAttribute('style');
+    else root.setAttribute('style', style);
+  }, originalStyle);
+  await testInfo.attach('scene-effects-resource-cycles', {
+    body: JSON.stringify(samples),
+    contentType: 'application/json',
+  });
+});
 
 async function keyboardRoomLocation(page: Page, code: string) {
   const browser = page.getByRole('navigation', { name: 'Location browser' });

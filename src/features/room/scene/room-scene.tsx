@@ -14,6 +14,7 @@ import {
 } from 'react';
 import {
   Group,
+  ACESFilmicToneMapping,
   MathUtils,
   OrthographicCamera,
   Raycaster,
@@ -53,6 +54,14 @@ import {
   SelectionEdges,
 } from './scene-palette';
 import { SceneDepth } from './scene-depth';
+import {
+  SceneEffectsProvider,
+  useOptionalSceneEffects,
+  useVisualHoverCode,
+} from './scene-effects-context';
+import { SceneEffectsOwner } from './scene-effects-owner';
+import { HoveredBody } from './hovered-body';
+import type { EffectsQuality } from './scene-effects-state';
 import { RoomLabel } from './room-label';
 import {
   occupiedLocation,
@@ -88,6 +97,7 @@ export type RoomSceneProps = {
   locationNames?: Record<string, string>;
   locationOccupancy?: RoomOccupancy;
   showCounts?: boolean;
+  effectsQuality?: EffectsQuality;
   onCountsChange?: (show: boolean) => void;
   bindings: RoomBinding[];
   selectedCode: string | null;
@@ -384,6 +394,8 @@ export function RevealedBody({
   const group = useRef<Group>(null);
   const { scene, invalidate } = useThree();
   const reduced = useEffectiveReducedMotion();
+  const effects = useOptionalSceneEffects();
+  const finishMotion = useRef<(() => void) | null>(null);
   const motion = useRef<{ from: Vector3; to: Vector3; started: number } | null>(
     null,
   );
@@ -395,12 +407,21 @@ export function RevealedBody({
     // A reconciled endpoint always supersedes the previous animation, even
     // when it already equals the body's current position before its first frame.
     motion.current = null;
+    finishMotion.current?.();
+    finishMotion.current = null;
     if (!group.current) return;
     const to = open ? offset : new Vector3();
+    const moves = group.current.position.distanceToSquared(to) > 1e-8;
     if (reduced || (open && settle)) {
+      const finish = moves
+        ? effects?.beginCasterMotion(`reveal:${node.id}`, node.id)
+        : null;
       group.current.position.copy(to);
       scene.updateMatrixWorld(true);
-    } else if (group.current.position.distanceToSquared(to) > 1e-8) {
+      finish?.();
+    } else if (moves) {
+      finishMotion.current =
+        effects?.beginCasterMotion(`reveal:${node.id}`, node.id) ?? null;
       motion.current = {
         from: group.current.position.clone(),
         to,
@@ -408,7 +429,14 @@ export function RevealedBody({
       };
     }
     invalidate();
-  }, [open, settle, reduced, offset, scene, invalidate]);
+  }, [open, settle, reduced, offset, scene, invalidate, effects, node.id]);
+  useEffect(
+    () => () => {
+      motion.current = null;
+      finishMotion.current?.();
+    },
+    [],
+  );
   useFrame(() => {
     if (!motion.current || !group.current) return;
     const current = motion.current;
@@ -422,7 +450,11 @@ export function RevealedBody({
       1 - Math.pow(1 - t, 3),
     );
     scene.updateMatrixWorld(true);
-    if (t === 1) motion.current = null;
+    if (t === 1) {
+      motion.current = null;
+      finishMotion.current?.();
+      finishMotion.current = null;
+    }
     // One last frame permits hover/label drivers to observe the endpoint.
     invalidate();
   }, -2);
@@ -465,6 +497,7 @@ function NodeVisual({
   revealSettled: boolean;
 }) {
   const { camera, scene, gl } = useThree();
+  const visualHoverCode = useVisualHoverCode();
   const pointerOwner = useRef<{
     code: string | null;
     pointerId: number;
@@ -559,99 +592,103 @@ function NodeVisual({
             open={node.locationCode === openCode}
             settle={revealSettled}
           >
-            <mesh>
-              <boxGeometry args={toSceneSize(node.size)} />
-              <SelectionMaterial
-                color={node.visual?.color ?? '#475569'}
-                selected={selected}
-                dimmed={hasRenderedSelection && !selected}
-                hovered={hoveredCode === node.locationCode}
-                opacity={node.visual?.opacity ?? 1}
-              />
-              {(node.visual?.edges || selected) && (
-                <SelectionEdges
+            <HoveredBody node={node}>
+              <mesh>
+                <boxGeometry args={toSceneSize(node.size)} />
+                <SelectionMaterial
+                  color={node.visual?.color ?? '#475569'}
                   selected={selected}
-                  dimmed={hasRenderedSelection}
+                  dimmed={hasRenderedSelection && !selected}
+                  hovered={hoveredCode === node.locationCode}
+                  opacity={node.visual?.opacity ?? 1}
                 />
-              )}
-            </mesh>
-            {node.visual?.style === 'drawer' && (
-              <Solid
-                position={[
-                  (node.interaction?.labelAnchor?.[0] ?? 1) > 0
-                    ? node.size[0] / 2 + 0.3
-                    : -node.size[0] / 2 - 0.3,
-                  0,
-                  0,
-                ]}
-                size={[0.6, node.size[1] * 0.3, 0.6]}
-                color="#cbd5e1"
-              />
-            )}
-            {node.visual?.style === 'container' && (
-              <Solid
-                position={[0, 0, node.size[2] / 2 - 0.4]}
-                size={[node.size[0], node.size[1], 0.8]}
-                color={node.visual.color}
-              />
-            )}
-            {node.visual?.style === 'rack' && (
-              <group>
+                {(node.visual?.edges || selected) && (
+                  <SelectionEdges
+                    selected={selected}
+                    dimmed={hasRenderedSelection}
+                    hovered={node.locationCode === visualHoverCode}
+                  />
+                )}
+              </mesh>
+              {node.visual?.style === 'drawer' && (
                 <Solid
-                  position={[0, -node.size[1] / 2 - 0.15, 0]}
-                  size={[node.size[0] - 3, 0.3, node.size[2] - 4]}
-                  color="#334155"
-                />
-                {profiles.map((profile, index) => (
-                  <Solid
-                    key={profile.id}
-                    position={[
-                      0,
-                      -node.size![1] / 2 - 0.35,
-                      node.size![2] / 2 - 8 - index * 8,
-                    ]}
-                    size={[
-                      Math.min(profile.width, node.size![0] - 2),
-                      0.5,
-                      profile.height,
-                    ]}
-                    color={index % 2 === 0 ? '#94a3b8' : '#64748b'}
-                  />
-                ))}
-                {[0, 1, 2, 3, 4, 5].map((index) => (
-                  <Solid
-                    key={index}
-                    position={[
-                      0,
-                      -node.size![1] / 2 - 0.35,
-                      -node.size![2] / 2 + 8 + index * 4,
-                    ]}
-                    size={[node.size![0] - 6, 0.5, 1]}
-                    color="#0f172a"
-                  />
-                ))}
-              </group>
-            )}
-            {interactive &&
-              (node.locationCode === selectedCode ||
-                showAllLabels ||
-                (showCounts &&
-                  occupiedLocation(locationOccupancy?.[node.locationCode!]) !==
-                    null)) && (
-                <CameraFacingLabel
-                  node={node}
-                  label={label}
-                  size={node.size}
-                  prioritySelected={node.locationCode === selectedCode}
-                  hovered={node.locationCode === hoveredCode}
-                  occupancy={
-                    showCounts || node.locationCode === openCode
-                      ? locationOccupancy?.[node.locationCode!]
-                      : undefined
-                  }
-                  onSelect={onSelect}
+                  position={[
+                    (node.interaction?.labelAnchor?.[0] ?? 1) > 0
+                      ? node.size[0] / 2 + 0.3
+                      : -node.size[0] / 2 - 0.3,
+                    0,
+                    0,
+                  ]}
+                  size={[0.6, node.size[1] * 0.3, 0.6]}
+                  color="#cbd5e1"
                 />
               )}
+              {node.visual?.style === 'container' && (
+                <Solid
+                  position={[0, 0, node.size[2] / 2 - 0.4]}
+                  size={[node.size[0], node.size[1], 0.8]}
+                  color={node.visual.color}
+                />
+              )}
+              {node.visual?.style === 'rack' && (
+                <group>
+                  <Solid
+                    position={[0, -node.size[1] / 2 - 0.15, 0]}
+                    size={[node.size[0] - 3, 0.3, node.size[2] - 4]}
+                    color="#334155"
+                  />
+                  {profiles.map((profile, index) => (
+                    <Solid
+                      key={profile.id}
+                      position={[
+                        0,
+                        -node.size![1] / 2 - 0.35,
+                        node.size![2] / 2 - 8 - index * 8,
+                      ]}
+                      size={[
+                        Math.min(profile.width, node.size![0] - 2),
+                        0.5,
+                        profile.height,
+                      ]}
+                      color={index % 2 === 0 ? '#94a3b8' : '#64748b'}
+                    />
+                  ))}
+                  {[0, 1, 2, 3, 4, 5].map((index) => (
+                    <Solid
+                      key={index}
+                      position={[
+                        0,
+                        -node.size![1] / 2 - 0.35,
+                        -node.size![2] / 2 + 8 + index * 4,
+                      ]}
+                      size={[node.size![0] - 6, 0.5, 1]}
+                      color="#0f172a"
+                    />
+                  ))}
+                </group>
+              )}
+              {interactive &&
+                (node.locationCode === selectedCode ||
+                  showAllLabels ||
+                  (showCounts &&
+                    occupiedLocation(
+                      locationOccupancy?.[node.locationCode!],
+                    ) !== null)) && (
+                  <CameraFacingLabel
+                    node={node}
+                    label={label}
+                    size={node.size}
+                    prioritySelected={node.locationCode === selectedCode}
+                    hovered={node.locationCode === hoveredCode}
+                    occupancy={
+                      showCounts || node.locationCode === openCode
+                        ? locationOccupancy?.[node.locationCode!]
+                        : undefined
+                    }
+                    onSelect={onSelect}
+                  />
+                )}
+            </HoveredBody>
           </RevealedBody>
         </group>
       )}
@@ -1670,69 +1707,82 @@ export default function RoomScene(props: RoomSceneProps) {
           frameloop="demand"
           dpr={[1, 1.5]}
           camera={{ near: 0.1, far: 3000, position: [200, 300, 300], zoom: 1 }}
-          gl={{ antialias: true, alpha: false, powerPreference: 'low-power' }}
+          gl={{
+            antialias: true,
+            alpha: false,
+            powerPreference: 'low-power',
+            toneMapping: ACESFilmicToneMapping,
+          }}
           fallback={
             <p>Graphics are unavailable. Use the location controls below.</p>
           }
         >
           <ScenePaletteProvider>
-            <ScenePaletteLighting />
-            <LabelLayoutProvider registry={registry}>
-              <LabelLayoutDriver registry={registry} />
-              <SceneDepth room={props.room} />
-              <Envelope
-                room={props.room}
-                onRecenter={() => requestCommand('recenter')}
-                canRecenter={(delta) =>
-                  floorDoubleClickAllowed(
-                    delta,
-                    manualGesture.current.active,
-                    manualGesture.current.lastMotionAt,
-                    performance.now(),
-                  )
-                }
-                showAllLabels={showAllLabels}
-              />
-              {props.room.nodes.map((node) => (
-                <NodeVisual
-                  key={node.id}
-                  node={node}
-                  locationNames={props.locationNames}
-                  selectedCode={props.selectedCode}
-                  hasRenderedSelection={renderedSelection}
-                  highlighted={highlighted}
-                  onSelect={props.onSelect}
-                  profiles={props.room.rackFaceProfiles}
+            <SceneEffectsProvider room={props.room}>
+              <ScenePaletteLighting />
+              <LabelLayoutProvider registry={registry}>
+                <LabelLayoutDriver registry={registry} />
+                <SceneDepth room={props.room} />
+                <Envelope
+                  room={props.room}
+                  onRecenter={() => requestCommand('recenter')}
+                  canRecenter={(delta) =>
+                    floorDoubleClickAllowed(
+                      delta,
+                      manualGesture.current.active,
+                      manualGesture.current.lastMotionAt,
+                      performance.now(),
+                    )
+                  }
                   showAllLabels={showAllLabels}
-                  hoveredCode={activeHover?.target.code ?? null}
-                  locationOccupancy={props.locationOccupancy}
-                  showCounts={showCounts}
-                  canSelect={canSelect}
-                  openCode={reveal.openCode}
-                  revealSettled={reveal.phase === 'settled'}
                 />
-              ))}
-              <CameraRig
-                {...props}
-                onFailure={handleFailure}
-                revealController={revealController}
-                command={command}
-                orbitMode={orbitMode}
-                manualGesture={manualGesture}
-                active={active}
-                selectionGesture={selectionGesture}
-                onDraggingChange={setDragging}
-                onPassiveDrag={showDragHint}
-              />
-              <VisibleHoverTracker
-                showAllLabels={showAllLabels}
-                active={active}
-                suspended={active && dragging}
-                retainDuringLabelHandoff={retainDuringLabelHandoff}
-                onHit={onVisibleHover}
-                onCanvasLeave={onCanvasHoverLeave}
-              />
-            </LabelLayoutProvider>
+                {props.room.nodes.map((node) => (
+                  <NodeVisual
+                    key={node.id}
+                    node={node}
+                    locationNames={props.locationNames}
+                    selectedCode={props.selectedCode}
+                    hasRenderedSelection={renderedSelection}
+                    highlighted={highlighted}
+                    onSelect={props.onSelect}
+                    profiles={props.room.rackFaceProfiles}
+                    showAllLabels={showAllLabels}
+                    hoveredCode={activeHover?.target.code ?? null}
+                    locationOccupancy={props.locationOccupancy}
+                    showCounts={showCounts}
+                    canSelect={canSelect}
+                    openCode={reveal.openCode}
+                    revealSettled={reveal.phase === 'settled'}
+                  />
+                ))}
+                <CameraRig
+                  {...props}
+                  onFailure={handleFailure}
+                  revealController={revealController}
+                  command={command}
+                  orbitMode={orbitMode}
+                  manualGesture={manualGesture}
+                  active={active}
+                  selectionGesture={selectionGesture}
+                  onDraggingChange={setDragging}
+                  onPassiveDrag={showDragHint}
+                />
+                <VisibleHoverTracker
+                  showAllLabels={showAllLabels}
+                  active={active}
+                  suspended={active && dragging}
+                  retainDuringLabelHandoff={retainDuringLabelHandoff}
+                  onHit={onVisibleHover}
+                  onCanvasLeave={onCanvasHoverLeave}
+                />
+                <SceneEffectsOwner
+                  room={props.room}
+                  selectedCode={props.selectedCode}
+                  highlightedCodes={props.highlightedCodes}
+                  quality={props.effectsQuality}
+                />
+              </LabelLayoutProvider>
+            </SceneEffectsProvider>
           </ScenePaletteProvider>
         </Canvas>
         {activeHover?.needsTooltip && (

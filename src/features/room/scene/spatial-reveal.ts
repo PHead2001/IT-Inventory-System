@@ -1,10 +1,11 @@
 import type { RoomDefinition, RoomNode } from '../schema';
 import type { RoomBinding } from '../bindings';
+import { SCENE_EFFECTS } from './scene-effects-state';
 
 export const SPATIAL_MOTION = Object.freeze({
   flightMs: 750,
   revealMs: 400,
-  intensity: 1,
+  intensity: SCENE_EFFECTS.intensity,
 });
 export type FocusRequest = Readonly<{
   code: string | null;

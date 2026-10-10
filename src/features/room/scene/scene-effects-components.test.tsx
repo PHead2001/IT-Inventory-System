@@ -1,0 +1,336 @@
+import { act, render } from '@testing-library/react';
+import {
+  Fragment,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  type ReactNode,
+  type Ref,
+} from 'react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import {
+  BoxGeometry,
+  Color,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  Scene,
+  Texture,
+  type MeshBasicMaterialParameters,
+} from 'three';
+import type { RoomDefinition, RoomNode } from '../schema';
+import {
+  createSceneEffectsStore,
+  type SceneEffectsStore,
+} from './scene-effects-state';
+import { HoveredBody } from './hovered-body';
+import { CachedContactShadows } from './cached-contact-shadows';
+
+const state = vi.hoisted(() => ({
+  store: null as unknown as SceneEffectsStore,
+  three: null as unknown,
+  frame: null as (() => void) | null,
+  group: null as Group | null,
+  receiver: null as Mesh | null,
+  fine: true,
+  reduced: false,
+  paletteRevision: 0,
+  palette: null as unknown as { background: Color; grid: Color },
+  resource: null as unknown as {
+    texture: Texture;
+    capture: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  },
+}));
+vi.mock('@react-three/fiber', () => ({
+  useThree: () => state.three,
+  useFrame: (callback: () => void) => {
+    state.frame = callback;
+  },
+}));
+vi.mock('./scene-effects-context', () => ({
+  useOptionalSceneEffects: () => state.store,
+  useSceneEffects: () => state.store,
+  useVisualHoverCode: () => state.store.getSnapshot().hoverCode,
+}));
+vi.mock('@/components/experience/motion-preference', () => ({
+  useEffectiveReducedMotion: () => state.reduced,
+}));
+vi.mock('./scene-palette', () => ({
+  useScenePalette: () => state.palette,
+  useScenePaletteRevision: () => state.paletteRevision,
+}));
+vi.mock('./contact-capture', () => ({
+  createContactCapture: () => state.resource,
+}));
+
+function GroupProbe({
+  ref,
+  children,
+}: {
+  ref: Ref<Group>;
+  children: ReactNode;
+}) {
+  const group = useMemo(() => {
+    const result = new Group();
+    result.add(new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial()));
+    return result;
+  }, []);
+  useImperativeHandle(ref, () => group, [group]);
+  useLayoutEffect(() => {
+    state.group = group;
+  }, [group]);
+  return children;
+}
+function ReceiverProbe({
+  ref,
+  children,
+}: {
+  ref: Ref<Mesh>;
+  children: ReactNode;
+}) {
+  const mesh = useMemo(() => {
+    const result = new Mesh(new PlaneGeometry(2, 2), new MeshBasicMaterial());
+    result.visible = false;
+    return result;
+  }, []);
+  useImperativeHandle(ref, () => mesh, [mesh]);
+  useLayoutEffect(() => {
+    state.receiver = mesh;
+  }, [mesh]);
+  return children;
+}
+function MaterialProbe({
+  ref,
+  ...props
+}: MeshBasicMaterialParameters & { ref: Ref<MeshBasicMaterial> }) {
+  const material = useMemo(() => new MeshBasicMaterial(props), [props]);
+  useImperativeHandle(ref, () => material, [material]);
+  return null;
+}
+vi.mock('react/jsx-runtime', async () => {
+  const actual =
+    await vi.importActual<typeof import('react/jsx-runtime')>(
+      'react/jsx-runtime',
+    );
+  return {
+    ...actual,
+    jsx: (...args: Parameters<typeof actual.jsx>) => {
+      if (args[0] === 'group') args[0] = GroupProbe;
+      if (args[0] === 'mesh') args[0] = ReceiverProbe;
+      if (args[0] === 'meshBasicMaterial') args[0] = MaterialProbe;
+      if (args[0] === 'planeGeometry') args[0] = Fragment;
+      return actual.jsx(...args);
+    },
+  };
+});
+vi.mock('react/jsx-dev-runtime', async () => {
+  const actual = await vi.importActual<typeof import('react/jsx-dev-runtime')>(
+    'react/jsx-dev-runtime',
+  );
+  return {
+    ...actual,
+    jsxDEV: (...args: Parameters<typeof actual.jsxDEV>) => {
+      if (args[0] === 'group') args[0] = GroupProbe;
+      if (args[0] === 'mesh') args[0] = ReceiverProbe;
+      if (args[0] === 'meshBasicMaterial') args[0] = MaterialProbe;
+      if (args[0] === 'planeGeometry') args[0] = Fragment;
+      return actual.jsxDEV(...args);
+    },
+  };
+});
+
+const node: RoomNode = {
+  id: 'drawer',
+  kind: 'box',
+  locationCode: 'ITC-D01',
+  position: [0, 0, 0],
+  rotationZDegrees: 0,
+  size: [16, 12, 6],
+  interaction: {
+    selectable: true,
+    primaryBinding: true,
+    label: 'Drawer 1',
+    focusPoint: [0, 0, 0],
+  },
+};
+const room = {
+  roomId: 'test-room',
+  dimensions: [100, 100, 96],
+} as unknown as RoomDefinition;
+let canvas: HTMLCanvasElement;
+let now: number;
+let invalidate: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  now = 0;
+  canvas = document.createElement('canvas');
+  invalidate = vi.fn();
+  state.three = { scene: new Scene(), gl: { domElement: canvas }, invalidate };
+  state.store = createSceneEffectsStore('room:1');
+  state.fine = true;
+  state.reduced = false;
+  state.group = state.receiver = null;
+  state.frame = null;
+  state.paletteRevision = 0;
+  state.palette = {
+    background: new Color('#07111f'),
+    grid: new Color('#355168'),
+  };
+  state.resource = {
+    texture: new Texture(),
+    capture: vi.fn(),
+    dispose: vi.fn(),
+  };
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      media: query,
+      matches: state.fine,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: () => true,
+    })),
+  );
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+function frame(at: number) {
+  now = at;
+  act(() => state.frame?.());
+}
+function hover() {
+  return <HoveredBody node={node}>{null}</HoveredBody>;
+}
+
+it('lifts only the visual body by 0.1 inches on a fine full-motion pointer, then stops demand frames', () => {
+  state.store.reconcileHover('ITC-D01', true);
+  render(hover());
+  expect(state.store.getSnapshot().casterMotions).toBe(1);
+  expect(state.store.getCasters()).toHaveLength(1);
+  frame(121);
+  expect(state.group?.position.y).toBeCloseTo(0.1);
+  expect(state.store.getSnapshot().casterMotions).toBe(0);
+  invalidate.mockClear();
+  frame(600);
+  expect(invalidate).not.toHaveBeenCalled();
+  expect(node.position).toEqual([0, 0, 0]);
+});
+it('cancels both pre-first-frame hover reversals without continuing the obsolete animation', () => {
+  const view = render(hover());
+  state.store.reconcileHover('ITC-D01', true);
+  view.rerender(hover());
+  state.store.clearHover();
+  view.rerender(hover());
+  invalidate.mockClear();
+  frame(300);
+  expect(state.group?.position.y).toBe(0);
+  expect(invalidate).not.toHaveBeenCalled();
+  state.store.reconcileHover('ITC-D01', true);
+  view.rerender(hover());
+  frame(421);
+  state.store.clearHover();
+  view.rerender(hover());
+  state.store.reconcileHover('ITC-D01', true);
+  view.rerender(hover());
+  invalidate.mockClear();
+  frame(900);
+  expect(state.group?.position.y).toBeCloseTo(0.1);
+  expect(invalidate).not.toHaveBeenCalled();
+});
+it('does not lift on coarse pointers and immediately returns a running lift to rest under Reduced motion', () => {
+  state.fine = false;
+  state.store.reconcileHover('ITC-D01', true);
+  const view = render(hover());
+  frame(500);
+  expect(state.group?.position.y).toBe(0);
+  state.fine = true;
+  view.rerender(hover());
+  frame(560);
+  expect(state.group!.position.y).toBeGreaterThan(0);
+  state.reduced = true;
+  view.rerender(hover());
+  expect(state.group?.position.y).toBe(0);
+  expect(state.store.getSnapshot().casterMotions).toBe(0);
+  invalidate.mockClear();
+  frame(1000);
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+function registerCaster() {
+  const group = new Group();
+  group.add(new Mesh(new BoxGeometry(), new MeshBasicMaterial()));
+  state.store.registerVisual('red', 'ITC-RED', group);
+}
+it('hides the old contact map immediately and captures once only after all opening, closing and hover casters settle', () => {
+  registerCaster();
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(state.receiver?.visible).toBe(true);
+  const closing = state.store.beginCasterMotion('reveal:old', 'old');
+  const opening = state.store.beginCasterMotion('reveal:red', 'red');
+  const lift = state.store.beginCasterMotion('hover:red', 'red', true);
+  expect(state.receiver?.visible).toBe(false);
+  frame(100);
+  closing();
+  frame(200);
+  opening();
+  frame(300);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  lift();
+  frame(400);
+  expect(state.resource.capture).toHaveBeenCalledTimes(2);
+  expect(state.receiver?.visible).toBe(true);
+  invalidate.mockClear();
+  frame(1000);
+  frame(2000);
+  expect(state.resource.capture).toHaveBeenCalledTimes(2);
+  expect(invalidate).not.toHaveBeenCalled();
+  view.unmount();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+});
+it('coalesces palette changes during motion to the latest settled capture and ignores non-caster activities', () => {
+  registerCaster();
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  const finish = state.store.beginCasterMotion('reveal:red', 'red');
+  state.paletteRevision = 1;
+  view.rerender(<CachedContactShadows room={room} quality="standard" />);
+  frame(100);
+  state.paletteRevision = 2;
+  view.rerender(<CachedContactShadows room={room} quality="standard" />);
+  frame(200);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  finish();
+  frame(400);
+  expect(state.resource.capture).toHaveBeenCalledTimes(2);
+  const camera = state.store.beginActivity('camera-and-counts');
+  frame(500);
+  camera();
+  frame(600);
+  expect(state.resource.capture).toHaveBeenCalledTimes(2);
+  expect(canvas.dataset.contactCacheKey).toContain(':2:standard');
+});
+it('latches capture failure, disposes owned resources and never retries on subsequent demand frames', () => {
+  registerCaster();
+  state.resource.capture.mockImplementation(() => {
+    throw new Error('GPU');
+  });
+  render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  frame(3);
+  frame(400);
+  expect(state.receiver?.visible).toBe(false);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+});

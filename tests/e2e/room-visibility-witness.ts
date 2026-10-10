@@ -306,6 +306,80 @@ export async function captureRoomReveal(page: Page) {
   });
 }
 
+/** Passive effects/ref/resource observation; never renders or mutates the scene. */
+export async function captureRoomEffects(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      '[data-room-surface] canvas',
+    );
+    const states = [...(window.__roomWitnessStores ?? [])]
+      .map((store) => store.getState())
+      .filter((state) => state.gl.domElement === canvas);
+    if (states.length !== 1 || !canvas)
+      throw new Error('Expected one committed effects scene');
+    const { scene, gl } = states[0];
+    const hoverOffsets: Record<string, number[]> = {};
+    const bloomCodes = new Set<string>();
+    let bloomMeshes = 0,
+      contactVisible = false;
+    scene.traverse((object) => {
+      const hoverId: unknown = object.userData.roomHoverVisualNode;
+      if (typeof hoverId === 'string')
+        hoverOffsets[hoverId] = object.position.toArray();
+      if (object.userData.roomContactReceiver) contactVisible = object.visible;
+      if (
+        !('isMesh' in object) ||
+        !object.isMesh ||
+        !(object.layers.mask & (1 << 11))
+      )
+        return;
+      bloomMeshes++;
+      for (
+        let parent: import('three').Object3D | null = object;
+        parent;
+        parent = parent.parent
+      ) {
+        const code: unknown = parent.userData.roomHoverTarget?.code;
+        if (typeof code === 'string') {
+          bloomCodes.add(code);
+          break;
+        }
+      }
+    });
+    return {
+      hoverOffsets,
+      bloomCodes: [...bloomCodes].sort(),
+      bloomMeshes,
+      contactVisible,
+      contactCaptures: Number(canvas.dataset.contactCaptures ?? 0),
+      contactStatus: canvas.dataset.contactStatus ?? '',
+      bloomStatus: canvas.dataset.bloomStatus ?? '',
+      paletteRevision: Number(canvas.dataset.paletteRevision ?? 0),
+      sceneFrames: Number(canvas.dataset.sceneEffectFrames ?? 0),
+      composerFrames: Number(canvas.dataset.composerFrames ?? 0),
+      drawFrame: gl.info.render.frame,
+      memory: {
+        geometries: gl.info.memory.geometries,
+        textures: gl.info.memory.textures,
+        programs: gl.info.programs?.length ?? 0,
+      },
+      qualityEvidence: canvas.dataset.effectsQualityEvidence ?? '',
+      runtime: {
+        userAgent: navigator.userAgent,
+        dpr: gl.getPixelRatio(),
+        width: gl.domElement.width,
+        height: gl.domElement.height,
+        exposure: gl.toneMappingExposure,
+        toneMapping: gl.toneMapping,
+        outputColorSpace: gl.outputColorSpace,
+        rawToneMapping: canvas.dataset.rawSceneToneMapping,
+        rawExposure: canvas.dataset.rawSceneExposure,
+        rawOutputColorSpace: canvas.dataset.rawSceneOutputColorSpace,
+      },
+    };
+  });
+}
+
 /** Independent first actual triangle at one stationary screen point, including unbound blockers. */
 export function roomWitnessCodeAtPoint(
   snapshot: WitnessSnapshot,
