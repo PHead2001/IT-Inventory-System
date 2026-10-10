@@ -75,7 +75,7 @@ try {
     function Write-EventLog {}
     function Start-Sleep {
         param($Seconds)
-        if ($Seconds -ne 30) { throw 'Capacity refusal did not use bounded loop.' }
+        if ($Seconds -ne 1) { throw 'Capacity refusal did not use stop-aware bounded loop.' }
         $script:sleeps++
         [IO.File]::WriteAllText((Join-Path $script:RunnerRoot 'stop.requested'), 'stop')
     }
@@ -105,16 +105,16 @@ try {
     function Get-QueuedRunnerJob { return $null }
     function Start-Sleep {
         param($Seconds)
-        if ($Seconds -ne 30) { throw 'Capacity retry changed its bounded interval.' }
+        if ($Seconds -ne 1) { throw 'Capacity retry changed its stop-aware bounded interval.' }
         $script:sleeps++
-        if ($script:recoverCapacity -and $script:sleeps -eq 1) {
-            $script:probeResult.FreePhysicalMemory = [uint64](10GB / 1KB)
+        if ($script:recoverCapacity -and $script:sleeps -le 30) {
+            if ($script:sleeps -eq 30) { $script:probeResult.FreePhysicalMemory = [uint64](10GB / 1KB) }
         } else { [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
     }
     foreach ($case in @(
         @{ free = (10GB / 1KB); recover = $false; sleeps = 1 },
         @{ free = (10GB / 1KB + 1); recover = $false; sleeps = 1 },
-        @{ free = (9GB / 1KB); recover = $true; sleeps = 2 }
+        @{ free = (9GB / 1KB); recover = $true; sleeps = 31 }
     )) {
         $script:probeResult = [pscustomobject]@{ FreePhysicalMemory = [uint64]$case.free; TotalVisibleMemorySize = [uint64](32GB / 1KB) }
         $script:recoverCapacity = $case.recover

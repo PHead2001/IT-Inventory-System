@@ -38,10 +38,12 @@ function Invoke-GitHub {
 }
 function Start-Sleep {
     param($Seconds)
-    if ($Seconds -ne 30 -or $script:sleeps -ne 0) { throw 'Capacity recovery lost its bounded backoff.' }
+    if ($Seconds -ne 1 -or $script:sleeps -ge 30) { throw 'Capacity recovery lost its stop-aware bounded backoff.' }
     $script:sleeps++
-    $script:blocked = Read-RunnerJson (Join-Path $base 'controller-observation.json')
-    $script:freeBytes = 7GB
+    if ($script:sleeps -eq 30) {
+        $script:blocked = Read-RunnerJson (Join-Path $base 'controller-observation.json')
+        $script:freeBytes = 7GB
+    }
 }
 function Invoke-RunnerSession {
     param($Config,$PilotAttempt,$ProfileLabel)
@@ -54,7 +56,7 @@ function Write-Host { param($Object) $script:messages.Add([string]$Object) }
 function Write-EventLog { throw 'Capacity waiting fabricated a failure.' }
 try {
     Invoke-SupervisorLoop
-    if ($script:sleeps -ne 1 -or $script:sessions -ne 1 -or (Test-Path -LiteralPath (Join-Path $base 'last-error.json'))) { throw 'Heavy capacity did not resume automatically without failure/duplicate allocation.' }
+    if ($script:sleeps -ne 30 -or $script:sessions -ne 1 -or (Test-Path -LiteralPath (Join-Path $base 'last-error.json'))) { throw 'Heavy capacity did not resume automatically after a complete poll budget without failure/duplicate allocation.' }
     if ($script:blocked.outcome -cne 'waiting-capacity' -or $script:blocked.availableBytes -ne ([decimal]6.5*1GB)) { throw 'A blocked heavy queue was misreported as idle.' }
     $heavy = @($script:blocked.profiles | Where-Object label -CEQ 'it-inventory-heavy')[0]
     if ($heavy.observedQueued -ne 1 -or $heavy.ready -or $heavy.requiredBytes -ne 7GB -or $heavy.hostReserveBytes -ne 1GB) { throw 'Blocked queue observation lost its profile count/capacity.' }

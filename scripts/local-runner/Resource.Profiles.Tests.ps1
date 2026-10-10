@@ -90,6 +90,10 @@ function Invoke-GitHub {
     if ($Uri -match '/runs/12/jobs\?') { return [pscustomobject]@{ total_count = $script:jobs.Count; jobs = $script:jobs } }
     throw 'Unexpected profile API probe.'
 }
+$base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-profiles-' + [guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($base)
+$script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
+try {
 foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 7GB; id = 1 }, @{ free = ([decimal]7.76 * 1GB); id = 1 })) {
     $selected = Get-QueuedRunnerJob $config 'dummy' $case.free
     if ($selected.id -ne $case.id -or $selected.resourceLabel -cne $selected.labels[1]) { throw 'Capacity traversal failed to skip a nonfitting job.' }
@@ -97,10 +101,6 @@ foreach ($case in @(@{ free = 4GB; id = 3 }, @{ free = 6GB; id = 2 }, @{ free = 
 if ($null -ne (Get-QueuedRunnerJob $config 'dummy' (4GB - 1KB))) { throw 'Queue admitted insufficient host headroom.' }
 $script:jobs = @((New-Job 4 'it-inventory-ephemeral'), (New-Job 3 'it-inventory-light'))
 if ((Get-QueuedRunnerJob $config 'dummy' 4GB).id -ne 3 -or (Get-QueuedRunnerJob $config 'dummy' 10GB).id -ne 4) { throw 'Legacy generic capacity changed.' }
-$base = Join-Path ([IO.Path]::GetTempPath()) ('ITIR-profiles-' + [guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($base)
-$script:RunnerRoot = $base; $script:RunnerStatePath = Join-Path $base 'state.json'
-try {
     $legacy = [pscustomobject]@{ tag = $script:RunnerTag; vmName = ('ITIR-' + ('c' * 32)); instancePath = (Join-Path $base ('ITIR-' + ('c' * 32))) }
     Assert-StateIdentity $legacy # Recovery must not require newly introduced profile fields.
     Complete-RunnerPilotClaim $legacy
@@ -109,7 +109,7 @@ try {
     function Get-RunnerState { return $null }
     function Get-OwnerToken { return 'dummy' }
     function Write-EventLog {}
-    function Start-Sleep { param($Seconds) if ($Seconds -ne 30) { throw 'Profile loop changed its wait interval.' }; [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
+    function Start-Sleep { param($Seconds) if ($Seconds -ne 1) { throw 'Profile loop changed its stop-aware wait interval.' }; [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop') }
     function Invoke-RunnerSession {
         param($Config, $PilotAttempt, $ProfileLabel)
         if ($ProfileLabel -cne 'it-inventory-light' -or $null -ne $PilotAttempt) { throw 'Selected profile was not propagated to its session.' }

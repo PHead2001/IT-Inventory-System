@@ -211,7 +211,7 @@ try {
         return [pscustomobject]@{ outcome = 'demand-withdrawn' }
     }
     function Start-Sleep($Seconds) {
-        if ($Seconds -ne 30) { throw 'Supervisor backoff changed.' }
+        if ($Seconds -ne 1) { throw 'Supervisor stop-aware backoff changed.' }
         $script:loopSleeps++
         [IO.File]::WriteAllText((Join-Path $base 'stop.requested'), 'stop')
     }

@@ -803,7 +803,20 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
     }
 }
 
-function Get-PilotEvidence($Config, $Binding, [string] $Token) {
+function Assert-RunnerPickupInspectionActive {
+    if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { throw 'Pickup suspension requested during read-only demand inspection.' }
+}
+
+function Wait-RunnerPickupPoll([ValidateRange(1,30)][int] $Seconds = 30) {
+    # Preserve the poll budget while allowing a suspension marker to end idle
+    # backoff. Never cancel an in-flight registration/receipt/provider operation.
+    for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
+        if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
+        Start-Sleep -Seconds 1
+    }
+}
+
+function Get-PilotEvidence($Config, $Binding, [string] $Token, [switch] $PickupInspection) {
     Assert-PilotConfig $Config
     if ($null -eq $Binding) { throw 'Pilot receipt binding is missing.' }
     foreach ($field in @('jobId', 'runId', 'workflowId')) {
@@ -812,14 +825,19 @@ function Get-PilotEvidence($Config, $Binding, [string] $Token) {
         }
     }
     $base = "https://api.github.com/repos/$($Config.repo)/actions"
+    if ($PickupInspection) { Assert-RunnerPickupInspectionActive }
     $run = Invoke-GitHub "$base/runs/$($Binding.runId)" 'GET' $null $Token
+    if ($PickupInspection) { Assert-RunnerPickupInspectionActive }
     $workflow = Invoke-GitHub "$base/workflows/$($Binding.workflowId)" 'GET' $null $Token
+    if ($PickupInspection) { Assert-RunnerPickupInspectionActive }
     $job = Invoke-GitHub "$base/jobs/$($Binding.jobId)" 'GET' $null $Token
+    if ($PickupInspection) { Assert-RunnerPickupInspectionActive }
     if (-not (Test-PilotEvidence $Config $run $workflow $job $Binding)) { throw 'Fresh GitHub pilot workflow/run/SHA/job metadata does not match the recorded binding.' }
     return [pscustomobject]@{ run = $run; workflow = $workflow; job = $job }
 }
 
 function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes = [decimal]::MaxValue, [string] $SessionProfileLabel = '') {
+    Assert-RunnerPickupInspectionActive
     $script:RunnerQueueObservation = @{}
     if ($SessionProfileLabel) { [void](Get-RunnerSessionProfile $Config $SessionProfileLabel) }
     $label = $Config.label
@@ -827,16 +845,22 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
     $parts = $Config.repo.Split('/')
     $base = "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions"
     foreach ($runStatus in @('queued', 'in_progress')) {
+        Assert-RunnerPickupInspectionActive
         $runs = Invoke-GitHub "$base/runs?status=$runStatus&per_page=100" 'GET' $null $Token
+        Assert-RunnerPickupInspectionActive
         if ($runs.total_count -gt 100) { throw 'Workflow run queue exceeds the bounded API view.' }
         foreach ($run in @($runs.workflow_runs)) {
             $workflow = $null
             if ($Config.activation -eq 'pilot') {
                 if ($run.head_sha -cne $Config.pilotExpectedSha) { continue }
+                Assert-RunnerPickupInspectionActive
                 $workflow = Invoke-GitHub "$base/workflows/$($run.workflow_id)" 'GET' $null $Token
+                Assert-RunnerPickupInspectionActive
                 if ($workflow.path -cne $Config.pilotWorkflowPath) { continue }
             }
+            Assert-RunnerPickupInspectionActive
             $jobs = Invoke-GitHub "$base/runs/$($run.id)/jobs?filter=latest&per_page=100" 'GET' $null $Token
+            Assert-RunnerPickupInspectionActive
             if ($jobs.total_count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
             foreach ($job in @($jobs.jobs)) {
                 $profile = Get-RunnerJobProfile $Config $job
@@ -852,7 +876,7 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
                             jobId = $job.id; runId = $run.id; workflowId = $workflow.id; workflowPath = $workflow.path
                             headSha = $run.head_sha; runAttempt = $run.run_attempt; pilotLabel = $Config.pilotLabel
                         }) -Force
-                        $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token
+                        $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token -PickupInspection
                         if (-not (Test-QueuedRunnerJob $fresh.job $label)) { continue }
                     }
                     $job | Add-Member -NotePropertyName resourceLabel -NotePropertyValue $profile.label -Force
@@ -1077,12 +1101,14 @@ function Invoke-SupervisorLoop {
         Assert-RunnerTransitionClear
         $config = Get-RunnerConfig
         if ($config.activation -notin @('pilot', 'active')) {
-            Start-Sleep -Seconds 30
+            Wait-RunnerPickupPoll
             continue
         }
         $pilotAttemptPath = Join-Path $script:RunnerRoot 'pilot-attempt.json'
         if (Get-RunnerState) { return } # A failed initial claim/cleanup requires recovery before further queue inspection.
-        if (-not (Invoke-RunnerJitReconciliation $config)) { Start-Sleep -Seconds 30; continue }
+        $reconciled = Invoke-RunnerJitReconciliation $config
+        if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
+        if (-not $reconciled) { Wait-RunnerPickupPoll; continue }
         if ($config.activation -eq 'pilot' -and (Test-Path -LiteralPath $pilotAttemptPath)) {
             # A crashed or restarted supervisor must not take a second pilot job.
             return
@@ -1094,14 +1120,16 @@ function Invoke-SupervisorLoop {
             $script:RunnerOperationStage = 'memory-admission'
             $initialLabel = if ($config.activation -eq 'pilot') { $config.pilotLabel } else { 'it-inventory-light' }
             $admission = Get-RunnerMemoryAdmission $initialLabel
+            if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
             if (-not $admission.ready) {
                 Write-RunnerObservation 'waiting-capacity' $config $admission.availableBytes
-                Start-Sleep -Seconds 30
+                Wait-RunnerPickupPoll
                 continue
             }
             $script:RunnerOperationStage = 'queue-inspection'
             $token = Get-OwnerToken
             $job = Get-QueuedRunnerJob $config $token $admission.availableBytes
+            if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
             $pollOutcome = if ($null -ne $job) { 'session-starting' } elseif ($null -ne $script:RunnerQueueObservation -and $script:RunnerQueueObservation.Count -gt 0) { 'waiting-capacity' } else { 'idle' }
             Write-RunnerObservation $pollOutcome $config $admission.availableBytes $script:RunnerQueueObservation
             if ($null -ne $job) {
@@ -1111,15 +1139,17 @@ function Invoke-SupervisorLoop {
                 $profile = Get-RunnerJobProfile $config $job
                 if ($null -eq $profile) { throw 'Selected runner job has unsupported resource labels.' }
                 $selectedAdmission = Get-RunnerMemoryAdmission $profile.label
+                if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
                 if (-not $selectedAdmission.ready) {
                     Write-RunnerObservation 'waiting-capacity' $config $selectedAdmission.availableBytes $script:RunnerQueueObservation
-                    Start-Sleep -Seconds 30
+                    Wait-RunnerPickupPoll
                     continue
                 }
                 if ($config.activation -eq 'pilot') {
                     $script:RunnerOperationStage = 'pilot-consumption'
-                    $fresh = Get-PilotEvidence $config $job.pilotBinding $token
+                    $fresh = Get-PilotEvidence $config $job.pilotBinding $token -PickupInspection
                     if (-not (Test-QueuedRunnerJob $fresh.job $config.pilotLabel)) { throw 'Bound pilot job changed before consumption.' }
+                    if (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested')) { return }
                     $pilotAttempt = [pscustomobject][ordered]@{
                         tag = $script:RunnerTag; jobId = $job.id
                         runId = $job.pilotBinding.runId; workflowId = $job.pilotBinding.workflowId
@@ -1159,6 +1189,8 @@ function Invoke-SupervisorLoop {
                 }
             }
         } catch {
+            if ($script:RunnerOperationStage -cin @('memory-admission', 'queue-inspection', 'pilot-consumption') -and
+                (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { return }
             # The next bounded poll may retry inspection. An unresolved durable
             # registration barrier refuses a new JIT after API/guest failure.
             $completedSession = $false
@@ -1170,7 +1202,7 @@ function Invoke-SupervisorLoop {
             Write-RunnerObservation 'inspection-failed' $config
         } finally { $token = $null }
         if ($completedSession) { continue } # Session's finally completed owned cleanup.
-        Start-Sleep -Seconds 30
+        Wait-RunnerPickupPoll
     }
 }
 
