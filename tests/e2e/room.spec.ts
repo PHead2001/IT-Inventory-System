@@ -2008,6 +2008,89 @@ test('room location browser refreshes filtered selections and results', async ({
   await expect(search).toHaveValue('ITC-D04');
 });
 
+test('phone More settles focused room labels and scrolls to keyboard Help and Close without moving the camera', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await login(page);
+  await page.goto('/room?location=ITC-D01');
+  const viewer = await ready(page);
+  await selected(page, 'ITC-D01');
+  await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
+  await setRoomLabels(page, true);
+  const more = page.getByRole('button', {
+    name: 'More map controls',
+    exact: true,
+  });
+  await more.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await settledLabels(page);
+  const before = await camera(page);
+  await more.click();
+  const popup = page.getByRole('region', {
+    name: 'More map controls',
+    exact: true,
+  });
+  await expect(popup).toBeVisible();
+  await settledLabels(page);
+  await expect(
+    viewer.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const scroll = await page.evaluate(() => scrollY);
+  const rect = await popup.boundingBox();
+  expect(rect).not.toBeNull();
+  await page.mouse.move(
+    rect!.x + rect!.width / 2,
+    rect!.y + Math.min(70, rect!.height / 2),
+  );
+  await page.mouse.wheel(0, 1200);
+  await expect
+    .poll(() => popup.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(30);
+  const help = popup.getByRole('button', { name: 'Controls', exact: true });
+  const close = popup.getByRole('button', {
+    name: 'Close controls',
+    exact: true,
+  });
+  await expect(help).toBeInViewport({ ratio: 0.95 });
+  await expect(close).toBeInViewport({ ratio: 0.95 });
+  expect(await page.evaluate(() => scrollY)).toBe(scroll);
+  await popup.getByRole('button', { name: 'Recenter', exact: true }).focus();
+  let reachedHelp = false;
+  for (let tabs = 0; tabs < 24; tabs++) {
+    await page.keyboard.press('Tab');
+    if (await help.evaluate((element) => document.activeElement === element)) {
+      reachedHelp = true;
+      break;
+    }
+  }
+  expect(reachedHelp).toBe(true);
+  await page.keyboard.press('Enter');
+  await expect(help).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(popup).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await settledLabels(page);
+  await expect(
+    viewer.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const after = await camera(page);
+  near(after.position, before.position);
+  near(after.target, before.target);
+  near(after.view, before.view);
+  near(after.projection, before.projection);
+  expect(after.zoom).toBeCloseTo(before.zoom, 6);
+  expect(await page.evaluate(() => scrollY)).toBe(scroll);
+  await selected(page, 'ITC-D01');
+});
+
 test('location browser has keyboard drill-down, aggregate selection, and full search breadcrumbs', async ({
   page,
 }, testInfo) => {

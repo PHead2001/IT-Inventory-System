@@ -719,6 +719,19 @@ export class ProjectedVisibleSurface {
       work.stats.triangles++;
       yield 1;
       let fragments = [target.polygon];
+      // DOM masks reject every covered point before the authoritative ray.
+      // Remove that same region before spending shared physical-overlap work;
+      // fully covered targets must not exhaust the later labels' transaction.
+      for (const rectangle of rectangles) {
+        const next: Polygon[] = [];
+        for (const fragment of fragments)
+          next.push(
+            ...(yield* subtract(fragment, rectangle, edges(rectangle), work)),
+          );
+        fragments = next;
+        if (!fragments.length) break;
+      }
+      if (!fragments.length) continue;
       for (const occluder of this.surfaces) {
         yield 1;
         if (
@@ -746,14 +759,6 @@ export class ProjectedVisibleSurface {
           );
         fragments = next;
         if (!fragments.length) break;
-      }
-      for (const rectangle of rectangles) {
-        const next: Polygon[] = [];
-        for (const fragment of fragments)
-          next.push(
-            ...(yield* subtract(fragment, rectangle, edges(rectangle), work)),
-          );
-        fragments = next;
       }
       for (const fragment of fragments) {
         yield fragment.length;

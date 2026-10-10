@@ -124,6 +124,56 @@ describe('projected actual visible regions', () => {
     f.owner.position.set(0, 0, 21);
     expect(f.run().status).toBe('hidden');
   });
+  it('does not spend shared physical-overlap work on a DOM-covered target before an uncovered target', () => {
+    const f = setup();
+    for (let i = 0; i < 24; i++) f.blocker(-2 + i / 6, -2 + (i + 1) / 6);
+    const second = new Group(),
+      origin = new Group();
+    second.userData.roomHoverTarget = { code: 'UNCOVERED', label: 'Uncovered' };
+    second.position.x = 3.5;
+    second.add(
+      new Mesh(new BoxGeometry(0.2, 0.2, 0.2), new MeshBasicMaterial()),
+      origin,
+    );
+    f.scene.add(second);
+    const mask = { left: 80, top: 80, right: 240, bottom: 240 };
+    const covered = f.run([mask]);
+    expect(covered.status).toBe('hidden');
+    expect(covered.stats.overlaps).toBe(0);
+    const uncovered = resolveExposedTargetAnchor(
+      f.scene,
+      f.camera,
+      origin,
+      'UNCOVERED',
+      new Vector3(),
+      viewport,
+      [mask],
+      f.projection,
+    );
+    expect(uncovered.status).toBe('visible');
+    expect(uncovered.stats.rays).toBeGreaterThan(0);
+    expect(uncovered.stats.operations).toBeLessThan(
+      defaultSurfaceLimits.maxOperations,
+    );
+  });
+  it('proves a partial DOM-mask sliver with physical occluders by authoritative ray and then proves closure', () => {
+    const f = setup();
+    f.blocker(-5, 0.331);
+    const right = f.blocker(0.347, 5);
+    const masks = [
+      { left: 0, top: 0, right: 173, bottom: 320 },
+      { left: 174, top: 0, right: 320, bottom: 320 },
+    ];
+    const result = f.run(masks);
+    expect(result.status).toBe('visible');
+    if (result.status !== 'visible') throw new Error(result.status);
+    expect(result.anchor.x).toBeGreaterThan(0.331);
+    expect(result.anchor.x).toBeLessThan(0.347);
+    expect(rayOwner(f, result.anchor.x, result.anchor.y)).toBe('TARGET');
+    expect(result.stats.rays).toBeGreaterThan(0);
+    right.position.x -= 0.02;
+    expect(f.run(masks).status).toBe('hidden');
+  });
   it('clips depth-crossing occluders instead of subtracting their whole projected triangle', () => {
     const f = setup();
     f.owner.remove(f.target);
