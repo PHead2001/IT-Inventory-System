@@ -651,17 +651,21 @@ test('denied camera has manual fallback, rejects external text and opens exact r
   });
   await page.goto('/scan');
   await page.getByRole('button', { name: 'Start camera' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    'Camera permission was denied',
-  );
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Camera permission was denied' }),
+  ).toBeVisible();
   const input = page.getByLabel(
     'Paste a label URL, barcode text, or exact identifier',
   );
   await input.fill('https://example.com/locations/ITC');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText(
-    'not a supported inventory label',
-  );
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'not a supported inventory label' }),
+  ).toBeVisible();
   await expect(page).toHaveURL(/\/scan$/);
   await input.fill('LOC:ITC-S1A');
   await page.getByRole('button', { name: 'Open', exact: true }).click();

@@ -1,6 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ session: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), privacy: vi.fn() }));
+vi.mock('@/lib/auth/privacy-barrier.server', () => ({
+  readLogoutGeneration: mocks.privacy,
+}));
 vi.mock('@/lib/auth/login-session.server', () => ({
   readLoginSession: mocks.session,
 }));
@@ -9,6 +12,11 @@ vi.mock('@/components/auth/auth-form', () => ({
     <form aria-label="Sign in">
       <input type="hidden" name="next" value={next ?? ''} readOnly />
     </form>
+  ),
+}));
+vi.mock('@/components/auth/auth-privacy', () => ({
+  AuthPrivacyRedirect: ({ destination }: { destination: string }) => (
+    <p data-testid="privacy-redirect">{destination}</p>
   ),
 }));
 vi.mock('next/navigation', () => ({
@@ -20,6 +28,7 @@ import LoginPage from './page';
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue('anonymous');
+  mocks.privacy.mockResolvedValue({ status: 'absent' });
 });
 it.each([
   ['/locations/ITC', '/locations/ITC'],
@@ -121,5 +130,23 @@ it.each([
     expect(
       screen.getByRole('link', { name: 'Use another account' }),
     ).toHaveAttribute('href', href);
+  },
+);
+
+it.each([
+  ['/dashboard', '/dashboard'],
+  ['https://evil.test', '/inventory'],
+  [undefined, '/inventory'],
+])(
+  'sends an already signed-in tab through cleanup then a safe existing destination %s',
+  async (next, expected) => {
+    mocks.session.mockResolvedValue('member');
+    mocks.privacy.mockResolvedValue({
+      status: 'valid',
+      generation: '00000000-0000-4000-8000-000000000001',
+    });
+    render(await LoginPage({ searchParams: Promise.resolve({ next }) }));
+    expect(screen.getByTestId('privacy-redirect')).toHaveTextContent(expected!);
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
   },
 );

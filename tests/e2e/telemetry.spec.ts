@@ -1,6 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import {
+  observeNativeLayoutShifts,
+  nativeProbeDominance,
+  shiftProbeId,
+  winningLayoutShift,
+  type LayoutShiftObservation,
+} from '../helpers/native-layout-shifts';
 
 const officialScript = readFileSync(
   new URL('../fixtures/speed-insights-script.js', import.meta.url),
@@ -24,11 +31,6 @@ type Metric = {
   href: string;
   route: string;
   attribution?: { eventTarget?: string };
-};
-type LayoutShiftObservation = {
-  value: number;
-  hadRecentInput: boolean;
-  sourceIds: string[];
 };
 
 test.use({
@@ -232,112 +234,172 @@ test('auth/token navigation and queued logout do not send vitals', async ({
   expect(requests).toEqual([]);
 });
 
+async function nativeShifts(page: Page) {
+  return page.evaluate(() => {
+    const observed = window as Window & {
+      __testLayoutShifts?: LayoutShiftObservation[];
+      __testDrainLayoutShifts?: () => void;
+    };
+    observed.__testDrainLayoutShifts?.();
+    return observed.__testLayoutShifts ?? [];
+  });
+}
+
+async function exerciseNativeShift(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const shift = document.createElement('div');
+    shift.id = 'inventory-location-results-tree-2';
+    shift.textContent = 'Exercise layout shift';
+    // Large visible physical movement; dominance is checked from actual native
+    // entries, rather than inferred from the probe's dimensions.
+    shift.style.cssText =
+      'position:fixed;top:0;left:0;width:100vw;height:90vh;z-index:2147483647;background:#123456;pointer-events:none';
+    document.body.append(shift);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  });
+  // End the input-exclusion period and separate our shift from page-load shifts.
+  await page.waitForTimeout(1100);
+  await page.evaluate(() => {
+    document.getElementById('inventory-location-results-tree-2')!.style.top =
+      '50vh';
+  });
+  await expect
+    .poll(async () =>
+      (await nativeShifts(page)).some(
+        (entry) =>
+          !entry.hadRecentInput &&
+          entry.value > 0 &&
+          entry.sources.some((source) => source.target === 'probe'),
+      ),
+    )
+    .toBe(true);
+  const winner = nativeProbeDominance(await nativeShifts(page));
+  expect(
+    winner.target,
+    'controlled probe must be the largest native shift with its first Element source',
+  ).toBe('probe');
+  expect(
+    winner.dominates,
+    'probe must outweigh all other eligible shifts combined',
+  ).toBe(true);
+  return winner;
+}
+
+// Runs without Auth or telemetry: proves real Chromium layout-shift generation
+// and buffered capture, including an observer installed after the shift.
+test('native layout probe proves buffered winning shift', async ({ page }) => {
+  await page.setContent('<!doctype html><main>Native layout fixture</main>');
+  await page.evaluate(observeNativeLayoutShifts);
+  const winner = await exerciseNativeShift(page);
+  await page.evaluate(observeNativeLayoutShifts);
+  await expect
+    .poll(async () => nativeProbeDominance(await nativeShifts(page)).dominates)
+    .toBe(true);
+  expect(nativeProbeDominance(await nativeShifts(page)).value).toBe(
+    winner.value,
+  );
+});
+
 test('native INP and CLS attribution emits only opaque element identifiers', async ({
   page,
 }, testInfo) => {
   const requests = await captureTelemetry(page);
-  await signIn(page);
-  await waitForOfficialScript(page);
-  requests.length = 0;
-  await page.evaluate(() => {
-    const observed = window as Window & {
-      __testLayoutShifts?: LayoutShiftObservation[];
-    };
-    observed.__testLayoutShifts = [];
-    new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        const shift = entry as PerformanceEntry & {
-          value: number;
-          hadRecentInput: boolean;
-          sources?: { node?: Node }[];
-        };
-        observed.__testLayoutShifts!.push({
-          value: shift.value,
-          hadRecentInput: shift.hadRecentInput,
-          sourceIds: (shift.sources ?? [])
-            .map((source) =>
-              source.node instanceof Element ? source.node.id : '',
-            )
-            .filter(Boolean),
-        });
-      }
-    }).observe({ type: 'layout-shift', buffered: false });
-    const main = document.querySelector('main')!;
-    const interaction = document.createElement('button');
-    interaction.id = 'inventory-location-results-tree-1';
-    interaction.textContent = 'Exercise interaction timing';
-    interaction.addEventListener('click', () => {
-      const end = performance.now() + 100;
-      while (performance.now() < end) {
-        /* deterministic long interaction */
-      }
+  await page.addInitScript(observeNativeLayoutShifts);
+  try {
+    await signIn(page);
+    // A fresh authenticated document gives both observers the same navigation,
+    // including buffered load shifts rather than the preceding login document.
+    await page.goto('/inventory');
+    await expect(
+      page.getByRole('heading', { name: 'Inventory', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('form', { name: 'Search inventory' }),
+    ).toBeVisible();
+    await waitForOfficialScript(page);
+    requests.length = 0;
+    await page.evaluate(() => {
+      const interaction = document.createElement('button');
+      interaction.id = 'inventory-location-results-tree-1';
+      interaction.textContent = 'Exercise interaction timing';
+      interaction.addEventListener('click', () => {
+        const end = performance.now() + 100;
+        while (performance.now() < end) {
+          /* deterministic long interaction */
+        }
+      });
+      document.querySelector('main')!.append(interaction);
     });
-    const shift = document.createElement('div');
-    shift.id = 'inventory-location-results-tree-2';
-    shift.textContent = 'Exercise layout shift';
-    shift.style.cssText =
-      'position:fixed;top:100px;left:100px;width:200px;height:50px;z-index:5;background:#123456';
-    main.append(interaction);
-    document.body.append(shift);
-  });
-  await page.waitForTimeout(900);
-  await page.evaluate(() => {
-    const shift = document.getElementById('inventory-location-results-tree-2')!;
-    shift.style.top = '220px';
-  });
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (
-          window as Window & { __testLayoutShifts?: LayoutShiftObservation[] }
-        ).__testLayoutShifts?.some(
-          (entry) =>
-            entry.value > 0 &&
-            !entry.hadRecentInput &&
-            entry.sourceIds.includes('inventory-location-results-tree-2'),
-        ),
-      ),
-    )
-    .toBe(true);
-  await page.locator('#inventory-location-results-tree-1').click();
-  await page.waitForTimeout(200);
-  // CLS registers its hidden callback asynchronously after buffered FCP,
-  // after the provider's transport listener. The first event queues CLS;
-  // the second drains it without unloading the intercepted request's page.
-  await flush(page);
-  await flush(page);
-  await waitForNativeMetrics(requests);
-  const metrics = emittedMetrics(requests, '/inventory');
-  const nativeShifts = await page.evaluate(
-    () =>
-      (window as Window & { __testLayoutShifts?: LayoutShiftObservation[] })
-        .__testLayoutShifts ?? [],
-  );
-  const diagnostic = JSON.stringify({
-    shifts: nativeShifts,
-    cls: metrics.filter((metric) => metric.type === 'CLS'),
-  });
-  writeFileSync(testInfo.outputPath('native-layout-shifts.json'), diagnostic);
-  await testInfo.attach('native-layout-shifts', {
-    body: diagnostic,
-    contentType: 'application/json',
-  });
-  expect(
-    metrics.find((metric) => metric.type === 'INP')?.attribution?.eventTarget,
-  ).toBe('#inventory-location-results-tree-1');
-  // The pinned official intake serializes CLS largestShiftTarget as
-  // attribution.eventTarget on the wire.
-  expect(
-    metrics.find((metric) => metric.type === 'CLS')?.attribution?.eventTarget,
-  ).toBe('#inventory-location-results-tree-2');
-  expect(
-    metrics.find((metric) => metric.type === 'CLS')?.value,
-  ).toBeGreaterThan(0);
-  expect(JSON.stringify(metrics)).not.toMatch(
-    /private-token-sentinel|[0-9a-f]{8}-[0-9a-f-]{27,}/i,
-  );
+    await exerciseNativeShift(page);
+    await page.locator('#inventory-location-results-tree-1').click();
+    await page.waitForTimeout(200);
+    expect(nativeProbeDominance(await nativeShifts(page)).dominates).toBe(true);
+    // CLS queues after the transport listener; the second event drains it.
+    await flush(page);
+    await flush(page);
+    await waitForNativeMetrics(requests);
+    expect(nativeProbeDominance(await nativeShifts(page)).dominates).toBe(true);
+    const metrics = emittedMetrics(requests, '/inventory');
+    expect(
+      metrics.find((metric) => metric.type === 'INP')?.attribution?.eventTarget,
+    ).toBe('#inventory-location-results-tree-1');
+    const cls = metrics.find((metric) => metric.type === 'CLS');
+    // The pinned intake serializes the first Element source in the winning
+    // session's largest individual shift; native dominance proves its identity.
+    expect(cls?.attribution?.eventTarget).toBe('#' + shiftProbeId);
+    expect(cls?.value).toBeGreaterThan(0);
+    expect(JSON.stringify(metrics)).not.toMatch(
+      /private-token-sentinel|[0-9a-f]{8}-[0-9a-f-]{27,}/i,
+    );
+  } catch (error) {
+    const shifts = await nativeShifts(page).catch(() => []);
+    const winner = winningLayoutShift(shifts);
+    const diagnostic = JSON.stringify({
+      entryCount: shifts.length,
+      // Bounded metadata only: no captured private DOM IDs, selectors or URLs.
+      shifts: shifts
+        .slice(-24)
+        .map((shift) => ({ ...shift, sources: shift.sources.slice(0, 5) })),
+      dominance: nativeProbeDominance(shifts),
+      reconstructedWinner: {
+        value: winner.value,
+        target: winner.target,
+        time: winner.largest?.startTime,
+      },
+      cls: requests
+        .flatMap((request) => {
+          const body = JSON.parse(request.body ?? '{}') as {
+            metrics?: Metric[];
+          };
+          return (body.metrics ?? [])
+            .filter((metric) => metric.type === 'CLS')
+            .map((metric) => ({
+              value: metric.value,
+              target:
+                metric.attribution?.eventTarget === '#' + shiftProbeId
+                  ? 'probe'
+                  : metric.attribution?.eventTarget
+                    ? 'other'
+                    : 'absent',
+            }));
+        })
+        .slice(-8),
+    });
+    console.error('Native CLS fixture diagnostic: ' + diagnostic);
+    writeFileSync(testInfo.outputPath('native-layout-shifts.json'), diagnostic);
+    await testInfo.attach('native-layout-shifts', {
+      body: diagnostic,
+      contentType: 'application/json',
+    });
+    throw error;
+  }
 });
-
 test('inventory stays usable when the provider script is blocked', async ({
   page,
 }) => {
