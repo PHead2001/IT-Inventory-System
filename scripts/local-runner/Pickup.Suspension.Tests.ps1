@@ -129,7 +129,7 @@ try {
         }
         $config|Add-Member -NotePropertyName label -NotePropertyValue 'it-inventory-ephemeral'
         $script:pilotJob.status='queued';$script:pilotJob.runner_id=0
-        foreach($at in 1..6) {
+        foreach($at in 1..7) {
             Reset-Fixture; $script:mode='pilot-queue';$script:stopAfter=$at
             $refused=$false;try{[void](& $script:actualQueue $config 'fixture')}catch{if($_.Exception.Message-cne'Pickup suspension requested during read-only demand inspection.'){throw};$refused=$true}
             if(-not$refused-or$script:apiCalls-ne$at-or$script:claims-ne0){throw 'Pilot queue traversal chained workflow/jobs/fresh binding work after Stop.'}

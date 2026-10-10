@@ -844,44 +844,74 @@ function Get-QueuedRunnerJob($Config, [string] $Token, [decimal] $AvailableBytes
     if ($Config.activation -eq 'pilot') { Assert-PilotConfig $Config; $label = $Config.pilotLabel }
     $parts = $Config.repo.Split('/')
     $base = "https://api.github.com/repos/$($parts[0])/$($parts[1])/actions"
+    # Runs can already be in progress while a continuation waits for this runner.
+    # Collect both bounded views before selection; API newest-first/status order
+    # must not give new previews priority over older continuations.
+    $candidates = @{}
     foreach ($runStatus in @('queued', 'in_progress')) {
         Assert-RunnerPickupInspectionActive
         $runs = Invoke-GitHub "$base/runs?status=$runStatus&per_page=100" 'GET' $null $Token
         Assert-RunnerPickupInspectionActive
-        if ($runs.total_count -gt 100) { throw 'Workflow run queue exceeds the bounded API view.' }
+        if ($runs.total_count -gt 100 -or @($runs.workflow_runs).Count -gt 100) { throw 'Workflow run queue exceeds the bounded API view.' }
         foreach ($run in @($runs.workflow_runs)) {
-            $workflow = $null
-            if ($Config.activation -eq 'pilot') {
-                if ($run.head_sha -cne $Config.pilotExpectedSha) { continue }
-                Assert-RunnerPickupInspectionActive
-                $workflow = Invoke-GitHub "$base/workflows/$($run.workflow_id)" 'GET' $null $Token
-                Assert-RunnerPickupInspectionActive
-                if ($workflow.path -cne $Config.pilotWorkflowPath) { continue }
+            $runId = [uint64]0
+            if ($null -eq $run -or $run.PSObject.Properties.Name -notcontains 'id' -or
+                [string]$run.id -notmatch '^[1-9][0-9]*$' -or -not [uint64]::TryParse([string]$run.id, [ref]$runId)) {
+                throw 'Workflow run queue identity is invalid.'
             }
+            # Undated/malformed timestamps remain eligible after dated runs,
+            # ordered by numeric ID. Never infer their age from response order.
+            $createdTicks = [long]::MaxValue
+            $created = [DateTimeOffset]::MinValue
+            if ($run.PSObject.Properties.Name -contains 'created_at' -and
+                [string]$run.created_at -cmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?(Z|[+-]\d{2}:\d{2})$' -and
+                [DateTimeOffset]::TryParse([string]$run.created_at, [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::None, [ref]$created)) {
+                $createdTicks = $created.UtcTicks
+            }
+            $key = [string]$runId
+            if ($candidates.ContainsKey($key)) {
+                # Status can change between snapshots. Inspect one run only and
+                # retain its oldest valid timestamp from either bounded view.
+                $candidates[$key].createdTicks = [Math]::Min($candidates[$key].createdTicks, $createdTicks)
+            } else {
+                $candidates[$key] = [pscustomobject]@{ run = $run; id = $runId; createdTicks = $createdTicks }
+            }
+        }
+    }
+    foreach ($candidate in @($candidates.Values | Sort-Object createdTicks, id)) {
+        $run = $candidate.run
+        $workflow = $null
+        if ($Config.activation -eq 'pilot') {
+            if ($run.head_sha -cne $Config.pilotExpectedSha) { continue }
             Assert-RunnerPickupInspectionActive
-            $jobs = Invoke-GitHub "$base/runs/$($run.id)/jobs?filter=latest&per_page=100" 'GET' $null $Token
+            $workflow = Invoke-GitHub "$base/workflows/$($run.workflow_id)" 'GET' $null $Token
             Assert-RunnerPickupInspectionActive
-            if ($jobs.total_count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
-            foreach ($job in @($jobs.jobs)) {
-                $profile = Get-RunnerJobProfile $Config $job
-                if ($null -eq $profile) { continue }
-                if ($SessionProfileLabel -and $SessionProfileLabel -cne $profile.label) { continue }
-                if (Test-QueuedRunnerJob $job $profile.label) {
-                    if (-not $script:RunnerQueueObservation.ContainsKey($profile.label)) { $script:RunnerQueueObservation[$profile.label] = 0 }
-                    $script:RunnerQueueObservation[$profile.label]++
-                    if ($AvailableBytes -lt $profile.requiredBytes) { continue }
-                    if ($Config.activation -eq 'pilot') {
-                        if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
-                        $job | Add-Member -NotePropertyName pilotBinding -NotePropertyValue ([pscustomobject]@{
-                            jobId = $job.id; runId = $run.id; workflowId = $workflow.id; workflowPath = $workflow.path
-                            headSha = $run.head_sha; runAttempt = $run.run_attempt; pilotLabel = $Config.pilotLabel
-                        }) -Force
-                        $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token -PickupInspection
-                        if (-not (Test-QueuedRunnerJob $fresh.job $label)) { continue }
-                    }
-                    $job | Add-Member -NotePropertyName resourceLabel -NotePropertyValue $profile.label -Force
-                    return $job
+            if ($workflow.path -cne $Config.pilotWorkflowPath) { continue }
+        }
+        Assert-RunnerPickupInspectionActive
+        $jobs = Invoke-GitHub "$base/runs/$($run.id)/jobs?filter=latest&per_page=100" 'GET' $null $Token
+        Assert-RunnerPickupInspectionActive
+        if ($jobs.total_count -gt 100 -or @($jobs.jobs).Count -gt 100) { throw 'Workflow job queue exceeds the bounded API view.' }
+        foreach ($job in @($jobs.jobs)) {
+            $profile = Get-RunnerJobProfile $Config $job
+            if ($null -eq $profile) { continue }
+            if ($SessionProfileLabel -and $SessionProfileLabel -cne $profile.label) { continue }
+            if (Test-QueuedRunnerJob $job $profile.label) {
+                if (-not $script:RunnerQueueObservation.ContainsKey($profile.label)) { $script:RunnerQueueObservation[$profile.label] = 0 }
+                $script:RunnerQueueObservation[$profile.label]++
+                if ($AvailableBytes -lt $profile.requiredBytes) { continue }
+                if ($Config.activation -eq 'pilot') {
+                    if (-not (Test-PilotEvidence $Config $run $workflow $job)) { continue }
+                    $job | Add-Member -NotePropertyName pilotBinding -NotePropertyValue ([pscustomobject]@{
+                        jobId = $job.id; runId = $run.id; workflowId = $workflow.id; workflowPath = $workflow.path
+                        headSha = $run.head_sha; runAttempt = $run.run_attempt; pilotLabel = $Config.pilotLabel
+                    }) -Force
+                    $fresh = Get-PilotEvidence $Config $job.pilotBinding $Token -PickupInspection
+                    if (-not (Test-QueuedRunnerJob $fresh.job $label)) { continue }
                 }
+                $job | Add-Member -NotePropertyName resourceLabel -NotePropertyValue $profile.label -Force
+                return $job
             }
         }
     }

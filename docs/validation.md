@@ -162,6 +162,16 @@ The diagnostic `Local runner pilot` uses its exact workflow/head SHA and must re
 
 Failure reports retain seven-day GitHub artifact storage. Uploads are best-effort and warn when quota or availability prevents them; failed tests still fail the `required` job. An absent upload is a diagnostics limitation, never evidence that tests passed. Disposal must also occur after failed or cancelled jobs.
 
+`Contract.Tests.ps1` includes `Queue.Fairness.Tests.ps1`: newest-first queued
+previews versus older in-progress continuations, UTC/numeric ordering, duplicate
+status snapshots, undated compatibility, strict profile/capacity skipping and
+100-run/job overflow refusal with no pagination. The focused command is
+`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/local-runner/Queue.Fairness.Tests.ps1`.
+Pilot binding and pickup-suspension suites also preserve exact-SHA eligibility
+and Stop checks around all read-only requests. These mocked checks prove demand
+selection; real GitHub job assignment and live installed queue draining need
+separate host evidence.
+
 ## Certification and provenance
 
 PR jobs check out and assert the exact head SHA. Main jobs report the actual post-merge SHA. The `required` check succeeds only when every mandatory stage succeeds. After it succeeds on main, the separate `Production database ready` job fails closed unless explicitly enabled and fully configured, then checks the pinned project and migration history before and after forward delivery. It is a production Vercel Deployment Check, not a PR branch-protection check. Failure artifacts include reports, traces, resource summaries and regenerated types, never credentials/environment dumps.

@@ -74,6 +74,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell memory admission regr
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Resource.Profiles.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell resource profile regression failed.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Queue.Fairness.Tests.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell queue fairness regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Capacity.Observation.Tests.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Fresh Windows PowerShell capacity observation regression failed.' }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Unattended.Recovery.Tests.ps1')

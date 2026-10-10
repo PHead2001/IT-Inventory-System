@@ -39,6 +39,21 @@ after all recovery guards pass. A broken watchdog/task installation still requir
 owner repair. Scheduled startup/recovery and offline tests do not establish real
 reboot, process-loss or continuous 24/7 operation; record those host checks separately.
 
+Queue inspection collects both `queued` and `in_progress` workflow-run snapshots
+before inspecting jobs: a run already executing can have a queued continuation.
+Each snapshot remains capped at 100 runs, with no pagination; overflow fails
+closed before job lookup. Positive numeric run IDs are validated and deduplicated
+across snapshots (at most 200 distinct runs). Runs are inspected oldest `created_at`
+first using the UTC instant, then numeric run ID for ties. A duplicate uses its
+oldest valid observed timestamp. Missing or invalid timestamps remain eligible
+after all dated runs, ordered by numeric ID; this compatibility policy does not
+invent an age from provider response order. Each job view remains capped at 100.
+Unsupported labels, nonfitting capacity and mismatched session profiles are still
+skipped, and exact pilot workflow/SHA/job binding and Stop checks remain required.
+This orders provisioning demand; GitHub assigns the actual job to a compatible
+JIT runner, so selecting a run does not force that runner to take its job. It
+adds no special main/production routing or authorization bypass.
+
 Status reports current available physical memory and guest/reserve/admission for
 every applicable fixed profile, so an idle controller does not imply capacity for
 a queued heavy job. The bounded queue traversal records only observed per-profile
