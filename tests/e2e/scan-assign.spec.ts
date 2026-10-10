@@ -508,6 +508,109 @@ test('real scan batch cancels late reads, refreshes stale stock, reconciles lost
     ).toHaveCount(0);
     expect(await count()).toBe(0);
     await inspect(page);
+    // Restore a persisted pending review on a phone. Unlike the late-result
+    // cancellation above, this read completes between a real press and release.
+    const originalViewport = page.viewportSize();
+    await page.setViewportSize({ width: 375, height: 812 });
+    let releaseRestore!: () => void;
+    const heldRestore = new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    let signalRestore!: () => void;
+    const restoreIntercepted = new Promise<void>((resolve) => {
+      signalRestore = resolve;
+    });
+    let restoreDelayed = false;
+    await page.route('**/scan?mode=assign*', async (route) => {
+      if (
+        !restoreDelayed &&
+        route.request().method() === 'POST' &&
+        route.request().headers()['next-action']
+      ) {
+        restoreDelayed = true;
+        signalRestore();
+        await heldRestore;
+      }
+      await route.continue();
+    });
+    try {
+      await page.reload();
+      await restoreIntercepted;
+      const inspection = page.getByRole('form', { name: 'Inspect equipment' });
+      const cancel = inspection.getByRole('button', {
+        name: /^(Cancel inspection|Skip inspection \/ review)$/,
+      });
+      await expect(inspection).toHaveAttribute('aria-busy', 'true');
+      await expect(cancel).toHaveText('Cancel inspection');
+      await expect(cancel).toBeFocused();
+      await cancel.scrollIntoViewIfNeeded();
+      await page.evaluate(() => document.fonts.ready);
+      const before = await cancel.boundingBox();
+      expect(before).toBeTruthy();
+      const point = {
+        x: before!.x + before!.width / 2,
+        y: before!.y + before!.height / 2,
+      };
+      const scrollBefore = await page.evaluate(() => window.scrollY);
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.down();
+      await expect(cancel).toBeFocused();
+      const restoredResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes('/scan?mode=assign') &&
+          response.request().method() === 'POST' &&
+          !!response.request().headers()['next-action'],
+      );
+      releaseRestore();
+      expect(await (await restoredResponse).finished()).toBeNull();
+      await expect(inspection).toHaveAttribute('aria-busy', 'false');
+      await expect(
+        page.getByText(
+          'Availability refreshed. Review the source and units before confirming.',
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(cancel).toHaveText('Skip inspection / review');
+      // These checks happen with the mouse still held. Review focus must not
+      // scroll the pressed target away and divert the browser's eventual click.
+      await expect(cancel).toBeFocused();
+      expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+      const after = await cancel.boundingBox();
+      expect(after).toMatchObject({
+        x: before!.x,
+        y: before!.y,
+        height: before!.height,
+      });
+      expect(
+        await cancel.evaluate(
+          (element, point) =>
+            document.elementFromPoint(point.x, point.y)?.closest('button') ===
+            element,
+          point,
+        ),
+      ).toBe(true);
+      expect(await count()).toBe(0);
+      await page.mouse.up();
+      await expect(
+        page.getByLabel('Scan, paste, or search inventory'),
+      ).toBeFocused();
+      await expect(
+        page.getByRole('region', { name: 'Review assignment' }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText('0 pending');
+      await expect(
+        page.getByRole('region', { name: 'Batch checklist' }),
+      ).toContainText('Skipped before confirmation.');
+      expect(await count()).toBe(0);
+    } finally {
+      releaseRestore();
+      await page.mouse.up();
+      await page.unrouteAll({ behavior: 'wait' });
+      if (originalViewport) await page.setViewportSize(originalViewport);
+    }
+    await inspect(page);
     const other = await context.newPage();
     await other.goto(`/scan?mode=assign&site=${siteId}`);
     await expect(
