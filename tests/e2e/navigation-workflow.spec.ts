@@ -325,9 +325,9 @@ test('a lost committed designer response survives authorization denial and repla
     await other.goto('/settings');
     await other.getByRole('button', { name: 'Sign out' }).click();
     await signIn(other, 'viewer');
-    await expect(page.getByRole('alert')).toContainText(
-      'original account access',
-    );
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'original account access' }),
+    ).toBeVisible();
     await expect(designer).toHaveCount(0);
     expect(commands).toHaveLength(1);
     expect(await publications()).toEqual(committedPublications);

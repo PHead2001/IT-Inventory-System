@@ -184,6 +184,12 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       .getByLabel('Reason (required)')
       .fill('Second holding fixture');
     await confirm(receive, 'Receive stock');
+    // Confirm clicks dispatch the action; wait for its committed result before
+    // a new document reads the holdings used to choose the next Receive default.
+    await expect(
+      receive.getByRole('status').filter({ hasText: 'Saved successfully.' }),
+    ).toBeVisible();
+    await version(page, 2);
     await page.goto(detailUrl);
     const multiple = await openForm(page, 'Receive stock');
     await expect(

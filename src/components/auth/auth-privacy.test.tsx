@@ -854,12 +854,17 @@ it('never retargets accepted opaque children to a different server binding', asy
 
 it('keeps the original owner masked but admits a separate fresh server-verified owner for another actor', async () => {
   const original = render(
-    <ProtectedTestBoundary>
-      <input
-        aria-label="Original uncertain request"
-        defaultValue="original payload"
-      />
-    </ProtectedTestBoundary>,
+    <>
+      <div id="__next-route-announcer__" role="alert">
+        Inventory
+      </div>
+      <ProtectedTestBoundary>
+        <input
+          aria-label="Original uncertain request"
+          defaultValue="original payload"
+        />
+      </ProtectedTestBoundary>
+    </>,
   );
   const originalField = await screen.findByLabelText(
     'Original uncertain request',
@@ -870,7 +875,13 @@ it('keeps the original owner masked but admits a separate fresh server-verified 
   });
   expect(originalField).not.toBeVisible();
   expect(originalField.closest('[inert]')).not.toBeNull();
-  await screen.findByRole('alert');
+  const warning = await screen.findByText(
+    /^This workspace’s original account access/,
+  );
+  expect(warning).toHaveAttribute('role', 'alert');
+  expect(warning).toBeVisible();
+  expect(screen.getAllByRole('alert')).toHaveLength(2);
+  expect(screen.getByText('Inventory')).toBeVisible();
   expect(originalField).toHaveValue('original payload');
   const recoveryLink = screen.getByRole('link', {
     name: 'open Inventory in a new tab',
