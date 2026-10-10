@@ -204,7 +204,15 @@ test('loaded local fonts and populated scan, labels and form designer remain usa
   const id = interfaceRecord.id;
   await page.goto(`/inventory/quantity/${id}`);
   await expect(page).toHaveTitle('Quantity item · IT Inventory');
-  const code = page
+  const currentRecord = page.locator('section').filter({
+    has: page.getByRole('heading', {
+      name: interfaceRecord.name,
+      exact: true,
+      level: 1,
+    }),
+  });
+  await expect(currentRecord).toHaveCount(1);
+  const code = currentRecord
     .getByText('Item code (SKU)', { exact: true })
     .locator('..')
     .locator('dd');
