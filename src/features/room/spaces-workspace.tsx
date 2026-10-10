@@ -511,9 +511,11 @@ export function SpacesWorkspace({
               <div className={styles.viewerHeading}>
                 <strong>{currentSpace.name} / measured map</strong>
                 <span>
-                  {sceneError
-                    ? 'Select a location in the location browser'
-                    : 'Select a location in the map or browser'}
+                  {selected
+                    ? `Selected: ${selected.name}`
+                    : sceneError
+                      ? 'Select a location in the location browser'
+                      : 'Select a location in the map or browser'}
                 </span>
               </div>
               {sceneError ? (

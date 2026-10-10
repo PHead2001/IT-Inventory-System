@@ -298,6 +298,88 @@ it('refers to the browser when the map is hidden or failed and restores map guid
   ).toBeVisible();
 });
 
+it('replaces the room selection instruction immediately and restores it after clearing', async () => {
+  let resolveContents!: (value: ReturnType<typeof response>) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise((resolve) => (resolveContents = resolve))),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode={null}
+    />,
+  );
+  expect(
+    screen.getByText('Select a location in the map or browser'),
+  ).toBeVisible();
+  await user.click(
+    screen.getByRole('button', { name: 'Choose shelf 1A in scene' }),
+  );
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  expect(
+    screen.queryByText('Select a location in the map or browser'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).toHaveAttribute('aria-busy', 'true');
+  resolveContents(response('Shelf stock', 'ITC-S1A'));
+  await screen.findByText('Shelf stock');
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(
+    screen.getByText('Select a location in the map or browser'),
+  ).toBeVisible();
+  expect(screen.queryByText('Selected: Shelf 1A')).not.toBeInTheDocument();
+});
+
+it('keeps the selected logical label through graphics fallback and browser selection', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise(() => {})),
+  );
+  const user = userEvent.setup();
+  render(
+    <SpacesWorkspace
+      backend="https://backend.example"
+      locations={locations}
+      userId="test-user"
+      initialSpace={spaces[0]}
+      initialCode="ITC-S1A"
+    />,
+  );
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Fail room' }));
+  expect(screen.getByText('Room view unavailable')).toBeVisible();
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  expect(
+    screen.queryByText('Select a location in the location browser'),
+  ).not.toBeInTheDocument();
+  await user.click(
+    screen.getAllByRole('button', { name: 'Shelf 1A ITC-S1A' })[0],
+  );
+  expect(screen.getByText('Room view unavailable')).toBeVisible();
+  expect(screen.getByText('Selected: Shelf 1A')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+  expect(
+    screen.getByText('Select a location in the location browser'),
+  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Expand IT Closet' }));
+  await user.click(
+    screen.getAllByRole('button', { name: 'Drawer 1 ITC-D01' })[0],
+  );
+  expect(screen.getByText('Selected: Drawer 1')).toBeVisible();
+  expect(
+    screen.queryByText(
+      /Select a location in the (map or browser|location browser)/,
+    ),
+  ).not.toBeInTheDocument();
+});
+
 it('highlights immediately and ignores slow A/B/A contents responses', async () => {
   const pending: {
     code: string;
