@@ -781,6 +781,7 @@ for (const width of [1280, 375, 390]) {
         await openLocationTab(() =>
           selected.getByRole('link').click({ button: 'middle' }),
         );
+        await expect(selected).toBeFocused();
         await openLocationTab(() => selected.press('Control+Enter'));
         await expect(selected).toBeFocused();
       }
