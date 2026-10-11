@@ -107,7 +107,11 @@ describe('browser scheduling', () => {
       "caller.auth.signOut({ scope: 'others' });",
     ])
       expect(unsafeFixtureSignOuts(source)).toEqual([1]);
-    for (const spec of parallelSpecs)
+    for (const spec of [
+      ...parallelSpecs,
+      'interface-fixtures.ts',
+      'inventory-discovery-fixtures.ts',
+    ])
       expect(
         unsafeFixtureSignOuts(readFileSync('tests/e2e/' + spec, 'utf8')),
         spec,
@@ -164,6 +168,29 @@ describe('browser scheduling', () => {
     expect(parallel.dependencies).toContain(exclusive.name);
   }, 60_000);
 
+  it('keeps shared reference and category-schema fixtures exclusive after consolidation', () => {
+    const references = discover(true, [
+      'tests/e2e/locations-reference.spec.ts',
+      'tests/e2e/inventory-search.spec.ts',
+    ]);
+    const rename = references.filter(
+      (entry) => entry.file === 'locations-reference.spec.ts',
+    );
+    expect(rename).toHaveLength(1);
+    expect(rename[0].project).toBe('chromium-exclusive');
+    const search = references.filter(
+      (entry) => entry.file === 'inventory-search.spec.ts',
+    );
+    expect(search).toHaveLength(1);
+    expect(search[0].project).toBe('chromium-exclusive');
+    for (const file of [
+      'audit-three-acceptance.spec.ts',
+      'audit-three-discovery.spec.ts',
+      'audit-three-interface.spec.ts',
+    ])
+      expect(readdirSync('tests/e2e')).not.toContain(file);
+  }, 60_000);
+
   it('caps full-suite concurrency and finishes exclusive files first', () => {
     const scheduling = e2eScheduling(true);
     expect(scheduling.workers).toBe(2);
@@ -193,6 +220,8 @@ describe('browser scheduling', () => {
         'files.spec.ts',
         'files-recovery.spec.ts',
         'foundation.spec.ts',
+        'locations-reference.spec.ts',
+        'inventory-search.spec.ts',
         'metadata-designer.spec.ts',
       ]),
     );

@@ -505,7 +505,7 @@ it.each([false, true])(
       />,
     );
     const row = screen
-      .getByRole('heading', { name: 'Site custody corrected' })
+      .getByRole('heading', { name: 'Site count corrected' })
       .closest('li');
     expect(row).toHaveTextContent('Count corrected at Historical site');
     expect(row).toHaveTextContent(

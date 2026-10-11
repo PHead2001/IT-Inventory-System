@@ -1,3 +1,4 @@
+import { recordStatusLabel } from '@/lib/record-status';
 import { z } from 'zod';
 import {
   resolveDisplayTimeZone,
@@ -160,6 +161,9 @@ export function exportCsv(
       'Item Code (SKU)',
       'Display timezone',
       'Exported at (display zone)',
+      'Type label',
+      'Status label',
+      'Custody label',
     ];
     function* lines() {
       yield headers.map(csvText).join(',');
@@ -195,6 +199,19 @@ export function exportCsv(
           csvText(row.item_code),
           csvText(displayTimeZoneLabel(displayContext)),
           csvText(displayExportedAt),
+          csvText(
+            row.kind === 'quantity' ? 'Quantity item' : 'Individual asset',
+          ),
+          csvText(recordStatusLabel(row.status)),
+          csvText(
+            row.custody_kind === 'site'
+              ? 'Assigned to site'
+              : row.custody_kind === 'storage'
+                ? 'In storage'
+                : row.custody_kind === 'retired'
+                  ? 'Retired'
+                  : 'No recorded assignment',
+          ),
         );
         yield cells.join(',');
       }
@@ -230,6 +247,8 @@ export function exportCsv(
     'Item Code (SKU)',
     'Display timezone',
     'Exported at (display zone)',
+    'Type label',
+    'Status label',
   ];
   function* lines() {
     yield headers.map(csvText).join(',');
@@ -261,6 +280,8 @@ export function exportCsv(
         csvText(row.item_code),
         csvText(displayTimeZoneLabel(displayContext)),
         csvText(displayExportedAt),
+        csvText('Quantity item'),
+        csvText(recordStatusLabel(row.status)),
       );
       yield cells.join(',');
     }

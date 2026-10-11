@@ -460,6 +460,16 @@ Location details group room navigation, label printing, history and query-scoped
 
 Settings Storage locations initially expands root rows only. Search shows matching rows with their ancestors in the same keyboard tree. Returning from a location setting uses its permanent code in the `selected` query to reveal its ancestors and mark the selected row with `aria-selected` (not a current-page claim); unknown selections change no data. Each Settings treeitem owns its disclosure and native link. The treeitem is the sole roving Tab stop, so focused hierarchy, expansion and selection semantics stay together. Arrow keys navigate/expand the tree, and Enter activates its native anchor once with the keyboard modifiers preserved. Pointer, middle-button and modifier clicks retain the anchor's ordinary navigation behavior; disclosure activation returns focus to its treeitem. The conventional inventory picker retains its existing independent behavior.
 
+## Readable display vocabulary
+
+Custody event titles use the shared display mapping in `features/custody/vocabulary.ts`;
+record status uses `lib/record-status.ts`. These mappings do not change persisted
+operations, identities, event snapshots, expected-version checks or retry receipts.
+Inventory CSV appends readable Type label, Status label and Custody label columns;
+low-stock CSV appends Type label and Status label. Both retain existing machine column positions and values. Clipboard support details
+carry original event/operation IDs and ISO precision without rendering them in
+ordinary receipt/history text; local timestamp displays keep the recorded `dateTime`.
+
 ## Shared screen palette and interactive transitions
 
 The dark screen palette is centralized in semantic custom properties in `globals.css`, including workspace, Labels, Scan, form-designer, inventory-row and closet-preview colors. Minimal interactive defaults scope the transition property list without supplying a duration. Existing animated controls opt into the shared feedback duration/easing; route and panel motion remain a separate implementation. UI scene colors keep the existing single-capture `readScenePalette` contract and its Three-compatible formats. Physical room data, geometry and material defaults are unchanged. Print/PDF/export ink remains independent of screen theme. See [interface standards](interface-standards.md) for the exact foundation scope and exceptions. Dark/Light/System persistence, prepaint handling and live scene retheme are not implemented by this foundation.

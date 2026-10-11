@@ -44,11 +44,13 @@ export function FieldSettings({
   initialDateTimeDraft,
   onDateTimeDraftChange,
   revisionOptionCount,
+  publishedOptions,
 }: {
   field: Field;
   autoFocus?: boolean;
   change: (field: Field) => void;
   revisionOptionCount?: number;
+  publishedOptions?: Field['options'];
   published?: boolean;
   showTypeChooser?: boolean;
   initialDateTimeDraft?: DateTimeDraft;
@@ -241,6 +243,7 @@ export function FieldSettings({
             field={field}
             change={change}
             revisionOptionCount={revisionOptionCount}
+            publishedOptions={publishedOptions}
           />
         </section>
       )}

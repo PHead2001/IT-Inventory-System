@@ -1,3 +1,4 @@
+import { CopyTechnicalDetails } from '@/components/copy-technical-details';
 import {
   historySummary,
   historyEventTitle,
@@ -166,7 +167,8 @@ export function InventoryRows({
                   </p>
                   {row.kind === 'quantity' && row.itemCode && (
                     <p className={styles.meta}>
-                      Item code (SKU): {row.itemCode}
+                      Item code (SKU):{' '}
+                      <span className="experience-code">{row.itemCode}</span>
                     </p>
                   )}
                 </div>
@@ -230,7 +232,8 @@ export function InventoryRows({
             <div className={styles.footer}>
               {row.serialNumber && (
                 <span className="[overflow-wrap:anywhere]">
-                  Serial: {row.serialNumber}
+                  Serial:{' '}
+                  <span className="experience-code">{row.serialNumber}</span>
                 </span>
               )}
               {summary &&
@@ -485,16 +488,14 @@ export function HistoryList({
               <summary className="min-h-11 cursor-pointer py-2">
                 Technical event details
               </summary>
-              <p>
-                Event: {event.kind}:{event.id}
-              </p>
-              <p>Record: {event.entityId}</p>
+              <CopyTechnicalDetails
+                details={`Event: ${event.kind}:${event.id}\nOperation type: ${event.eventType}\nRecord: ${event.entityId}\nCustody event: ${event.assignment?.eventId ?? 'None'}\nRecorded instant: ${event.at}`}
+              />
               <p>
                 Record name is the current name, not a recorded name snapshot.
               </p>
               {event.assignment && (
                 <>
-                  <p>Custody event: {event.assignment.eventId}</p>
                   <p>
                     Custody endpoint labels are recorded snapshots from this
                     event.

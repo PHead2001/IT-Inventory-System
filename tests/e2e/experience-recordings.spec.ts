@@ -44,7 +44,9 @@ test('records navigation, a held designer drag and resize, and the saved form', 
   const category = 'Recording ' + randomUUID().slice(0, 8);
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${category}.`,
+  );
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });

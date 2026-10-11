@@ -434,7 +434,9 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${category}.`,
+  );
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });

@@ -2716,6 +2716,82 @@ describe('category form designer', () => {
       screen.queryByRole('region', { name: 'Form save impact' }),
     ).not.toBeInTheDocument();
   });
+  it('uses the committed choice baseline while refresh still has obsolete props', async () => {
+    const legacy = structuredClone(form);
+    legacy.published_definition.fields.push({
+      id: id(30),
+      type: 'single_select',
+      label: 'Connector',
+      applies_to: ['quantity', 'asset'],
+      required: false,
+      rules: {},
+      options: [
+        { id: id(31), label: 'USB', active: true },
+        { id: id(32), label: 'usb', active: true },
+      ],
+    });
+    legacy.published_definition.layout[0].controls.push({
+      id: id(33),
+      kind: 'field',
+      field_id: id(30),
+      width: 12,
+    });
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: true,
+      data: { status: 'saved', version: '2', published_revision_id: id(9) },
+    });
+    const props = {
+      memberId: id(50),
+      categories: [{ id: id(1), name: 'Cables', active: true }],
+      forms: { [id(1)]: legacy },
+    };
+    const view = render(<MetadataSettings {...props} />);
+    fireEvent.click(document.querySelector(`[data-control-id="${id(33)}"]`)!);
+    fireEvent.change(screen.getByLabelText('Option name: usb'), {
+      target: { value: 'Ethernet' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved active form revision 2.');
+    fireEvent.change(screen.getByLabelText('Option name: Ethernet'), {
+      target: { value: 'usb' },
+    });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(
+      screen.getAllByText(/indistinguishable active choice/).length,
+    ).toBeGreaterThan(0);
+    // A delayed refresh with the old revision must not replace the committed baseline.
+    view.rerender(<MetadataSettings {...props} forms={{ ...props.forms }} />);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveMetadataForm).toHaveBeenCalledOnce();
+    fireEvent.change(screen.getByLabelText('Option name: usb'), {
+      target: { value: 'Ethernet cable' },
+    });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0].payload).toMatchObject({
+      expected_published_revision_id: id(9),
+    });
+  });
+  it('protects a newly published field identity before refreshed props arrive', async () => {
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: true,
+      data: { status: 'saved', version: '2', published_revision_id: id(9) },
+    });
+    mount();
+    addField('Ports');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved active form revision 2.');
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
+    expect(screen.queryByLabelText('Field type')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create replacement field' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Discard unpublished field' }),
+    ).not.toBeInTheDocument();
+  });
   it('requires targeted confirmation with an identical proposal and fresh request ID', async () => {
     vi.mocked(saveMetadataForm)
       .mockResolvedValueOnce({

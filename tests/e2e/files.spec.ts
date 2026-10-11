@@ -1,3 +1,4 @@
+import { custodyButtons, custodyReceiptTitle } from './custody-controls';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { expect, test, type Page, type Locator } from '@playwright/test';
@@ -12,6 +13,7 @@ import { Client } from 'pg';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
 import { displayedInstant } from '../helpers/displayed-instant';
+import { exactOperationalTime as exactTime } from '../helpers/operational-time';
 
 function richStatePath(name: string) {
   const directory = resolve('.local-tools/experience-visual/rich-states');
@@ -137,20 +139,20 @@ async function custodyForm(page: Page, title: string) {
 }
 async function submitCustody(form: Locator, title: string) {
   await form
-    .getByRole('button', { name: `Review ${title.toLowerCase()}`, exact: true })
+    .getByRole('button', { name: custodyButtons(title)[0], exact: true })
     .click();
   await expect(
     form.getByRole('region', { name: 'Review changes' }),
   ).toBeVisible();
   await form
     .getByRole('button', {
-      name: `Confirm ${title.toLowerCase()}`,
+      name: custodyButtons(title)[1],
       exact: true,
     })
     .click();
   await expect(
     form.page().getByRole('region', { name: 'Custody completion' }),
-  ).toContainText('Custody saved');
+  ).toContainText(custodyReceiptTitle(title, 'asset'));
 }
 function png(color: number) {
   const image = new PNG({ width: 4, height: 4 });
@@ -592,7 +594,7 @@ test('asset PDF is structurally validated and downloads as an attachment', async
   expect(download.suggestedFilename()).toBe('manual.pdf');
   expect(sha256(await readFile(await download.path()))).toBe(sha256(bytes));
   const returned = await custodyForm(page, 'Return to storage');
-  await chooseLocation(returned, 'Return to storage', 'ITC-RACK');
+  await chooseLocation(returned, 'Storage location', 'ITC-RACK');
   await submitCustody(returned, 'Return to storage');
   await page.goto(assetUrl);
   await expect(cards.getByText('manual.pdf', { exact: true })).toBeVisible();
@@ -884,23 +886,3 @@ test('browser Storage denial does not block a near-20 MiB PDF upload', async ({
     }
   }
 });
-
-async function exactTime(time: Locator) {
-  const summary = time.locator('xpath=parent::summary');
-  if (await summary.count()) {
-    const disclosure = summary.locator('xpath=parent::details');
-    await summary.focus();
-    if (
-      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
-    )
-      await summary.press('Enter');
-    await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
-    await expect(exact).toBeVisible();
-    await expect(disclosure).toContainText(
-      (await time.getAttribute('datetime'))!,
-    );
-    return exact;
-  }
-  return time;
-}
