@@ -1,6 +1,10 @@
 import 'server-only';
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
+import {
+  locationOccupancySchema,
+  type RoomOccupancy,
+} from './occupancy-contract';
 
 const countRows = z
   .array(
@@ -61,4 +65,64 @@ export async function getLocationEntryCounts(
 ): Promise<Record<string, string>> {
   validateLocationCodes(locationCodes);
   return readLocationEntryCounts(await requireMember(), locationCodes);
+}
+
+/** Additive occupancy contract. The legacy active-entry read stays unchanged. */
+export async function readLocationOccupancy(
+  { supabase }: MemberContext,
+  locationCodes: string[],
+  signal?: AbortSignal,
+): Promise<RoomOccupancy> {
+  const requested = validateLocationCodes(locationCodes);
+  if (signal?.aborted) throw new Error('Location count request cancelled.');
+  const controller = new AbortController();
+  let rejectDeadline!: (reason: Error) => void;
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject;
+  });
+  const cancel = () => {
+    controller.abort();
+    rejectDeadline(new Error('Location count request cancelled.'));
+  };
+  const timer = setTimeout(() => {
+    controller.abort();
+    rejectDeadline(new Error('Location count request timed out.'));
+  }, 5000);
+  signal?.addEventListener('abort', cancel, { once: true });
+  let response;
+  try {
+    response = await Promise.race([
+      supabase
+        .rpc('inventory_location_occupancy', {
+          p_location_codes: locationCodes,
+        })
+        .abortSignal(controller.signal),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
+  const { data, error } = response;
+  if (error || !data) throw new Error('Location counts could not be loaded.');
+  const rows = z
+    .array(
+      locationOccupancySchema.extend({
+        location_code: z.string().min(1).max(100),
+      }),
+    )
+    .max(100)
+    .parse(data);
+  const result: RoomOccupancy = {};
+  for (const { location_code, ...counts } of rows) {
+    if (!requested.has(location_code) || Object.hasOwn(result, location_code))
+      throw new Error('Location counts did not match the requested locations.');
+    result[location_code] = counts;
+  }
+  return result;
+}
+
+export async function getLocationOccupancy(locationCodes: string[]) {
+  validateLocationCodes(locationCodes);
+  return readLocationOccupancy(await requireMember(), locationCodes);
 }

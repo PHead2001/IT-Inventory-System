@@ -7,11 +7,21 @@ import {
 } from '@/features/room/spaces';
 import { buildRoomBindings } from '@/features/room/bindings';
 import { roomContentsFilter } from '@/features/room/contents-contract';
+import { supabaseConfig } from '@/lib/supabase/config';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store' };
 export async function GET(request: NextRequest) {
   const scope = await createInventoryReadScope();
+  const generation = z
+    .uuid()
+    .safeParse(request.nextUrl.searchParams.get('generation'));
+  if (!generation.success)
+    return NextResponse.json(
+      { error: 'Invalid count request.' },
+      { status: 400, headers },
+    );
   const locations = await scope.getLocations();
   const space = availableSpaces(locations).find(
     (entry) => entry.id === request.nextUrl.searchParams.get('space'),
@@ -35,12 +45,14 @@ export async function GET(request: NextRequest) {
     )
     .map((entry) => entry.code);
   try {
-    const counts = await scope.getLocationEntryCounts(codes);
+    const counts = await scope.getLocationOccupancy(codes, request.signal);
     return NextResponse.json(
       {
         identity: {
           userId: scope.member.user_id,
           environment: request.nextUrl.origin,
+          backend: new URL(supabaseConfig().url).origin,
+          generation: generation.data,
           spaceId: space.id,
           filter: roomContentsFilter,
         },

@@ -44,6 +44,7 @@ vi.mock('@/features/custody/management-form', () => ({
 const routes = [
   {
     path: './inventory/assets/[id]/page',
+    generic: 'Individual asset · IT Inventory',
     read: reads.asset,
     params: { id: 'opaque-asset' },
     title: 'Private asset · IT Inventory',
@@ -51,6 +52,7 @@ const routes = [
   },
   {
     path: './inventory/quantity/[id]/page',
+    generic: 'Quantity item · IT Inventory',
     read: reads.quantity,
     params: { id: 'opaque-quantity' },
     title: 'Private quantity · IT Inventory',
@@ -58,6 +60,7 @@ const routes = [
   },
   {
     path: './locations/[code]/page',
+    generic: 'Location details · IT Inventory',
     read: reads.location,
     params: { code: 'PRIVATE-LOCATION' },
     title: 'Private location · Locations · IT Inventory',
@@ -65,6 +68,7 @@ const routes = [
   },
   {
     path: './sites/[code]/page',
+    generic: 'Site details · IT Inventory',
     read: reads.site,
     params: { code: 'PRIVATE-SITE' },
     title: 'Private site · Sites · IT Inventory',
@@ -72,6 +76,7 @@ const routes = [
   },
   {
     path: './settings/sites/[code]/page',
+    generic: 'Site details and settings · IT Inventory',
     read: reads.site,
     params: { code: 'PRIVATE-SITE' },
     title: 'Private site · Site settings · IT Inventory',
@@ -79,6 +84,7 @@ const routes = [
   },
   {
     path: './settings/locations/[code]/page',
+    generic: 'Rename location · IT Inventory',
     read: reads.managed,
     params: { code: 'PRIVATE-LOCATION' },
     title: 'Private location · Location settings · IT Inventory',
@@ -88,6 +94,7 @@ const routes = [
   },
   {
     path: './settings/forms/[categoryId]/page',
+    generic: 'Category forms · IT Inventory',
     read: reads.category,
     params: { categoryId: 'opaque-category' },
     title: 'Private category form · Settings · IT Inventory',
@@ -106,6 +113,7 @@ const routes = [
   },
   {
     path: './sites/[code]/open/[kind]/page',
+    generic: 'Record existing equipment · IT Inventory',
     read: reads.site,
     params: { code: 'PRIVATE-SITE', kind: 'quantity' },
     title: 'Record existing quantity item at Private site · IT Inventory',
@@ -117,80 +125,26 @@ beforeEach(() => {
   auth.member.mockResolvedValue({ member: { role: 'staff' } });
 });
 it.each(routes)(
-  'names the authorized record on $path including readable historical records',
-  async ({ path, read, params, title, value }) => {
-    read.mockResolvedValue(value);
+  'keeps streamed metadata generic and read-free on $path, including denied or failed reads',
+  async ({ path, read, params, title, value, generic }) => {
     const page = await import(path);
-    expect(
-      await page.generateMetadata({ params: Promise.resolve(params) }),
-    ).toEqual({ title: { absolute: title } });
-    expect(read).toHaveBeenCalledOnce();
-  },
-);
-it.each(routes)(
-  'propagates auth redirects and read failures before producing any title on $path',
-  async ({ path, read, params }) => {
-    const page = await import(path);
-    for (const message of [
-      'LOGIN_REDIRECT',
-      'INACTIVE_MEMBER_REDIRECT',
-      'DATABASE_READ_FAILURE',
+    for (const outcome of [
+      value,
+      null,
+      new Error('LOGIN_REDIRECT'),
+      new Error('DATABASE_READ_FAILURE'),
     ]) {
-      const failure = new Error(message);
-      read.mockRejectedValueOnce(failure);
-      await expect(
-        page.generateMetadata({ params: Promise.resolve(params) }),
-      ).rejects.toBe(failure);
+      if (outcome instanceof Error) read.mockRejectedValue(outcome);
+      else read.mockResolvedValue(outcome);
+      const metadata = await page.generateMetadata({
+        params: Promise.resolve(params),
+      });
+      expect(metadata.title.absolute).toBe(generic);
+      expect(metadata.title.absolute).not.toBe(title);
+      expect(JSON.stringify(metadata)).not.toContain('Private');
+      expect(JSON.stringify(metadata)).not.toContain('opaque-');
+      expect(read).not.toHaveBeenCalled();
+      expect(auth.member).not.toHaveBeenCalled();
     }
-  },
-);
-it.each(routes)(
-  'uses notFound for a missing authorized record on $path',
-  async ({ path, read, params }) => {
-    read.mockResolvedValue(
-      path.includes('settings/forms')
-        ? { categories: [] }
-        : path.includes('settings/locations')
-          ? []
-          : null,
-    );
-    const page = await import(path);
-    await expect(
-      page.generateMetadata({ params: Promise.resolve(params) }),
-    ).rejects.toThrow('NOT_FOUND');
-  },
-);
-it.each([
-  { active: false, removed_at: null },
-  { active: true, removed_at: '2026-10-09T00:00:00Z' },
-])('does not name unavailable categories %j', async (status) => {
-  reads.category.mockResolvedValue({
-    categories: [
-      { id: 'opaque-category', name: 'Private removed category', ...status },
-    ],
-  });
-  const page = await import('./settings/forms/[categoryId]/page');
-  await expect(
-    page.generateMetadata({
-      params: Promise.resolve({ categoryId: 'opaque-category' }),
-    }),
-  ).rejects.toThrow('NOT_FOUND');
-});
-it.each([
-  { role: 'viewer', active: true },
-  { role: 'staff', active: false },
-])(
-  'keeps denied site opening titles generic for %j',
-  async ({ role, active }) => {
-    auth.member.mockResolvedValue({ member: { role } });
-    reads.site.mockResolvedValue({ name: 'Private site', active });
-    const page = await import('./sites/[code]/open/[kind]/page');
-    const result = await page.generateMetadata({
-      params: Promise.resolve({ code: 'PRIVATE-SITE', kind: 'asset' }),
-    });
-    expect(result.title.absolute).toBe(
-      'Record existing individual asset · IT Inventory',
-    );
-    expect(JSON.stringify(result)).not.toContain('Private site');
   },
 );

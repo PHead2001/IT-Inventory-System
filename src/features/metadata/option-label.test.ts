@@ -39,7 +39,7 @@ describe('pinned choice label identity', () => {
     options[2].active = true;
     expect(ambiguousOptionIds(options).has(id(3))).toBe(true);
   });
-  it('reserves literal suffixes and includes inactive choices in revision order', () => {
+  it('reserves literal suffixes and includes inactive choices in UUID order', () => {
     const options = [
       { id: id(1), label: 'Same', active: true },
       { id: id(2), label: 'same', active: false },
@@ -55,6 +55,63 @@ describe('pinned choice label identity', () => {
     expect(optionDisplayLabels(options).get(id(2))).toBe(
       optionDisplayLabels(structuredClone(options)).get(id(2)),
     );
+  });
+  it('keeps UUID display identity through reversed duplicate, inactive, literal and hierarchical navigation order', () => {
+    const choices = [
+      { id: id(1), label: ' Same ', active: true },
+      { id: id(2), label: 'same', active: false, parent_id: id(8) },
+      { id: id(3), label: 'Same (2)', active: true },
+      { id: id(4), label: 'Same', active: true, parent_id: id(1) },
+      { id: id(5), label: 'A / B', active: true },
+      { id: id(6), label: 'A', active: true },
+      { id: id(7), label: 'B', active: true, parent_id: id(6) },
+      { id: id(8), label: 'Root', active: true },
+    ];
+    const original = structuredClone(choices);
+    const reversed = [...choices].reverse();
+    const before = optionDisplayLabels(choices);
+    const after = optionDisplayLabels(reversed);
+    for (const option of choices)
+      expect(after.get(option.id)).toBe(before.get(option.id));
+    expect([...after.keys()]).toEqual(reversed.map((option) => option.id));
+    expect(choices).toEqual(original);
+    const originalIndex = buildOptionIndex(choices),
+      reversedIndex = buildOptionIndex(reversed);
+    for (const option of choices)
+      expect(reversedIndex.paths.get(option.id)).toBe(
+        originalIndex.paths.get(option.id),
+      );
+    expect(reversedIndex.paths.get(id(2))).toBe('Root / same (3)');
+    expect(reversedIndex.paths.get(id(4))).toBe('Same / Same (4)');
+    expect(reversedIndex.paths.get(id(5))).toBe('"A / B"');
+    expect(reversedIndex.paths.get(id(7))).toBe('A / B');
+    expect(
+      reversedIndex.children.get(null)?.map((option) => option.id),
+    ).toEqual(
+      reversed.filter((option) => !option.parent_id).map((option) => option.id),
+    );
+  });
+  it('preserves all 1000 full Unicode labels in caller order while UUIDs allocate suffixes across reorder', () => {
+    const label = 'Stra\u00dfe\u03a3\uab70\ufb03'.repeat(30).slice(0, 200);
+    const options = Array.from({ length: 1000 }, (_, position) => ({
+      id: id(1000 - position),
+      label,
+      active: true,
+    }));
+    const labels = optionDisplayLabels(options);
+    const reversed = optionDisplayLabels([...options].reverse());
+    expect([...labels.keys()]).toEqual(options.map((option) => option.id));
+    expect([...reversed.keys()]).toEqual(
+      [...options].reverse().map((option) => option.id),
+    );
+    expect(labels.get(id(1000))).toBe(`${label} (1000)`);
+    expect(labels.get(id(1))).toBe(label);
+    expect(new Set(labels.values()).size).toBe(1000);
+    for (let ordinal = 1; ordinal <= 1000; ordinal++) {
+      const expected = label + (ordinal === 1 ? '' : ` (${ordinal})`);
+      expect(labels.get(id(ordinal))).toBe(expected);
+      expect(reversed.get(id(ordinal))).toBe(expected);
+    }
   });
   it('quotes literal path separators and quote characters without child-path ambiguity', () => {
     const options = [

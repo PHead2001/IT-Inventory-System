@@ -1,3 +1,5 @@
+import { fits } from './viewport-controls';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
@@ -556,3 +558,127 @@ test('a pre-existing server draft remains reviewable and can be explicitly disca
   );
   await client.auth.signOut();
 });
+
+interfaceTest(
+  'populated form designer remains usable with private-safe category titles at phone widths',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    for (const width of [375, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/settings/forms');
+      await page
+        .locator(`main a[href="/settings/forms/${interfaceRecord.categoryId}"]`)
+        .click();
+      await expect(
+        page.getByRole('region', { name: 'Forms and fields' }),
+      ).toBeVisible();
+      await expect(page).toHaveTitle(
+        `${interfaceRecord.categoryName} form · Settings · IT Inventory`,
+      );
+      await expect(
+        page.getByRole('navigation', { name: 'Designer panels' }),
+      ).toBeVisible();
+      await fits(page);
+      await page.screenshot({
+        path: info.outputPath(`form-designer-${width}.png`),
+        fullPage: true,
+      });
+      for (const privateValue of [
+        interfaceRecord.id,
+        interfaceRecord.categoryId,
+        interfaceRecord.name,
+      ])
+        await expect(page.locator('head title')).not.toContainText(
+          privateValue,
+        );
+    }
+  },
+);
+
+interfaceTest(
+  'designer dialog hands focus to visible additions and existing fields while Cancel returns to its trigger',
+  async ({ page, interfaceRecord }) => {
+    await interfaceLogin(page);
+    await page.goto(`/settings/forms/${interfaceRecord.categoryId}`);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const designer = page.getByRole('region', { name: 'Forms and fields' });
+      const panels = designer.getByRole('navigation', {
+        name: 'Designer panels',
+      });
+      const library = async () => {
+        if (width === 390)
+          await panels
+            .getByRole('button', { name: 'Library', exact: true })
+            .click();
+      };
+      await library();
+      const trigger = designer.getByRole('button', {
+        name: 'Add field',
+        exact: true,
+      });
+      await trigger.click();
+      let dialog = page.getByRole('dialog', { name: 'Add field' });
+      const fieldName = `Focus field ${width}`;
+      await dialog.getByLabel('Field name', { exact: true }).fill(fieldName);
+      await dialog
+        .getByRole('button', { name: 'Add to form', exact: true })
+        .click();
+      await expect(dialog).toHaveCount(0);
+      const control = designer
+        .getByRole('button', {
+          name: `Drag ${fieldName}`,
+          exact: true,
+          includeHidden: true,
+        })
+        .locator('xpath=ancestor::*[@data-control-id][1]');
+      const inspector = designer.getByTestId('designer-inspector');
+      await expect(control).toHaveAttribute('data-selected', 'true');
+      if (width === 1440) await expect(control).toBeFocused();
+      else {
+        await expect(
+          inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+        ).toBeFocused();
+        await expect(inspector).toBeVisible();
+      }
+      await library();
+      await trigger.click();
+      dialog = page.getByRole('dialog', { name: 'Add field' });
+      await dialog
+        .getByRole('button', { name: 'Cancel field addition', exact: true })
+        .click();
+      await expect(trigger).toBeVisible();
+      await expect(trigger).toBeFocused();
+      await trigger.click();
+      dialog = page.getByRole('dialog', { name: 'Add field' });
+      await dialog
+        .getByRole('tab', { name: 'Standard fields', exact: true })
+        .click();
+      await dialog
+        .getByText('Name', { exact: true })
+        .locator('..')
+        .getByRole('button', { name: 'Go to field', exact: true })
+        .click();
+      await expect(dialog).toHaveCount(0);
+      const name = designer
+        .getByRole('button', {
+          name: 'Drag Name',
+          exact: true,
+          includeHidden: true,
+        })
+        .locator('xpath=ancestor::*[@data-control-id][1]');
+      await expect(name).toHaveAttribute('data-selected', 'true');
+      await expect(
+        inspector.getByRole('region', {
+          name: 'Name layout properties',
+          exact: true,
+        }),
+      ).toBeVisible();
+      if (width === 1440) await expect(name).toBeFocused();
+      else
+        await expect(
+          inspector.getByRole('heading', { name: 'Inspector', exact: true }),
+        ).toBeFocused();
+    }
+  },
+);

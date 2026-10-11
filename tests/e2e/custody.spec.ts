@@ -1,3 +1,10 @@
+import { withinViewport } from './viewport-controls';
+import {
+  acceptanceCommand,
+  acceptanceConfirm,
+  acceptanceFixtures,
+  acceptanceLogin,
+} from './audit-three-acceptance-fixtures';
 import { custodyButtons, custodyReceiptTitle } from './custody-controls';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -832,4 +839,258 @@ test('empty property archive and restore are discoverable and keep identity', as
     page.getByRole('button', { name: 'Archive site', exact: true }),
   ).toBeVisible();
   expect(await siteId(siteCode)).toBe(id);
+});
+
+test('Restore uses eligible last storage only and requires an explicit confirmed destination', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    await acceptanceLogin(page);
+    const red = await owned.location('ITC-RED');
+    const eligible = await owned.asset(`Eligible restore ${owned.suffix}`, red);
+    await page.goto(`/inventory/assets/${eligible}`);
+    let form = await openRecordTask(page, 'Retire asset');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Owned eligible restore checkpoint');
+    await acceptanceConfirm(form, 'Retire asset');
+    await page.reload();
+    form = await openRecordTask(page, 'Restore asset');
+    await expect(
+      form.getByRole('combobox', {
+        name: 'Confirmed current location',
+        exact: true,
+      }),
+    ).toContainText('Red Container');
+    await chooseLocation(form, 'Confirmed current location', 'ITC-BLACK');
+    await form
+      .getByRole('button', { name: 'Review restore asset', exact: true })
+      .click();
+    await expect(form.getByLabel('Reason (required)')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Confirmed at the chosen storage after inspection');
+    await expect(
+      form.getByRole('combobox', {
+        name: 'Confirmed current location',
+        exact: true,
+      }),
+    ).toContainText('Black Container');
+    await acceptanceConfirm(form, 'Restore asset');
+    await page.reload();
+    await expect(
+      page.locator('main a[href="/locations/ITC-BLACK"]').first(),
+    ).toBeVisible();
+
+    const storage = await owned.ownedLocation(
+      `Ineligible restore ${owned.suffix}`,
+    );
+    const ineligible = await owned.asset(
+      `Ineligible restore asset ${owned.suffix}`,
+      storage.id,
+    );
+    await page.goto(`/inventory/assets/${ineligible}`);
+    form = await openRecordTask(page, 'Retire asset');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Owned inactive-location restore checkpoint');
+    await acceptanceConfirm(form, 'Retire asset');
+    const inactive = await owned.admin
+      .from('locations')
+      .update({ active: false, can_hold_inventory: false })
+      .eq('id', storage.id);
+    expect(inactive.error).toBeNull();
+    await page.reload();
+    form = await openRecordTask(page, 'Restore asset');
+    await expect(
+      form.getByRole('combobox', {
+        name: 'Confirmed current location',
+        exact: true,
+      }),
+    ).toHaveText(/Select a location/);
+
+    const site = await owned.site();
+    const atSite = await acceptanceCommand(owned.caller, 'asset_site_open_v3', {
+      name: `Site restore ${owned.suffix}`,
+      description: null,
+      category_id: owned.categoryId,
+      manufacturer: null,
+      model: null,
+      site_id: site.id,
+      asset_tag: `00-site-${owned.suffix}`,
+      serial_number: null,
+      expected_published_revision_id: owned.revisionId,
+      custom_patch: { set: {}, unset: [] },
+    });
+    owned.assets.add(atSite.entity_id);
+    await page.goto(`/inventory/assets/${atSite.entity_id}`);
+    form = await openRecordTask(page, 'Retire asset at site');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Owned site-held restore checkpoint');
+    await acceptanceConfirm(form, 'Retire asset at site');
+    await page.reload();
+    form = await openRecordTask(page, 'Restore asset');
+    await expect(
+      form.getByRole('combobox', {
+        name: 'Confirmed current location',
+        exact: true,
+      }),
+    ).toHaveText(/Select a location/);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('custody Done permits another operation and revisit cannot resurrect or repeat either committed receipt', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    await acceptanceLogin(page);
+    const red = await owned.location('ITC-RED'),
+      site = await owned.site();
+    const id = await owned.asset(`Receipt lifecycle ${owned.suffix}`, red);
+    const detail = `/inventory/assets/${id}`;
+    await page.goto(detail);
+    let form = await openRecordTask(page, 'Assign asset to a site');
+    await form.getByLabel('Destination site').selectOption(site.id);
+    await acceptanceConfirm(form, 'Assign asset to a site');
+    const first = page.getByRole('region', {
+      name: 'Custody completion',
+      exact: true,
+    });
+    await expect(first).toContainText('Assigned to site');
+    await first.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(
+      page
+        .getByRole('region', { name: 'Record tasks' })
+        .getByRole('button', { name: 'Return to storage', exact: true }),
+    ).toBeVisible();
+    form = await openRecordTask(page, 'Return to storage');
+    await expect(
+      form.getByRole('button', {
+        name: 'Review return',
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await chooseLocation(form, 'Storage location', 'ITC-BLACK');
+    await acceptanceConfirm(form, 'Return to storage');
+    const second = page.getByRole('region', {
+      name: 'Custody completion',
+      exact: true,
+    });
+    await expect(second).toContainText('Returned from site');
+    await second.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.goto('/inventory');
+    await page.goto(detail);
+    await page.reload();
+    await expect(
+      page.getByRole('region', { name: 'Custody completion', exact: true }),
+    ).toHaveCount(0);
+    form = await openRecordTask(page, 'Assign asset to a site');
+    await expect(
+      form.getByRole('button', {
+        name: 'Review assignment',
+        exact: true,
+      }),
+    ).toBeVisible();
+    const state = await owned.caller
+      .from('serialized_assets')
+      .select('version,location_id,site_id')
+      .eq('id', id)
+      .single();
+    expect(state.error).toBeNull();
+    expect(state.data).toMatchObject({
+      version: 3,
+      location_id: await owned.location('ITC-BLACK'),
+      site_id: null,
+    });
+    const events = await owned.caller
+      .from('assignment_events')
+      .select('kind')
+      .eq('asset_id', id);
+    expect(events.error).toBeNull();
+    expect(events.data).toHaveLength(2);
+    expect(events.data!.map((event) => event.kind).sort()).toEqual([
+      'issued',
+      'returned',
+    ]);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('Settings hierarchy exposes keyboard paths and stays framed on a narrow viewport', async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/settings/locations');
+  const configuration = page.getByRole('region', {
+    name: 'Location configuration',
+  });
+  const tree = configuration.getByRole('tree', { name: 'Locations' });
+  const root = tree.getByRole('treeitem', { name: /ITC · Active$/ });
+  await root.focus();
+  await root.press('ArrowLeft');
+  await expect(root).toHaveAttribute('aria-expanded', 'false');
+  await expect(
+    tree.getByRole('treeitem', { name: /ITC-R · Active$/ }),
+  ).toHaveCount(0);
+  await root.press('ArrowRight');
+  await expect(root).toHaveAttribute('aria-expanded', 'true');
+  // Reused local fixtures can add earlier-sorted children to ITC. ArrowRight
+  // follows the rendered hierarchy, rather than assuming Left Storage is first.
+  const rootIndex = await root.evaluate((element) =>
+    Array.from(
+      element.closest('[role="tree"]')!.querySelectorAll('[role="treeitem"]'),
+    ).indexOf(element),
+  );
+  expect(rootIndex).toBeGreaterThanOrEqual(0);
+  const firstChild = tree.getByRole('treeitem').nth(rootIndex + 1);
+  await expect(firstChild).toHaveAttribute('aria-level', '2');
+  const parentPath = await root.locator('span').nth(1).innerText();
+  await expect(firstChild.locator('span').nth(1)).toContainText(
+    parentPath + ' / ',
+  );
+  await root.press('ArrowRight');
+  await expect(firstChild).toBeFocused();
+  const right = tree.getByRole('treeitem', { name: /ITC-R · Active$/ });
+  await right.focus();
+  await right.press('ArrowLeft');
+  await expect(right).toHaveAttribute('aria-expanded', 'false');
+  await expect(
+    tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ }),
+  ).toHaveCount(0);
+  await right.press('ArrowRight');
+  const drawer = tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ });
+  await drawer.focus();
+  await drawer.press('ArrowLeft');
+  await expect(right).toBeFocused();
+  await right.press('Home');
+  const first = tree.getByRole('treeitem').first();
+  await expect(first).toBeFocused();
+  await first.press('End');
+  await expect(tree.getByRole('treeitem').last()).toBeFocused();
+  await configuration
+    .getByLabel('Search locations', { exact: true })
+    .fill('ITC-D07');
+  await expect(
+    configuration.getByRole('list', { name: 'Locations' }),
+  ).toBeVisible();
+  await expect(
+    configuration.getByText('1 matching locations', { exact: true }),
+  ).toBeVisible();
+  const result = configuration.getByRole('link', { name: /ITC-D07 · Active$/ });
+  await result.scrollIntoViewIfNeeded();
+  await withinViewport(result);
+  await result.press('Enter');
+  await expect(page).toHaveURL(/\/settings\/locations\/ITC-D07$/);
 });

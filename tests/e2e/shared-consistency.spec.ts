@@ -160,12 +160,11 @@ function localApi() {
 }
 async function options(page: Page) {
   return Promise.all(
-    settingNames.map((name) =>
-      page
-        .getByRole('combobox', { name, exact: true })
-        .locator('option')
-        .allTextContents(),
-    ),
+    settingNames.map(async (name) => {
+      const combobox = page.getByRole('combobox', { name, exact: true });
+      await expect(combobox).toBeVisible();
+      return combobox.locator('option').allTextContents();
+    }),
   );
 }
 
@@ -292,21 +291,33 @@ for (const fallback of [false, true]) {
         );
       expect(rows).toHaveLength(2);
       const [headers, row] = rows;
-      expect(headers.slice(-3)).toEqual([
+      expect(new Set(headers).size).toBe(headers.length);
+      const column = (name: string) => {
+        expect(headers.filter((header) => header === name)).toHaveLength(1);
+        return headers.indexOf(name);
+      };
+      const metadataColumns = [
         'Item Code (SKU)',
         'Display timezone',
         'Exported at (display zone)',
-      ]);
-      expect(row[headers.indexOf('Name')]).toBe(name);
-      expect(row[headers.indexOf('Display timezone')]).toBe(
+        'Type label',
+        'Status label',
+        'Custody label',
+      ];
+      const skuColumn = column('Item Code (SKU)');
+      expect(metadataColumns.map(column)).toEqual(
+        metadataColumns.map((_, offset) => skuColumn + offset),
+      );
+      expect(row[column('Name')]).toBe(name);
+      expect(row[column('Display timezone')]).toBe(
         fallback ? 'UTC (UTC fallback)' : zone,
       );
-      const displayTime = row[headers.indexOf('Exported at (display zone)')];
+      const displayTime = row[column('Exported at (display zone)')];
       expect(displayTime).toContain(zone);
       if (fallback) expect(displayTime).toContain('UTC (UTC fallback)');
       expect(displayedInstant(displayTime)).toBe(
         Math.floor(
-          new Date(row[headers.indexOf('Exported At (UTC)')]).getTime() / 1000,
+          new Date(row[column('Exported At (UTC)')]).getTime() / 1000,
         ) * 1000,
       );
       expect(download.suggestedFilename()).toMatch(/\d{8}T\d{6}Z\.csv$/);

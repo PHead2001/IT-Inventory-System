@@ -1,5 +1,7 @@
 'use client';
 import { OperationalTimestamp } from '@/components/operational-time';
+import { usePrivacyRevocationRevision } from '@/components/auth/privacy-readiness';
+import { readPrivacyRevocationRevision } from '@/features/scan/assign-batch';
 import {
   useCallback,
   useEffect,
@@ -586,6 +588,8 @@ export function MetadataSettings({
   selectedCategoryId?: string;
 }) {
   const router = useRouter();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const initialRevocation = useRef(readPrivacyRevocationRevision());
   const reducedMotion = useEffectiveReducedMotion();
   const pendingDesignerFocus = useRef<number | null>(null);
   const focusIntent = useRef(0);
@@ -869,6 +873,9 @@ export function MetadataSettings({
       setOperationPending(false);
     }
   };
+  useLayoutEffect(() => {
+    if (initialRevocation.current !== revocationRevision) denyIdentity();
+  }, [revocationRevision, denyIdentity]);
   useEffect(() => {
     definitionRef.current = definition;
   }, [definition]);

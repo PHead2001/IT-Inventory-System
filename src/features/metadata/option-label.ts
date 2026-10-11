@@ -71,8 +71,9 @@ const displaySegment = (rawLabel: string) => {
   return /["\\/]/.test(label) ? JSON.stringify(label) : label;
 };
 
-/** Use the complete referenced revision in persisted order, including inactive
- * choices. Reserve all literal names before allocating human ordinal suffixes. */
+/** Allocate from the complete referenced revision in canonical UUID order,
+ * including inactive choices. Navigation order never reallocates display identity.
+ * Reserve all literal names before allocating human ordinal suffixes. */
 export function optionDisplayLabels(
   options: readonly LabeledOption[],
 ): Map<string, string> {
@@ -84,7 +85,12 @@ export function optionDisplayLabels(
   const used = new Set<string>();
   const labels = new Map<string, string>();
   const nextOrdinal = new Map<string, number>();
-  for (const option of options) {
+  const canonical = [...options].sort((left, right) => {
+    const a = left.id.toLowerCase(),
+      b = right.id.toLowerCase();
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  for (const option of canonical) {
     const base = displaySegment(option.label || 'Unnamed option');
     const key = normalizeOptionLabel(base);
     let ordinal = nextOrdinal.get(key) ?? 1;
@@ -102,5 +108,6 @@ export function optionDisplayLabels(
     used.add(normalizeOptionLabel(display));
     labels.set(option.id, display);
   }
-  return labels;
+  // Preserve the caller's iteration/navigation order; only allocation is sorted.
+  return new Map(options.map((option) => [option.id, labels.get(option.id)!]));
 }

@@ -143,7 +143,12 @@ export async function verifyChoiceRevisionDisplay(owner: Client) {
     assert.deepEqual(
       await readPaths(later, selected),
       expected(reordered, selected),
-      'a later revision uses its own persisted order',
+      'a later reordered revision uses canonical UUID allocation in both SQL and TS',
+    );
+    assert.deepEqual(
+      await readPaths(later, selected),
+      originalPaths,
+      'reordering unchanged published choice UUIDs never swaps their display labels',
     );
     assert.deepEqual(
       await readPaths(revision, selected),
@@ -158,7 +163,7 @@ export async function verifyChoiceRevisionDisplay(owner: Client) {
     assert.deepEqual(
       await readPaths(tied, selected),
       expected(byId, selected),
-      'persisted sort-order ties use the stable choice UUID tiebreaker',
+      'editable sort-order ties do not affect stable choice UUID allocation',
     );
     assert.equal(
       (

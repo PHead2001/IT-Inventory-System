@@ -60,7 +60,7 @@ it('explains physical asset movement on the primary launcher before a task is ch
   expect(screen.queryByRole('form')).toBeNull();
   expect(move).toHaveAttribute('aria-pressed', 'false');
 });
-it('retains the last available archive review after restore and a subsequent lifecycle refresh', () => {
+it('retains the reviewed archive version and counts inside a withdrawn, inaccessible task', () => {
   const view = render(<DetailTasks {...props} archiveReview={null} />);
   expect(screen.queryByRole('button', { name: 'Edit details' })).toBeNull();
   const review = {
@@ -91,8 +91,38 @@ it('retains the last available archive review after restore and a subsequent lif
       archiveReview={null}
     />,
   );
+  const retained = screen.getByRole('form', {
+    name: 'Archive quantity item and clear stock',
+    hidden: true,
+  });
+  expect(retained).toBeInTheDocument();
+  expect(retained).not.toBeVisible();
+  const boundary = retained.closest('fieldset');
+  expect(boundary).toHaveAttribute('hidden');
+  expect(boundary).toHaveAttribute('inert');
+  expect(boundary).toBeDisabled();
+  expect(screen.getByText('4 units to remove')).toBeInTheDocument();
+  expect(screen.getByText('4 units to remove')).not.toBeVisible();
+
+  // A version-3 refresh must not replace the retained version-2 review.
+  view.rerender(
+    <DetailTasks
+      {...props}
+      item={{ ...item, version: 3 }}
+      archiveReview={{
+        ...review,
+        version: '3',
+        archived: true,
+        removed_total: '9',
+      }}
+    />,
+  );
+  expect(screen.getByText('4 units to remove')).toBeInTheDocument();
+  expect(screen.queryByText('9 units to remove')).toBeNull();
   expect(
-    screen.getByRole('form', { name: 'Archive quantity item and clear stock' }),
-  ).toBeInTheDocument();
-  expect(screen.getByText('4 units to remove')).toBeVisible();
+    screen.getByText(
+      'This quantity item changed. Load and review the latest per-location counts before archiving.',
+    ),
+  ).not.toBeVisible();
+  expect(retained).not.toBeVisible();
 });

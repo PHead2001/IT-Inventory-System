@@ -1,3 +1,6 @@
+import { displayedInstant } from '../helpers/displayed-instant';
+import { expectRecordedInstantCopy } from '../helpers/operational-time';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
@@ -251,7 +254,9 @@ test('location status, holding scope, matching rows and real CSV agree across na
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Current scope: Active only')).toBeVisible();
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     const split = page.locator('li').filter({
       has: page.getByRole('link', { name: setup.splitName, exact: true }),
     });
@@ -284,23 +289,31 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await all.click({ noWaitAfter: true });
     await expect.poll(() => slowStarted).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await active.click({ noWaitAfter: true });
     releaseScope();
     await expect.poll(() => slowDelivered).toBe(true);
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.unroute('**/locations/ITC-BLACK?**');
     await all.click();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await expect(active).not.toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('29 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('29 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/status=all/);
     await page.reload();
     await expect(all).toHaveAttribute('aria-current', 'page');
     await page.goBack();
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('28 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('28 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
@@ -325,11 +338,34 @@ test('location status, holding scope, matching rows and real CSV agree across na
       .getByLabel('Search inventory', { exact: true })
       .fill(setup.prefix);
     await search.getByRole('button', { name: 'Search', exact: true }).click();
-    await expect(page.getByText('30 matching rows')).toBeVisible();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/inventory' &&
+        url.searchParams.get('q') === setup.prefix &&
+        !url.searchParams.has('page'),
+    );
+    await expect(
+      page.getByText('30 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(/^On this page:/)).toBeVisible();
-    await page.getByRole('link', { name: 'Next', exact: true }).click();
-    await expect(page.getByText('Page 2 of 2')).toBeVisible();
-    await expect(page.getByText('30 matching rows')).toBeVisible();
+    const next = page
+      .getByRole('navigation', { name: 'Pagination' })
+      .getByRole('link', { name: 'Next', exact: true });
+    await expect(next).toHaveAttribute(
+      'href',
+      '/inventory?' + new URLSearchParams({ q: setup.prefix, page: '2' }),
+    );
+    await next.click();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/inventory' &&
+        url.searchParams.get('q') === setup.prefix &&
+        url.searchParams.get('page') === '2',
+    );
+    await expect(page.getByText('Page 2 of 2', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('30 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Next', exact: true }),
     ).toHaveCount(0);
@@ -342,9 +378,13 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await expect(
       search.getByLabel('Search inventory', { exact: true }),
     ).toHaveValue(setup.prefix);
-    await expect(page.getByText('31 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('31 matching rows', { exact: true }),
+    ).toBeVisible();
     await page.goto('/inventory?q=' + encodeURIComponent(setup.splitName));
-    await expect(page.getByText('2 matching rows')).toBeVisible();
+    await expect(
+      page.getByText('2 matching rows', { exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByText('On this page: 2 quantity rows with stock'),
     ).toBeVisible();
@@ -731,3 +771,32 @@ test('Office codes, compact duplicate child links and empty destination remain a
     });
   }
 });
+
+interfaceTest(
+  'relative history exposes exact timezone and original precision through keyboard disclosure',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    await page.goto(`/history?type=quantity&entityId=${interfaceRecord.id}`);
+    const time = page.locator('summary > time').first();
+    await expect(time).toBeVisible();
+    const original = await time.getAttribute('datetime');
+    const summary = time.locator('xpath=parent::summary');
+    const disclosure = summary.locator('xpath=parent::details');
+    await summary.focus();
+    await expect(summary).toBeFocused();
+    await summary.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+    const exact = disclosure.locator(':scope > p').first();
+    await expect(exact).toBeVisible();
+    await expect(exact).toContainText(/UTC|GMT/);
+    expect(displayedInstant((await exact.textContent())!)).toBe(
+      Math.floor(Date.parse(original!) / 1000) * 1000,
+    );
+    await expectRecordedInstantCopy(disclosure, original!);
+    await expect(time).toHaveAttribute('datetime', original!);
+    await page.screenshot({
+      path: info.outputPath('history-exact-disclosure.png'),
+      fullPage: true,
+    });
+  },
+);

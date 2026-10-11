@@ -466,6 +466,40 @@ describe('inventory operation forms', () => {
     ).toBeVisible();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
+  it('exposes the Receive receipt only after its deferred mutation commits', async () => {
+    let complete!: (value: {
+      ok: true;
+      entityId: string;
+      version: string;
+      changed: true;
+    }) => void;
+    mocks.submit.mockReturnValueOnce(
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<MutationForm {...defaults} operation="quantity_receive" />);
+    await chooseLocation(user, 'Receive at', '1B');
+    await user.type(screen.getByLabelText('Reason (required)'), 'Delivery');
+    await user.click(
+      screen.getByRole('button', { name: 'Review receive stock' }),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm receive stock' }),
+    );
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Saved successfully.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      complete({ ok: true, entityId: item.id, version: '3', changed: true });
+    });
+    expect(await screen.findByText('Saved successfully.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeVisible();
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  });
   it('retains acknowledged sibling success when its own record refresh arrives', async () => {
     mocks.submit.mockResolvedValue({
       ok: true,

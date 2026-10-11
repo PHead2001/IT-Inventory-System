@@ -95,3 +95,19 @@ it('rejects forged review versions, destinations, actor and unsupported keys', (
     ),
   ).toBeNull();
 });
+it('refuses same-request cleanup/replay after an intervening byte change even if parsed values remain equal', () => {
+  expect(storeAssignmentRecovery(stored, null)).toBe(true);
+  const original = readAssignmentRecovery(scope).raw!;
+  const storageKey =
+    'inventory-assign-v1:' +
+    JSON.stringify([scope.origin, scope.backend, scope.actor]);
+  sessionStorage.setItem(storageKey, original + ' ');
+  expect(readAssignmentRecovery(scope).value).toEqual(
+    parseAssignmentRecovery(original, scope),
+  );
+  expect(storeAssignmentRecovery(stored, stored, original)).toBe(false);
+  expect(
+    clearAssignmentRecovery(scope, stored.command.requestId, original),
+  ).toBe(false);
+  expect(sessionStorage.getItem(storageKey)).toBe(original + ' ');
+});

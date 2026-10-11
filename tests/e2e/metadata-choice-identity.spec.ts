@@ -28,13 +28,17 @@ test('legacy choices remain readable on inventory and labels and editable withou
     revision = randomUUID(),
     item = randomUUID();
   const name = 'Readable legacy choice ' + randomUUID();
+  // A unique fixture prefix with deterministic UUID order keeps Same (4) bound
+  // to the third duplicate regardless of authoring/navigation order.
+  const optionId = (n: number) =>
+    field.slice(0, 24) + String(n).padStart(12, '0');
   const options = [
-    { id: randomUUID(), label: 'Same', active: true },
-    { id: randomUUID(), label: 'same', active: false },
-    { id: randomUUID(), label: 'Same', active: true },
-    { id: randomUUID(), label: 'Same (2)', active: true },
+    { id: optionId(1), label: 'Same', active: true },
+    { id: optionId(2), label: 'same', active: false },
+    { id: optionId(3), label: 'Same', active: true },
+    { id: optionId(4), label: 'Same (2)', active: true },
     ...Array.from({ length: 65 }, (_, n) => ({
-      id: randomUUID(),
+      id: optionId(n + 5),
       label: `Choice ${n + 1}`,
       active: true,
     })),
