@@ -61,6 +61,7 @@ Write for the staff member in the moment, not for a reviewer of the implementati
 - Use domain words staff already use: location, assigned to, in stock, retired. Avoid model terms on screen: transaction, definition, holding, custody record, revision, payload, scope.
 - Show one short line of help at most. Move long explanations behind a "?" or "Learn more" disclosure.
 - Mark optional fields "(optional)". Do not explain the asterisk convention on every form.
+- Validation summaries list separate linked field entries, with spacing and visible markers. Activating an entry focuses its field; live validation clears entries without stealing edit focus.
 - Error messages say what is wrong and how to fix it, next to the field.
 - Plain does not mean vague. Never trade truthfulness for friendliness (see §6).
 
@@ -83,6 +84,26 @@ Write for the staff member in the moment, not for a reviewer of the implementati
 | Correct recorded location                                                                  | Correct: update the record without physically moving equipment                              |
 | Move asset                                                                                 | Move: physically relocate the asset                                                         |
 | Write off / Retire                                                                         | Write off quantity stock / Retire an individual asset                                       |
+| Issued / Assigned (individual asset)                                                       | Assigned to site                                                                            |
+| Issued (quantity stock)                                                                    | Issued to site                                                                              |
+| Returned                                                                                   | Returned from site                                                                          |
+| Transferred                                                                                | Transferred between sites                                                                   |
+| Corrected (quantity) / Corrected (individual asset)                                        | Site count corrected / Site custody corrected                                               |
+| Written off (quantity) / Written off (individual asset)                                    | Quantity written off at site / Asset written off at site                                    |
+| Retired (site assignment)                                                                  | Asset retired at site                                                                       |
+| Name reviewed / Endpoints reviewed for this operation                                      | Omit the implementation suffix; show the recorded item and route                            |
+| Operation identity / Recorded instant                                                      | Copy technical details                                                                      |
+| Quantity Item code (SKU)                                                                   | Quantity item code (SKU)                                                                    |
+| Review assign asset to a site / Confirm assign asset to a site                             | Review assignment / Assign to site                                                          |
+| Inventory schema / provisional software location / reviewed room code                      | Categories / storage location / application update                                          |
+| Truly unreferenced category will be deleted                                                | This category has no inventory or history references and will be removed                    |
+
+Shared display labels in `custody/vocabulary.ts` implement the vocabulary above.
+Category outcomes include the completed action and
+category name. Status labels share `record-status.ts` across lists, detail, Labels and
+Scan. Inventory CSV appends Type label, Status label and Custody label while retaining existing
+machine columns and positions. Low-stock CSV also appends Type label and Status label. Support IDs and original ISO instants belong in **Copy
+technical details**; expanded timestamps show readable exact local time and timezone.
 
 Add rows here when a recurring phrase is replaced, so later work reuses the same wording.
 
@@ -124,6 +145,8 @@ Use motion where it explains a change:
 Rules:
 
 - Transition only the properties that change. No computed `transition-property: all`, including controls with zero duration. The shared `--transition-interactive-properties` covers background-color, border-color, color, box-shadow, opacity and transform. Minimal interactive defaults in the base cascade layer set only that property list; they never start motion or override narrower utilities. The opt-in utility lives in the components layer so caller utilities retain control. Existing animated buttons use `experience-interactive` with `--motion-feedback` (130 ms) and `--ease-workspace`; narrower existing property lists remain narrow.
+- Settings exposes **Reduce motion in this browser** as a labeled switch. Its checked state is the saved browser choice; adjacent help explains effective motion and any OS requirement. Turning it off cannot override system reduced motion.
+- Until the browser preference is loaded, the motion control is a disabled ordinary button with loading help and no switch role or checked state. Once loaded, it exposes the saved choice as an enabled switch. The first styled paint remains reduced; an initial server value must not be treated as the saved choice.
 - Under Reduced motion, replace movement with an instant state change or a fade of 120 ms or less. Static visual quality must remain.
 - No motion that delays a request, replays on query-string updates, or runs continuously behind working forms.
 
@@ -133,6 +156,7 @@ Rules:
 
 - Pickers and popovers are at least as wide as their trigger, anchor below it and never cover their own label.
 - File inputs use one styled drop zone with a browse button and show the selected file name and thumbnail. Do not render the native "Choose File" control.
+- File selection explains **Nothing uploads until you choose Upload and review.**
 - Drop and Browse share local type/size/name validation. Image previews use revocable local object URLs; PDFs show a filename/document marker and are never embedded before review. Selection grants no publication or inspection trust. Existing upload, inspection, review, replacement and cleanup boundaries remain authoritative.
 - Long option lists use a themed scrollbar and keep the search field in view.
 - Destructive confirmations follow §3. Free-text reasons may offer preset chips that fill the field.
@@ -144,8 +168,8 @@ Rules:
 
 Follows the 2.5D interaction rules in `AGENTS.md`. In addition:
 
-- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. The primary set (Fit, Center selected, labels, zoom) stays visible; camera mode and pan go in an overflow menu. The toolbar never covers the selected object after a camera focus.
-- **Labels:** every visible label goes through the shared `layoutLabels` pass, including section markers. A label shifted from its anchor gets a leader line. Density follows zoom: groups when zoomed out, drawers when zoomed in.
+- **Toolbar:** one compact row of icon buttons with tooltips and accessible names at every width. Fit, Center selected, zoom, Interact and More stay visible with 44px targets at 375px; labels, counts and grouped camera controls go in a compact anchored nonmodal popover. The toolbar never covers the selected object after a camera focus.
+- **Labels:** every visible label goes through the shared `layoutLabels` pass, including section markers. A label shifted from its anchor gets a leader line. Selected readable text has first priority, then one occupied marker per exposed occupied location; optional full text may not displace these actions. Measure wrapped text and compact 44px footprints. Opaque occlusion is preserved; crowded unsupported views explicitly list affected locations.
 - **Selection:** outline or glow in the accent color, with unselected geometry slightly dimmed. Clearing the selection restores it.
 - **Information:** occupied locations may show count badges, which follow the same collision rules.
 - **Look:** low-poly and measured, grounded with soft contact shadows and a subtle floor grid. Keep `frameloop="demand"`. No continuous idle motion under Reduced motion.
@@ -184,8 +208,8 @@ page retains navigation to all record history and custom snapshots.
 Relative times refresh the shared clock when a timestamp mounts and tolerate at most
 two minutes of future clock skew as **Just now**; genuinely future instants stay distinct.
 They use one shared 30-second browser clock, paused when hidden and stopped without subscribers. Server/first hydration
-uses exact UTC; focus/click opens the exact display timestamp, timezone and original
-recorded instant with its precision. Date-only controls and export formats are unchanged.
+uses exact UTC; focus/click opens the exact readable display timestamp and timezone; Copy technical
+details preserves the original recorded instant with its precision. Date-only controls and export formats are unchanged.
 
 - **Empty** (nothing exists yet): say so and offer the create action.
 - **Filtered-empty** (filters exclude everything): name the active filters and offer "Clear filters".

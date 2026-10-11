@@ -105,6 +105,7 @@ class SceneBoundary extends Component<
 export function SpacesWorkspace({
   locations,
   userId,
+  backend,
   initialSpace,
   initialCode,
   initialNotice = null,
@@ -112,6 +113,7 @@ export function SpacesWorkspace({
 }: {
   locations: LocationRef[];
   userId: string;
+  backend: string;
   initialSpace: Space;
   initialCode: string | null;
   initialNotice?: string | null;
@@ -176,6 +178,7 @@ export function SpacesWorkspace({
     userId,
     selection.space.id,
     attemptKey,
+    backend,
   );
   // Mutations live on other routes. Refresh on return (including retained pages)
   // and tab focus; never persist private counts or imply realtime updates.
@@ -479,10 +482,10 @@ export function SpacesWorkspace({
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <p role="status">
             {occupancy.status === 'loading'
-              ? 'Refreshing item counts…'
+              ? 'Refreshing location counts…'
               : occupancy.status === 'error'
                 ? 'Item counts unavailable. Refresh to try again.'
-                : 'Counts are a snapshot of active items: one per positive-stock quantity item and active individual asset at each leaf location.'}
+                : 'Counts show quantity items with stock and active individual assets at each storage location. Focus or select a marker for quantity items, units and individual assets. Hidden locations remain in the browser; counts are a snapshot.'}
           </p>
           <button
             className={styles.commandButton}
@@ -508,9 +511,11 @@ export function SpacesWorkspace({
               <div className={styles.viewerHeading}>
                 <strong>{currentSpace.name} / measured map</strong>
                 <span>
-                  {sceneError
-                    ? 'Select a location in the location browser'
-                    : 'Select a location in the map or browser'}
+                  {selected
+                    ? `Selected: ${selected.name}`
+                    : sceneError
+                      ? 'Select a location in the location browser'
+                      : 'Select a location in the map or browser'}
                 </span>
               </div>
               {sceneError ? (
@@ -541,7 +546,7 @@ export function SpacesWorkspace({
                       setShowCounts(show);
                       setRetryTick((tick) => tick + 1);
                     }}
-                    locationEntryCounts={occupancy.counts}
+                    locationOccupancy={occupancy.counts}
                     locationNames={Object.fromEntries(
                       locations.map((location) => [
                         location.code,

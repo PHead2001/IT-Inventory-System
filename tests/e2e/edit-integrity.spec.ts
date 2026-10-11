@@ -226,11 +226,11 @@ test('Return uses the current assignment origin beyond 25 transfers, and keeps m
     await page.goto('/inventory/assets/' + assetId);
     const form = await openRecordTask(page, 'Return to storage');
     const picker = form.getByRole('combobox', {
-      name: 'Return to storage',
+      name: 'Storage location',
       exact: true,
     });
     await expect(picker).toContainText('1A');
-    await chooseLocation(form, 'Return to storage', 'ITC-S1B');
+    await chooseLocation(form, 'Storage location', 'ITC-S1B');
     // A separate metadata edit advances the record and causes the existing stale
     // form review flow; it must not reapply the original suggestion over our choice.
     await change('asset_update_v3', {
@@ -242,12 +242,8 @@ test('Return uses the current assignment origin beyond 25 transfers, and keeps m
       asset_tag: `Return-${suffix}`,
       custom_patch: {},
     });
-    await form
-      .getByRole('button', { name: 'Review return to storage' })
-      .click();
-    await form
-      .getByRole('button', { name: 'Confirm return to storage' })
-      .click();
+    await form.getByRole('button', { name: 'Review return' }).click();
+    await form.getByRole('button', { name: 'Return to storage' }).click();
     await expect(
       form.getByRole('button', { name: 'Review latest holdings' }),
     ).toBeVisible();
@@ -273,7 +269,7 @@ test('Return uses the current assignment origin beyond 25 transfers, and keeps m
     await page.goto('/inventory/assets/' + assetId);
     const next = await openRecordTask(page, 'Return to storage');
     await expect(
-      next.getByRole('combobox', { name: 'Return to storage', exact: true }),
+      next.getByRole('combobox', { name: 'Storage location', exact: true }),
     ).toContainText('1B');
   } finally {
     if (assetId && currentSite)

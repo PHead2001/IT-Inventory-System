@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createClient } from '@supabase/supabase-js';
 import { Client } from 'pg';
 import authFixture from '../fixtures/auth.json' with { type: 'json' };
+import { verifyChoiceRevisionDisplay } from './metadata-choice-display';
 
 const api = process.env.LOCAL_API_URL!;
 const db = process.env.LOCAL_DB_URL!;
@@ -48,6 +49,7 @@ async function actor(maintainer: boolean) {
 async function main() {
   await owner.connect();
   try {
+    await verifyChoiceRevisionDisplay(owner);
     const maintainer = await actor(true);
     const viewer = await actor(false);
     const created = await maintainer.client.rpc(

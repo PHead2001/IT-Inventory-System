@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -45,6 +46,9 @@ it('uses one local browse/drop path, revokes image previews, and never embeds or
     />,
   );
   await screen.findByText('Uploaded · review required');
+  expect(
+    screen.getByText(/Nothing uploads until you choose Upload and review\./),
+  ).toBeVisible();
   const image = new File(['benign image fixture'], 'selected.png', {
     type: 'image/png',
   });
@@ -229,6 +233,8 @@ beforeEach(() => {
 });
 
 it('labels the actual file upload/activity instants in the one shared display zone and preserves their source fractions', async () => {
+  userEvent.setup();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   const zone = vi
     .spyOn(operationalTime, 'browserDisplayTimeZone')
     .mockReturnValue({ timeZone: 'America/Los_Angeles', fallback: false });
@@ -302,13 +308,25 @@ it('labels the actual file upload/activity instants in the one shared display zo
       const exact = '2 Oct 2026, 22:23:06 UTC-07:00 (America/Los_Angeles)';
       if (time.closest('summary')) {
         expect(time.closest('summary')).toHaveAttribute('title', exact);
-        expect(time.closest('details')).toHaveTextContent(at);
+        const disclosure = time.closest('details')!;
+        expect(disclosure).toHaveTextContent(exact);
+        expect(disclosure).not.toHaveTextContent(at);
+        fireEvent.click(time.closest('summary')!);
+        fireEvent.click(
+          within(disclosure).getByRole('button', {
+            name: 'Copy technical details',
+          }),
+        );
+        await waitFor(() =>
+          expect(copy).toHaveBeenCalledWith(`Recorded instant: ${at}`),
+        );
       } else expect(time).toHaveTextContent(exact);
     }
     expect(container.textContent).toContain('Uploaded:');
     expect(mocks.upload).not.toHaveBeenCalled();
     expect(zone).toHaveBeenCalledOnce();
   } finally {
+    copy.mockRestore();
     zone.mockRestore();
   }
 });

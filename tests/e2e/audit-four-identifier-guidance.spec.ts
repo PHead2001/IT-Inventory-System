@@ -130,7 +130,7 @@ for (const width of [1280, 390])
         ).toHaveCount(3);
         await expect(
           page.getByRole('list', { name: 'Matching records' }),
-        ).toContainText('retired');
+        ).toContainText('Retired');
         await lookup(page, `AST:${collision.toLowerCase()}`);
         await expect(page).toHaveURL(
           new RegExp(`/inventory/assets/${one.entity_id}$`),

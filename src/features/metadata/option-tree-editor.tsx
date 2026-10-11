@@ -8,7 +8,7 @@ import {
   type Field,
 } from './designer-model';
 import { ChoicePicker } from './choice-picker';
-import { ambiguousOptionIds, normalizeOptionLabel } from './option-label';
+import { invalidOptionCollisionIds } from './option-label';
 import {
   optionPasteBaseline,
   reviewOptionPaths,
@@ -22,10 +22,12 @@ export function OptionTreeEditor({
   field,
   change,
   revisionOptionCount = field.options.length,
+  publishedOptions,
 }: {
   field: Field;
   change: (next: Field) => void;
   revisionOptionCount?: number;
+  publishedOptions?: Field['options'];
 }) {
   const options = field.options;
   const hierarchy = field.type === 'hierarchical_select';
@@ -44,19 +46,19 @@ export function OptionTreeEditor({
   const pasteTrigger = useRef<HTMLButtonElement>(null);
   const pasteApplied = useRef(false);
   const pasteInput = useRef<HTMLTextAreaElement>(null);
-  const ambiguous = ambiguousOptionIds(options);
+  const ambiguous = invalidOptionCollisionIds(options, publishedOptions);
   const compatibleSibling = (optionId: string, parent: string | null) => {
     const option = index.byId.get(optionId);
     return (
       option &&
-      !options.some(
-        (other) =>
-          other.id !== optionId &&
-          other.active &&
-          (other.parent_id ?? null) === parent &&
-          normalizeOptionLabel(other.label) ===
-            normalizeOptionLabel(option.label),
-      )
+      !invalidOptionCollisionIds(
+        options.map((other) =>
+          other.id === optionId
+            ? { ...other, active: true, parent_id: parent }
+            : other,
+        ),
+        publishedOptions,
+      ).has(optionId)
     );
   };
   const closePaste = () => {
@@ -208,17 +210,20 @@ export function OptionTreeEditor({
     [next[a], next[b]] = [next[b], next[a]];
     change({ ...field, options: next });
   };
-  const destinations = selected
-    ? options.filter(
-        (option) =>
-          option.active &&
-          canReparent(options, selected.id, option.id) &&
-          (!selected.active || compatibleSibling(selected.id, option.id)) &&
-          (index.paths.get(option.id) ?? option.label)
-            .toLowerCase()
-            .includes(destinationSearch.trim().toLowerCase()),
-      )
-    : [];
+  // Adding a choice selects it for focus, but does not open the move controls.
+  // Avoid scanning and validating the entire tree until destinations are needed.
+  const destinations =
+    hierarchy && moving && selected
+      ? options.filter(
+          (option) =>
+            option.active &&
+            canReparent(options, selected.id, option.id) &&
+            (!selected.active || compatibleSibling(selected.id, option.id)) &&
+            (index.paths.get(option.id) ?? option.label)
+              .toLowerCase()
+              .includes(destinationSearch.trim().toLowerCase()),
+        )
+      : [];
   return (
     <div
       className="space-y-2 rounded border border-slate-600 p-2 text-xs"
@@ -324,12 +329,8 @@ export function OptionTreeEditor({
               </label>
               {ambiguous.has(option.id) && (
                 <p role="alert" className="text-amber-200">
-                  This active name matches a sibling under{' '}
-                  {option.parent_id
-                    ? index.paths.get(option.parent_id)
-                    : 'Top level'}
-                  . Rename or retire a duplicate before publishing; saved
-                  identities stay unchanged.
+                  This active name matches another choice in this field. Rename
+                  or retire a duplicate before publishing.
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-3">
@@ -404,7 +405,7 @@ export function OptionTreeEditor({
                           )
                         ) {
                           setFeedback(
-                            `Cannot restore ${option.label}: an active sibling has the same name. Rename it first.`,
+                            `Cannot restore ${option.label}: an active choice in this field has the same name. Rename it first.`,
                           );
                           return;
                         }
@@ -509,7 +510,7 @@ export function OptionTreeEditor({
           <p>
             Currently: {index.paths.get(selected.id)}. Child options move with
             it. Destinations that create a cycle or exceed 64 levels are
-            excluded, as are destinations with a matching active sibling name.
+            excluded, as are moves that create a matching active choice name.
           </p>
           {options.length > PAGE && (
             <label className="block">
@@ -538,7 +539,7 @@ export function OptionTreeEditor({
                   pendingFocus.current = selected.id;
                 } else
                   setFeedback(
-                    'This destination would create an ambiguous sibling, a cycle or an over-depth path.',
+                    'This destination would create an ambiguous choice, a cycle or an over-depth path.',
                   );
               }}
             >

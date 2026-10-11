@@ -18,6 +18,9 @@ import {
 } from './actions';
 import type { MetadataDefinition, MetadataForm } from './contracts';
 import { moveControl } from './designer-model';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import { revokePrivatePresentation } from '@/features/scan/assign-batch';
 import { fetchCategoryForm } from './form-fetch.actions';
 import {
   clearAllDesignerRecovery,
@@ -27,7 +30,17 @@ import {
 } from './designer-recovery';
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => router }));
+const privacyActions = vi.hoisted(() => ({
+  readLogoutPrivacyGeneration: vi.fn(),
+  acknowledgeLogoutPrivacyGeneration: vi.fn(),
+  readProtectedPrivacyIdentity: vi.fn(),
+}));
+vi.mock('@/lib/auth/actions', () => privacyActions);
+vi.mock('next/navigation', () => ({
+  useRouter: () => router,
+  usePathname: () => '/settings/metadata',
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./actions', () => ({
   submitMetadataDraft: vi.fn(),
@@ -117,6 +130,15 @@ function openRecoveryTools() {
 describe('category form designer', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
+    privacyActions.readLogoutPrivacyGeneration
+      .mockReset()
+      .mockResolvedValue({ status: 'absent' });
+    privacyActions.acknowledgeLogoutPrivacyGeneration
+      .mockReset()
+      .mockResolvedValue({ status: 'match' });
+    privacyActions.readProtectedPrivacyIdentity
+      .mockReset()
+      .mockResolvedValue({ status: 'match', generation: { status: 'absent' } });
     router.push.mockReset();
     vi.mocked(fetchCategoryForm).mockReset();
     vi.mocked(fetchCategoryForm).mockResolvedValue({ ok: true, form: null });
@@ -2184,6 +2206,93 @@ describe('category form designer', () => {
     expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
     cleanup();
   });
+  it('retains a memory-only command through protected revocation and requires explicit original-owner recovery after readmission', async () => {
+    const binding = {
+      actorId: id(50),
+      backend: 'https://isolated.supabase.co',
+      role: 'staff',
+      canManageConfiguration: true,
+    };
+    vi.mocked(saveMetadataForm).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    render(
+      <ProtectedPrivacyBoundary binding={binding}>
+        <ProtectedPrivacyContent>
+          <MetadataSettings
+            memberId={id(50)}
+            categories={[{ id: id(1), name: 'Cables', active: true }]}
+            forms={{ [id(1)]: form }}
+          />
+        </ProtectedPrivacyContent>
+      </ProtectedPrivacyBoundary>,
+    );
+    await screen.findByRole('button', { name: 'Add field' });
+    addField('Private memory-only form field');
+    const storageBlocked = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota');
+      });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/save outcome could not be confirmed/);
+    const originalRequest = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    const originalRecovery = readDesignerRecovery(id(50), id(1)).item;
+    expect(originalRecovery?.receipt?.id).toBe(originalRequest.requestId);
+    privacyActions.readProtectedPrivacyIdentity.mockResolvedValueOnce({
+      status: 'denied',
+    });
+    act(() => {
+      revokePrivatePresentation();
+    });
+    expect(
+      Array.from(document.querySelectorAll('input'))
+        .map((input) => input.value)
+        .join(' '),
+    ).not.toContain('Private memory-only form field');
+    expect(
+      screen.queryByRole('button', { name: 'Retry original save' }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'original account access',
+    );
+    expect(readDesignerRecovery(id(50), id(1))).toEqual({
+      available: false,
+      item: originalRecovery,
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+    );
+    expect(
+      await screen.findByText(/Configuration access changed/),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Recover edits' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save changes' }),
+    ).not.toBeInTheDocument();
+    expect(
+      privacyActions.readProtectedPrivacyIdentity,
+    ).toHaveBeenLastCalledWith(binding);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry access' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'saved', version: '3', published_revision_id: id(23) },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await screen.findByText('Saved active form revision 3.');
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(
+      originalRequest,
+    );
+    expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
+    storageBlocked.mockRestore();
+  });
   it('retains the same request after an uncertain save and recovery re-entry', async () => {
     vi.mocked(saveMetadataForm).mockRejectedValueOnce(
       new Error('lost response'),
@@ -2607,6 +2716,82 @@ describe('category form designer', () => {
       screen.queryByRole('region', { name: 'Form save impact' }),
     ).not.toBeInTheDocument();
   });
+  it('uses the committed choice baseline while refresh still has obsolete props', async () => {
+    const legacy = structuredClone(form);
+    legacy.published_definition.fields.push({
+      id: id(30),
+      type: 'single_select',
+      label: 'Connector',
+      applies_to: ['quantity', 'asset'],
+      required: false,
+      rules: {},
+      options: [
+        { id: id(31), label: 'USB', active: true },
+        { id: id(32), label: 'usb', active: true },
+      ],
+    });
+    legacy.published_definition.layout[0].controls.push({
+      id: id(33),
+      kind: 'field',
+      field_id: id(30),
+      width: 12,
+    });
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: true,
+      data: { status: 'saved', version: '2', published_revision_id: id(9) },
+    });
+    const props = {
+      memberId: id(50),
+      categories: [{ id: id(1), name: 'Cables', active: true }],
+      forms: { [id(1)]: legacy },
+    };
+    const view = render(<MetadataSettings {...props} />);
+    fireEvent.click(document.querySelector(`[data-control-id="${id(33)}"]`)!);
+    fireEvent.change(screen.getByLabelText('Option name: usb'), {
+      target: { value: 'Ethernet' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved active form revision 2.');
+    fireEvent.change(screen.getByLabelText('Option name: Ethernet'), {
+      target: { value: 'usb' },
+    });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(
+      screen.getAllByText(/indistinguishable active choice/).length,
+    ).toBeGreaterThan(0);
+    // A delayed refresh with the old revision must not replace the committed baseline.
+    view.rerender(<MetadataSettings {...props} forms={{ ...props.forms }} />);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveMetadataForm).toHaveBeenCalledOnce();
+    fireEvent.change(screen.getByLabelText('Option name: usb'), {
+      target: { value: 'Ethernet cable' },
+    });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(saveMetadataForm).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0].payload).toMatchObject({
+      expected_published_revision_id: id(9),
+    });
+  });
+  it('protects a newly published field identity before refreshed props arrive', async () => {
+    vi.mocked(saveMetadataForm).mockResolvedValue({
+      ok: true,
+      data: { status: 'saved', version: '2', published_revision_id: id(9) },
+    });
+    mount();
+    addField('Ports');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved active form revision 2.');
+    fireEvent.click(screen.getByText('Advanced', { selector: 'summary' }));
+    expect(screen.queryByLabelText('Field type')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create replacement field' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Discard unpublished field' }),
+    ).not.toBeInTheDocument();
+  });
   it('requires targeted confirmation with an identical proposal and fresh request ID', async () => {
     vi.mocked(saveMetadataForm)
       .mockResolvedValueOnce({
@@ -2994,6 +3179,81 @@ describe('category form designer', () => {
     await waitFor(() => expect(name).toHaveFocus());
     expect(name).toHaveValue('Inspection notes');
   });
+  it.each(['desktop', 'phone', 'short'] as const)(
+    'resets the selected inspector scroll while preserving unsaved input and intentional %s focus',
+    (viewport) => {
+      mount();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation(
+        (callback) => {
+          frames.push(callback);
+          return frames.length;
+        },
+      );
+      addField('Late field');
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      const inspector = screen.getByTestId('designer-inspector');
+      const canvas = screen.getByTestId('designer-canvas');
+      const control = canvas.querySelector<HTMLElement>(
+        '[data-control-id][data-selected="true"]',
+      )!;
+      const identity = control.dataset.controlId;
+      inspector.scrollTop = 900;
+      fireEvent.change(screen.getByLabelText('Field name'), {
+        target: { value: 'Unsaved literal <draft>' },
+      });
+      expect(inspector.scrollTop).toBe(900);
+      const scroll = vi.fn();
+      inspector.scrollTo = scroll;
+      fireEvent.click(
+        within(inspector).getByRole('button', { name: 'Layout' }),
+      );
+      expect(
+        within(inspector).getByRole('region', { name: 'Appearance' }),
+      ).toHaveFocus();
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(screen.getByLabelText('Field name')).toHaveValue(
+        'Unsaved literal <draft>',
+      );
+      const select = within(canvas).getByRole('button', {
+        name: 'Inspect Unsaved literal <draft> settings',
+      });
+      fireEvent.click(select);
+      // Model responsive CSS after the panel state commits, before queued focus.
+      if (viewport === 'phone') canvas.style.display = 'none';
+      if (viewport === 'short')
+        screen.getByTestId('designer-panes').dataset.designerFlow = 'true';
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(inspector.scrollTop).toBe(0);
+      expect(control).toHaveAttribute('role', 'group');
+      expect(control.dataset.controlId).toBe(identity);
+      expect(control.querySelector('button button, button input')).toBeNull();
+      if (viewport === 'desktop') expect(control).toHaveFocus();
+      else
+        expect(
+          within(inspector).getByRole('heading', {
+            name: 'Inspector',
+          }),
+        ).toHaveFocus();
+      expect(screen.getByLabelText('Field name')).toHaveValue(
+        'Unsaved literal <draft>',
+      );
+      if (viewport === 'short') {
+        const appearance = within(inspector).getByRole('region', {
+          name: 'Appearance',
+        });
+        const documentJump = vi.fn();
+        appearance.scrollIntoView = documentJump;
+        fireEvent.click(
+          within(inspector).getByRole('button', { name: 'Layout' }),
+        );
+        expect(documentJump).toHaveBeenCalledOnce();
+        expect(scroll).toHaveBeenCalledOnce();
+        expect(appearance).toHaveFocus();
+      }
+      expect(saveMetadataForm).not.toHaveBeenCalled();
+    },
+  );
   it('applies pasted paths in one undoable designer edit', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Add field' }));

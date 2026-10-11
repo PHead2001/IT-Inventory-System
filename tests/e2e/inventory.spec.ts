@@ -1,3 +1,11 @@
+import { randomUUID } from 'node:crypto';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
+import { withinViewport } from './viewport-controls';
+import {
+  acceptanceCommand,
+  acceptanceFixtures,
+  acceptanceLogin,
+} from './audit-three-acceptance-fixtures';
 import {
   beginNewRecordTransaction,
   expectStableReceiptAction,
@@ -25,6 +33,25 @@ async function choose(form: Locator, label: string, code: string) {
 }
 async function openForm(page: Page, name: string) {
   return openRecordTask(page, name);
+}
+async function openRecordHistory(
+  page: Page,
+  name: 'View all item history' | 'View all asset history',
+) {
+  const link = page.getByRole('link', { name, exact: true });
+  const href = await link.getAttribute('href');
+  expect(href).toBeTruthy();
+  const target = new URL(href!, page.url()).href;
+  await link.click();
+  await expect(page).toHaveURL(target);
+  // The outgoing detail timeline remains usable during same-binding admission.
+  // Its event headings/disclosures also exist on the incoming history page.
+  await expect(
+    page.getByRole('heading', { name: 'Inventory history', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('form', { name: 'Filter history' }),
+  ).toBeVisible();
 }
 async function confirm(form: Locator, name: string) {
   if (
@@ -165,6 +192,12 @@ test('empty normalized edits leave history unchanged, Receive defaults once, and
       .getByLabel('Reason (required)')
       .fill('Second holding fixture');
     await confirm(receive, 'Receive stock');
+    // Confirm clicks dispatch the action; wait for its committed result before
+    // a new document reads the holdings used to choose the next Receive default.
+    await expect(
+      receive.getByRole('status').filter({ hasText: 'Saved successfully.' }),
+    ).toBeVisible();
+    await version(page, 2);
     await page.goto(detailUrl);
     const multiple = await openForm(page, 'Receive stock');
     await expect(
@@ -413,7 +446,7 @@ test('quantity move rejects an overdraw and retains committed receipt through da
     await expect(
       form.getByText('Previous move receipt', { exact: true }),
     ).toHaveCount(0);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(2);
@@ -480,7 +513,7 @@ test('a separate authenticated writer changes stock after move review and reject
       form.getByRole('button', { name: 'Confirm move stock' }),
     ).toHaveCount(0);
     await page.reload();
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(0);
@@ -583,7 +616,7 @@ test('a real committed move with a lost response retries the original command on
     expect(commands).toHaveLength(2);
     expect(commands[1]).toBe(commands[0]);
     await version(page, 2);
-    await page.getByRole('link', { name: 'View all item history' }).click();
+    await openRecordHistory(page, 'View all item history');
     await expect(
       page.getByRole('heading', { name: 'Physically moved', exact: true }),
     ).toHaveCount(1);
@@ -641,7 +674,7 @@ test('archiving stocked quantity clears every location in one reviewed operation
   await expect(page.getByText(/Quantity item/).first()).toBeVisible();
   await expectRecordStatus(page, 'archived');
   await expectRecordVersion(page, 3);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   const event = page.locator('li').filter({
     has: page.getByRole('heading', { name: 'Quantity item archived' }),
   });
@@ -864,7 +897,7 @@ test('quantity core persists multi-location receives, partial and all transfers,
       name: 'Current stock — 0 available in storage',
     }),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Stock received', exact: true }),
   ).toBeVisible();
@@ -997,7 +1030,7 @@ test('serialized core allows duplicate serials and persists distinct moves, corr
       })
       .getByText(/Managed switch/),
   ).toBeVisible();
-  await page.getByRole('link', { name: 'View all asset history' }).click();
+  await openRecordHistory(page, 'View all asset history');
   await expect(
     page.getByRole('heading', { name: 'Physically moved', exact: true }),
   ).toHaveCount(1);
@@ -1097,7 +1130,7 @@ test('overlapping two-page edits renew field choices after further races and vie
       name: /^(Receive stock|Move stock|Edit details)$/,
     }),
   ).toHaveCount(0);
-  await page.getByRole('link', { name: 'View all item history' }).click();
+  await openRecordHistory(page, 'View all item history');
   await expect(
     page.getByRole('heading', { name: 'Details updated', exact: true }),
   ).toHaveCount(4);
@@ -1107,3 +1140,169 @@ test('overlapping two-page edits renew field choices after further races and vie
     page.getByRole('form', { name: 'Add quantity item' }),
   ).toHaveCount(0);
 });
+
+test('ambiguous Receive preserves an edited destination after real stale refresh', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    await acceptanceLogin(page);
+    const red = await owned.location('ITC-RED'),
+      black = await owned.location('ITC-BLACK');
+    const itemId = await owned.quantity(
+      `Ambiguous Receive ${owned.suffix}`,
+      red,
+      2,
+    );
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 1,
+      location_id: black,
+      quantity: 1,
+      reason: 'Second owned holding',
+    });
+    await page.goto(`/inventory/quantity/${itemId}`);
+    const form = await openRecordTask(page, 'Receive stock');
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toHaveText(/Select a location/);
+    await chooseLocation(form, 'Receive at', 'ITC-CLEAR');
+    await form.getByLabel('Quantity to receive').fill('3');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Chosen destination must survive the stale refresh');
+    await form
+      .getByRole('button', { name: 'Review receive stock', exact: true })
+      .click();
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 2,
+      location_id: red,
+      quantity: 1,
+      reason: 'Independent real balance change',
+    });
+    await form
+      .getByRole('button', { name: 'Confirm receive stock', exact: true })
+      .click();
+    await expect(form.getByRole('alert')).toContainText(/changed/);
+    await form
+      .getByRole('button', { name: 'Refresh latest record', exact: true })
+      .click();
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText('Clear Container');
+    await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(
+      form.getByRole('button', { name: 'Confirm receive stock', exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('inventory search location picker exposes keyboard paths and stays framed on a narrow viewport', async ({
+  page,
+}) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/inventory');
+  const form = page.getByRole('form', {
+    name: 'Search inventory',
+    exact: true,
+  });
+  await form.getByRole('button', { name: 'More filters', exact: true }).click();
+  const trigger = form.getByLabel('Location', { exact: true });
+  await trigger.click();
+  const search = form.getByRole('combobox', { name: 'Search locations' });
+  await expect(search).toBeFocused();
+  await withinViewport(search);
+  const pickerTree = form.getByRole('tree', { name: 'Location', exact: true });
+  await withinViewport(pickerTree);
+  await search.press('Home');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree
+      .getByRole('treeitem', { name: 'All locations, no location filter' })
+      .getAttribute('id'))!,
+  );
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree.getByRole('treeitem').nth(1).getAttribute('id'))!,
+  );
+  const pickerRoot = pickerTree.getByRole('treeitem', { name: /, ITC$/ });
+  await pickerRoot.press('ArrowRight');
+  await expect(pickerRoot).toHaveAttribute('aria-expanded', 'true');
+  await search.fill('ITC-D07');
+  const option = form.getByRole('option', { name: /, ITC-D07$/ });
+  await expect(option).toBeVisible();
+  await withinViewport(option);
+  await search.press('Enter');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toContainText('ITC-D07');
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get('location') === 'ITC-D07',
+  );
+  await trigger.click();
+  await expect(search).toBeFocused();
+  await search.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(search).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+interfaceTest(
+  'missing resources keep direct transport status and private-safe identity with client recovery',
+  async ({ page }, info) => {
+    await interfaceLogin(page);
+    for (const [path, heading] of [
+      ['/audit-three-missing-' + randomUUID(), 'Page not found'],
+      ['/inventory/quantity/' + randomUUID(), 'Inventory record unavailable'],
+      ['/inventory/assets/' + randomUUID(), 'Inventory record unavailable'],
+    ]) {
+      const response = await page.goto(path);
+      expect(
+        response!.status(),
+        `Direct missing-resource status for ${path}`,
+      ).toBe(404);
+      await expect(
+        page.getByRole('heading', { name: heading, exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('main')).toHaveCount(1);
+      await expect(page).toHaveTitle(/IT Inventory/);
+      await expect(page.locator('head title')).not.toContainText(
+        path.split('/').at(-1)!,
+      );
+      await page.screenshot({
+        path: info.outputPath(
+          `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,
+        ),
+        fullPage: true,
+      });
+      await page
+        .getByRole('link', { name: 'Search inventory', exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/inventory$/);
+      await expect(page).toHaveTitle('Inventory · IT Inventory');
+    }
+    for (const [path, title] of [
+      ['/scan', 'Scan'],
+      ['/labels', 'Labels'],
+      ['/history', 'History'],
+    ]) {
+      await page.goto(path);
+      await expect(page).toHaveTitle(`${title} · IT Inventory`);
+    }
+    const icon = page.locator('link[rel="icon"]').first();
+    const iconResponse = await page.request.get(
+      (await icon.getAttribute('href'))!,
+    );
+    expect(iconResponse.ok()).toBe(true);
+    expect(iconResponse.headers()['content-type']).toMatch(/image/);
+  },
+);

@@ -1,3 +1,4 @@
+import { custodyButtons } from './custody-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -13,7 +14,7 @@ export async function acceptanceLogin(page: Page) {
 export async function acceptanceConfirm(form: Locator, action: string) {
   await form
     .getByRole('button', {
-      name: `Review ${action.toLowerCase()}`,
+      name: custodyButtons(action)[0],
       exact: true,
     })
     .click();
@@ -22,7 +23,7 @@ export async function acceptanceConfirm(form: Locator, action: string) {
   ).toBeVisible();
   await form
     .getByRole('button', {
-      name: `Confirm ${action.toLowerCase()}`,
+      name: custodyButtons(action)[1],
       exact: true,
     })
     .click();

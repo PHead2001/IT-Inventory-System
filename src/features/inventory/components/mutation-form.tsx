@@ -1158,8 +1158,7 @@ function MutationFormFields({
       )}
       {operation === 'asset_retire' && (
         <p className="text-sm text-slate-300">
-          Write off removes missing or consumed quantity from recorded stock.
-          Retire ends tracking of an individual asset.
+          Retire ends this individual asset’s service. A reason is required.
         </p>
       )}
       <fieldset
@@ -1396,14 +1395,14 @@ function MutationFormFields({
       )}
       {refreshedVersion !== null && !completed && (
         <p className="text-sm text-amber-200">
-          Baseline refreshed to version {refreshedVersion}. Your entries are
-          preserved; review them against the updated record before confirming.
+          The record has been updated. Your entries are preserved; review them
+          against the updated record before confirming.
         </p>
       )}
       {validReview && !completed && (
         <section aria-label="Review changes" className={panel}>
           <h3 id={reviewContextId} className="font-semibold">
-            Review {labels[operation].toLowerCase()} for{' '}
+            Review changes for{' '}
             {item?.name ?? asset?.name ?? values.name ?? 'this record'}
           </h3>
           {destructive && (

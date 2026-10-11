@@ -487,6 +487,9 @@ test('activity presets resolve local calendar boundaries across both DST transit
   await page
     .getByRole('combobox', { name: 'Activity range', exact: true })
     .selectOption('today');
+  await expect(
+    page.getByRole('combobox', { name: 'Activity range', exact: true }),
+  ).toHaveValue('today');
   await page.getByLabel('Display / preset timezone').selectOption('UTC');
   await page.getByRole('button', { name: 'Filter activity' }).click();
   await expect(page).toHaveURL(
