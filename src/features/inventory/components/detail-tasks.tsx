@@ -60,11 +60,21 @@ export function DetailTasks(props: {
         add('quantity_move', 'Move stock');
         add('custody:issue', 'Issue stock to a site');
       }
-      add('quantity_adjust', 'Correct physical count', 'secondary');
+      add(
+        'quantity_adjust',
+        'Correct physical count',
+        'secondary',
+        'Correct the recorded storage quantity to the count you observed, without moving stock between locations.',
+      );
       if (siteHoldings.length) {
         add('custody:return', 'Return to storage');
         add('custody:transfer', 'Transfer between sites');
-        add('custody:correct', 'Correct recorded site holding', 'secondary');
+        add(
+          'custody:correct',
+          'Correct recorded site holding',
+          'secondary',
+          'Correct the recorded quantity already at a site, without issuing, returning or transferring stock.',
+        );
         add('custody:write_off', 'Write off at site', 'consequential');
       }
       add(
@@ -86,7 +96,12 @@ export function DetailTasks(props: {
   else if (props.currentSite) {
     add('custody:return', 'Return to storage');
     add('custody:transfer', 'Transfer between sites');
-    add('custody:correct', 'Correct recorded site custody', 'secondary');
+    add(
+      'custody:correct',
+      'Correct recorded site custody',
+      'secondary',
+      'Correct which site is recorded for this asset, without physically transferring equipment.',
+    );
     add(
       'custody:write_off',
       'Write off at site',

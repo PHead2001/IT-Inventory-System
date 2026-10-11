@@ -41,6 +41,11 @@ import {
 } from './task-state';
 import { field, panel } from './read-ui';
 import { moveCompletionKey, parseMoveCompletion } from '../move-completion';
+import {
+  RetirementReasonPresets,
+  RetirementNote,
+  retirementReason,
+} from './retirement-reason';
 import { OperationalTimestamp } from '@/components/operational-time';
 
 type Operation = MutationCommand['operation'];
@@ -374,6 +379,7 @@ function MutationFormFields({
     destination_location_id: '',
     initial_location_id: '',
     reason: '',
+    retirement_note: '',
     move_all: 'false',
   });
   const [state, setState] = useState<MutationState | null>(initialCompletion);
@@ -541,6 +547,10 @@ function MutationFormFields({
     (!moving || (!moveSnapshotChanged && reviewKey === currentReviewKey));
   if (moving && review && moveSnapshotChanged && !uncertain && !completed)
     setReview(false);
+  const finalReason =
+    operation === 'asset_retire'
+      ? retirementReason(values.reason, values.retirement_note)
+      : values.reason;
   const requiresReason = [
     'quantity_receive',
     'quantity_adjust',
@@ -553,6 +563,19 @@ function MutationFormFields({
   function collectIssues() {
     if (uncertain || completed || pending) return [];
     const amountIssues = [];
+    if (operation === 'asset_retire' && !finalReason)
+      amountIssues.push({
+        id: operation + '-reason',
+        label: 'Reason',
+        message: 'Enter a retirement reason.',
+      });
+    if (operation === 'asset_retire' && finalReason.length > 2000)
+      amountIssues.push({
+        id: operation + '-reason',
+        label: 'Reason',
+        message:
+          'Keep the reason and retirement note together within 2,000 characters.',
+      });
     if (
       operation === 'quantity_receive' &&
       Number(values.quantity) +
@@ -826,7 +849,7 @@ function MutationFormFields({
     )
       result.location_id = values.location_id;
     if (!metadata || operation === 'quantity_create') {
-      if (values.reason.trim()) result.reason = values.reason.trim();
+      if (finalReason.trim()) result.reason = finalReason.trim();
     }
     return result;
   };
@@ -1470,6 +1493,12 @@ function MutationFormFields({
           )}
         {!metadata && (
           <div className="space-y-2">
+            {operation === 'asset_retire' && (
+              <RetirementReasonPresets
+                reason={values.reason}
+                onChange={(value) => update('reason', value)}
+              />
+            )}
             <label htmlFor={operation + '-reason'}>
               Reason{requiresReason ? ' (required)' : ' (optional)'}
             </label>
@@ -1484,6 +1513,13 @@ function MutationFormFields({
               onChange={(event) => update('reason', event.target.value)}
             />
             {validation.error(operation + '-reason')}
+            {operation === 'asset_retire' && (
+              <RetirementNote
+                id={operation + '-retirement-note'}
+                value={values.retirement_note}
+                onChange={(value) => update('retirement_note', value)}
+              />
+            )}
           </div>
         )}
       </fieldset>
@@ -1520,8 +1556,8 @@ function MutationFormFields({
               </li>
             ))}
           </ul>
-          {values.reason && (
-            <p className="mt-2 break-words text-sm">Reason: {values.reason}</p>
+          {finalReason && (
+            <p className="mt-2 break-words text-sm">Reason: {finalReason}</p>
           )}
         </section>
       )}

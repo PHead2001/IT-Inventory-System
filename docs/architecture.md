@@ -7,6 +7,15 @@ mounted Auth privacy controller; its accepted owner/navigation and privacy epoch
 control client-only document titles. Failed verification or revocation clears the
 title synchronously without replacing retained forms or recovery commands.
 
+Retirement presets fill the existing editable free-text reason on both storage
+and site retirement forms. An optional note remains a separate draft field and
+joins the trimmed reason once, with an em dash, for both review and the existing
+command payload. A note cannot replace a required reason; the combined text uses
+the existing 2,000-character bound. Preset or note edits invalidate review and
+remain subject to the existing version, pending and unknown-outcome retry guards.
+Correction task descriptions explain record repair versus physical movement before
+selection; no lifecycle statuses, history structures or RPCs change.
+
 Explicit task selection after a known completion creates a new form instance.
 Its initial page snapshot must reach the acknowledged result version; until then
 the workspace offers a read-refresh retry rather than an older ready form. This

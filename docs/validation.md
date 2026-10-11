@@ -615,3 +615,11 @@ Earlier checks at PR47 head `23dcd8c2022ec61908912cfe4f44e8b37be5f8e5`
 and PR44/main `43351451aff5c3d4441ff211060ae680574a3f77` remain historical.
 This mapping documents source retention; it does not establish a new combined-tree
 pass or actual Docker/email/browser acceptance. Report fresh focused checks separately.
+
+A304 retirement component regressions exercise each editable preset in storage and
+site retirement, manual text/optional-note preservation across refresh, exact
+review/payload parity, note edits invalidating review, blank or overlong combined
+reason rejection and identical unknown-outcome replay. A309 checks visible launcher
+help and accessible descriptions before selecting quantity storage/site and asset
+location/site corrections. These checks do not replace browser or persisted-history
+acceptance on the final candidate.

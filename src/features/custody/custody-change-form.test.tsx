@@ -1055,3 +1055,102 @@ it.each([
     expect(submitCustody).toHaveBeenCalledOnce();
   },
 );
+
+const retirementProps = {
+  kind: 'asset' as const,
+  action: 'retire' as const,
+  entityId: id(1),
+  entityName: 'Laptop',
+  version: '7',
+  locations: [location],
+  sites: [site],
+  currentSite: site,
+};
+it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
+  'uses retirement preset %s in the editable site reason, review and exact custody payload',
+  async (preset) => {
+    vi.mocked(submitCustody).mockResolvedValue({
+      ok: true,
+      entityId: id(1),
+      version: '8',
+      changed: true,
+    });
+    render(<CustodyChangeForm {...retirementProps} />);
+    fireEvent.click(screen.getByRole('button', { name: preset, exact: true }));
+    expect(screen.getByLabelText('Reason (required)')).toHaveValue(preset);
+    const form = screen.getByRole('form', { name: 'Retire asset at site' });
+    fireEvent.submit(form);
+    expect(screen.getByText('Reason: ' + preset)).toBeVisible();
+    expect(submitCustody).not.toHaveBeenCalled();
+    fireEvent.submit(form);
+    await waitFor(() => expect(submitCustody).toHaveBeenCalledOnce());
+    expect(vi.mocked(submitCustody).mock.calls[0][0].payload).toEqual({
+      action: 'retire',
+      asset_id: id(1),
+      expected_version: '7',
+      reason: preset,
+      reference: null,
+      source_site_id: site.id,
+    });
+  },
+);
+it('keeps a manual site retirement reason and optional note stable through refresh and exact unknown-outcome replay', async () => {
+  vi.mocked(submitCustody)
+    .mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: id(1),
+      version: '8',
+      changed: true,
+    });
+  const view = render(<CustodyChangeForm {...retirementProps} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Sold', exact: true }));
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: 'Sold after owner approval' },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: '  Invoice 42  ' },
+  });
+  view.rerender(
+    <CustodyChangeForm
+      {...retirementProps}
+      sites={[...retirementProps.sites]}
+    />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toHaveValue(
+    'Sold after owner approval',
+  );
+  const form = screen.getByRole('form', { name: 'Retire asset at site' });
+  fireEvent.submit(form);
+  expect(
+    screen.getByText('Reason: Sold after owner approval — Invoice 42'),
+  ).toBeVisible();
+  fireEvent.submit(form);
+  await screen.findByText(/result could not be confirmed/i);
+  const command = vi.mocked(submitCustody).mock.calls[0][0];
+  expect(command.payload.reason).toBe('Sold after owner approval — Invoice 42');
+  expect(screen.getByLabelText('Retirement note (optional)')).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same custody transaction' }),
+  );
+  await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(command);
+});
+it.each([
+  ['', 'note cannot replace reason'],
+  ['  ', 'note cannot replace reason'],
+  ['E-waste', 'x'.repeat(2000)],
+])('blocks blank or overlong site retirement reason %s', (reason, note) => {
+  render(<CustodyChangeForm {...retirementProps} />);
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: reason },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: note },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Retire asset at site' }));
+  expect(
+    screen.queryByRole('button', { name: 'Retire asset at site' }),
+  ).toBeNull();
+  expect(submitCustody).not.toHaveBeenCalled();
+});

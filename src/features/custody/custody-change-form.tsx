@@ -1,4 +1,9 @@
 'use client';
+import {
+  RetirementReasonPresets,
+  RetirementNote,
+  retirementReason,
+} from '@/features/inventory/components/retirement-reason';
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -160,6 +165,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
     quantity: '1',
     observed_quantity: '0',
     reason: '',
+    retirement_note: '',
     reference: '',
   });
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
@@ -252,6 +258,10 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   );
   const quantity = kind === 'quantity';
   const correction = action === 'correct';
+  const retiring = kind === 'asset' && action === 'retire';
+  const finalReason = retiring
+    ? retirementReason(values.reason, values.retirement_note)
+    : values.reason;
   const reviewedRoute = reviewed ? (
     quantity && correction ? (
       <>At {reviewedEndpoint(reviewed.source, reviewed.sourceStorage)}</>
@@ -300,6 +310,19 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
   function collectIssues() {
     if (uncertain || pending || completed) return [];
     const issues = [];
+    if (retiring && !finalReason)
+      issues.push({
+        id: scope + '-reason',
+        label: 'Reason',
+        message: 'Enter a retirement reason.',
+      });
+    if (retiring && finalReason.length > 2000)
+      issues.push({
+        id: scope + '-reason',
+        label: 'Reason',
+        message:
+          'Keep the reason and retirement note together within 2,000 characters.',
+      });
     if (
       fromStorage &&
       !(quantity
@@ -392,7 +415,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       action,
       [quantity ? 'item_id' : 'asset_id']: entityId,
       expected_version: version,
-      reason: values.reason.trim() || null,
+      reason: finalReason.trim() || null,
       reference: values.reference.trim() || null,
     };
     if (fromStorage) payload.source_location_id = values.source_location_id;
@@ -890,6 +913,12 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               {validation.error(scope + '-quantity')}
             </label>
           ))}
+        {retiring && (
+          <RetirementReasonPresets
+            reason={values.reason}
+            onChange={(value) => update('reason', value)}
+          />
+        )}
         <label className="block space-y-2">
           Reason {requiresReason ? '(required)' : '(optional)'}
           <textarea
@@ -906,6 +935,13 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           />
           {validation.error(scope + '-reason')}
         </label>
+        {retiring && (
+          <RetirementNote
+            id={scope + '-retirement-note'}
+            value={values.retirement_note}
+            onChange={(value) => update('retirement_note', value)}
+          />
+        )}
         <label className="block space-y-2">
           Ticket number reference (optional)
           <Input
@@ -942,7 +978,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           {reviewed.reference && (
             <p>Ticket number reference: {reviewed.reference}</p>
           )}
-          {values.reason && <p>Reason: {values.reason}</p>}
+          {finalReason && <p>Reason: {finalReason}</p>}
         </section>
       )}
       {state && (
