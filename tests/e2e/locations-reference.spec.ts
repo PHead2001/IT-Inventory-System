@@ -43,11 +43,17 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       exact: true,
     });
     await search.fill(before.data!.code);
-    const link = page.locator(
-      `a[href="/settings/locations/${before.data!.code}"]`,
-    );
     await search.press('Tab');
-    await expect(link).toBeFocused();
+    // Search reveals matching ancestors; Tab enters the tree at its root.
+    const tree = page.getByRole('tree', { name: 'Locations' });
+    await expect(tree.getByRole('treeitem').first()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    const location = tree.getByRole('treeitem', { name: /ITC-RED · Active$/ });
+    await expect(location).toBeFocused();
+    await expect(location.getByRole('link')).toHaveAttribute(
+      'href',
+      `/settings/locations/${before.data!.code}`,
+    );
     await page.keyboard.press('Enter');
     const form = page.locator('form');
     const name = form.getByRole('textbox', { name: 'Name', exact: true });
@@ -81,13 +87,17 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     await expect(
       page.getByRole('heading', { name: renamed, exact: true }),
     ).toBeVisible();
-    const locationHeader = page
-      .getByRole('heading', { name: renamed, level: 1, exact: true })
-      .locator('..');
-    const roomLink = locationHeader.locator(
-      `:scope > a[href="/room?location=${before.data!.code}"]`,
-    );
+    const roomLink = page
+      .getByRole('navigation', { name: 'Location actions', exact: true })
+      .getByRole('link', {
+        name: `Show ${before.data!.code} in room`,
+        exact: true,
+      });
     await expect(roomLink).toHaveCount(1);
+    await expect(roomLink).toHaveAttribute(
+      'href',
+      `/room?location=${before.data!.code}`,
+    );
     await expect(roomLink).toHaveAccessibleName(
       `Show ${before.data!.code} in room`,
     );

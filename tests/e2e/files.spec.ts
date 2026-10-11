@@ -260,6 +260,9 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     },
     [...equipmentPhoto()],
   );
+  await expect(
+    files.getByText(/Nothing uploads until you choose Upload and review\./),
+  ).toBeVisible();
   const beforeDrop = page.url();
   await page.locator('body').dispatchEvent('drop', { dataTransfer: dropped });
   await expect(page).toHaveURL(beforeDrop);

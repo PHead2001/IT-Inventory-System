@@ -590,22 +590,54 @@ a {
   clip-path: none;
 }
 .experience-motion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   min-height: 44px;
-  padding: 0 14px;
+  max-width: 100%;
+  padding: 8px 14px;
   border: 1px solid var(--workspace-motion-toggle-border);
-  border-radius: 999px;
+  border-radius: 12px;
   background: var(--workspace-motion-toggle-background);
   color: var(--workspace-motion-toggle-text);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   text-align: left;
   transition:
     border-color var(--motion-feedback),
     transform var(--motion-feedback);
 }
-.experience-motion-toggle span,
-.experience-motion-toggle small {
+.experience-motion-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.experience-motion-state {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.experience-motion-track {
   display: block;
+  width: 36px;
+  padding: 3px;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+}
+.experience-motion-track > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track {
+  border-color: var(--accent);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track > span {
+  margin-left: auto;
+  background: var(--accent);
 }
 .experience-motion-toggle small {
   margin-top: 2px;

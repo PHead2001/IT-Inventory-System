@@ -485,6 +485,14 @@ Inventory create, metadata update and restore RPCs take a shared advisory catalo
 
 Shared label defaults cover 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices, plus nullable validated version-1 print geometry for custom sheets or one label per page. Geometry uses integer tenths of a millimetre and is independent of inventory identity. Null keeps the standard sizes. The print page starts from shared defaults, while each local print job can choose differently. The existing maintainer RPC preserves historical receipts when geometry is omitted, applies effective geometry only after the singleton/version lock, and records atomic effective before/after events. See [labels and stock](labels-and-stock.md#configurable-print-media-a307) for the exact layout schema, bounds and printing limits.
 
+## Working controls
+
+The browser reduced-motion switch records only the existing local preference. Effective reduced motion remains local OR system; storage failure retains the existing tab preference and first-paint reduced policy.
+
+Location details group room navigation, label printing, history and query-scoped CSV export in one header action navigation. The selected status remains explicit on its selector. Location-scoped inventory rows omit only the exact current location, preserving child-location and site disambiguation and item-wide quantities. Rows without the exact current-location field use two desktop columns; child/site rows keep three and the existing narrow-container layouts. Compact location counts keep matching totals and informative aggregate breakdowns; query, authorization and export contracts are unchanged.
+
+Settings Storage locations initially expands root rows only. Search shows matching rows with their ancestors in the same keyboard tree. Returning from a location setting uses its permanent code in the `selected` query to reveal its ancestors and mark the selected row with `aria-selected` (not a current-page claim); unknown selections change no data. Each Settings treeitem owns its disclosure and native link. The treeitem is the sole roving Tab stop, so focused hierarchy, expansion and selection semantics stay together. Arrow keys navigate/expand the tree, and Enter activates its native anchor once with the keyboard modifiers preserved. Pointer, middle-button and modifier clicks retain the anchor's ordinary navigation behavior; disclosure activation returns focus to its treeitem. The conventional inventory picker retains its existing independent behavior.
+
 ## Readable display vocabulary
 
 Custody event titles use the shared display mapping in `features/custody/vocabulary.ts`;

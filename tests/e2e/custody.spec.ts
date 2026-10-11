@@ -288,9 +288,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toHaveAttribute('href', '/locations/' + locationCode);
   await expect(page.getByTestId('room-viewer')).toHaveCount(0);
   await page.goto('/locations/' + locationCode);
-  await expect(
-    page.getByRole('link', { name: 'Print location label' }),
-  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Print label' })).toBeVisible();
   await noHorizontalOverflow(page);
   await page.goto('/labels?location=' + locationCode);
   await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
@@ -515,7 +513,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save name' })).toHaveCount(0);
   await page
-    .locator(`a[role="treeitem"][href="/settings/locations/${locationCode}"]`)
+    .locator(`[role="treeitem"] a[href="/settings/locations/${locationCode}"]`)
     .click();
   await expect(
     page.getByText('This location is read-only for your account.', {
@@ -1072,6 +1070,7 @@ test('Settings hierarchy exposes keyboard paths and stays framed on a narrow vie
   await right.press('ArrowRight');
   const drawer = tree.getByRole('treeitem', { name: /ITC-D07 · Active$/ });
   await drawer.focus();
+  await expect(drawer).toHaveAttribute('aria-level', '3');
   await drawer.press('ArrowLeft');
   await expect(right).toBeFocused();
   await right.press('Home');
@@ -1083,14 +1082,17 @@ test('Settings hierarchy exposes keyboard paths and stays framed on a narrow vie
     .getByLabel('Search locations', { exact: true })
     .fill('ITC-D07');
   await expect(
-    configuration.getByRole('list', { name: 'Locations' }),
+    configuration.getByRole('tree', { name: 'Locations' }),
   ).toBeVisible();
   await expect(
     configuration.getByText('1 matching locations', { exact: true }),
   ).toBeVisible();
-  const result = configuration.getByRole('link', { name: /ITC-D07 · Active$/ });
+  const result = configuration.getByRole('treeitem', {
+    name: /ITC-D07 · Active$/,
+  });
   await result.scrollIntoViewIfNeeded();
   await withinViewport(result);
+  await expect(result.getByRole('link')).toHaveAttribute('tabindex', '-1');
   await result.press('Enter');
   await expect(page).toHaveURL(/\/settings\/locations\/ITC-D07$/);
 });

@@ -81,12 +81,6 @@ export default async function LocationPage({
         </Link>
         <p className="experience-eyebrow mt-3">Storage / Location</p>
         <h1 className="experience-heading mt-1 break-words">{location.name}</h1>
-        <Link
-          className="inline-block min-h-11 py-3 text-sm text-cyan-300 underline"
-          href={'/labels?location=' + encodeURIComponent(location.code)}
-        >
-          Print location label
-        </Link>
         <p className="my-3 break-words text-sm leading-6 text-slate-300">
           {location.breadcrumb} ·{' '}
           {!location.active
@@ -96,7 +90,30 @@ export default async function LocationPage({
               : 'Includes child locations'}
         </p>
         <LocationCode code={location.code} />
-        <ShowInRoom location={location} />
+        <nav
+          aria-label="Location actions"
+          className="my-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm"
+        >
+          <ShowInRoom location={location} />
+          <Link
+            className="min-h-11 py-3 text-cyan-300 underline"
+            href={'/labels?location=' + encodeURIComponent(location.code)}
+          >
+            Print label
+          </Link>
+          <Link
+            className="min-h-11 py-3 text-cyan-300 underline"
+            href={'/history?location=' + encodeURIComponent(code)}
+          >
+            History
+          </Link>
+          <ExportLink
+            className="min-h-11 py-3 text-cyan-300 underline"
+            href={'/api/exports/inventory?' + scopeParams}
+          >
+            Export
+          </ExportLink>
+        </nav>
         {children.length > 0 && (
           <section className={panel + ' mb-5'}>
             <h2 className="mb-3 text-lg font-semibold">Child locations</h2>
@@ -145,33 +162,17 @@ export default async function LocationPage({
             </Link>
           ))}
         </nav>
-        <div className="my-3 flex flex-wrap gap-x-5 text-sm">
-          <Link
-            className="min-h-11 py-3 text-cyan-300 underline"
-            href={'/history?location=' + encodeURIComponent(code)}
-          >
-            Location history
-          </Link>
-          <ExportLink
-            className="min-h-11 py-3 text-cyan-300 underline"
-            href={'/api/exports/inventory?' + scopeParams}
-          >
-            Download location inventory CSV
-          </ExportLink>
-        </div>
         <div className="mb-3">
           <h2 className="font-semibold">
             {location.can_hold_inventory
               ? 'Inventory at this location'
               : 'Inventory in this area and its descendants'}
           </h2>
-          <p className="my-2 text-sm">
-            Current scope: {statusScope(filter.status)}
-          </p>
-          <InventoryCount result={result} />
+          <InventoryCount result={result} compact />
         </div>
         <InventoryRows
           rows={result.rows}
+          currentLocationId={location.id}
           emptyState={
             <div className={panel}>
               <p>

@@ -2457,10 +2457,39 @@ it('removes outside Cancel release listeners on unmount while restoration is pen
     await act(async () => finish({ ok: true, candidate }));
     expect(readBatch(scope).raw).toBe(before);
     expect(mocks.submit).not.toHaveBeenCalled();
+    let refresh!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        refresh = resolve;
+      }),
+    );
     render(<AssignmentWorkspace {...props} />);
+    // The historical review is already visible while availability refresh is
+    // pending. Its presence alone does not establish completed review focus.
+    const review = screen.getByRole('region', { name: 'Review assignment' });
     expect(
-      await screen.findByRole('region', { name: 'Review assignment' }),
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Cancel inspection' }),
     ).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeDisabled();
+    await act(async () =>
+      refresh({
+        ok: true,
+        candidate: { ...candidate, name: 'Freshly inspected adapters' },
+      }),
+    );
+    expect(
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'false');
+    expect(
+      screen.getByRole('heading', { name: 'Freshly inspected adapters' }),
+    ).toBeInTheDocument();
+    expect(review).toHaveFocus();
+    expect(mocks.submit).not.toHaveBeenCalled();
   } finally {
     add.mockRestore();
     remove.mockRestore();
