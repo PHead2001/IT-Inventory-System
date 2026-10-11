@@ -104,6 +104,17 @@ export function reviewOptionPaths(
             reused.add(prefix);
         } else {
           if (
+            review.options.some(
+              (option) =>
+                option.active &&
+                normalizeOptionLabel(option.label) ===
+                  normalizeOptionLabel(name),
+            )
+          )
+            throw new Error(
+              `${prefix}: an active choice elsewhere in this field has the same name. Use a distinct name.`,
+            );
+          if (
             review.options.length >= 1000 ||
             revisionOptionCount + review.options.length - options.length >= 5000
           )

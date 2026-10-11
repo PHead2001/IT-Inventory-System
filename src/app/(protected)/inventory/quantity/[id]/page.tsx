@@ -1,3 +1,4 @@
+import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
@@ -249,7 +250,7 @@ export default async function QuantityPage({
             {assignments.map((event) => (
               <p className={panel} key={event.id}>
                 <span className="font-medium capitalize">
-                  {event.kind.replaceAll('_', ' ')}
+                  {custodyEventLabel(event.kind, 'quantity')}
                 </span>{' '}
                 ·{' '}
                 {event.kind === 'corrected'

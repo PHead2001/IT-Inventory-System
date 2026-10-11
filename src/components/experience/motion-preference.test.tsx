@@ -1,8 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import {
   MotionPreference,
   MotionToggle,
@@ -96,6 +98,104 @@ it('keeps persisted local reduction during hydration when OS motion is normal', 
   container.remove();
 });
 
+it.each([false, true])(
+  'withholds protected Settings until restoration, then uses saved choice %s for the first keyboard activation',
+  async (saved) => {
+    mockSystemMotion(false);
+    window.localStorage.setItem('it-inventory-reduce-motion', String(saved));
+    const view = (ready: boolean) => (
+      <PrivacyReadinessContext value={{ ready, generation: 'settings' }}>
+        <MotionPreference>
+          <ProtectedPrivacyContent>
+            <MotionToggle />
+          </ProtectedPrivacyContent>
+        </MotionPreference>
+      </PrivacyReadinessContext>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(view(false));
+    document.body.appendChild(container);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      expect(container.querySelector('button')).toBeNull();
+      await act(async () => {
+        root = hydrateRoot(container, view(false));
+      });
+      expect(within(container).queryByRole('switch')).not.toBeInTheDocument();
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(saved),
+      );
+      await act(async () => root?.render(view(true)));
+      const toggle = within(container).getByRole('switch', {
+        name: 'Reduce motion in this browser',
+      });
+      expect(toggle).toBeEnabled();
+      expect(toggle).toHaveAttribute('aria-checked', String(saved));
+      toggle.focus();
+      await userEvent.setup().keyboard(' ');
+      expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(!saved),
+      );
+      expect(document.documentElement.dataset.motion).toBe(
+        saved ? 'full' : 'reduced',
+      );
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  },
+);
+
+it.each([false, true])(
+  'keeps the preference unknown until the saved browser choice (%s) is known, then exposes and toggles that choice',
+  async (saved) => {
+    mockSystemMotion(false);
+    window.localStorage.setItem('it-inventory-reduce-motion', String(saved));
+    const view = (
+      <MotionPreference>
+        <MotionToggle />
+      </MotionPreference>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(view);
+    document.body.appendChild(container);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      const toggle = within(container).getByRole('button', {
+        name: 'Reduce motion in this browser',
+      });
+      expect(toggle).toBeDisabled();
+      expect(toggle).not.toHaveAttribute('role');
+      expect(toggle).not.toHaveAttribute('aria-checked');
+      expect(within(container).queryByRole('switch')).not.toBeInTheDocument();
+      expect(toggle).toHaveAccessibleDescription(
+        "Loading this browser's motion preference.",
+      );
+      await act(async () => {
+        root = hydrateRoot(container, view);
+      });
+      await waitFor(() => {
+        expect(
+          within(container).getByRole('switch', {
+            name: 'Reduce motion in this browser',
+          }),
+        ).toBe(toggle);
+        expect(toggle).toBeEnabled();
+        expect(toggle).toHaveAttribute('aria-checked', String(saved));
+      });
+      await userEvent.setup().click(toggle);
+      expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(!saved),
+      );
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  },
+);
+
 it('combines OS and local choices and responds to either changing', async () => {
   const user = userEvent.setup();
   const setSystem = mockSystemMotion();
@@ -105,16 +205,23 @@ it('combines OS and local choices and responds to either changing', async () => 
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('false');
-  expect(toggle).toHaveTextContent('Full motion');
+  expect(toggle).toHaveAccessibleDescription('Full motion is active.');
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
   act(() => setSystem(true));
-  expect(toggle).toHaveTextContent('Reduced by system');
+  expect(toggle).toHaveAccessibleDescription(
+    'Reduced motion is required by your system, even when this switch is off.',
+  );
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  expect(toggle).toHaveTextContent('Reduced locally');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(toggle).toHaveAccessibleDescription(
+    'Reduced motion is active. Your system also requires reduced motion.',
+  );
   act(() => setSystem(false));
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   await user.click(toggle);
@@ -155,9 +262,11 @@ it('keeps the local reduced-motion choice across mounts', async () => {
       <MotionToggle />
     </MotionPreference>,
   );
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   first.unmount();
   render(
@@ -168,8 +277,8 @@ it('keeps the local reduced-motion choice across mounts', async () => {
     </MotionPreference>,
   );
   expect(
-    screen.getByRole('button', { name: 'Use system motion setting' }),
-  ).toHaveAttribute('aria-pressed', 'true');
+    screen.getByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toHaveAttribute('aria-checked', 'true');
 });
 
 it('renders and toggles when browser storage rejects reads and writes', async () => {
@@ -189,11 +298,13 @@ it('renders and toggles when browser storage rejects reads and writes', async ()
     </MotionPreference>,
   );
   expect(screen.getByText('Workspace')).toBeInTheDocument();
-  const toggle = screen.getByRole('button', { name: 'Reduce motion locally' });
+  const toggle = screen.getByRole('switch', {
+    name: 'Reduce motion in this browser',
+  });
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(document.documentElement.dataset.motion).toBe('reduced');
   expect(screen.getByTestId('effective-motion')).toHaveTextContent('true');
   await user.click(toggle);
-  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(toggle).toHaveAttribute('aria-checked', 'false');
 });

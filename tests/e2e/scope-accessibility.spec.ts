@@ -1,3 +1,6 @@
+import { displayedInstant } from '../helpers/displayed-instant';
+import { expectRecordedInstantCopy } from '../helpers/operational-time';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
@@ -250,7 +253,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
     const active = page.getByRole('link', { name: 'Active only', exact: true });
     const all = page.getByRole('link', { name: 'All statuses', exact: true });
     await expect(active).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('Current scope: Active only')).toBeVisible();
+    await expect(page.getByText('Current scope: Active only')).toHaveCount(0);
     await expect(
       page.getByText('28 matching rows', { exact: true }),
     ).toBeVisible();
@@ -259,6 +262,33 @@ test('location status, holding scope, matching rows and real CSV agree across na
     });
     await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
     await expect(split.getByText('At this location')).toBeVisible();
+    const localGrid = split.locator('[class*="rowGrid"]').first();
+    expect(
+      await split.evaluate((row) => row.getBoundingClientRect().width),
+    ).toBeGreaterThan(680);
+    await expect
+      .poll(() =>
+        localGrid.evaluate(
+          (grid) =>
+            getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
+        ),
+      )
+      .toBe(2);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect
+      .poll(() =>
+        localGrid.evaluate(
+          (grid) =>
+            getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,
+        ),
+      )
+      .toBe(1);
+    await expect(split.getByText('1 unit', { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath('location-row-two-column-mobile.png'),
+    });
+    await page.setViewportSize({ width: 1180, height: 757 });
+
     await expect(
       split.getByText('Across all storage: 2 available'),
     ).toBeVisible();
@@ -314,9 +344,7 @@ test('location status, holding scope, matching rows and real CSV agree across na
     await page.goForward();
     await expect(all).toHaveAttribute('aria-current', 'page');
     const downloading = page.waitForEvent('download');
-    await page
-      .getByRole('link', { name: 'Download location inventory CSV' })
-      .click();
+    await page.getByRole('link', { name: 'Export' }).click();
     const download = await downloading;
     const path = testInfo.outputPath('all-status-location.csv');
     await download.saveAs(path);
@@ -688,9 +716,7 @@ test('Office codes, compact duplicate child links and empty destination remain a
     await page.getByRole('link', { name: 'Include all statuses' }).click();
     await expect(page.getByText('No recorded inventory here.')).toBeVisible();
     const downloaded = page.waitForEvent('download');
-    await page
-      .getByRole('link', { name: 'Download location inventory CSV' })
-      .click();
+    await page.getByRole('link', { name: 'Export' }).click();
     const path = testInfo.outputPath('empty-destination.csv');
     await (await downloaded).saveAs(path);
     expect(csvRows(await readFile(path, 'utf8'))).toHaveLength(1);
@@ -768,3 +794,32 @@ test('Office codes, compact duplicate child links and empty destination remain a
     });
   }
 });
+
+interfaceTest(
+  'relative history exposes exact timezone and original precision through keyboard disclosure',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    await page.goto(`/history?type=quantity&entityId=${interfaceRecord.id}`);
+    const time = page.locator('summary > time').first();
+    await expect(time).toBeVisible();
+    const original = await time.getAttribute('datetime');
+    const summary = time.locator('xpath=parent::summary');
+    const disclosure = summary.locator('xpath=parent::details');
+    await summary.focus();
+    await expect(summary).toBeFocused();
+    await summary.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+    const exact = disclosure.locator(':scope > p').first();
+    await expect(exact).toBeVisible();
+    await expect(exact).toContainText(/UTC|GMT/);
+    expect(displayedInstant((await exact.textContent())!)).toBe(
+      Math.floor(Date.parse(original!) / 1000) * 1000,
+    );
+    await expectRecordedInstantCopy(disclosure, original!);
+    await expect(time).toHaveAttribute('datetime', original!);
+    await page.screenshot({
+      path: info.outputPath('history-exact-disclosure.png'),
+      fullPage: true,
+    });
+  },
+);

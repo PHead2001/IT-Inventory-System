@@ -17,32 +17,97 @@ type LabeledOption = {
   parent_id?: string | null;
   active: boolean;
 };
-/** Siblings are scoped to one field's options and one parent identity. */
+/** New active labels must be distinguishable throughout one field. */
 export function ambiguousOptionIds(
   options: readonly LabeledOption[],
 ): Set<string> {
-  const siblings = new Map<string, string[]>();
+  const groups = new Map<string, string[]>();
   for (const option of options) {
     if (!option.active) continue;
-    const key = JSON.stringify([
-      option.parent_id ?? null,
-      normalizeOptionLabel(option.label),
-    ]);
-    const ids = siblings.get(key) ?? [];
+    const key = normalizeOptionLabel(option.label);
+    const ids = groups.get(key) ?? [];
     ids.push(option.id);
-    siblings.set(key, ids);
+    groups.set(key, ids);
   }
-  return new Set([...siblings.values()].filter((ids) => ids.length > 1).flat());
+  return new Set([...groups.values()].filter((ids) => ids.length > 1).flat());
 }
-/** Full stable identities avoid collisions from truncated UUID prefixes. */
+/** The caller supplies this field's CURRENT server-published raw definition,
+ * separately from its editable draft. Never infer provenance from IDs alone. */
+export function invalidOptionCollisionIds(
+  options: readonly LabeledOption[],
+  publishedBaseline: readonly LabeledOption[] = [],
+): Set<string> {
+  const ambiguous = ambiguousOptionIds(options);
+  const baseline = new Map(
+    publishedBaseline.map((option) => [option.id, option]),
+  );
+  const changedKeys = new Set<string>();
+  for (const option of options) {
+    if (!ambiguous.has(option.id)) continue;
+    const before = baseline.get(option.id);
+    if (
+      !before?.active ||
+      before.label !== option.label ||
+      (before.parent_id ?? null) !== (option.parent_id ?? null)
+    )
+      changedKeys.add(normalizeOptionLabel(option.label));
+  }
+  return new Set(
+    options
+      .filter(
+        (option) =>
+          option.active && changedKeys.has(normalizeOptionLabel(option.label)),
+      )
+      .map((option) => option.id),
+  );
+}
+
+// Quote literal separators and quotation/escape characters so a label cannot
+// impersonate a hierarchical path. SQL uses the same JSON string spelling.
+const displaySegment = (rawLabel: string) => {
+  // Match the compiler's existing PostgreSQL btrim(label), without changing
+  // the raw label used for authoring/provenance comparisons.
+  const label = rawLabel.replace(/^ +| +$/g, '') || 'Unnamed option';
+  return /["\\/]/.test(label) ? JSON.stringify(label) : label;
+};
+
+/** Allocate from the complete referenced revision in canonical UUID order,
+ * including inactive choices. Navigation order never reallocates display identity.
+ * Reserve all literal names before allocating human ordinal suffixes. */
 export function optionDisplayLabels(
   options: readonly LabeledOption[],
 ): Map<string, string> {
-  const ambiguous = ambiguousOptionIds(options);
-  return new Map(
-    options.map((option) => [
-      option.id,
-      `${option.label || 'Unnamed option'}${ambiguous.has(option.id) ? ` [choice ${option.id}]` : ''}`,
-    ]),
+  const reserved = new Set(
+    options.map((option) =>
+      normalizeOptionLabel(displaySegment(option.label || 'Unnamed option')),
+    ),
   );
+  const used = new Set<string>();
+  const labels = new Map<string, string>();
+  const nextOrdinal = new Map<string, number>();
+  const canonical = [...options].sort((left, right) => {
+    const a = left.id.toLowerCase(),
+      b = right.id.toLowerCase();
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  for (const option of canonical) {
+    const base = displaySegment(option.label || 'Unnamed option');
+    const key = normalizeOptionLabel(base);
+    let ordinal = nextOrdinal.get(key) ?? 1;
+    let display = base;
+    if (used.has(key)) {
+      do {
+        ordinal = Math.max(2, ordinal);
+        display = `${base} (${ordinal++})`;
+      } while (
+        reserved.has(normalizeOptionLabel(display)) ||
+        used.has(normalizeOptionLabel(display))
+      );
+    }
+    nextOrdinal.set(key, Math.max(2, ordinal));
+    used.add(normalizeOptionLabel(display));
+    labels.set(option.id, display);
+  }
+  // Preserve the caller's iteration/navigation order; only allocation is sorted.
+  return new Map(options.map((option) => [option.id, labels.get(option.id)!]));
 }

@@ -172,7 +172,7 @@ export function ArchiveQuantityForm({
           {displayCount(baseline.removed_total)} units to remove
         </h3>
         <p className="mt-1 text-xs text-slate-400">
-          Reviewed at item version {baseline.version}
+          Review the stock that will be cleared
         </p>
         {baseline.locations.length > 0 ? (
           <ul className="mt-3 space-y-2 text-sm">

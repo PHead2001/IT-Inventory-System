@@ -2,6 +2,8 @@ import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { MotionToggle } from '@/components/experience/motion-preference';
+import { BuildInfo } from '@/features/build-info/build-info';
+import { readBuildProvenance } from '@/features/build-info/read.server';
 
 const sections = [
   {
@@ -87,6 +89,7 @@ export default async function SettingsPage({
             </li>
           ))}
         </ul>
+        <BuildInfo provenance={readBuildProvenance()} />
       </div>
     </ProtectedPrivacyContent>
   );

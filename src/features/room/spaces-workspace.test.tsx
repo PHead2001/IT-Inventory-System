@@ -902,7 +902,25 @@ it('loads counts only when enabled and refreshes counts and contents together on
     window.dispatchEvent(new Event('pageshow'));
   });
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 2));
-  await screen.findByText(/counts are a snapshot/);
+  const countsExplanation = await screen.findByText(
+    /Counts show quantity items with stock and active individual assets at each storage location\./,
+  );
+  expect(countsExplanation).toHaveAttribute('role', 'status');
+  expect(countsExplanation).toBeVisible();
+  expect(countsExplanation).toHaveTextContent(/counts are a snapshot/);
   await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
   await waitFor(() => expect(fetcher.mock.calls.length).toBe(before + 4));
+  await user.click(screen.getByRole('button', { name: 'Toggle item counts' }));
+  await waitFor(() =>
+    expect(screen.getByTestId('scene-selection')).toHaveAttribute(
+      'data-counts',
+      'null',
+    ),
+  );
+  expect(countsExplanation).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      'Counts show quantity items with stock and active individual assets at each storage location.',
+    ),
+  ).not.toBeInTheDocument();
 });

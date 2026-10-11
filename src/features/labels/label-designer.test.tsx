@@ -184,6 +184,140 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+const restoredLocation: LiveLabel = {
+  ...quantity,
+  kind: 'location',
+  key: 'ITC-CLEAR',
+  name: 'Clear Container',
+  path: '/locations/ITC-CLEAR',
+};
+const restoredRows = [asset, quantity, restoredLocation];
+function saveMixedQueue() {
+  const entries = restoredRows.map((record, index) => ({
+    kind: record.kind,
+    key: record.key,
+    copies: index + 2,
+    baselineTag: record.tag,
+    baselineState: record.state,
+    lifecycleAcknowledged: true,
+  }));
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({ entries, filters: defaultFilters, job: defaultJob }),
+  );
+  return entries;
+}
+function expectPrivateQueueIdentity(queue: HTMLElement) {
+  for (const record of restoredRows) {
+    expect(queue).not.toHaveTextContent(record.key);
+    for (const control of within(queue).getAllByRole('button'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+    for (const control of within(queue).getAllByRole('spinbutton'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+  }
+}
+it('restores a mixed queue with human refreshing labels until the authorized deferred read supplies names', async () => {
+  const savedEntries = saveMixedQueue();
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(restoredRows);
+  render(<LabelDesigner {...props} initial={[]} />);
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  await within(queue).findByText('Individual asset 1 · refreshing…');
+  expect(
+    within(queue).getByText('Quantity item 2 · refreshing…'),
+  ).toBeVisible();
+  expect(within(queue).getByText('Location 3 · refreshing…')).toBeVisible();
+  expectPrivateQueueIdentity(queue);
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(mocks.getQueueRecords).toHaveBeenCalledWith(
+      savedEntries.map(({ kind, key }) => ({ kind, key })),
+    ),
+  );
+  await act(async () => finish(restoredRows));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(queue).toHaveTextContent('Laptop');
+  expect(queue).toHaveTextContent('Adapters');
+  expect(queue).toHaveTextContent('Clear Container');
+  expect(
+    within(queue)
+      .getAllByRole('spinbutton')
+      .map((input) => (input as HTMLInputElement).value),
+  ).toEqual(['2', '3', '4']);
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries,
+  ).toEqual(savedEntries);
+});
+it.each(['missing', 'failure'] as const)(
+  'shows human mixed-queue %s states without keys or cached unauthorized names',
+  async (outcome) => {
+    saveMixedQueue();
+    mocks.getQueueRecords.mockResolvedValue(restoredRows);
+    render(<LabelDesigner {...props} initial={[]} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const queue = screen.getByRole('region', { name: 'Label queue' });
+    if (outcome === 'missing') mocks.getQueueRecords.mockResolvedValueOnce([]);
+    else
+      mocks.getQueueRecords.mockRejectedValueOnce(
+        new Error('Private read detail ' + assetId),
+      );
+    fireEvent.click(printButton());
+    const state =
+      outcome === 'missing'
+        ? 'unavailable to this account'
+        : 'refresh failed; retry';
+    await within(queue).findByText('Individual asset 1 · ' + state);
+    expect(within(queue).getByText('Quantity item 2 · ' + state)).toBeVisible();
+    expect(within(queue).getByText('Location 3 · ' + state)).toBeVisible();
+    expectPrivateQueueIdentity(queue);
+    for (const record of restoredRows)
+      expect(queue).not.toHaveTextContent(record.name);
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+    if (outcome === 'failure') {
+      let finish!: (rows: LiveLabel[]) => void;
+      mocks.getQueueRecords.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Retry label refresh' }),
+      );
+      await within(queue).findByText('Individual asset 1 · refreshing…');
+      expectPrivateQueueIdentity(queue);
+      await waitFor(() =>
+        expect(mocks.getQueueRecords).toHaveBeenCalledTimes(3),
+      );
+      await act(async () => finish(restoredRows));
+      await waitFor(() => expect(printButton()).toBeEnabled());
+    } else {
+      fireEvent.click(
+        within(queue).getAllByRole('button', {
+          name: /^Remove$/,
+        })[1],
+      );
+      await waitFor(() =>
+        expect(
+          JSON.parse(
+            sessionStorage.getItem(
+              queueStorageKey(props.origin, props.memberId),
+            )!,
+          ).entries.map((entry: { key: string }) => entry.key),
+        ).toEqual([assetId, restoredLocation.key]),
+      );
+    }
+  },
+);
+
 it('omits empty search paging without changing the existing label queue', async () => {
   render(<LabelDesigner {...props} />);
   expect(
@@ -912,11 +1046,11 @@ it('describes queued locations as locations while retaining inventory category f
   render(<LabelDesigner {...props} initial={[location, uncategorized]} />);
   await waitFor(() =>
     expect(
-      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · active'),
+      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · Active'),
     ).toBeInTheDocument(),
   );
   expect(
-    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · active'),
+    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · Active'),
   ).toBeInTheDocument();
 });
 
@@ -1449,7 +1583,12 @@ it('shows a quantity Item code in search results without replacing its UUID rout
     pageSize: 25,
   });
   render(<LabelDesigner {...props} />);
-  expect(await screen.findByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(await screen.findByText('Item code: SKU-0042')).toHaveClass(
+    'experience-code',
+  );
+  expect(
+    screen.getByText('Active', { selector: '.experience-record-status' }),
+  ).toBeVisible();
   expect(screen.queryByText('ID ' + quantityId)).not.toBeInTheDocument();
   expect(
     screen.getByRole('checkbox', {
@@ -1656,14 +1795,14 @@ it('shows one named decision on returning to a changed item and invalidates revi
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(notice).toHaveTextContent('Laptop');
   expect(notice).toHaveTextContent('Individual asset');
-  expect(notice).toHaveTextContent('Lifecycle changed from active to retired.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Active to Retired.');
   expect(
     screen.queryByText('Review required before printing'),
   ).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   let snapshot = within(notice).getByRole('region', { name: 'Review Laptop' });
-  expect(snapshot).toHaveTextContent('Current authorized snapshot: retired');
+  expect(snapshot).toHaveTextContent('Current authorized snapshot: Retired');
   expect(
     within(snapshot).getByRole('link', { name: 'View item details' }),
   ).toHaveAttribute('href', asset.path);
@@ -1679,7 +1818,7 @@ it('shows one named decision on returning to a changed item and invalidates revi
   current = asset;
   fireEvent(window, new Event('focus'));
   notice = await screen.findByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Lifecycle changed from retired to active.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Retired to Active.');
   expect(within(notice).queryByRole('region')).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1715,7 +1854,7 @@ it('requires fresh review when the acknowledgment read returns a different tag o
     ).not.toBeInTheDocument(),
   );
   notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).toHaveTextContent('Identifier changed.');
   expect(printButton()).toBeDisabled();
   const stored = JSON.parse(
@@ -1896,9 +2035,9 @@ it('rejects a delayed acknowledgment after focus advances the queue validation g
   expect(stored.entries[0].lifecycleAcknowledged).toBe(false);
   expect(
     screen.getByRole('alert', { name: 'Label item decisions' }),
-  ).toHaveTextContent('Current state: active.');
+  ).toHaveTextContent('Current state: Active.');
   expect(
-    screen.queryByText(/Current authorized snapshot: retired/),
+    screen.queryByText(/Current authorized snapshot: Retired/),
   ).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1949,7 +2088,7 @@ it.each([false, true])(
       );
       expect(
         screen.getByRole('alert', { name: 'Label item decisions' }),
-      ).toHaveTextContent('Current state: active');
+      ).toHaveTextContent('Current state: Active');
     } else {
       await waitFor(() =>
         expect(
@@ -1981,7 +2120,7 @@ it('persists outstanding review when an observed retirement returns to active be
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Current state: active.'),
+    ).toHaveTextContent('Current state: Active.'),
   );
   expect(printButton()).toBeDisabled();
   await waitFor(() =>
@@ -1996,7 +2135,7 @@ it('persists outstanding review when an observed retirement returns to active be
   const notice = await screen.findByRole('alert', {
     name: 'Label item decisions',
   });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   expect(within(notice).queryByRole('checkbox')).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
@@ -2021,7 +2160,7 @@ it('latches another item changed in an acknowledgment read even when it restores
     ).toHaveTextContent('Laptop'),
   );
   const notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).not.toHaveTextContent('Adapters');
   await waitFor(() => {
     const stored = JSON.parse(
@@ -2055,7 +2194,7 @@ it('retains a surviving item lifecycle observation beside a missing sibling thro
     name: 'Label item decisions',
   });
   expect(notice).toHaveTextContent('Laptop');
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(
     screen.queryByText(/Some queued records are unavailable/),
   ).not.toBeInTheDocument();
@@ -2110,13 +2249,13 @@ it('invalidates an already latched checked review immediately when a duplicate l
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Review item' }));
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
     screen.getByRole('region', { name: 'Review Laptop' }),
-  ).toHaveTextContent('Current authorized snapshot: active');
+  ).toHaveTextContent('Current authorized snapshot: Active');
   expect(window.print).not.toHaveBeenCalled();
 });
 
@@ -2183,7 +2322,7 @@ it('retains review debt when an overlapping manual lookup observes a second chan
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   expect(screen.getByText('1 distinct record · 1 label')).toBeVisible();
   expect(window.print).not.toHaveBeenCalled();
@@ -2227,10 +2366,12 @@ it.each([
       name: 'Search result records',
     });
     expect(
-      within(results).getByText(`${display} · ${categoryName} · active`),
-    ).toBeVisible();
+      within(results).getByText(`${display} · ${categoryName} ·`, {
+        exact: false,
+      }),
+    ).toHaveTextContent(`${display} · ${categoryName} · Active`);
     expect(
-      within(results).queryByText(`${kind} · ${categoryName} · active`),
+      within(results).queryByText(`${kind} · ${categoryName} · Active`),
     ).toBeNull();
   },
 );
@@ -2249,7 +2390,7 @@ function labelResults(
       categoryName: row.categoryName ?? '',
       status: row.state,
       assetTag: row.tag,
-      itemCode: null,
+      itemCode: row.humanId ?? null,
       serialNumber: null,
       manufacturer: null,
       model: null,
@@ -2333,14 +2474,73 @@ it('retains explicit selections across pages with named added, present and unava
   fireEvent.click(
     screen.getByRole('button', { name: 'Add selected to queue' }),
   );
-  expect(
-    await screen.findByText(
-      /^Added: Laptop.*Already present: Adapters.*Unavailable to this account: Missing adapters/,
-    ),
-  ).toBeVisible();
+  const feedback = await screen.findByText(
+    'Added: Laptop (Individual asset). Already present: Adapters (Quantity item). Unavailable to this account: Missing adapters (Quantity item).',
+  );
+  expect(feedback).toBeVisible();
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(asset.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    quantity.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    missing.key,
+  );
   expect(screen.getByText('0 selected records')).toBeVisible();
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '2 distinct records \u00b7 2 labels',
+  );
+});
+
+it('distinguishes same-name quantity batch feedback using freshly resolved item codes while preserving typed queue identities', async () => {
+  const already = { ...quantity, humanId: 'ADP-USB' };
+  const added = {
+    ...quantity,
+    key: '00000000-0000-4000-8000-000000000004',
+    humanId: 'ADP-HDMI',
+    holdingContext: 'ITC-S1B: 2',
+  };
+  const search = labelResults([already, added]);
+  search.rows[0].itemCode = 'OLD-USB';
+  search.rows[1].itemCode = 'OLD-HDMI';
+  mocks.searchLabelRecords.mockResolvedValue(search);
+  mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+    Promise.resolve(
+      [already, added].filter((row) => keys.some((key) => key.key === row.key)),
+    ),
+  );
+  render(<LabelDesigner {...props} initial={[already]} />);
+  await screen.findByRole('button', { name: 'In queue' });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  const feedback = await screen.findByText(
+    'Added: Adapters (Quantity item; item code ADP-HDMI). Already present: Adapters (Quantity item; item code ADP-USB). Unavailable to this account: none.',
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    already.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(added.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent('OLD-');
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries.map(
+        ({
+          kind,
+          key,
+          copies,
+        }: {
+          kind: string;
+          key: string;
+          copies: number;
+        }) => ({ kind, key, copies }),
+      ),
+    ).toEqual([
+      { kind: 'quantity', key: already.key, copies: 1 },
+      { kind: 'quantity', key: added.key, copies: 1 },
+    ]),
   );
 });
 

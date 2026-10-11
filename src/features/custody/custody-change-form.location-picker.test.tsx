@@ -65,7 +65,7 @@ const returnProps = {
   },
 };
 const returnPicker = () =>
-  screen.getByRole('combobox', { name: 'Return to storage' });
+  screen.getByRole('combobox', { name: 'Storage location' });
 
 it.each(['close', 'switch', 'reason'] as const)(
   'keeps an automatically recovered default pristine while guarding actual edits on %s',
@@ -214,9 +214,7 @@ it.each(['suggested', 'no_storage_origin'] as const)(
   async (status) => {
     const user = userEvent.setup();
     const view = render(<CustodyChangeForm {...returnProps} />);
-    await user.click(
-      screen.getByRole('button', { name: 'Review return to storage' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review return' }));
     view.rerender(
       <CustodyChangeForm
         {...returnProps}
@@ -229,7 +227,7 @@ it.each(['suggested', 'no_storage_origin'] as const)(
       screen.getByText(/last verified suggestion is retained/),
     ).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+      screen.queryByRole('button', { name: 'Return to storage' }),
     ).toBeNull();
     view.rerender(
       <CustodyChangeForm
@@ -246,7 +244,7 @@ it.each(['suggested', 'no_storage_origin'] as const)(
     );
     expect(screen.queryByText(/could not be checked/)).toBeNull();
     expect(
-      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+      screen.queryByRole('button', { name: 'Return to storage' }),
     ).toBeNull();
     expect(submitCustody).not.toHaveBeenCalled();
   },
@@ -288,9 +286,7 @@ it.each(['manual', 'cleared'] as const)(
 it('invalidates an existing confirmation before a same-version suggestion changes its untouched destination', async () => {
   const user = userEvent.setup();
   const view = render(<CustodyChangeForm {...returnProps} />);
-  await user.click(
-    screen.getByRole('button', { name: 'Review return to storage' }),
-  );
+  await user.click(screen.getByRole('button', { name: 'Review return' }));
   expect(
     screen.getByRole('region', { name: 'Review changes' }),
   ).toHaveTextContent('Server Rack');
@@ -305,7 +301,7 @@ it('invalidates an existing confirmation before a same-version suggestion change
   );
   expect(returnPicker()).toHaveTextContent('Drawer 1');
   expect(
-    screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    screen.queryByRole('button', { name: 'Return to storage' }),
   ).toBeNull();
   expect(submitCustody).not.toHaveBeenCalled();
 });
@@ -329,12 +325,8 @@ it.each([
       screen.getByLabelText('Ticket number reference (optional)'),
       'Keep draft',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Review return to storage' }),
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Confirm return to storage' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review return' }));
+    await user.click(screen.getByRole('button', { name: 'Return to storage' }));
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Refresh latest holdings' }),
@@ -354,7 +346,7 @@ it.each([
     expect(returnPicker()).toHaveTextContent('Server Rack');
     expect(screen.getByText(/Initially suggested/)).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Review return to storage' }),
+      screen.getByRole('button', { name: 'Review return' }),
     ).toBeDisabled();
     await user.click(
       screen.getByRole('button', { name: 'Review latest holdings' }),
@@ -365,7 +357,7 @@ it.each([
       screen.getByLabelText('Ticket number reference (optional)'),
     ).toHaveValue('Keep draft');
     expect(
-      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+      screen.queryByRole('button', { name: 'Return to storage' }),
     ).toBeNull();
     if (status === 'suggested') {
       vi.mocked(submitCustody).mockResolvedValueOnce({
@@ -374,11 +366,9 @@ it.each([
         version: '82',
         changed: true,
       });
+      await user.click(screen.getByRole('button', { name: 'Review return' }));
       await user.click(
-        screen.getByRole('button', { name: 'Review return to storage' }),
-      );
-      await user.click(
-        screen.getByRole('button', { name: 'Confirm return to storage' }),
+        screen.getByRole('button', { name: 'Return to storage' }),
       );
       await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
       const [first, renewed] = vi
@@ -407,12 +397,8 @@ it('freezes the suggested destination during pending and uncertain returns and r
       }),
   );
   const view = render(<CustodyChangeForm {...returnProps} />);
-  await user.click(
-    screen.getByRole('button', { name: 'Review return to storage' }),
-  );
-  await user.click(
-    screen.getByRole('button', { name: 'Confirm return to storage' }),
-  );
+  await user.click(screen.getByRole('button', { name: 'Review return' }));
+  await user.click(screen.getByRole('button', { name: 'Return to storage' }));
   const original = vi.mocked(submitCustody).mock.calls[0][0];
   const refreshed = {
     ...returnProps,
@@ -472,7 +458,7 @@ it('suggests a verified Return origin and preserves a manual choice and explicit
     },
   };
   const view = render(<CustodyChangeForm {...props} />);
-  const picker = screen.getByLabelText('Return to storage', {
+  const picker = screen.getByLabelText('Storage location', {
     exact: true,
     selector: 'button',
   });
@@ -539,7 +525,7 @@ it.each(['no_storage_origin', 'ineligible', 'unavailable'] as const)(
       />,
     );
     expect(
-      screen.getByLabelText('Return to storage', {
+      screen.getByLabelText('Storage location', {
         exact: true,
         selector: 'button',
       }),
@@ -594,7 +580,7 @@ it.each([
       />,
     );
     expect(
-      screen.getByRole('combobox', { name: 'Return to storage' }),
+      screen.getByRole('combobox', { name: 'Storage location' }),
     ).toHaveTextContent('Select a location');
     expect(screen.getByText(expected)).toBeVisible();
     expect(screen.queryByText(/Initially suggested/)).toBeNull();
@@ -620,11 +606,9 @@ it('invalidates a stale Return review and preserves explicit clearing when revie
     },
   };
   const view = render(<CustodyChangeForm {...props} />);
-  await user.click(
-    screen.getByRole('button', { name: 'Review return to storage' }),
-  );
+  await user.click(screen.getByRole('button', { name: 'Review return' }));
   expect(
-    screen.getByRole('button', { name: 'Confirm return to storage' }),
+    screen.getByRole('button', { name: 'Return to storage' }),
   ).toBeEnabled();
   view.rerender(
     <CustodyChangeForm
@@ -634,7 +618,7 @@ it('invalidates a stale Return review and preserves explicit clearing when revie
     />,
   );
   expect(
-    screen.queryByRole('button', { name: 'Confirm return to storage' }),
+    screen.queryByRole('button', { name: 'Return to storage' }),
   ).toBeNull();
   await user.click(
     screen.getByRole('button', { name: 'Review latest holdings' }),
@@ -651,7 +635,7 @@ it('invalidates a stale Return review and preserves explicit clearing when revie
     screen.getByRole('button', { name: 'Review latest holdings' }),
   );
   expect(
-    screen.getByRole('combobox', { name: 'Return to storage' }),
+    screen.getByRole('combobox', { name: 'Storage location' }),
   ).toHaveTextContent('Select a location');
   expect(submitCustody).not.toHaveBeenCalled();
 });
@@ -686,7 +670,7 @@ it.each(['manual', 'cleared'] as const)(
       },
     };
     const view = render(<CustodyChangeForm {...props} />);
-    const picker = screen.getByRole('combobox', { name: 'Return to storage' });
+    const picker = screen.getByRole('combobox', { name: 'Storage location' });
     await user.click(picker);
     await user.type(
       screen.getByRole('combobox', { name: 'Search locations' }),
@@ -697,15 +681,11 @@ it.each(['manual', 'cleared'] as const)(
       screen.getByLabelText('Ticket number reference (optional)'),
       'Keep draft',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Review return to storage' }),
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Confirm return to storage' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review return' }));
+    await user.click(screen.getByRole('button', { name: 'Return to storage' }));
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(
-      screen.getByRole('button', { name: 'Review return to storage' }),
+      screen.getByRole('button', { name: 'Review return' }),
     ).toBeDisabled();
     expect(
       screen.queryByRole('button', { name: 'Review latest holdings' }),
@@ -722,7 +702,7 @@ it.each(['manual', 'cleared'] as const)(
       screen.getByLabelText('Ticket number reference (optional)'),
     ).toBeDisabled();
     expect(
-      screen.getByRole('button', { name: 'Review return to storage' }),
+      screen.getByRole('button', { name: 'Review return' }),
     ).toBeDisabled();
     await user.click(
       screen.getByRole('button', { name: 'Refresh latest holdings' }),
@@ -732,7 +712,7 @@ it.each(['manual', 'cleared'] as const)(
     // An unchanged snapshot cannot authorize another attempt.
     view.rerender(<CustodyChangeForm {...props} />);
     expect(
-      screen.getByRole('button', { name: 'Review return to storage' }),
+      screen.getByRole('button', { name: 'Review return' }),
     ).toBeDisabled();
     const latest = {
       ...props,
@@ -746,7 +726,7 @@ it.each(['manual', 'cleared'] as const)(
     };
     view.rerender(<CustodyChangeForm {...latest} />);
     expect(
-      screen.getByRole('button', { name: 'Review return to storage' }),
+      screen.getByRole('button', { name: 'Review return' }),
     ).toBeDisabled();
     expect(picker).toHaveTextContent('Drawer 1');
     await user.click(
@@ -758,7 +738,7 @@ it.each(['manual', 'cleared'] as const)(
       screen.getByLabelText('Ticket number reference (optional)'),
     ).toHaveValue('Keep draft');
     expect(
-      screen.queryByRole('button', { name: 'Confirm return to storage' }),
+      screen.queryByRole('button', { name: 'Return to storage' }),
     ).toBeNull();
     if (destination === 'cleared') {
       await user.click(
@@ -790,13 +770,9 @@ it.each(['manual', 'cleared'] as const)(
       version: '83',
       changed: true,
     });
-    await user.click(
-      screen.getByRole('button', { name: 'Review return to storage' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review return' }));
     expect(submitCustody).toHaveBeenCalledTimes(1);
-    await user.click(
-      screen.getByRole('button', { name: 'Confirm return to storage' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Return to storage' }));
     await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
     const renewed = vi.mocked(submitCustody).mock.calls[1][0] as {
       requestId: string;
@@ -890,13 +866,9 @@ it('real source picker accepts the asset current storage location without quanti
   ).toBeVisible();
   await user.keyboard('{Escape}');
   await user.selectOptions(screen.getByLabelText('Destination site'), site.id);
-  await user.click(
-    screen.getByRole('button', { name: 'Review assign asset to a site' }),
-  );
+  await user.click(screen.getByRole('button', { name: 'Review assignment' }));
   expect(submitCustody).not.toHaveBeenCalled();
-  await user.click(
-    screen.getByRole('button', { name: 'Confirm assign asset to a site' }),
-  );
+  await user.click(screen.getByRole('button', { name: 'Assign to site' }));
   await waitFor(() => expect(submitCustody).toHaveBeenCalled());
   expect(vi.mocked(submitCustody).mock.calls[0][0]).toMatchObject({
     payload: {

@@ -612,9 +612,114 @@ it('shows ambiguous identities for manual choice without submitting or silently 
   expect(mocks.inspect).not.toHaveBeenCalled();
   expect(mocks.submit).not.toHaveBeenCalled();
   fireEvent.click(
-    screen.getByRole('button', { name: 'Adapters · quantity · active' }),
+    screen.getByRole('button', { name: 'Adapters · Quantity item · Active' }),
   );
   await screen.findByRole('region', { name: 'Review assignment' });
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('labels an exact location match correctly and preserves its location path when selected for rejected assignment inspection', async () => {
+  const location = {
+    kind: 'location',
+    path: '/locations/ITC-RED',
+    label: 'Red (ITC-RED)',
+    state: 'active',
+  };
+  mocks.find.mockResolvedValue({
+    ok: true,
+    status: 'ambiguous',
+    matches: [
+      location,
+      match,
+      {
+        kind: 'asset',
+        path: '/inventory/assets/' + id(11),
+        label: 'Laptop',
+        state: 'active',
+      },
+    ],
+  });
+  const rejection =
+    'This label identifies a location. Select an existing quantity item or individual asset to assign.';
+  mocks.inspect.mockResolvedValueOnce({ ok: false, message: rejection });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'ITC-RED' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  const chooser = await screen.findByRole('list', {
+    name: 'Choose inventory record',
+  });
+  expect(
+    within(chooser).getByRole('button', {
+      name: 'Adapters · Quantity item · Active',
+    }),
+  ).toBeVisible();
+  expect(
+    within(chooser).getByRole('button', {
+      name: 'Laptop · Individual asset · Active',
+    }),
+  ).toBeVisible();
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(chooser).getByRole('button', {
+      name: 'Red (ITC-RED) · Location · Active',
+    }),
+  );
+  await screen.findByText(rejection, { selector: '[role="status"]' });
+  expect(mocks.find).toHaveBeenCalledWith({
+    actorId: props.actorId,
+    text: 'ITC-RED',
+    mode: 'identifier',
+  });
+  expect(mocks.inspect).toHaveBeenCalledExactlyOnceWith({
+    actorId: props.actorId,
+    path: location.path,
+    siteId: site.id,
+  });
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Confirm assign' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('keeps a found LOC label as a location target and rejects it without offering asset assignment', async () => {
+  const path = '/locations/ITC-RED';
+  mocks.find.mockResolvedValue({
+    ok: true,
+    status: 'found',
+    matches: [
+      { kind: 'location', path, label: 'Red (ITC-RED)', state: 'active' },
+    ],
+  });
+  const rejection =
+    'This label identifies a location. Select an existing quantity item or individual asset to assign.';
+  mocks.inspect.mockResolvedValue({ ok: false, message: rejection });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'LOC:ITC-RED' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await screen.findByText(rejection, { selector: '[role="status"]' });
+  expect(mocks.find).toHaveBeenCalledWith({
+    actorId: props.actorId,
+    text: 'LOC:ITC-RED',
+    mode: 'identifier',
+  });
+  expect(mocks.inspect).toHaveBeenCalledExactlyOnceWith({
+    actorId: props.actorId,
+    path,
+    siteId: site.id,
+  });
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Confirm assign' }),
+  ).not.toBeInTheDocument();
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 
@@ -667,7 +772,7 @@ it('pages distinct search candidates without losing destination/ticket and inspe
   expect(mocks.inspect).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Next candidates' }));
   const selected = await screen.findByRole('button', {
-    name: 'Later laptop · asset · active',
+    name: 'Later laptop · Individual asset · Active',
   });
   expect(
     screen.getByRole('button', { name: 'Next candidates' }),
@@ -728,7 +833,9 @@ it('restores an empty search-page failure to one pending review when returning t
   ).toHaveTextContent('1 failed');
   fireEvent.click(screen.getByRole('button', { name: 'Previous candidates' }));
   fireEvent.click(
-    await screen.findByRole('button', { name: 'Adapters · quantity · active' }),
+    await screen.findByRole('button', {
+      name: 'Adapters · Quantity item · Active',
+    }),
   );
   await screen.findByRole('region', { name: 'Review assignment' });
   const reviewed = readBatch(scope).value!.entries;
@@ -1138,7 +1245,15 @@ it('requires explicit refreshed inspection after a stale rejection and preserves
   fireEvent.click(
     screen.getByRole('button', { name: 'Inspect current state' }),
   );
-  await screen.findByText(/Version 9/);
+  await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeEnabled(),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review assignment' }),
+  ).not.toHaveTextContent('Version');
   const refreshed = readBatch(scope).value!.entries;
   expect(refreshed).toHaveLength(2);
   expect(refreshed[0]).toEqual(rejected);
@@ -1307,6 +1422,18 @@ it('masks the previous actor batch and discards late pending results on account 
   expect(mocks.submit).toHaveBeenCalledTimes(1);
 });
 
+it('inspects with a capitalized shared status and mono identifier, hiding the record version', async () => {
+  const { container } = render(<AssignmentWorkspace {...props} />);
+  await inspect();
+  const review = screen.getByRole('region', { name: 'Review assignment' });
+  expect(review).toHaveTextContent('Active');
+  expect(review).not.toHaveTextContent('Version');
+  expect(container.querySelector('.experience-code')).toHaveTextContent(
+    candidate.identifier,
+  );
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
 const scope = {
   actor: props.actorId,
   origin: window.location.origin,
@@ -1357,7 +1484,12 @@ it('retains context and historical inspection across a record visit/remount and 
   ).toHaveTextContent('Red');
   expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeDisabled();
   expect(mocks.submit).not.toHaveBeenCalled();
-  await screen.findByText(/Version 12/);
+  await waitFor(() =>
+    expect(readBatch(scope).value?.historical?.candidate.version).toBe('12'),
+  );
+  expect(
+    screen.getByRole('region', { name: 'Review assignment' }),
+  ).not.toHaveTextContent('Version');
   expect(mocks.inspect).toHaveBeenCalledTimes(2);
   expect(readBatch(scope).value?.entries).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Confirm assign' })).toBeEnabled();
@@ -2325,26 +2457,39 @@ it('removes outside Cancel release listeners on unmount while restoration is pen
     await act(async () => finish({ ok: true, candidate }));
     expect(readBatch(scope).raw).toBe(before);
     expect(mocks.submit).not.toHaveBeenCalled();
-    let finishNext!: (value: unknown) => void;
+    let refresh!: (value: unknown) => void;
     mocks.inspect.mockReturnValueOnce(
       new Promise((resolve) => {
-        finishNext = resolve;
+        refresh = resolve;
       }),
     );
     render(<AssignmentWorkspace {...props} />);
-    // Historical review is already mounted while restoration still owns focus.
-    // Its presence alone cannot establish that the fresh inspection completed.
+    // The historical review is already visible while availability refresh is
+    // pending. Its presence alone does not establish completed review focus.
+    const review = screen.getByRole('region', { name: 'Review assignment' });
+    expect(
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'true');
+    expect(readBatch(scope).raw).toBe(before);
     expect(
       screen.getByRole('button', { name: 'Cancel inspection' }),
     ).toHaveFocus();
     expect(
       screen.getByRole('button', { name: 'Confirm assign' }),
     ).toBeDisabled();
-    expect(readBatch(scope).raw).toBe(before);
-    await act(async () => finishNext({ ok: true, candidate }));
+    await act(async () =>
+      refresh({
+        ok: true,
+        candidate: { ...candidate, name: 'Freshly inspected adapters' },
+      }),
+    );
     expect(
-      screen.getByRole('region', { name: 'Review assignment' }),
-    ).toHaveFocus();
+      screen.getByRole('form', { name: 'Inspect equipment' }),
+    ).toHaveAttribute('aria-busy', 'false');
+    expect(
+      screen.getByRole('heading', { name: 'Freshly inspected adapters' }),
+    ).toBeInTheDocument();
+    expect(review).toHaveFocus();
     expect(
       screen.getByRole('button', { name: 'Confirm assign' }),
     ).toBeEnabled();

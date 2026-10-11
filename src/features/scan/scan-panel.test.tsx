@@ -184,7 +184,7 @@ it.each(['cancel', 'text', 'mode', 'account'])(
     } else if (action === 'text')
       fireEvent.change(input, { target: { value: 'NEW' } });
     else if (action === 'mode')
-      fireEvent.click(screen.getByLabelText('Quantity Item code (SKU)'));
+      fireEvent.click(screen.getByLabelText('Quantity item code (SKU)'));
     else act(() => invalidateAssignmentCallbacks());
     await act(async () => pending.resolve(found));
     expect(mocks.push).not.toHaveBeenCalled();
@@ -436,7 +436,7 @@ it('routes explicit Item code input through exact quantity lookup without interp
     ],
   });
   render(<ScanPanel />);
-  fireEvent.click(screen.getByLabelText('Quantity Item code (SKU)'));
+  fireEvent.click(screen.getByLabelText('Quantity item code (SKU)'));
   const input = screen.getByLabelText('Enter the exact Item code (SKU)');
   fireEvent.change(input, { target: { value: '/SKU' } });
   fireEvent.click(screen.getByRole('button', { name: 'Open' }));
@@ -452,7 +452,7 @@ it('routes explicit Item code input through exact quantity lookup without interp
 });
 it('keeps camera payloads in label mode even when manual Item code mode is selected', async () => {
   render(<ScanPanel />);
-  fireEvent.click(screen.getByLabelText('Quantity Item code (SKU)'));
+  fireEvent.click(screen.getByLabelText('Quantity item code (SKU)'));
   fireEvent.click(screen.getByRole('button', { name: 'Start camera' }));
   await waitFor(() => expect(mocks.decode).toHaveBeenCalled());
   mocks.decode.mock.calls[0][2]({

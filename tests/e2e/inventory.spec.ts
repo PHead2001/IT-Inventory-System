@@ -1,3 +1,11 @@
+import { randomUUID } from 'node:crypto';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
+import { withinViewport } from './viewport-controls';
+import {
+  acceptanceCommand,
+  acceptanceFixtures,
+  acceptanceLogin,
+} from './audit-three-acceptance-fixtures';
 import {
   beginNewRecordTransaction,
   expectStableReceiptAction,
@@ -1132,3 +1140,169 @@ test('overlapping two-page edits renew field choices after further races and vie
     page.getByRole('form', { name: 'Add quantity item' }),
   ).toHaveCount(0);
 });
+
+test('ambiguous Receive preserves an edited destination after real stale refresh', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  try {
+    await acceptanceLogin(page);
+    const red = await owned.location('ITC-RED'),
+      black = await owned.location('ITC-BLACK');
+    const itemId = await owned.quantity(
+      `Ambiguous Receive ${owned.suffix}`,
+      red,
+      2,
+    );
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 1,
+      location_id: black,
+      quantity: 1,
+      reason: 'Second owned holding',
+    });
+    await page.goto(`/inventory/quantity/${itemId}`);
+    const form = await openRecordTask(page, 'Receive stock');
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toHaveText(/Select a location/);
+    await chooseLocation(form, 'Receive at', 'ITC-CLEAR');
+    await form.getByLabel('Quantity to receive').fill('3');
+    await form
+      .getByLabel('Reason (required)')
+      .fill('Chosen destination must survive the stale refresh');
+    await form
+      .getByRole('button', { name: 'Review receive stock', exact: true })
+      .click();
+    await acceptanceCommand(owned.caller, 'quantity_receive', {
+      item_id: itemId,
+      expected_version: 2,
+      location_id: red,
+      quantity: 1,
+      reason: 'Independent real balance change',
+    });
+    await form
+      .getByRole('button', { name: 'Confirm receive stock', exact: true })
+      .click();
+    await expect(form.getByRole('alert')).toContainText(/changed/);
+    await form
+      .getByRole('button', { name: 'Refresh latest record', exact: true })
+      .click();
+    await expect(
+      form.getByRole('combobox', { name: 'Receive at', exact: true }),
+    ).toContainText('Clear Container');
+    await expect(form.getByLabel('Quantity to receive')).toHaveValue('3');
+    await expect(
+      form.getByRole('button', { name: 'Confirm receive stock', exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await owned.cleanup();
+  }
+});
+
+test('inventory search location picker exposes keyboard paths and stays framed on a narrow viewport', async ({
+  page,
+}) => {
+  await login(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/inventory');
+  const form = page.getByRole('form', {
+    name: 'Search inventory',
+    exact: true,
+  });
+  await form.getByRole('button', { name: 'More filters', exact: true }).click();
+  const trigger = form.getByLabel('Location', { exact: true });
+  await trigger.click();
+  const search = form.getByRole('combobox', { name: 'Search locations' });
+  await expect(search).toBeFocused();
+  await withinViewport(search);
+  const pickerTree = form.getByRole('tree', { name: 'Location', exact: true });
+  await withinViewport(pickerTree);
+  await search.press('Home');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree
+      .getByRole('treeitem', { name: 'All locations, no location filter' })
+      .getAttribute('id'))!,
+  );
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute(
+    'aria-activedescendant',
+    (await pickerTree.getByRole('treeitem').nth(1).getAttribute('id'))!,
+  );
+  const pickerRoot = pickerTree.getByRole('treeitem', { name: /, ITC$/ });
+  await pickerRoot.press('ArrowRight');
+  await expect(pickerRoot).toHaveAttribute('aria-expanded', 'true');
+  await search.fill('ITC-D07');
+  const option = form.getByRole('option', { name: /, ITC-D07$/ });
+  await expect(option).toBeVisible();
+  await withinViewport(option);
+  await search.press('Enter');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toContainText('ITC-D07');
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get('location') === 'ITC-D07',
+  );
+  await trigger.click();
+  await expect(search).toBeFocused();
+  await search.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(search).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+interfaceTest(
+  'missing resources keep direct transport status and private-safe identity with client recovery',
+  async ({ page }, info) => {
+    await interfaceLogin(page);
+    for (const [path, heading] of [
+      ['/audit-three-missing-' + randomUUID(), 'Page not found'],
+      ['/inventory/quantity/' + randomUUID(), 'Inventory record unavailable'],
+      ['/inventory/assets/' + randomUUID(), 'Inventory record unavailable'],
+    ]) {
+      const response = await page.goto(path);
+      expect(
+        response!.status(),
+        `Direct missing-resource status for ${path}`,
+      ).toBe(404);
+      await expect(
+        page.getByRole('heading', { name: heading, exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('main')).toHaveCount(1);
+      await expect(page).toHaveTitle(/IT Inventory/);
+      await expect(page.locator('head title')).not.toContainText(
+        path.split('/').at(-1)!,
+      );
+      await page.screenshot({
+        path: info.outputPath(
+          `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,
+        ),
+        fullPage: true,
+      });
+      await page
+        .getByRole('link', { name: 'Search inventory', exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/inventory$/);
+      await expect(page).toHaveTitle('Inventory · IT Inventory');
+    }
+    for (const [path, title] of [
+      ['/scan', 'Scan'],
+      ['/labels', 'Labels'],
+      ['/history', 'History'],
+    ]) {
+      await page.goto(path);
+      await expect(page).toHaveTitle(`${title} · IT Inventory`);
+    }
+    const icon = page.locator('link[rel="icon"]').first();
+    const iconResponse = await page.request.get(
+      (await icon.getAttribute('href'))!,
+    );
+    expect(iconResponse.ok()).toBe(true);
+    expect(iconResponse.headers()['content-type']).toMatch(/image/);
+  },
+);

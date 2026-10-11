@@ -7,7 +7,7 @@ export default async function CategoriesPage() {
   return (
     <ProtectedPrivacyContent>
       <>
-        <p className="experience-eyebrow">Settings · Inventory schema</p>
+        <p className="experience-eyebrow">Settings · Categories</p>
         <h1 className="experience-heading mb-4 mt-3">Categories</h1>
         <SettingsPanel
           mode="categories"

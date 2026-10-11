@@ -1,4 +1,6 @@
 'use client';
+import { recordStatusLabel } from '@/lib/record-status';
+import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
   useEffect,
@@ -736,7 +738,7 @@ function LabelDesignerWorkspace({
               (row) => queueIdentity(row) === queueIdentity(key),
             )?.name ??
             locations.find((location) => location.code === key.key)?.name ??
-            key.key,
+            `Selected ${recordKind(key.kind).toLowerCase()}`,
         },
       ],
       false,
@@ -1368,7 +1370,7 @@ function LabelDesignerWorkspace({
                     </Link>
                     <p className={styles.resultMeta}>
                       {recordKind(record.kind)} · {record.categoryName} ·{' '}
-                      {record.status}
+                      <RecordStatus status={record.status} />
                     </p>
                     <p className={styles.resultMeta}>
                       {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
@@ -1384,11 +1386,26 @@ function LabelDesignerWorkspace({
                           record.itemCode && `Item code: ${record.itemCode}`,
                           record.assetTag,
                           record.serialNumber,
-                          record.manufacturer,
-                          record.model,
                         ]
                           .filter(Boolean)
-                          .join(' · ')}
+                          .map((code, index) => (
+                            <span key={index} className="experience-code">
+                              {index > 0 && ' · '}
+                              {code}
+                            </span>
+                          ))}
+                        {[record.manufacturer, record.model]
+                          .filter(Boolean)
+                          .map((label, index) => (
+                            <span key={index}>
+                              {(record.itemCode ||
+                                record.assetTag ||
+                                record.serialNumber ||
+                                index > 0) &&
+                                ' · '}
+                              {label}
+                            </span>
+                          ))}
                       </p>
                     )}
                     {record.customPreview &&
@@ -1597,8 +1614,8 @@ function LabelDesignerWorkspace({
                         </h4>
                         <p className={styles.subtle}>
                           {stateChanged
-                            ? `Lifecycle changed from ${entry.baselineState} to ${row.state}.`
-                            : `Current state: ${row.state}.`}
+                            ? `Lifecycle changed from ${recordStatusLabel(entry.baselineState)} to ${recordStatusLabel(row.state)}.`
+                            : `Current state: ${recordStatusLabel(row.state)}.`}
                           {tagChanged ? ' Identifier changed.' : ''}
                         </p>
                         <div className={styles.queueActions}>
@@ -1645,7 +1662,8 @@ function LabelDesignerWorkspace({
                             aria-label={`Review ${row.name}`}
                           >
                             <p className={styles.subtle}>
-                              Current authorized snapshot: {row.state}
+                              Current authorized snapshot:{' '}
+                              <RecordStatus status={row.state} />
                               {row.tag
                                 ? ` · Tag ${row.tag}`
                                 : row.kind === 'asset'
@@ -1736,15 +1754,22 @@ function LabelDesignerWorkspace({
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}
             <div className={styles.queueList}>
-              {entries.map((entry) => {
+              {entries.map((entry, index) => {
                 const id = queueIdentity(entry),
                   record = byId.get(id);
+                const readState = refreshPending
+                  ? 'refreshing…'
+                  : refreshFailed
+                    ? 'refresh failed; retry'
+                    : unavailable.includes(id)
+                      ? 'unavailable to this account'
+                      : 'loading…';
                 return (
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
-                        : `${id} · unavailable`}
+                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
+                        : `${recordKind(entry.kind)} ${index + 1} · ${readState}`}
                     </span>
                     <div className={styles.queueActions}>
                       <label className={styles.copies}>

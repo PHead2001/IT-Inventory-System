@@ -1,3 +1,4 @@
+import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -404,7 +405,10 @@ export default async function SitePage({
                       className="break-words px-4 py-3 sm:px-5"
                     >
                       <p className="font-semibold capitalize">
-                        {event.kind.replaceAll('_', ' ')}
+                        {custodyEventLabel(
+                          event.kind,
+                          event.item_id ? 'quantity' : 'asset',
+                        )}
                       </p>
                       <p className="text-sm text-slate-300">
                         <OperationalTimestamp value={event.created_at} /> ·{' '}
