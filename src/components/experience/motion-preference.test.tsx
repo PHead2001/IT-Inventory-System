@@ -3,6 +3,8 @@ import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import {
   MotionPreference,
   MotionToggle,
@@ -95,6 +97,55 @@ it('keeps persisted local reduction during hydration when OS motion is normal', 
   await act(async () => root?.unmount());
   container.remove();
 });
+
+it.each([false, true])(
+  'withholds protected Settings until restoration, then uses saved choice %s for the first keyboard activation',
+  async (saved) => {
+    mockSystemMotion(false);
+    window.localStorage.setItem('it-inventory-reduce-motion', String(saved));
+    const view = (ready: boolean) => (
+      <PrivacyReadinessContext value={{ ready, generation: 'settings' }}>
+        <MotionPreference>
+          <ProtectedPrivacyContent>
+            <MotionToggle />
+          </ProtectedPrivacyContent>
+        </MotionPreference>
+      </PrivacyReadinessContext>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(view(false));
+    document.body.appendChild(container);
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      expect(container.querySelector('button')).toBeNull();
+      await act(async () => {
+        root = hydrateRoot(container, view(false));
+      });
+      expect(within(container).queryByRole('switch')).not.toBeInTheDocument();
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(saved),
+      );
+      await act(async () => root?.render(view(true)));
+      const toggle = within(container).getByRole('switch', {
+        name: 'Reduce motion in this browser',
+      });
+      expect(toggle).toBeEnabled();
+      expect(toggle).toHaveAttribute('aria-checked', String(saved));
+      toggle.focus();
+      await userEvent.setup().keyboard(' ');
+      expect(toggle).toHaveAttribute('aria-checked', String(!saved));
+      expect(window.localStorage.getItem('it-inventory-reduce-motion')).toBe(
+        String(!saved),
+      );
+      expect(document.documentElement.dataset.motion).toBe(
+        saved ? 'full' : 'reduced',
+      );
+    } finally {
+      await act(async () => root?.unmount());
+      container.remove();
+    }
+  },
+);
 
 it.each([false, true])(
   'keeps the preference unknown until the saved browser choice (%s) is known, then exposes and toggles that choice',

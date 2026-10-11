@@ -642,17 +642,21 @@ test('motion Settings waits for the browser choice before the first keyboard act
     });
     try {
       await probe.goto('/settings', { waitUntil: 'commit' });
-      const loading = probe.getByRole('button', {
-        name: 'Reduce motion in this browser',
-      });
-      await expect(loading).toBeVisible();
-      await expect(loading).toBeDisabled();
-      await expect(loading).not.toHaveAttribute('role');
-      await expect(loading).not.toHaveAttribute('aria-checked');
+      // Settings is withheld by the protected privacy gate until its scripts
+      // can verify restoration. The standalone toggle's SSR loading state is
+      // covered at the component layer; this route must expose no control yet.
+      await expect(
+        probe.getByRole('status').filter({
+          hasText: 'Clearing private data from this tab…',
+        }),
+      ).toBeVisible();
+      await expect(
+        probe.locator('[aria-label="Reduce motion in this browser"]'),
+      ).toHaveCount(0);
       await expect(probe.getByRole('switch')).toHaveCount(0);
-      await expect(loading).toHaveAccessibleDescription(
-        "Loading this browser's motion preference.",
-      );
+      await expect(
+        probe.getByRole('heading', { name: 'Settings', exact: true }),
+      ).toHaveCount(0);
       await expect(probe.locator('html')).toHaveAttribute(
         'data-motion',
         'reduced',
@@ -751,27 +755,33 @@ for (const width of [1280, 375, 390]) {
       await expect(selected).toBeFocused();
       if (width === 1280 && !reduced) {
         const original = page.url();
-        const popupPromise = page.waitForEvent('popup');
-        await selected.getByRole('link').click({ modifiers: ['Control'] });
-        const popup = await popupPromise;
-        await expect(popup).toHaveURL(/\/settings\/locations\/ITC-D07$/);
-        await expect(page).toHaveURL(original);
-        await popup.close();
-        await expect(selected).toBeFocused();
-        const middlePopupPromise = page.waitForEvent('popup');
-        await selected.getByRole('link').click({ button: 'middle' });
-        const middlePopup = await middlePopupPromise;
-        await expect(middlePopup).toHaveURL(/\/settings\/locations\/ITC-D07$/);
-        await expect(page).toHaveURL(original);
-        await middlePopup.close();
-        const keyboardPopupPromise = page.waitForEvent('popup');
-        await selected.press('Control+Enter');
-        const keyboardPopup = await keyboardPopupPromise;
-        await expect(keyboardPopup).toHaveURL(
-          /\/settings\/locations\/ITC-D07$/,
+        const context = page.context();
+        const destination = new URL('/settings/locations/ITC-D07', original)
+          .href;
+        async function openLocationTab(action: () => Promise<void>) {
+          const before = context.pages().length;
+          // Browser-managed Ctrl/middle-click tabs need not retain an opener,
+          // so their authoritative creation event belongs to the context.
+          const tabPromise = context.waitForEvent('page');
+          await action();
+          const tab = await tabPromise;
+          try {
+            await expect(tab).toHaveURL(destination);
+            expect(context.pages()).toHaveLength(before + 1);
+            await expect(page).toHaveURL(original);
+          } finally {
+            await tab.close();
+          }
+          expect(context.pages()).toHaveLength(before);
+        }
+        await openLocationTab(() =>
+          selected.getByRole('link').click({ modifiers: ['Control'] }),
         );
-        await expect(page).toHaveURL(original);
-        await keyboardPopup.close();
+        await expect(selected).toBeFocused();
+        await openLocationTab(() =>
+          selected.getByRole('link').click({ button: 'middle' }),
+        );
+        await openLocationTab(() => selected.press('Control+Enter'));
         await expect(selected).toBeFocused();
       }
       await expect(selected).toHaveAttribute('aria-level', '3');
