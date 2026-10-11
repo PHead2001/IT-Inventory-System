@@ -91,6 +91,28 @@ describe('pinned choice label identity', () => {
       reversed.filter((option) => !option.parent_id).map((option) => option.id),
     );
   });
+  it('preserves all 1000 full Unicode labels in caller order while UUIDs allocate suffixes across reorder', () => {
+    const label = 'Stra\u00dfe\u03a3\uab70\ufb03'.repeat(30).slice(0, 200);
+    const options = Array.from({ length: 1000 }, (_, position) => ({
+      id: id(1000 - position),
+      label,
+      active: true,
+    }));
+    const labels = optionDisplayLabels(options);
+    const reversed = optionDisplayLabels([...options].reverse());
+    expect([...labels.keys()]).toEqual(options.map((option) => option.id));
+    expect([...reversed.keys()]).toEqual(
+      [...options].reverse().map((option) => option.id),
+    );
+    expect(labels.get(id(1000))).toBe(`${label} (1000)`);
+    expect(labels.get(id(1))).toBe(label);
+    expect(new Set(labels.values()).size).toBe(1000);
+    for (let ordinal = 1; ordinal <= 1000; ordinal++) {
+      const expected = label + (ordinal === 1 ? '' : ` (${ordinal})`);
+      expect(labels.get(id(ordinal))).toBe(expected);
+      expect(reversed.get(id(ordinal))).toBe(expected);
+    }
+  });
   it('quotes literal path separators and quote characters without child-path ambiguity', () => {
     const options = [
       { id: id(1), label: 'A', active: true },
