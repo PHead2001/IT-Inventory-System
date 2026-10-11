@@ -60,6 +60,8 @@ Spatial performance acceptance compares baseline and candidate with matching bro
 
 For focused browser iteration use `npm run test:e2e -- tests/e2e/room.spec.ts`. This still builds with the local public backend environment. Final certification remains fresh `npm ci` followed by the complete `npm run validate`, exact-head CI, fresh Codex review and the configured nonproduction preview smoke.
 
+The separate Settings Storage locations tree opens below the first level collapsed. Searching reveals matching ancestors with hierarchy and keyboard navigation intact. All locations from a location setting returns to the selected permanent code, revealing its ancestors. This does not change the inventory/room picker or room URL contracts.
+
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.
 Only the latest placement transaction is retained, with at most four exact packing

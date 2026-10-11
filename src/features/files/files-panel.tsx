@@ -960,8 +960,8 @@ function BoundFilesPanel({
               }
             />
             <p className="my-2 text-xs text-slate-300">
-              Drop one file here, or browse your device. Selection is local.
-              Upload and review to attach it.
+              Drop one file here, or browse your device. Nothing uploads until
+              you choose Upload and review.
             </p>
             <button
               type="button"

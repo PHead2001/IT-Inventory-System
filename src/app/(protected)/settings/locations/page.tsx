@@ -5,8 +5,14 @@ import { getManagedLocations } from '@/features/custody/queries.server';
 import { SettingsLocationTree } from '@/features/locations/settings-location-tree';
 import { panel } from '@/features/inventory/components/read-ui';
 
-export default async function ManageLocationsPage() {
+export default async function ManageLocationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ selected?: string | string[] }>;
+}) {
   await requireMember();
+  const raw = (await searchParams).selected;
+  const selectedCode = typeof raw === 'string' ? raw : undefined;
   const locations = await getManagedLocations();
   return (
     <ProtectedPrivacyContent>
@@ -27,7 +33,11 @@ export default async function ManageLocationsPage() {
           Configuration maintainers can rename display labels. Storage layout,
           permanent codes and room connections require an application update.
         </p>
-        <SettingsLocationTree locations={locations} />
+        <SettingsLocationTree
+          key={selectedCode ?? 'all'}
+          locations={locations}
+          selectedCode={selectedCode}
+        />
       </>
     </ProtectedPrivacyContent>
   );

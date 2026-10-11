@@ -87,3 +87,19 @@ Inventory creation uses Add quantity item and Add individual asset terminology. 
 Core details and custom answers are available through an accessible expandable review area. Applied defaults, false, zero, explicit empty answers and absent answers remain distinct, and nested choices use the authorized published option paths. Long values remain fully reviewable. Back to edit preserves inputs; material edits invalidate review. Confirmation dispatches the same reviewed normalized intent under the existing actor, form revision and request identity; uncertain results still replay the original durable command. Existing-record metadata edits retain their established review and reconciliation behavior.
 
 Entering creation review focuses and scrolls to its actual summary heading. Back to edit returns focus to Name while preserving entries. Creation actions follow the summary in normal document flow so they do not cover review values or focused controls at narrow widths or zoom.
+
+The selected designer inspector uses a wider desktop column and one bounded scroll
+surface, with clearance measured from the wrapping toolbar's current sticky
+position and height. Below the desktop breakpoint, the existing Library / Canvas /
+Inspector panels remain available. Selection returns the inspector to its top;
+desktop canvas focus stays on the selected control, while narrow selection hands
+focus to the Inspector heading. Basics, Choices and Layout jump within the inspector
+without remounting the selected field's editor or changing draft identities. Canvas
+controls are labelled groups with a separate Settings button; drag, resize and
+keyboard move controls remain independent actions.
+When the natural sticky toolbar would leave less than 240 px for settings, both
+it and the inspector use document flow; the inspector has no height cap or internal
+scrollbar. Selection then focuses the Inspector heading, and section jumps scroll
+the document. Height, width and font changes restore bounded mode when space
+returns. Feasibility uses the CSS-owned natural sticky configuration, so the
+fallback does not oscillate by measuring its own smaller static clearance.

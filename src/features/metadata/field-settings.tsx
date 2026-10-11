@@ -108,7 +108,7 @@ export function FieldSettings({
   const starts = selectTypes.includes(field.type);
   return (
     <div className="min-w-0 space-y-4" data-testid={`field-${field.id}`}>
-      <section className="space-y-3" aria-label="Basics">
+      <section className="space-y-3" aria-label="Basics" tabIndex={-1}>
         <h4 className="font-semibold text-cyan-100">Basics</h4>
         <label className="block text-sm">
           Field name
@@ -230,7 +230,7 @@ export function FieldSettings({
         )}
       </section>
       {starts && (
-        <section className="space-y-3" aria-label="Choices">
+        <section className="space-y-3" aria-label="Choices" tabIndex={-1}>
           <h4 className="font-semibold text-cyan-100">Choices</h4>
           {field.type === 'multi_select' && (
             <p className="text-sm text-slate-400">
@@ -443,7 +443,7 @@ export function FieldSettings({
         </div>
       </details>
       {appearance && (
-        <section aria-label="Appearance" className="space-y-3">
+        <section aria-label="Appearance" className="space-y-3" tabIndex={-1}>
           <h4 className="font-semibold text-cyan-100">Appearance</h4>
           {appearance}
         </section>

@@ -21,7 +21,9 @@ export default async function ManageLocationPage({
       <>
         <Link
           className="inline-flex min-h-11 items-center text-cyan-300 underline"
-          href="/settings/locations"
+          href={
+            '/settings/locations?selected=' + encodeURIComponent(location.code)
+          }
         >
           All locations
         </Link>
