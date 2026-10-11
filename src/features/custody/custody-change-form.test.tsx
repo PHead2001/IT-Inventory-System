@@ -1136,11 +1136,33 @@ it('keeps a manual site retirement reason and optional note stable through refre
     payload: { reason: 'Sold after owner approval — Invoice 42' },
   });
   expect(screen.getByLabelText('Retirement note (optional)')).toBeDisabled();
+  // The result message can render while the async transition still has the
+  // disabled Saving button. Retry only after that transition has settled.
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Retry same custody transaction' }),
+    ).toBeEnabled(),
+  );
+  view.rerender(
+    <CustodyChangeForm
+      {...retirementProps}
+      version="8"
+      sites={[]}
+      currentSite={null}
+    />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toHaveValue(
+    'Sold after owner approval',
+  );
+  expect(screen.getByLabelText('Retirement note (optional)')).toHaveValue(
+    '  Invoice 42  ',
+  );
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry same custody transaction' }),
   );
   await waitFor(() => expect(submitCustody).toHaveBeenCalledTimes(2));
   expect(vi.mocked(submitCustody).mock.calls[1][0]).toEqual(command);
+  expect(await screen.findByRole('button', { name: 'Done' })).toBeVisible();
 });
 it.each([
   ['', 'note cannot replace reason'],
