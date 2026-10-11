@@ -81,4 +81,31 @@ describe('visible room hover', () => {
     scene.add(drawer);
     expect(visibleRoomTarget(pointAt(scene))?.code).toBe('ITC-D01');
   });
+  it.each(['hidden', 'zero-opacity'])(
+    'ignores a %s intersected material group even when sibling groups are visible',
+    (mode) => {
+      const scene = new Group();
+      const drawer = new Group();
+      drawer.userData.roomHoverTarget = { code: 'ITC-D01', label: 'Drawer 1' };
+      box(drawer, 0);
+      scene.add(drawer);
+      const materials = Array.from(
+        { length: 6 },
+        () => new MeshBasicMaterial(),
+      );
+      const front = materials[4];
+      if (mode === 'hidden') front.visible = false;
+      else front.opacity = 0;
+      const occluder = new Mesh(new BoxGeometry(4, 4, 0.5), materials);
+      occluder.position.z = 2;
+      scene.add(occluder);
+      const hits = pointAt(scene);
+      expect(hits[0].object).toBe(occluder);
+      expect(hits[0].face?.materialIndex).toBe(4);
+      expect(visibleRoomTarget(hits)?.code).toBe('ITC-D01');
+      front.visible = true;
+      front.opacity = 1;
+      expect(visibleRoomTarget(pointAt(scene))).toBeNull();
+    },
+  );
 });

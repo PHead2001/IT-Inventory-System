@@ -2,41 +2,74 @@
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { roomContentsFilter } from './contents-contract';
+import {
+  locationOccupancySchema,
+  type RoomOccupancy,
+} from './occupancy-contract';
 
 const snapshot = z.strictObject({
   identity: z.strictObject({
     userId: z.string(),
     environment: z.string(),
+    backend: z.string(),
+    generation: z.uuid(),
     spaceId: z.string(),
     filter: z.literal(roomContentsFilter),
   }),
   counts: z
-    .record(z.string(), z.string().regex(/^(0|[1-9][0-9]*)$/))
+    .record(z.string(), locationOccupancySchema)
     .refine((counts) => Object.keys(counts).length <= 100),
 });
 
-/** Component-owned, uncached snapshot; old counts disappear during every refresh. */
+/** Each transition owns a fresh request, even when a previous scope returns. */
 export function useRoomOccupancy(
   enabled: boolean,
   userId: string,
   spaceId: string,
   refreshKey: string,
+  backend: string,
 ) {
-  const key = JSON.stringify([enabled, userId, spaceId, refreshKey]);
+  const environment =
+    typeof window === 'undefined' ? '' : window.location.origin;
+  const key = JSON.stringify([
+    enabled,
+    userId,
+    environment,
+    backend,
+    spaceId,
+    refreshKey,
+  ]);
+  const [attempt, setAttempt] = useState(() => ({
+    key,
+    generation: crypto.randomUUID(),
+  }));
   const [state, setState] = useState<{
-    key: string;
-    counts?: Record<string, string>;
+    generation: string;
+    counts?: RoomOccupancy;
     error?: boolean;
   } | null>(null);
+  // Adjusting this component's own state during render prevents an old snapshot
+  // appearing for even one committed paint when A -> B -> A or off -> on.
+  if (attempt.key !== key) setAttempt({ key, generation: crypto.randomUUID() });
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || attempt.key !== key) return;
     let active = true;
     const controller = new AbortController();
-    fetch('/api/room/occupancy?' + new URLSearchParams({ space: spaceId }), {
-      cache: 'no-store',
-      credentials: 'same-origin',
-      signal: controller.signal,
-    })
+    const timer = setTimeout(() => {
+      if (!active) return;
+      active = false;
+      controller.abort();
+      setState({ generation: attempt.generation, error: true });
+    }, 8000);
+    fetch(
+      '/api/room/occupancy?' +
+        new URLSearchParams({ space: spaceId, generation: attempt.generation }),
+      {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal,
+      },
+    )
       .then(async (response) => {
         if (
           !response.ok ||
@@ -47,27 +80,35 @@ export function useRoomOccupancy(
         if (
           data.identity.userId !== userId ||
           data.identity.spaceId !== spaceId ||
-          data.identity.environment !== window.location.origin
+          data.identity.environment !== window.location.origin ||
+          data.identity.backend !== backend ||
+          data.identity.generation !== attempt.generation
         )
           throw new Error('Counts identity mismatch');
-        if (active) setState({ key, counts: data.counts });
+        if (active)
+          setState({ generation: attempt.generation, counts: data.counts });
       })
       .catch(() => {
-        if (active && !controller.signal.aborted)
-          setState({ key, error: true });
-      });
+        if (active) setState({ generation: attempt.generation, error: true });
+      })
+      .finally(() => clearTimeout(timer));
     return () => {
       active = false;
+      clearTimeout(timer);
       controller.abort();
     };
-  }, [enabled, userId, spaceId, key]);
+  }, [enabled, userId, spaceId, backend, key, attempt]);
+  const current =
+    attempt.key === key && state?.generation === attempt.generation
+      ? state
+      : null;
   return {
-    counts: enabled && state?.key === key ? state.counts : undefined,
+    counts: enabled ? current?.counts : undefined,
     status: !enabled
       ? 'off'
-      : state?.key !== key
+      : !current
         ? 'loading'
-        : state.error
+        : current.error
           ? 'error'
           : 'ready',
   };

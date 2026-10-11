@@ -3,6 +3,8 @@ import { AuthForm } from '@/components/auth/auth-form';
 import { loginDestination, validReturnPath } from '@/features/scan/targets';
 import { redirect } from 'next/navigation';
 import { readLoginSession } from '@/lib/auth/login-session.server';
+import { readLogoutGeneration } from '@/lib/auth/privacy-barrier.server';
+import { AuthPrivacyRedirect } from '@/components/auth/auth-privacy';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Sign in' };
 export default async function LoginPage({
@@ -13,7 +15,23 @@ export default async function LoginPage({
   const params = await searchParams;
   const next = validReturnPath(params.next);
   const session = await readLoginSession();
-  if (params.switch !== '1') {
+  // A retained browser-wide reminder must reach each tab before member redirects.
+  const privacy = await readLogoutGeneration();
+  if (
+    params.switch !== '1' &&
+    privacy.status !== 'absent' &&
+    (session === 'member' || session === 'denied')
+  )
+    return (
+      <AuthPrivacyRedirect
+        destination={
+          session === 'member'
+            ? loginDestination(params.next)
+            : '/access-denied'
+        }
+      />
+    );
+  if (params.switch !== '1' && privacy.status === 'absent') {
     if (session === 'member') redirect(loginDestination(params.next));
     if (session === 'denied') redirect('/access-denied');
     if (session === 'unavailable')

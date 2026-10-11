@@ -1,5 +1,11 @@
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
@@ -14,6 +20,38 @@ import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { setLocalReducedMotion } from './motion-settings';
 
 test.use({ deviceScaleFactor: 2 });
+
+async function pendingDesignerActor(page: Page, privateName: string) {
+  let actor = '';
+  await expect
+    .poll(async () => {
+      actor = await page.evaluate((name) => {
+        for (const key of Object.keys(sessionStorage)) {
+          if (!key.startsWith('it-inventory:form-designer:v1:')) continue;
+          const raw = sessionStorage.getItem(key);
+          if (!raw?.includes(name)) continue;
+          const draft = JSON.parse(raw) as { memberId?: unknown };
+          if (typeof draft.memberId === 'string') return draft.memberId;
+        }
+        return '';
+      }, privateName);
+      return actor;
+    })
+    .toMatch(/^[0-9a-f-]{36}$/i);
+  return actor;
+}
+
+/** Privacy generation reads/acknowledgements are separate from this actor check. */
+function isDesignerIdentityRequest(request: Request, actor: string) {
+  if (request.method() !== 'POST' || !request.headers()['next-action'])
+    return false;
+  try {
+    const args: unknown = JSON.parse(request.postData() ?? '');
+    return Array.isArray(args) && args.length === 1 && args[0] === actor;
+  } catch {
+    return false;
+  }
+}
 
 async function expectLocationIdentity(
   panel: Locator,
@@ -599,6 +637,7 @@ test('same-user focus checks coalesce while the unsaved designer remains mounted
   const input = designer.getByLabel('Section heading').last();
   const pendingName = `Unsaved focus ${crypto.randomUUID()}`;
   await input.fill(pendingName);
+  const actor = await pendingDesignerActor(page, pendingName);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -609,7 +648,7 @@ test('same-user focus checks coalesce while the unsaved designer remains mounted
   });
   let actionRequests = 0;
   await page.route('**/settings/forms/**', async (route) => {
-    if (route.request().method() === 'POST') {
+    if (isDesignerIdentityRequest(route.request(), actor)) {
       actionRequests++;
       started();
       await gate;
@@ -651,12 +690,13 @@ test('a transient access-check failure retains local edits and pauses Save until
   const input = designer.getByLabel('Section heading').last();
   const pendingName = `Retained on failure ${crypto.randomUUID()}`;
   await input.fill(pendingName);
+  const actor = await pendingDesignerActor(page, pendingName);
   let interrupted!: () => void;
   const requestFailed = new Promise<void>((resolve) => {
     interrupted = resolve;
   });
   await page.route('**/settings/forms/**', async (route) => {
-    if (route.request().method() === 'POST') {
+    if (isDesignerIdentityRequest(route.request(), actor)) {
       await route.abort('failed');
       interrupted();
     } else await route.continue();
@@ -725,6 +765,10 @@ test('account switch during a held designer gesture permanently masks the old pr
     ).toBeVisible();
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    // A privacy presentation mask alone is not terminal designer denial.
+    await expect(page.getByText(/Configuration access changed\./)).toHaveCount(
+      1,
+    );
     await expect(
       designer.getByRole('button', { name: 'Save changes' }),
     ).toHaveCount(0);
@@ -739,6 +783,9 @@ test('account switch during a held designer gesture permanently masks the old pr
     ).toBe(false);
     await page.mouse.up();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByText(/Configuration access changed\./)).toHaveCount(
+      1,
+    );
     await expect(
       designer.getByRole('button', { name: 'Save changes' }),
     ).toHaveCount(0);
