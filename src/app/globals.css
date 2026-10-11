@@ -578,12 +578,15 @@ a {
   z-index: 50;
   left: 16px;
   top: -100px;
+  /* A preceding cleanup panel can move this positioned shell down the page. */
+  clip-path: inset(50%);
   background: var(--surface);
   color: var(--foreground);
   padding: 12px;
 }
 .experience-skip-link:focus {
   top: 8px;
+  clip-path: none;
 }
 .experience-motion-toggle {
   display: flex;
@@ -1150,7 +1153,7 @@ html[data-motion='full'] .experience-auth-panel {
   }
 }
 @media (max-width: 640px) {
-  .experience-header:has(.experience-account > details[open]) {
+  .experience-header:has(.experience-account details[open]) {
     position: relative;
     z-index: 10;
   }
@@ -1179,7 +1182,7 @@ html[data-motion='full'] .experience-auth-panel {
     flex-shrink: 0;
     max-width: none;
   }
-  .experience-account > details {
+  .experience-account details {
     position: static;
   }
   .experience-account-name {

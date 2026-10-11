@@ -1,5 +1,6 @@
 export const metadata = { title: { absolute: 'Settings · IT Inventory' } };
 import { SettingsNavigation } from './settings-navigation';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 
 export default function SettingsLayout({
   children,
@@ -8,7 +9,9 @@ export default function SettingsLayout({
 }) {
   return (
     <>
-      <SettingsNavigation />
+      <ProtectedPrivacyContent>
+        <SettingsNavigation />
+      </ProtectedPrivacyContent>
       {children}
     </>
   );

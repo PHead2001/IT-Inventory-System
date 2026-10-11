@@ -1,3 +1,9 @@
+vi.mock('@/lib/supabase/config', () => ({
+  supabaseConfig: () => ({
+    url: 'https://backend.example',
+    key: 'public-test',
+  }),
+}));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 vi.mock('@/lib/auth/session.server', () => ({
@@ -11,11 +17,17 @@ vi.mock('@/features/room/spaces', () => ({
   resolveSpace: () => ({ id: 'private-space', name: 'Private physical space' }),
   spaceLocations: () => [{ code: 'PRIVATE-CODE' }],
 }));
+const mocks = vi.hoisted(() => ({ workspace: vi.fn() }));
 vi.mock('@/features/room/spaces-workspace', () => ({
-  SpacesWorkspace: ({ initialSpace }: { initialSpace: { name: string } }) => (
-    <p>{initialSpace.name}</p>
-  ),
+  SpacesWorkspace: (props: {
+    initialSpace: { name: string };
+    backend: string;
+  }) => {
+    mocks.workspace(props);
+    return <p>{props.initialSpace.name}</p>;
+  },
 }));
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import * as route from './page';
 it('identifies Spaces & maps while keeping selected location and private space names out of metadata', async () => {
   render(
@@ -31,5 +43,41 @@ it('identifies Spaces & maps while keeping selected location and private space n
   expect(route.metadata.title).toBe('Spaces & maps');
   expect(JSON.stringify(route.metadata)).not.toMatch(
     /PRIVATE|private-space|Private physical space/,
+  );
+});
+
+it('withholds the workspace until privacy readiness, then passes the public backend binding', async () => {
+  const page = await route.default({
+    searchParams: Promise.resolve({
+      space: 'private-space',
+      location: 'PRIVATE-CODE',
+    }),
+  });
+  const { rerender } = render(
+    <PrivacyReadinessContext.Provider
+      value={{ ready: false, visible: false, generation: 'checking' }}
+    >
+      {page}
+    </PrivacyReadinessContext.Provider>,
+  );
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('heading', { name: 'Spaces & maps' }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText('Private physical space')).not.toBeInTheDocument();
+  rerender(
+    <PrivacyReadinessContext.Provider
+      value={{ ready: true, visible: true, generation: 'accepted' }}
+    >
+      {page}
+    </PrivacyReadinessContext.Provider>,
+  );
+  expect(screen.getByText('Private physical space')).toBeVisible();
+  expect(mocks.workspace).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      backend: 'https://backend.example',
+      userId: 'PRIVATE_ACTOR',
+      initialCode: 'PRIVATE-CODE',
+    }),
   );
 });

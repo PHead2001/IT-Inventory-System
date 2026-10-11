@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +10,16 @@ import {
   type SetStateAction,
 } from 'react';
 import Link from 'next/link';
+import {
+  PrivateRestorationGate,
+  usePrivacyReadiness,
+  usePrivacyRevocationRevision,
+} from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readAuthoritativeCleanupRevision,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
@@ -155,10 +166,14 @@ type LabelDesignerProps = {
 
 export function LabelDesigner(props: LabelDesignerProps) {
   return (
-    <LabelDesignerWorkspace
-      key={queueStorageKey(props.origin, props.memberId)}
-      {...props}
-    />
+    <PrivateRestorationGate
+      scope={queueStorageKey(props.origin, props.memberId)}
+    >
+      <LabelDesignerWorkspace
+        key={queueStorageKey(props.origin, props.memberId)}
+        {...props}
+      />
+    </PrivateRestorationGate>
   );
 }
 
@@ -172,6 +187,14 @@ function LabelDesignerWorkspace({
   addIntent = emptyIntent,
   defaults = defaultJob,
 }: LabelDesignerProps) {
+  const privacy = usePrivacyReadiness();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const observedRevocation = useRef(readPrivacyRevocationRevision());
+  const [revoked, setRevoked] = useState(false);
+  const admitted =
+    privacy.ready && (!revoked || privacy.verifiedEpoch === assignmentEpoch());
+  const cleanupRevision = useRef(readAuthoritativeCleanupRevision());
+  const restoredStorageKey = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const query = useSearchParams().toString();
@@ -256,6 +279,46 @@ function LabelDesignerWorkspace({
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
   );
+  useLayoutEffect(() => {
+    const wiped = readAuthoritativeCleanupRevision();
+    if (
+      observedRevocation.current === revocationRevision &&
+      cleanupRevision.current === wiped
+    )
+      return;
+    observedRevocation.current = revocationRevision;
+    setRevoked(true);
+    cleanupRevision.current = wiped;
+    queueEpoch.current++;
+    manualClearEpoch.current++;
+    selectionEpoch.current++;
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    restoredStorageKey.current = storageKey;
+    setEntries([]);
+    setLive([]);
+    setSelected([]);
+    setSearch(null);
+    setFilters(defaultFilters);
+    setDraftState(defaultFilters);
+    setJob(defaultJob);
+    setPrintRows(null);
+    setPrepared(null);
+    setPendingChanges([]);
+    setReviewed({});
+    removalReviews.current = {};
+    setValidatedKey('');
+    setReadySheetKey('');
+    setMessage('');
+    setQueueFeedback('');
+    setHydrated(true);
+  }, [
+    revocationRevision,
+    privacy.cleanupRevision,
+    storageKey,
+    setEntries,
+    setLive,
+  ]);
 
   useEffect(
     () => () => {
@@ -269,11 +332,17 @@ function LabelDesignerWorkspace({
   );
 
   useEffect(() => {
+    if (!admitted || restoredStorageKey.current === storageKey) return;
     let current = true;
     // Hydration is asynchronous so React does not render a second, synchronous
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
-      if (!current) return;
+      if (
+        !current ||
+        cleanupRevision.current !== readAuthoritativeCleanupRevision()
+      )
+        return;
+      restoredStorageKey.current = storageKey;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
         stored = parseStoredQueue(
@@ -304,9 +373,16 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [storageKey, setEntries]);
+  }, [storageKey, setEntries, admitted]);
   useEffect(() => {
-    if (!hydrated) return;
+    // An old passive effect can run before the boundary's reset commits. Fence
+    // its writes against the live wipe revision, not only captured readiness.
+    if (
+      !hydrated ||
+      !admitted ||
+      cleanupRevision.current !== readAuthoritativeCleanupRevision()
+    )
+      return;
     try {
       sessionStorage.setItem(
         storageKey,
@@ -316,11 +392,11 @@ function LabelDesignerWorkspace({
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job]);
+  }, [storageKey, hydrated, entries, filters, job, admitted]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.
-    if (!hydrated) return;
+    if (!hydrated || !admitted) return;
     let current = true;
     void searchLabelRecords(filters)
       .then((result) => {
@@ -332,7 +408,7 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [filters, hydrated]);
+  }, [filters, hydrated, admitted]);
 
   const invalidate = useCallback(
     (preserveRemovalReviews = false) => {

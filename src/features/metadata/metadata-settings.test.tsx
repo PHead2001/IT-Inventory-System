@@ -18,6 +18,9 @@ import {
 } from './actions';
 import type { MetadataDefinition, MetadataForm } from './contracts';
 import { moveControl } from './designer-model';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import { revokePrivatePresentation } from '@/features/scan/assign-batch';
 import { fetchCategoryForm } from './form-fetch.actions';
 import {
   clearAllDesignerRecovery,
@@ -27,7 +30,17 @@ import {
 } from './designer-recovery';
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => router }));
+const privacyActions = vi.hoisted(() => ({
+  readLogoutPrivacyGeneration: vi.fn(),
+  acknowledgeLogoutPrivacyGeneration: vi.fn(),
+  readProtectedPrivacyIdentity: vi.fn(),
+}));
+vi.mock('@/lib/auth/actions', () => privacyActions);
+vi.mock('next/navigation', () => ({
+  useRouter: () => router,
+  usePathname: () => '/settings/metadata',
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock('./form-fetch.actions', () => ({ fetchCategoryForm: vi.fn() }));
 vi.mock('./actions', () => ({
   submitMetadataDraft: vi.fn(),
@@ -117,6 +130,15 @@ function openRecoveryTools() {
 describe('category form designer', () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
+    privacyActions.readLogoutPrivacyGeneration
+      .mockReset()
+      .mockResolvedValue({ status: 'absent' });
+    privacyActions.acknowledgeLogoutPrivacyGeneration
+      .mockReset()
+      .mockResolvedValue({ status: 'match' });
+    privacyActions.readProtectedPrivacyIdentity
+      .mockReset()
+      .mockResolvedValue({ status: 'match', generation: { status: 'absent' } });
     router.push.mockReset();
     vi.mocked(fetchCategoryForm).mockReset();
     vi.mocked(fetchCategoryForm).mockResolvedValue({ ok: true, form: null });
@@ -2183,6 +2205,93 @@ describe('category form designer', () => {
     );
     expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
     cleanup();
+  });
+  it('retains a memory-only command through protected revocation and requires explicit original-owner recovery after readmission', async () => {
+    const binding = {
+      actorId: id(50),
+      backend: 'https://isolated.supabase.co',
+      role: 'staff',
+      canManageConfiguration: true,
+    };
+    vi.mocked(saveMetadataForm).mockRejectedValueOnce(
+      new Error('lost response'),
+    );
+    render(
+      <ProtectedPrivacyBoundary binding={binding}>
+        <ProtectedPrivacyContent>
+          <MetadataSettings
+            memberId={id(50)}
+            categories={[{ id: id(1), name: 'Cables', active: true }]}
+            forms={{ [id(1)]: form }}
+          />
+        </ProtectedPrivacyContent>
+      </ProtectedPrivacyBoundary>,
+    );
+    await screen.findByRole('button', { name: 'Add field' });
+    addField('Private memory-only form field');
+    const storageBlocked = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota');
+      });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/save outcome could not be confirmed/);
+    const originalRequest = vi.mocked(saveMetadataForm).mock.calls[0][0];
+    const originalRecovery = readDesignerRecovery(id(50), id(1)).item;
+    expect(originalRecovery?.receipt?.id).toBe(originalRequest.requestId);
+    privacyActions.readProtectedPrivacyIdentity.mockResolvedValueOnce({
+      status: 'denied',
+    });
+    act(() => {
+      revokePrivatePresentation();
+    });
+    expect(
+      Array.from(document.querySelectorAll('input'))
+        .map((input) => input.value)
+        .join(' '),
+    ).not.toContain('Private memory-only form field');
+    expect(
+      screen.queryByRole('button', { name: 'Retry original save' }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'original account access',
+    );
+    expect(readDesignerRecovery(id(50), id(1))).toEqual({
+      available: false,
+      item: originalRecovery,
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+    );
+    expect(
+      await screen.findByText(/Configuration access changed/),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Recover edits' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save changes' }),
+    ).not.toBeInTheDocument();
+    expect(
+      privacyActions.readProtectedPrivacyIdentity,
+    ).toHaveBeenLastCalledWith(binding);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry access' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Recover edits' }),
+    );
+    vi.mocked(saveMetadataForm).mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'saved', version: '3', published_revision_id: id(23) },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry original save' }),
+    );
+    await screen.findByText('Saved active form revision 3.');
+    expect(vi.mocked(saveMetadataForm).mock.calls[1][0]).toEqual(
+      originalRequest,
+    );
+    expect(readDesignerRecovery(id(50), id(1)).item).toBeNull();
+    storageBlocked.mockRestore();
   });
   it('retains the same request after an uncertain save and recovery re-entry', async () => {
     vi.mocked(saveMetadataForm).mockRejectedValueOnce(

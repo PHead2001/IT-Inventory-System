@@ -154,8 +154,105 @@ describe('LocationPicker', () => {
     await user.click(screen.getByRole('treeitem', { name: /^IT Closet/ }));
     expect(document.querySelector('input[name="location"]')).toHaveValue('ITC');
     await user.click(screen.getByLabelText('Location'));
-    await user.click(screen.getByRole('treeitem', { name: /All locations/ }));
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    const noFilter = screen.getByRole('treeitem', {
+      name: 'All locations, no location filter',
+    });
+    await user.keyboard('{Home}');
+    expect(search).toHaveAttribute('aria-activedescendant', noFilter.id);
+    await user.keyboard('{Enter}');
     expect(document.querySelector('input[name="location"]')).toHaveValue('');
+  });
+  it('keeps a custom optional-source label distinct from the default no-location-filter choice', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    render(
+      <LocationPicker
+        mode="destination"
+        label="Preferred storage source"
+        locations={[root, drawer]}
+        allowAll
+        emptyLabel="Choose for each item"
+        value={drawer.id}
+        onValueChange={changed}
+      />,
+    );
+    await user.click(screen.getByLabelText('Preferred storage source'));
+    expect(
+      screen.queryByRole('treeitem', {
+        name: 'All locations, no location filter',
+      }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole('treeitem', {
+        name: 'Choose for each item',
+      }),
+    );
+    expect(changed).toHaveBeenCalledWith('');
+    expect(screen.getByLabelText('Preferred storage source')).toHaveFocus();
+  });
+  it('combines optional source labels with live tree/search stock without reselecting on refresh', async () => {
+    const user = userEvent.setup();
+    const changed = vi.fn();
+    const props = {
+      mode: 'source' as const,
+      label: 'Preferred storage source',
+      locations: [root, drawer, secondDrawer, thirdDrawer],
+      sourceIds: [drawer.id, secondDrawer.id, thirdDrawer.id],
+      allowAll: true,
+      emptyLabel: 'Choose for each item',
+      value: drawer.id,
+      onValueChange: changed,
+    };
+    const view = render(
+      <LocationPicker
+        {...props}
+        availability={{ root: 500, drawer: 1, 'drawer-10': 8 }}
+      />,
+    );
+    await user.click(screen.getByLabelText(props.label));
+    expect(
+      screen.getByRole('treeitem', { name: 'Choose for each item' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('treeitem', { name: /Drawer 7.*1 unit available/ }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.getByRole('treeitem', { name: /Drawer 10.*8 units available/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('treeitem', { name: /IT Closet, navigation group/ }),
+    ).not.toHaveTextContent('500 units available');
+    expect(
+      screen.getByRole('treeitem', { name: /Drawer 11/ }),
+    ).not.toHaveTextContent('available');
+
+    view.rerender(
+      <LocationPicker
+        {...props}
+        availability={{ root: 500, drawer: 0, 'drawer-10': 5 }}
+      />,
+    );
+    expect(
+      screen.getByRole('treeitem', { name: /Drawer 7.*0 units available/ }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(changed).not.toHaveBeenCalled();
+    const search = screen.getByRole('combobox', { name: 'Search locations' });
+    await user.type(search, 'Drawer');
+    expect(
+      screen.getByRole('option', { name: /Drawer 7.*0 units available/ }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.getByRole('option', { name: /Drawer 10.*5 units available/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: /Drawer 11/ }),
+    ).not.toHaveTextContent('available');
+    expect(changed).not.toHaveBeenCalled();
+    await user.clear(search);
+    await user.keyboard('{Home}{Enter}');
+    expect(changed).toHaveBeenCalledExactlyOnceWith('');
+    expect(screen.getByLabelText(props.label)).toHaveFocus();
   });
   it('does not select hidden results or submit the form while loading or failed', async () => {
     const user = userEvent.setup();

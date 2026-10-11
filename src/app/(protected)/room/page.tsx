@@ -1,3 +1,4 @@
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { requireMember } from '@/lib/auth/session.server';
 import { getLocations } from '@/features/inventory/queries.server';
 import { parseRoomLocation } from '@/features/room/navigation';
@@ -7,6 +8,7 @@ import {
   spaceLocations,
 } from '@/features/room/spaces';
 import { SpacesWorkspace } from '@/features/room/spaces-workspace';
+import { supabaseConfig } from '@/lib/supabase/config';
 
 export const metadata = { title: 'Spaces & maps' };
 
@@ -26,7 +28,12 @@ export default async function RoomPage({
   ]);
   const code = parseRoomLocation(params.location);
   const space = resolveSpace(locations, params.space ?? null, code);
-  if (!space) return <p>No active spaces are available.</p>;
+  if (!space)
+    return (
+      <ProtectedPrivacyContent>
+        <p>No active spaces are available.</p>
+      </ProtectedPrivacyContent>
+    );
   const selectedCode = spaceLocations(locations, space).some(
     (location) => location.code === code,
   )
@@ -43,23 +50,26 @@ export default async function RoomPage({
         ? 'The requested location is unavailable in this space. Choose a location below.'
         : null;
   return (
-    <>
-      <p className="experience-eyebrow">Locations / Spatial inventory</p>
-      <h1 className="experience-heading mt-3">Spaces &amp; maps</h1>
-      <p className="experience-muted mt-3 max-w-2xl text-sm leading-6">
-        Find inventory by physical location. Explore the measured IT Closet map
-        or browse logical locations in spaces without a map.
-      </p>
-      <SpacesWorkspace
-        locations={locations}
-        userId={member.user_id}
-        initialSpace={space}
-        initialCode={selectedCode}
-        initialNotice={fallbackNotice}
-        initialPage={
-          Number.isSafeInteger(page) && page > 0 ? Math.min(page, 100000) : 1
-        }
-      />
-    </>
+    <ProtectedPrivacyContent>
+      <>
+        <p className="experience-eyebrow">Locations / Spatial inventory</p>
+        <h1 className="experience-heading mt-3">Spaces &amp; maps</h1>
+        <p className="experience-muted mt-3 max-w-2xl text-sm leading-6">
+          Find inventory by physical location. Explore the measured IT Closet
+          map or browse logical locations in spaces without a map.
+        </p>
+        <SpacesWorkspace
+          locations={locations}
+          userId={member.user_id}
+          backend={new URL(supabaseConfig().url).origin}
+          initialSpace={space}
+          initialCode={selectedCode}
+          initialNotice={fallbackNotice}
+          initialPage={
+            Number.isSafeInteger(page) && page > 0 ? Math.min(page, 100000) : 1
+          }
+        />
+      </>
+    </ProtectedPrivacyContent>
   );
 }
