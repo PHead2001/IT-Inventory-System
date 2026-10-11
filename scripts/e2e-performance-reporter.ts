@@ -1,4 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { relative } from 'node:path';
 import { cpus, platform } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import type {
@@ -8,6 +14,50 @@ import type {
   TestCase,
   TestResult,
 } from '@playwright/test/reporter';
+
+export const MAX_FAILURE_RECORDS = 20;
+
+export function failureMetadata(test: TestCase, result: TestResult) {
+  const file = relative(process.cwd(), test.location.file).replaceAll(
+    '\\',
+    '/',
+  );
+  // Source coordinates only, never titles, errors, attachments, stdout or bodies.
+  const source =
+    file.length <= 160 && /^tests\/e2e\/[a-zA-Z0-9_/-]+\.spec\.ts$/.test(file)
+      ? file
+      : 'unavailable';
+  const integer = (value: number) =>
+    Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000
+      ? value
+      : null;
+  return {
+    file: source,
+    line: integer(test.location.line),
+    status: ['failed', 'timedOut', 'interrupted'].includes(result.status)
+      ? result.status
+      : 'unknown',
+    retry: integer(result.retry),
+    workerIndex: integer(result.workerIndex),
+    errorCount: Math.min(result.errors.length, 100),
+    traceAttached: result.attachments.some(
+      (attachment) => attachment.name === 'trace',
+    ),
+  };
+}
+
+export function failureSummary(
+  records: ReturnType<typeof failureMetadata>[],
+  total: number,
+) {
+  return {
+    failedAttempts: total,
+    omitted: Math.max(0, total - MAX_FAILURE_RECORDS),
+    records: records.slice(0, MAX_FAILURE_RECORDS),
+    guidance:
+      'Assertion details are in the Validate browser workflows log. Download traces from foundation-failures only if the upload succeeded; artifact quota or service failure leaves no downloadable trace. Metadata is limited to 20 failed attempts and excludes titles, error bodies and attachment contents.',
+  };
+}
 
 export function linuxMemory(text: string) {
   const value = (name: string) => {
@@ -64,6 +114,8 @@ export default class PerformanceReporter {
   private peakSwapUsedMiB: number | null = null;
   private initialOomKills: number | null = null;
   private metricFailures = 0;
+  private failureCount = 0;
+  private failures: ReturnType<typeof failureMetadata>[] = [];
 
   private sample() {
     if (platform() !== 'linux') return;
@@ -121,6 +173,11 @@ export default class PerformanceReporter {
   onTestEnd(test: TestCase, result: TestResult) {
     this.activeTests.delete(test.id);
     this.attempts++;
+    if (['failed', 'timedOut', 'interrupted'].includes(result.status)) {
+      this.failureCount++;
+      if (this.failures.length < MAX_FAILURE_RECORDS)
+        this.failures.push(failureMetadata(test, result));
+    }
     this.finalTests.set(test.id, {
       result: result.status,
       outcome: test.outcome(),
@@ -131,6 +188,22 @@ export default class PerformanceReporter {
     if (this.listing) return;
     clearInterval(this.timer);
     this.sample();
+    if (this.failureCount || result.status !== 'passed') {
+      const evidence = JSON.stringify(
+        failureSummary(this.failures, this.failureCount),
+      );
+      console.log('E2E failure metadata: ' + evidence);
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        try {
+          appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `\n### Browser failure metadata\n\n\`\`\`json\n${evidence}\n\`\`\`\n`,
+          );
+        } catch {
+          console.error('E2E failure summary unavailable; use the job log.');
+        }
+      }
+    }
     let oomKillDelta: number | null = null;
     if (this.initialOomKills !== null) {
       try {

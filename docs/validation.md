@@ -185,6 +185,8 @@ The diagnostic `Local runner pilot` uses its exact workflow/head SHA and must re
 
 Failure reports retain seven-day GitHub artifact storage. Uploads are best-effort and warn when quota or availability prevents them; failed tests still fail the `required` job. An absent upload is a diagnostics limitation, never evidence that tests passed. Disposal must also occur after failed or cancelled jobs.
 
+Before artifact upload, the existing Playwright performance reporter prints and appends bounded Browser failure metadata to the job summary: up to twenty failed/interrupted/timed-out attempts, repository E2E source file/line, status, retry, worker index, error count and whether Playwright attached a trace. It reports omitted attempts explicitly. Titles, assertion messages/stacks, test output, attachment paths/contents, environment values and HTTP bodies are excluded. The existing list reporter remains the source for assertion details in the Validate browser workflows log. If artifact upload fails, the workflow also records the limitation in the summary: there is no downloadable trace from that upload. Cancellation or process termination before reporter completion can leave this metadata absent too. This fallback improves diagnosis and does not repair provider storage quota, preserve host traces or change test outcomes.
+
 `Contract.Tests.ps1` includes `Queue.Fairness.Tests.ps1`: newest-first queued
 previews versus older in-progress continuations, UTC/numeric ordering, duplicate
 status snapshots, undated compatibility, strict profile/capacity skipping and
