@@ -45,6 +45,10 @@ export function visibleRoomTarget(
 /** Eligibility and logical ownership shared by rays and triangle traversal.
  * Material-array eligibility alone does not prove a particular face visible. */
 export function visibleRoomMeshTarget(object: Object3D) {
+  // Drei Edges uses a Mesh subclass whose position buffer is a shader extrusion
+  // template. Its disabled picking and decorative strokes are not solid faces.
+  if ('isLineSegments2' in object && object.isLineSegments2 === true)
+    return null;
   if (!(object instanceof Mesh) || object.userData.hoverPassThrough)
     return null;
   if (!object.visible || !object.material) return null;

@@ -29,6 +29,7 @@ export type WitnessTriangle = {
   code: string | null;
   side: number;
   vertices: number[];
+  sourceMesh?: number;
 };
 export type WitnessSnapshot = {
   view: number[];
@@ -36,6 +37,11 @@ export type WitnessSnapshot = {
   frame: { x: number; y: number; width: number; height: number };
   masks: { left: number; top: number; right: number; bottom: number }[];
   triangles: WitnessTriangle[];
+  meshes?: {
+    index: number;
+    topology: 'triangles';
+    geometry: 'box' | 'buffer';
+  }[];
 };
 
 /** Test-only observation. Existing hook callbacks retain their original receiver. */
@@ -98,6 +104,7 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
         );
       const { scene, camera } = states[0];
       const triangles: WitnessTriangle[] = [];
+      const meshes: NonNullable<WitnessSnapshot['meshes']> = [];
       let objects = 0;
       let alphaTexels = 0;
       const alphaBounds = new Map<import('three').Texture, [number, number]>();
@@ -144,6 +151,10 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
         if (++objects > 5000)
           throw new Error('Room witness object bound exceeded');
         if (!('isMesh' in object) || !object.isMesh) return;
+        // Independent renderer classification: wide-line position attributes
+        // are extrusion templates, not the rendered segments' world vertices.
+        if ('isLineSegments2' in object && object.isLineSegments2 === true)
+          return;
         for (
           let parent: import('three').Object3D | null = object;
           parent;
@@ -156,6 +167,12 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
             'Room witness requires supported unskinned noninstanced geometry',
           );
         const position = mesh.geometry.getAttribute('position');
+        const sourceMesh = meshes.length;
+        meshes.push({
+          index: sourceMesh,
+          topology: 'triangles',
+          geometry: mesh.geometry.type === 'BoxGeometry' ? 'box' : 'buffer',
+        });
         if (!position || position.itemSize !== 3)
           throw new Error('Room witness position geometry unavailable');
         const materials = Array.isArray(mesh.material)
@@ -249,7 +266,7 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
             );
             if (vertices.some((value) => !Number.isFinite(value)))
               throw new Error('Room witness nonfinite vertex');
-            triangles.push({ code, side: material.side, vertices });
+            triangles.push({ code, side: material.side, vertices, sourceMesh });
             if (triangles.length > 25000)
               throw new Error('Room witness triangle bound exceeded');
           }
@@ -260,6 +277,7 @@ export async function captureRoomWitness(page: Page): Promise<WitnessSnapshot> {
       const rect = canvas!.getBoundingClientRect();
       const snapshot = {
         triangles,
+        meshes,
         view: [...camera.matrixWorldInverse.elements],
         projection: [...camera.projectionMatrix.elements],
         frame: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -492,6 +510,7 @@ export function roomRayWitnessAt(
   const maximum = origin.distanceTo(far);
   let code: string | null = null,
     distance = Infinity;
+  let sourceMesh: number | null = null;
   for (const face of snapshot.triangles) {
     const a = new Vector3().fromArray(face.vertices, 0),
       b = new Vector3().fromArray(face.vertices, 3),
@@ -504,6 +523,7 @@ export function roomRayWitnessAt(
     const measured = origin.distanceTo(hit);
     if (measured <= maximum && measured < distance) {
       code = face.code;
+      sourceMesh = face.sourceMesh ?? null;
       distance = measured;
     }
   }
@@ -511,6 +531,7 @@ export function roomRayWitnessAt(
     code,
     distance: Number.isFinite(distance) ? distance : null,
     inside: true,
+    sourceMesh,
   };
 }
 

@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
+import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import {
   captureRoomWitness,
   roomRayWitnessAt,
+  type WitnessSnapshot,
 } from './room-visibility-witness';
 
 export type RoomPointerAttempt = {
@@ -21,6 +24,110 @@ declare global {
 }
 
 const MAX_BYTES = 128 * 1024;
+/** Failure-only transport. Whole-scene geometry preserves every possible opaque
+ * occluder; never silently emit a partial scene that could prove false exposure. */
+export function roomGeometryReplay(
+  scene: WitnessSnapshot,
+  allowedCodes: string[],
+  stage: RoomLayoutWitnessStage,
+  byteBudget: number,
+) {
+  const incomplete = () => [
+    JSON.stringify({ schema: 1, stage, complete: false, truncated: true }),
+  ];
+  try {
+    const finite = (values: number[], length: number) => {
+      if (values.length !== length || !values.every(Number.isFinite))
+        throw new Error('invalid');
+      return [...values];
+    };
+    if (
+      scene.triangles.length > 25000 ||
+      scene.masks.length > 96 ||
+      (scene.meshes?.length ?? 0) > 5000
+    )
+      return incomplete();
+    const allowed = new Set(allowedCodes);
+    const rectangles = (r: {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+    }) => {
+      const [left, top, right, bottom] = finite(
+        [r.left, r.top, r.right, r.bottom],
+        4,
+      );
+      return { left, top, right, bottom };
+    };
+    const [x, y, width, height] = finite(
+      [scene.frame.x, scene.frame.y, scene.frame.width, scene.frame.height],
+      4,
+    );
+    const payload = {
+      schema: 1,
+      stage,
+      complete: true,
+      scene: {
+        view: finite(scene.view, 16),
+        projection: finite(scene.projection, 16),
+        frame: { x, y, width, height },
+        masks: scene.masks.map(rectangles),
+        meshes: (scene.meshes ?? []).map((mesh, index) => {
+          if (
+            mesh.index !== index ||
+            mesh.topology !== 'triangles' ||
+            !['box', 'buffer'].includes(mesh.geometry)
+          )
+            throw new Error('invalid');
+          return { index, topology: 'triangles', geometry: mesh.geometry };
+        }),
+        triangles: scene.triangles.map((triangle) => {
+          if (
+            (triangle.code !== null && !allowed.has(triangle.code)) ||
+            ![0, 1, 2].includes(triangle.side) ||
+            !Number.isSafeInteger(triangle.sourceMesh) ||
+            triangle.sourceMesh! < 0 ||
+            triangle.sourceMesh! >= (scene.meshes?.length ?? 0)
+          )
+            throw new Error('invalid');
+          return {
+            code: triangle.code,
+            side: triangle.side,
+            vertices: finite(triangle.vertices, 9),
+            sourceMesh: triangle.sourceMesh,
+          };
+        }),
+      },
+    };
+    const raw = Buffer.from(JSON.stringify(payload));
+    if (raw.length > 8 * 1024 * 1024) return incomplete();
+    const encoded = gzipSync(raw).toString('base64');
+    if (encoded.length > 96 * 1024) return incomplete();
+    const sha256 = createHash('sha256').update(raw).digest('hex');
+    const parts = Math.ceil(encoded.length / (12 * 1024));
+    const records = Array.from({ length: parts }, (_, part) =>
+      JSON.stringify({
+        schema: 1,
+        stage,
+        complete: true,
+        encoding: 'gzip-base64',
+        sha256,
+        part,
+        parts,
+        data: encoded.slice(part * 12 * 1024, (part + 1) * 12 * 1024),
+      }),
+    );
+    return records.reduce(
+      (bytes, record) => bytes + Buffer.byteLength(record) + 32,
+      0,
+    ) <= byteBudget
+      ? records
+      : incomplete();
+  } catch {
+    return incomplete();
+  }
+}
 export type RoomLayoutWitnessStage =
   | 'scroll-more-overlapping-canvas'
   | 'scroll-more-outside-canvas-without-reopening'
@@ -164,6 +271,7 @@ export async function reportRoomLayoutFailure(
         };
         const actualEvent = window.__roomDiagnosticPointerEvent ?? null;
         return {
+          enabled: window.__roomLayoutDiagnosticsEnabled === true,
           stage,
           outcome,
           measured: {
@@ -211,10 +319,13 @@ export async function reportRoomLayoutFailure(
       },
       { codes: allowedCodes, stage, outcome, pointer: pointer ?? null },
     );
+    if (!report.enabled) return;
     let independent: object | null = null;
+    let replayScene: WitnessSnapshot | null = null;
     if (pointer) {
       try {
         const scene = await captureRoomWitness(page);
+        if (outcome === 'failure') replayScene = scene;
         const rayAt = (point: { x: number; y: number }) => {
           const ray = roomRayWitnessAt(scene, point);
           return {
@@ -242,9 +353,28 @@ export async function reportRoomLayoutFailure(
       }
     }
     const encoded = JSON.stringify({ ...report, independent });
-    if (Buffer.byteLength(encoded, 'utf8') > MAX_BYTES)
+    if (Buffer.byteLength(encoded, 'utf8') > MAX_BYTES - 512)
       throw new Error('payload-bound');
     console.log('ROOM_LABEL_LAYOUT_DIAGNOSTIC ' + encoded);
+    if (outcome === 'failure' && pointer) {
+      const records = replayScene
+        ? roomGeometryReplay(
+            replayScene,
+            allowedCodes,
+            stage,
+            MAX_BYTES - Buffer.byteLength(encoded) - 512,
+          )
+        : [
+            JSON.stringify({
+              schema: 1,
+              stage,
+              complete: false,
+              captureError: true,
+            }),
+          ];
+      for (const record of records)
+        console.log('ROOM_GEOMETRY_REPLAY ' + record);
+    }
   } catch {
     console.log(
       'ROOM_LABEL_LAYOUT_DIAGNOSTIC ' +

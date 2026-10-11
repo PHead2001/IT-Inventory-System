@@ -361,6 +361,10 @@ The test-only visibility witness captures the actual committed R3F scene once pe
 
 Acceptance still requires real WebGL at 375px with the actual canvas, loaded fonts, selected long text and open More; independent exposed-object coverage, no overlapping/shrunk actions, accurate authorized triples, actual camera/input/focus response, resize and settled demand-idle evidence. Long-label component/DOM stress cannot replace current-geometry browser proof. Run the clean database gate and authentic type regeneration, then the complete exact-candidate gates and independent reviews described above; unavailable Docker/browser execution is an explicit limitation, never a pass.
 
+Room projection and the independent witness exclude known `LineSegments2` decorative strokes: their raw positions are shader extrusion templates, not opaque world triangles. A regression uses the installed line geometry with disabled edge picking to demonstrate false occlusion and preserves ordinary opaque mesh occlusion.
+
+Opt-in room diagnostics emit `ROOM_GEOMETRY_REPLAY` only after a failed target assertion. The complete supported opaque scene includes camera matrices, canvas/masks, canonical location codes and numeric source-mesh identities/topology, never inventory text. Replay records contain ordered 12-KiB base64 chunks of gzip JSON and a SHA-256 of the uncompressed JSON; join parts, decode, decompress and verify the hash before replay. The existing 25,000-triangle/5,000-object/8-MiB capture bounds remain; replay transport is capped at 96 KiB and shares a 128-KiB failure-report budget. Missing, invalid or oversized captures explicitly report incomplete/truncated evidence rather than exporting a partial scene. Capture occurs after failure, so it does not prove atomic identity with the original event.
+
 ## Logout-generation privacy barrier
 
 Focused Auth tests cover retained HttpOnly generation creation only after confirmed

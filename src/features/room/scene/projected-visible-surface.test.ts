@@ -20,6 +20,7 @@ import {
   maxSurfaceContinuationFrames,
 } from './projected-visible-surface';
 import { visibleRoomHit } from './visible-hover';
+import { LineSegments2 } from '../../../../node_modules/three-stdlib/lines/LineSegments2.js';
 
 const viewport = { left: 0, top: 0, right: 320, bottom: 320 };
 function setup() {
@@ -74,6 +75,28 @@ function rayOwner(f: ReturnType<typeof setup>, x: number, y = 0) {
 }
 
 describe('projected actual visible regions', () => {
+  it('does not turn the installed Drei edge extrusion template into an opaque blocker', () => {
+    const f = setup();
+    const edge = new LineSegments2();
+    expect(edge).toBeInstanceOf(Mesh);
+    // Drei Edges disables this object's raycast. Its actual segment is remote;
+    // position is the shader extrusion template, not the segment vertices.
+    edge.geometry.setPositions([100, 100, 0, 101, 100, 0]);
+    edge.raycast = () => {};
+    edge.position.z = 4;
+    edge.scale.set(4, 4, 1);
+    f.scene.add(edge);
+    expect(rayOwner(f, 0)).toBe('TARGET');
+    expect(f.run([], new Vector3(1000, 1000, 1000)).status).toBe('visible');
+    const opaque = f.blocker(-5, 5);
+    opaque.raycast = () => {};
+    // An ordinary opaque mesh remains an occluder even if its event picking is
+    // disabled. The exclusion is specific to known shader line topology.
+    f.projection.refresh();
+    expect(f.projection.find('TARGET', () => true, viewport).status).toBe(
+      'hidden',
+    );
+  });
   it('finds an arbitrary thin slit missed by every old fixed face sample, then proves closure', () => {
     const f = setup();
     f.blocker(-5, 0.31);
