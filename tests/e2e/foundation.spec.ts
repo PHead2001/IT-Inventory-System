@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
@@ -402,4 +403,21 @@ test('recovery exchanges token once and keeps a fixed destination', async ({
   await expect(
     page.getByRole('form', { name: 'Continue securely' }).getByRole('alert'),
   ).toContainText('expired or has already been used');
+});
+
+test('anonymous missing asset navigation masks resource identity behind sign-in', async ({
+  browser,
+}) => {
+  const anonymous = await browser.newContext();
+  try {
+    const visitor = await anonymous.newPage();
+    await visitor.goto('/inventory/assets/' + randomUUID());
+    await expect(visitor).toHaveURL(/\/login/);
+    await expect(visitor).toHaveTitle(/Sign in.*IT Inventory/);
+    await expect(
+      visitor.getByRole('heading', { name: 'Inventory record unavailable' }),
+    ).toHaveCount(0);
+  } finally {
+    await anonymous.close();
+  }
 });

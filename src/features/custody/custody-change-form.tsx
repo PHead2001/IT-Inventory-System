@@ -10,6 +10,7 @@ import type { LocationRef } from '@/features/inventory/contracts-ui';
 import { field, panel } from '@/features/inventory/components/read-ui';
 import { submitCustody, loadCustodyReceipt } from './actions';
 import { CustodyReceiptView } from './custody-receipt';
+import { custodyEventLabel } from './vocabulary';
 import {
   useReportTaskState,
   useTaskReset,
@@ -491,32 +492,24 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               receipt={state.custody}
               reviewedName={reviewed?.name}
             />
-            {reviewed && (
-              <p className="break-words text-sm">
-                Reviewed route: {reviewedRoute}{' '}
-                <span className="text-slate-400">
-                  (endpoints reviewed for this operation)
-                </span>
-              </p>
-            )}
           </>
         ) : (
           <>
-            <h3 className="text-lg font-semibold">Custody saved</h3>
-            {reviewed?.name && (
-              <p className="break-words">
-                {reviewed.name} (name reviewed for this operation)
-              </p>
-            )}
+            <h3 className="text-lg font-semibold">
+              {state.changed
+                ? custodyEventLabel(action, kind)
+                : 'No change needed'}
+            </h3>
+            {reviewed?.name && <p className="break-words">{reviewed.name}</p>}
             <p>
               {quantity && correction
                 ? `Count correction at ${reviewed?.source}`
-                : `${titles[action]} · ${reviewed?.source} → ${reviewed?.destination}`}
+                : `${reviewed?.source} → ${reviewed?.destination}`}
             </p>
             <p>
               {quantity
                 ? correction
-                  ? `Reviewed observed count: ${reviewed?.quantity} units (submitted for this operation)`
+                  ? `Observed count: ${reviewed?.quantity} units`
                   : `${reviewed?.quantity} units`
                 : '1 individual asset'}
             </p>
@@ -568,16 +561,32 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
               Done
             </Button>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={actorMismatch || latest.version !== state.version}
-            onClick={latest.startAnother}
-          >
-            {action === 'issue' || action === 'assign'
-              ? 'Issue another'
-              : 'Start another operation'}
-          </Button>
+          {kind === 'quantity' && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                actorMismatch ||
+                latest.version !== state.version ||
+                unavailable ||
+                (action === 'issue' &&
+                  !storageBalances.some((balance) => balance.quantity > 0))
+              }
+              onClick={latest.startAnother}
+            >
+              {action === 'issue' || action === 'assign'
+                ? 'Issue another'
+                : action === 'return'
+                  ? 'Return more'
+                  : action === 'transfer'
+                    ? 'Transfer more'
+                    : action === 'correct'
+                      ? 'Correct another count'
+                      : action === 'opening'
+                        ? 'Record another holding'
+                        : 'Write off more'}
+            </Button>
+          )}
           <Link
             className="inline-flex min-h-11 items-center text-cyan-300 underline"
             href={`/inventory/${kind === 'quantity' ? 'quantity' : 'assets'}/${entityId}`}
@@ -604,11 +613,16 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       onSubmit={submit}
       noValidate
     >
-      <h3 className="text-lg font-semibold">{titles[action]}</h3>
+      {!resetTask && (
+        <h3 className="text-lg font-semibold">{titles[action]}</h3>
+      )}
       {['write_off', 'retire'].includes(action) && (
         <p className="text-sm text-slate-300">
-          Write off removes missing or consumed quantity from recorded stock.
-          Retire ends tracking of an individual asset.
+          {kind === 'quantity'
+            ? 'Write off removes missing or consumed quantity stock. A reason is required.'
+            : action === 'retire'
+              ? 'Retire ends this individual asset’s service and closes its site assignment. A reason is required.'
+              : 'Write off records the loss of this individual asset and closes its site assignment. A reason is required.'}
         </p>
       )}
       {actorMismatch && (
@@ -696,7 +710,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           <>
             <LocationPicker
               id={`${kind}-${action}-destination`}
-              label="Return to storage"
+              label="Storage location"
               locations={locations}
               mode="destination"
               value={values.destination_location_id}
@@ -855,7 +869,7 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
       {reviewed && !uncertain && (
         <section aria-label="Review changes" className={panel}>
           <h3 id={scope + '-review-context'} className="font-semibold">
-            Review {titles[action].toLowerCase()} for{' '}
+            Review changes for{' '}
             {reviewed.name ?? latest.entityName ?? 'this record'}
           </h3>
           {['write_off', 'retire'].includes(action) && (
@@ -931,7 +945,27 @@ function CustodyFields(latest: Props & { startAnother: () => void }) {
           ? 'Saving…'
           : uncertain
             ? 'Retry same custody transaction'
-            : `${reviewed ? 'Confirm' : 'Review'} ${titles[action].toLowerCase()}`}
+            : reviewed
+              ? {
+                  issue: 'Issue to site',
+                  assign: 'Assign to site',
+                  return: 'Return to storage',
+                  transfer: 'Transfer between sites',
+                  opening: 'Record site holding',
+                  correct: 'Save correction',
+                  write_off: 'Write off at site',
+                  retire: 'Retire asset at site',
+                }[action]
+              : {
+                  issue: 'Review issue',
+                  assign: 'Review assignment',
+                  return: 'Review return',
+                  transfer: 'Review transfer',
+                  opening: 'Review site holding',
+                  correct: 'Review correction',
+                  write_off: 'Review write-off',
+                  retire: 'Review retirement',
+                }[action]}
       </Button>
     </form>
   );

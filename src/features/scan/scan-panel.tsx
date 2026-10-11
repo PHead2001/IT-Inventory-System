@@ -1,4 +1,5 @@
 'use client';
+import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
   useEffect,
@@ -321,7 +322,7 @@ export function ScanPanel() {
                   setMode('item_code');
                 }}
               />
-              Quantity Item code (SKU)
+              Quantity item code (SKU)
             </label>
           </fieldset>
           <label htmlFor="scan-text" className={styles.fieldLabel}>
@@ -392,7 +393,9 @@ export function ScanPanel() {
               >
                 {match.label}
               </Link>
-              <span className={styles.state}>{match.state}</span>
+              <span className={styles.state}>
+                <RecordStatus status={match.state} />
+              </span>
             </li>
           ))}
         </ul>

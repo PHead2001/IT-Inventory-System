@@ -40,6 +40,52 @@ const legacyLowStockHeaders = [
   'Environment',
 ];
 describe('inventory CSV', () => {
+  it.each([false, true])(
+    'distinguishes retired custody from missing assignments with custom fields %s',
+    (includeCustom) => {
+      const rows = ['retired', 'site', 'storage', null, undefined].map(
+        (custody_kind) => ({
+          entity_id: id,
+          kind: 'asset',
+          name: 'Switch',
+          category_name: 'Networking',
+          manufacturer: null,
+          model: null,
+          status: custody_kind === 'retired' ? 'retired' : 'active',
+          asset_tag: 'SW-1',
+          serial_number: null,
+          quantity: null,
+          location_name: null,
+          location_code: null,
+          breadcrumb: null,
+          custody_kind,
+        }),
+      );
+      const csv = exportCsv(
+        'inventory',
+        { rows, total: rows.length, exported_at: at },
+        'Preview',
+        includeCustom,
+      ).csv;
+      const [header, ...body] = csv.slice(1).trimEnd().split('\r\n');
+      const headers = header.split(',').map((value) => JSON.parse(value));
+      const machineIndex = headers.indexOf('Custody');
+      const labelIndex = headers.indexOf('Custody label');
+      expect(
+        body.map((line) => JSON.parse(line.split(',')[machineIndex])),
+      ).toEqual(['retired', 'site', 'storage', '', '']);
+      expect(labelIndex).toBe(headers.length - 1);
+      expect(
+        body.map((line) => JSON.parse(line.slice(line.lastIndexOf(',') + 1))),
+      ).toEqual([
+        'Retired',
+        'Assigned to site',
+        'In storage',
+        'No recorded assignment',
+        'No recorded assignment',
+      ]);
+    },
+  );
   it.each(['inventory', 'low_stock'] as const)(
     'appends display metadata after all existing %s fields, preserving UTC source and custom opt-in',
     (type) => {
@@ -110,6 +156,9 @@ describe('inventory CSV', () => {
           ...original,
           'Display timezone',
           'Exported at (display zone)',
+          ...(type === 'inventory'
+            ? ['Type label', 'Status label', 'Custody label']
+            : ['Type label', 'Status label']),
         ]);
         expect(result.exportedAt).toBe(at);
         expect(result.csv).toContain(csvText(at) + ',"Preview"');
@@ -209,13 +258,13 @@ describe('inventory CSV', () => {
     expect(header.split(',').slice(0, 15)).toEqual(
       legacyInventoryHeaders.map(csvText),
     );
-    expect(header.split(',').slice(-3)).toEqual(
+    expect(header.split(',').slice(-6, -3)).toEqual(
       ['Item Code (SKU)', 'Display timezone', 'Exported at (display zone)'].map(
         csvText,
       ),
     );
     expect(
-      body.endsWith(
+      body.includes(
         ['=SKU-0001', 'UTC', '24 Sept 2026, 15:18:37 UTC']
           .map(csvText)
           .join(','),
@@ -632,3 +681,83 @@ describe('inventory CSV', () => {
     expect(checks).toBe(5);
   });
 });
+
+it('retains machine identities while appending readable labels', () => {
+  const row = {
+    kind: 'asset',
+    entity_id: id,
+    name: 'Laptop',
+    category_name: 'Computers',
+    manufacturer: null,
+    model: null,
+    asset_tag: 'LAP-01',
+    serial_number: null,
+    status: 'retired',
+    quantity: null,
+    location_name: null,
+    location_code: null,
+    breadcrumb: null,
+    custody_kind: 'site',
+  };
+  const [header, line] = exportCsv(
+    'inventory',
+    { rows: [row], total: 1, exported_at: at },
+    'Preview',
+  )
+    .csv.slice(1)
+    .split('\r\n');
+  const headers = header.split(',');
+  const values = line.split(',');
+  expect(values[headers.indexOf(csvText('Status'))]).toBe(csvText('retired'));
+  expect(values[headers.indexOf(csvText('Custody'))]).toBe(csvText('site'));
+  expect(values.slice(-3)).toEqual(
+    ['Individual asset', 'Retired', 'Assigned to site'].map(csvText),
+  );
+});
+
+it.each(['active', 'archived'])(
+  'appends readable low-stock labels while preserving machine columns for %s',
+  (status) => {
+    for (const custom of [false, true]) {
+      const row = {
+        entity_id: id,
+        name: 'Cable',
+        category_name: 'Cables',
+        manufacturer: null,
+        model: null,
+        status,
+        recorded_total: '0',
+        reorder_threshold: 1,
+        stock_state: 'out_of_stock',
+        holding_context: 'No stock',
+        item_code: 'SKU-001',
+        custom_fields: {},
+      };
+      const [header, line] = exportCsv(
+        'low_stock',
+        { rows: [row], total: 1, exported_at: at },
+        'Preview',
+        custom,
+      )
+        .csv.slice(1)
+        .split('\r\n');
+      const headers = header.split(',');
+      const values = line.split(',');
+      expect(headers.slice(0, legacyLowStockHeaders.length)).toEqual(
+        legacyLowStockHeaders.map(csvText),
+      );
+      expect(values[headers.indexOf(csvText('Type'))]).toBe(
+        csvText('Quantity'),
+      );
+      expect(values[headers.indexOf(csvText('Status'))]).toBe(csvText(status));
+      expect(headers.slice(-2)).toEqual(
+        ['Type label', 'Status label'].map(csvText),
+      );
+      expect(values.slice(-2)).toEqual(
+        ['Quantity item', status === 'active' ? 'Active' : 'Archived'].map(
+          csvText,
+        ),
+      );
+    }
+  },
+);

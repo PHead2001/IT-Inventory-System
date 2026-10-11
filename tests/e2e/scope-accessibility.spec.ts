@@ -1,3 +1,6 @@
+import { displayedInstant } from '../helpers/displayed-instant';
+import { expectRecordedInstantCopy } from '../helpers/operational-time';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
@@ -768,3 +771,32 @@ test('Office codes, compact duplicate child links and empty destination remain a
     });
   }
 });
+
+interfaceTest(
+  'relative history exposes exact timezone and original precision through keyboard disclosure',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    await page.goto(`/history?type=quantity&entityId=${interfaceRecord.id}`);
+    const time = page.locator('summary > time').first();
+    await expect(time).toBeVisible();
+    const original = await time.getAttribute('datetime');
+    const summary = time.locator('xpath=parent::summary');
+    const disclosure = summary.locator('xpath=parent::details');
+    await summary.focus();
+    await expect(summary).toBeFocused();
+    await summary.press('Enter');
+    await expect(disclosure).toHaveAttribute('open', '');
+    const exact = disclosure.locator(':scope > p').first();
+    await expect(exact).toBeVisible();
+    await expect(exact).toContainText(/UTC|GMT/);
+    expect(displayedInstant((await exact.textContent())!)).toBe(
+      Math.floor(Date.parse(original!) / 1000) * 1000,
+    );
+    await expectRecordedInstantCopy(disclosure, original!);
+    await expect(time).toHaveAttribute('datetime', original!);
+    await page.screenshot({
+      path: info.outputPath('history-exact-disclosure.png'),
+      fullPage: true,
+    });
+  },
+);

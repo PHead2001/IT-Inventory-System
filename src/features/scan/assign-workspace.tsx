@@ -1,4 +1,5 @@
 'use client';
+import { RecordStatus } from '@/components/record-status';
 import {
   useEffect,
   useCallback,
@@ -1538,7 +1539,7 @@ function AssignmentFields({
             }}
           >
             <option value="identifier">Label or exact identifier</option>
-            <option value="item_code">Exact quantity Item code (SKU)</option>
+            <option value="item_code">Exact quantity item code (SKU)</option>
             <option value="search">Search inventory</option>
           </select>
         </label>
@@ -1610,7 +1611,13 @@ function AssignmentFields({
                   });
                 }}
               >
-                {match.label} · {match.kind} · {match.state}
+                {match.label} ·{' '}
+                {match.kind === 'quantity'
+                  ? 'Quantity item'
+                  : match.kind === 'location'
+                    ? 'Location'
+                    : 'Individual asset'}{' '}
+                · <RecordStatus status={match.state} />
               </Button>
             </li>
           ))}
@@ -1685,8 +1692,11 @@ function AssignmentFields({
             {candidate.kind === 'quantity'
               ? 'Quantity item'
               : 'Individual asset'}{' '}
-            · {candidate.identifier || 'No display identifier'} · Version{' '}
-            {candidate.version} · {candidate.status}
+            ·{' '}
+            <span className="experience-code">
+              {candidate.identifier || 'No display identifier'}
+            </span>{' '}
+            · <RecordStatus status={candidate.status} />
           </p>
           <p>
             Destination: {state.context?.siteName}

@@ -1,5 +1,96 @@
 # Validation
 
+## C403 live-search timing coverage
+
+`tests/e2e/inventory-search.spec.ts` uses applied URL, input, row count,
+filter chips and idle status for live-search readiness, including Clear filters.
+Its immediate request-negative checks verify browser wiring; they no longer
+claim that a real debounce deadline elapsed. The held real response, rapid edits,
+composition commit, Back/Forward, competing chip/pagination/Clear navigation,
+page-99 reconciliation and actual full-filter CSV download remain in that feature spec.
+
+The original elapsed-time exclusions are retained deterministically in
+`src/features/inventory/components/search-form.test.tsx`:
+
+- **waits for composition, preserves later typing across an earlier response, and
+  restores history** advances 500 ms during composition without navigation,
+  then 250 ms after composition ends; it also retains newer typing when an
+  earlier response arrives.
+- **cancels unsent typing when a chip, pagination or Clear filters commits another
+  search** separately advances 300 ms after each real link click and verifies
+  that cancelled typing does not navigate.
+- **debounces rapid A/B/A typing and clear, but submits immediately without a
+  duplicate request** proves the 249+1 ms boundary and immediate submission
+  without a later duplicate replacement.
+
+The three Audit 3 milestone specs are consolidated into feature owners. The
+original failure checks map below; splitting mixed tests changes fixture allocation,
+not their assertions. The only removed standalone test duplicated route visits and
+title assertions now retained in the populated feature tests. This is source-level
+coverage ownership, not a measured runtime improvement or browser acceptance.
+
+| Original spec and test (pre-consolidation line)                  | Retained feature coverage                                                                    | Preserved failure checks                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit-three-acceptance` Restore / ambiguous Receive (11)        | `custody.spec.ts` Restore; `inventory.spec.ts` ambiguous Receive                             | Eligible last-storage default; explicit reason and destination; inactive/storage-ineligible and site-held locations do not default; real independent balance change rejects stale confirmation; refresh retains destination/quantity and clears confirmation. |
+| `audit-three-acceptance` local mapped storage rename (167)       | `locations-reference.spec.ts` local mapped storage rename                                    | Keyboard focus before/after save; case/trim sibling collision and retained input; unchanged UUID/code/parent; renamed location/room label; selected-code and camera framing; exact original name/code/parent restored in `finally`.                           |
+| `audit-three-acceptance` custody Done / revisit (368)            | `custody.spec.ts` custody Done / revisit                                                     | Done enables second operation; revisit/reload cannot resurrect receipts; final version 3 and storage/site state; exactly two issued/returned events.                                                                                                          |
+| `audit-three-discovery` live inventory typing (185)              | `inventory-search.spec.ts` live inventory typing                                             | Held real RSC; applied rows/chips/CSV during pending response; rapid edits/composition/history; chip/page/Clear cancellation; page 99 reconciliation; 26 owned names in actual downloaded CSV.                                                                |
+| `audit-three-discovery` Settings hierarchy / search picker (374) | `custody.spec.ts` Settings hierarchy; `inventory.spec.ts` search location picker             | Collapse/expand, rendered first-child/parent navigation, Home/End, flat Settings search and detail link; picker active descendant, arrow navigation/search/select/Escape focus return; viewport containment and no overflow.                                  |
+| `audit-three-interface` local fonts on location label (136)      | `labels-stock.spec.ts` local UI and code fonts                                               | Exact mapped label code; UI/mono computed families and loaded faces; at least two same-origin local WOFF2 resources.                                                                                                                                          |
+| `audit-three-interface` populated phone flows (197)              | `labels-stock.spec.ts` fonts / scan / labels; `metadata-designer.spec.ts` populated designer | Owned quantity code and fonts; 375/390 px labels, enabled size selector, manual same-origin scan Open and exact destination; populated designer/panels; exact quantity/category titles; viewport fit and screenshots.                                         |
+| `audit-three-interface` designer dialog focus (309)              | `metadata-designer.spec.ts` designer dialog focus                                            | New field selected; desktop field focus / phone inspector focus; Cancel returns to trigger; existing standard Name selected and properties visible at desktop/phone.                                                                                          |
+| `audit-three-interface` history timezone disclosure (397)        | `scope-accessibility.spec.ts` relative history                                               | Keyboard disclosure, visible UTC/GMT timezone, exact displayed instant, original timestamp precision/`datetime`, clipboard detail and screenshot.                                                                                                             |
+| `audit-three-interface` synthetic missing RSC (429)              | `navigation-workflow.spec.ts` synthetic RSC missing response                                 | Real owned NextLink; scoped non-prefetch request rewrite, RSC response content type/status attachment, unavailable boundary; private IDs/name absent; zero document fallback; ordinary NextLink recovery and title.                                           |
+| `audit-three-interface` direct missing resources (526)           | `inventory.spec.ts` direct missing resources; `foundation.spec.ts` anonymous missing asset   | Public/quantity/asset document HTTP 404, one main, unavailable headings, title excludes path identity, screenshots/client recovery; anonymous login redirect/title and no resource disclosure; scan/labels/history route titles and valid image icon.         |
+| `audit-three-interface` generic owned route titles (589)         | Merged into populated phone quantity / designer tests above                                  | Exact Quantity item / Category forms titles and absence of **each** owned quantity UUID, category UUID and record name in both titles.                                                                                                                        |
+
+`inventory-discovery-fixtures.ts` retains its loopback-only API/port guard,
+26 uniquely prefixed owned rows, archive cleanup and local fixture sign-out.
+`interface-fixtures.ts` retains test-scoped unique categories/items, loopback-only
+browser/API guards, record/category cleanup and local sign-out. Each consumer gets
+its own fixture; sharing the helper does not share records between tests.
+The mapped `ITC-RED` rename remains outside the existing parallel allowlist in
+`locations-reference.spec.ts`: it must finish and restore the canonical reference
+before parallel reference readers run. The live-search fixture also remains exclusive in `inventory-search.spec.ts` because
+parallel designer specs may publish required fields on shared categories. Custody,
+metadata-designer and foundation retain their existing exclusive ownership. No CI, project gate, runner, concurrency,
+security, race or accounting coverage is relaxed.
+
+D304 still requires caller-scoped authenticated record-name titles in a future
+product change. The generic successful-route title assertions retained here describe
+current behavior; update them with that implementation and its authorization tests.
+Missing-resource titles and synthetic unavailable boundaries must remain private-safe;
+do not weaken their privacy assertions to accommodate successful record-name titles.
+Browser execution, clean database certification and exact-SHA remote acceptance remain
+required separately. Component and discovery checks do not replace those gates.
+
+## U403 choice identity proof
+
+The forward choice-identity migration keeps the public RPC signatures and pinned
+normalization unchanged. Focused option-label, picker, editor, paste and authoring
+tests cover field-wide collisions, separate trusted published baselines, readable
+ordinals, literal suffix reservation, inactive choices and paging/search/reload.
+`supabase/tests/metadata-choice-publication.test.sql` covers modern review/final
+publication, permissive legacy draft-save followed by review/publish, raw-spelling
+provenance changes, removal/reintroduction, stale versions/review tokens and
+atomic failure without identity, event, receipt or answer changes. Historical
+revision JSON, compiled options and event snapshots are compared byte-for-byte.
+The existing form-save integration invokes `metadata-choice-display.ts` to compare
+actual SQL paths with TypeScript over complete revisions, selected subsets and
+reordering followed by historical reads. The 1,000-choice pgTAP suite retains
+its one-normalization-per-option and output/resource-limit assertions.
+
+`tests/e2e/metadata-choice-identity.spec.ts` uses a loopback-only coherent legacy
+fixture for populated Inventory and Labels at desktop and 390 px in Full and
+Reduced motion, unchanged-legacy editing and blocked spelling changes. The
+existing nested authoring browser case now distinguishes fresh cross-parent
+collision rejection from unchanged published compatibility. These database and
+browser tests require the canonical disposable local stack or CI; source/unit
+passes do not certify SQL execution, hosted summaries or actual populated UI.
+Full database/type generation, browser captures, exact-SHA remote checks and
+fresh independent review remain acceptance gates. Generated database types need
+no API signature update for this private-function replacement.
+
 Checkpoint scope/accessibility regression coverage includes normalized location status/export links, caller-scoped record identity and unavailable history recovery, page-local versus full-row counts, empty inventory/destination states, page recovery, monitoring coverage, intact location codes and hidden/unmodeled/failed map guidance. Focused Vitest tests prove these contracts and stale-response handling; `scope-accessibility.spec.ts` exercises ordinary controls, real authorized reads and downloaded CSV across page boundaries. Required-input and category-focus interaction coverage lives in `scope-accessibility-forms.spec.ts`. Mocked reads are not integrated runtime or complete assistive-technology proof; use the existing disposable-local and isolated-preview gates for final acceptance.
 
 Dedicated first-use acceptance runs on the disposable local backend: run `npm run db:reset`, then `npm run test:e2e -- --config tests/acceptance/checkpoint2.config.ts` before other data-creating tests. Authenticated precondition reads require zero quantity definitions, serialized assets and sites; a nonempty catalog or failed read fails the test rather than skipping it. The ordinary CI and full-validation gates remain unchanged.
@@ -335,7 +426,7 @@ flows through the authorized application.
 F307 checks branded route-kind titles without private record names or UUIDs.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
-The interface E2E uses a clearly synthetic navigation-boundary fixture: a real
+The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
 owned inventory NextLink receives the server's real missing-record RSC response
 through a scoped non-prefetch request rewrite. It requires unavailable content,
 private-safe metadata, no document fallback, and recovery through an ordinary
@@ -350,6 +441,22 @@ uses an error convention when metadata resolution itself fails; a static
 client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
+
+## P05 vocabulary and support detail checks
+
+Focused receipt/history, category, task, status and export tests cover immutable
+snapshots, safe uncertain retries, capitalized status, action-specific success,
+record-type help and precision-preserving clipboard details. Browser coverage in
+`tests/e2e/audit-four-vocabulary.spec.ts` is ready for populated authorized UI at
+desktop and 390 px, including task headings, scan status, history and clipboard.
+Local resource limits exclude builds, Docker resets and full browser execution;
+E2E discovery alone is not visual or hosted acceptance.
+
+The P05 review batch includes low-stock readable CSV labels with machine-column
+compatibility tests for both export branches and custom-field modes. Shared browser
+custody controls assert the specific committed operation, including transfer and
+quantity write-off, and category browser helpers check the actual category name.
+These focused/static checks do not replace the pending database/browser runtime gate.
 
 ## Audit 4.2 room interaction evidence
 
@@ -440,7 +547,7 @@ route-omitting boundary returned HTTP 200 even without Suspense. The structural
 page-gate pattern returned HTTP 404 for the missing page and HTTP 200 for the
 successful page without mounting those private probes. This is DB-free local
 transport evidence, not full-application or hosted browser acceptance. Preserve
-the real direct missing-resource document assertions in the interface E2E, and
+the real direct missing-resource document assertions in the inventory/navigation-workflow E2E, and
 run the complete application/browser gates for the final change. Inspect desktop
 and phone-width layout after the gates release; unit visibility checks alone do
 not establish that new wrappers preserve the rendered layout.
@@ -476,3 +583,32 @@ redirect, empty and access-denied branches.
 | `sites/page.tsx`                       |                             1 |         |
 | `sites/[code]/page.tsx`                |                             1 | Yes     |
 | `sites/[code]/open/[kind]/page.tsx`    |                             3 | Yes     |
+
+## PR44 / PR47 local Auth diagnostic consolidation
+
+The merged fixture invokes `scripts/local-auth-templates.mjs` once after the
+replacement Auth container is healthy, through the existing `verifyTemplates`
+injection contract. Its canonical verifier validates local Auth/Kong ownership,
+loopback bindings, database identity/port, exact invite/recovery URLs and checked-in
+file bytes, then fetches bounded HTTP bodies from inside Auth under one shared
+readiness deadline. Redirects are rejected. The duplicate PR47 Docker-exec template
+codec/probe is superseded; no application Auth flow or provider setting changes.
+
+The retained failure-to-coverage mapping is in
+`tests/local-auth-password-policy.test.mjs`:
+
+| Previous PR47 check                                                 | Canonical retained check                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exact invite/recovery bytes, network and non-TTY bounded retrieval  | Actual canonical files/all phases; owned service validation; fixed HTTP requests pinned to local Docker with buffer/time limits and no redirect following.                                                                                                                                          |
+| Missing, duplicate or wrong template URLs                           | Owned service configuration rejects missing, duplicate and wrong URLs before any fetch; loopback/database/project/network guards remain.                                                                                                                                                            |
+| Framing/body bounds and malformed output                            | Canonical HTTP parser rejects malformed status/header, truncated length, encoded and oversized responses; CLI buffers/timeouts replace the unused multiplexed exec codec.                                                                                                                           |
+| Wrong bytes, unverified completion and secret redaction             | Bounded content mismatch/transport/probe-client categories; success requires validated complete HTTP 200, exact body length and exact checked-in bytes.                                                                                                                                             |
+| Final HTTP status and forged header values                          | Canonical status parser preserves only validated status; dedicated forged-header regression; redirects are rejected rather than followed.                                                                                                                                                           |
+| Temporary readiness, attempt/shared deadline                        | Transient listener readiness; exact deadline prevents another fetch; shrinking/subsecond command budgets and late-success rejection cover both templates under the canonical 30-second maximum. The superseded probe's implementation-specific three-attempt/20-second rules are not a second gate. |
+| Absolute Docker timeout, byte limit and sanitized response failures | Original real-socket lifecycle transport regression retains trickle timeout, output overflow, HTTP error and invalid JSON redaction.                                                                                                                                                                |
+| Failed preflight prevents email test/run and restores container     | Existing injected template-failure restoration plus an actual canonical content-mismatch regression prove one preflight invocation, no run, owned replacement removal and exact original container restoration. Existing original-error aggregation cases remain.                                   |
+
+Earlier checks at PR47 head `23dcd8c2022ec61908912cfe4f44e8b37be5f8e5`
+and PR44/main `43351451aff5c3d4441ff211060ae680574a3f77` remain historical.
+This mapping documents source retention; it does not establish a new combined-tree
+pass or actual Docker/email/browser acceptance. Report fresh focused checks separately.

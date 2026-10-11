@@ -53,7 +53,10 @@ it('updates every mounted timestamp for a new event, shared ticks and visibility
   expect(timestamps()[1]).toHaveTextContent('3 min ago');
   expect(timestamps()[1]).toHaveAttribute('datetime', saved);
   fireEvent.click(container.querySelectorAll('summary')[1]);
-  expect(screen.getByText(saved)).toBeVisible();
+  expect(screen.queryByText(saved)).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole('button', { name: 'Copy technical details' }).at(-1),
+  ).toBeVisible();
   unmount();
   expect(relativeClockSnapshot()).toBeNull();
 });
@@ -86,11 +89,14 @@ it('discloses the exact timestamp, timezone and recorded precision through a foc
   );
   const summary = container.querySelector('summary')!;
   expect(summary).toHaveTextContent('1 min ago');
-  expect(summary).toHaveTextContent('3 Oct 2026, 05:23:06 UTC');
+  expect(summary).toHaveTextContent('Recorded 3 Oct 2026 at 5:23 AM');
   summary.focus();
   expect(summary).toHaveFocus();
   fireEvent.click(summary);
-  expect(screen.getByText(at)).toBeVisible();
+  expect(screen.queryByText(at)).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole('button', { name: 'Copy technical details' }).at(-1),
+  ).toBeVisible();
   expect(container.querySelector('time')).toHaveAttribute('datetime', at);
   unmount();
   vi.useRealTimers();

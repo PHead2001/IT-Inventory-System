@@ -452,6 +452,16 @@ Inventory create, metadata update and restore RPCs take a shared advisory catalo
 
 Shared label defaults cover the current 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices. The print page starts from these defaults, while each print session can choose differently. The future custom-fields engine, designer and file schema are separate work. This slice preserves inventory rows and their extension point but creates no custom-field tables or forms.
 
+## Readable display vocabulary
+
+Custody event titles use the shared display mapping in `features/custody/vocabulary.ts`;
+record status uses `lib/record-status.ts`. These mappings do not change persisted
+operations, identities, event snapshots, expected-version checks or retry receipts.
+Inventory CSV appends readable Type label, Status label and Custody label columns;
+low-stock CSV appends Type label and Status label. Both retain existing machine column positions and values. Clipboard support details
+carry original event/operation IDs and ISO precision without rendering them in
+ordinary receipt/history text; local timestamp displays keep the recorded `dateTime`.
+
 ## Shared screen palette and interactive transitions
 
 The dark screen palette is centralized in semantic custom properties in `globals.css`, including workspace, Labels, Scan, form-designer, inventory-row and closet-preview colors. Minimal interactive defaults scope the transition property list without supplying a duration. Existing animated controls opt into the shared feedback duration/easing; route and panel motion remain a separate implementation. UI scene colors keep the existing single-capture `readScenePalette` contract and its Three-compatible formats. Physical room data, geometry and material defaults are unchanged. Print/PDF/export ink remains independent of screen theme. See [interface standards](interface-standards.md) for the exact foundation scope and exceptions. Dark/Light/System persistence, prepaint handling and live scene retheme are not implemented by this foundation.

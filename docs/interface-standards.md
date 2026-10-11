@@ -83,6 +83,26 @@ Write for the staff member in the moment, not for a reviewer of the implementati
 | Correct recorded location                                                                  | Correct: update the record without physically moving equipment                              |
 | Move asset                                                                                 | Move: physically relocate the asset                                                         |
 | Write off / Retire                                                                         | Write off quantity stock / Retire an individual asset                                       |
+| Issued / Assigned (individual asset)                                                       | Assigned to site                                                                            |
+| Issued (quantity stock)                                                                    | Issued to site                                                                              |
+| Returned                                                                                   | Returned from site                                                                          |
+| Transferred                                                                                | Transferred between sites                                                                   |
+| Corrected (quantity) / Corrected (individual asset)                                        | Site count corrected / Site custody corrected                                               |
+| Written off (quantity) / Written off (individual asset)                                    | Quantity written off at site / Asset written off at site                                    |
+| Retired (site assignment)                                                                  | Asset retired at site                                                                       |
+| Name reviewed / Endpoints reviewed for this operation                                      | Omit the implementation suffix; show the recorded item and route                            |
+| Operation identity / Recorded instant                                                      | Copy technical details                                                                      |
+| Quantity Item code (SKU)                                                                   | Quantity item code (SKU)                                                                    |
+| Review assign asset to a site / Confirm assign asset to a site                             | Review assignment / Assign to site                                                          |
+| Inventory schema / provisional software location / reviewed room code                      | Categories / storage location / application update                                          |
+| Truly unreferenced category will be deleted                                                | This category has no inventory or history references and will be removed                    |
+
+Shared display labels in `custody/vocabulary.ts` implement the vocabulary above.
+Category outcomes include the completed action and
+category name. Status labels share `record-status.ts` across lists, detail, Labels and
+Scan. Inventory CSV appends Type label, Status label and Custody label while retaining existing
+machine columns and positions. Low-stock CSV also appends Type label and Status label. Support IDs and original ISO instants belong in **Copy
+technical details**; expanded timestamps show readable exact local time and timezone.
 
 Add rows here when a recurring phrase is replaced, so later work reuses the same wording.
 
@@ -184,8 +204,8 @@ page retains navigation to all record history and custom snapshots.
 Relative times refresh the shared clock when a timestamp mounts and tolerate at most
 two minutes of future clock skew as **Just now**; genuinely future instants stay distinct.
 They use one shared 30-second browser clock, paused when hidden and stopped without subscribers. Server/first hydration
-uses exact UTC; focus/click opens the exact display timestamp, timezone and original
-recorded instant with its precision. Date-only controls and export formats are unchanged.
+uses exact UTC; focus/click opens the exact readable display timestamp and timezone; Copy technical
+details preserves the original recorded instant with its precision. Date-only controls and export formats are unchanged.
 
 - **Empty** (nothing exists yet): say so and offer the create action.
 - **Filtered-empty** (filters exclude everything): name the active filters and offer "Clear filters".
