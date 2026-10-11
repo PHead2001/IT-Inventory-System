@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   notFound: vi.fn(),
   designer: vi.fn(),
+  panel: vi.fn(),
 }));
 vi.mock('@/features/configuration/queries.server', () => ({
   getConfigurationCategories: mocks.categories,
@@ -32,7 +33,10 @@ vi.mock('@/features/metadata/metadata-settings', () => ({
   },
 }));
 vi.mock('@/features/configuration/settings-panel', () => ({
-  SettingsPanel: () => <div>Configuration controls</div>,
+  SettingsPanel: (props: unknown) => {
+    mocks.panel(props);
+    return <div>Configuration controls</div>;
+  },
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => mocks.pathname,
@@ -64,6 +68,7 @@ beforeEach(() => {
       version: '1',
     },
     canManage: true,
+    labelBinding: { actorId: id, backend: 'https://isolated.supabase.co' },
   });
   mocks.forms.mockResolvedValue({ [id]: {} });
   mocks.notFound.mockImplementation(() => {
@@ -88,6 +93,15 @@ it('keeps landing, form chooser and label defaults independent of form definitio
   await LabelSettingsPage();
   expect(mocks.forms).not.toHaveBeenCalled();
   expect(mocks.labels).toHaveBeenCalledOnce();
+});
+
+it('passes the loaded label caller binding into the actual label settings UI', async () => {
+  render(await LabelSettingsPage());
+  expect(mocks.panel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      labelBinding: { actorId: id, backend: 'https://isolated.supabase.co' },
+    }),
+  );
 });
 
 it('loads only the selected active category form for an editor', async () => {

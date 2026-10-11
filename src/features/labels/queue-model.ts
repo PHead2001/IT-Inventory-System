@@ -1,5 +1,11 @@
 import { ASSET_UUID, LOCATION_CODE } from '@/features/scan/targets';
-import { printLayoutSchema, type PrintLayout } from './print-layout';
+import {
+  printLayoutSchema,
+  mediaDraftSchema,
+  parseLayoutDraft,
+  type LayoutDraft,
+  type PrintLayout,
+} from './print-layout';
 export type LabelKind = 'location' | 'asset' | 'quantity';
 export type QueueKey = { kind: LabelKind; key: string };
 export type QueueEntry = QueueKey & {
@@ -39,6 +45,7 @@ export const MAX_DISTINCT = 200;
 export const MAX_LABELS = 500;
 export const MAX_COPIES = 100;
 export const MAX_COPY_DRAFT_LENGTH = 80;
+export const MAX_QUEUE_STORAGE_LENGTH = 100_000;
 
 export function queueIdentity(value: QueueKey): string {
   return value.kind + ':' + value.key;
@@ -123,9 +130,11 @@ export function parseStoredQueue(
   filters: LabelSearchFilters;
   job: JobSettings;
   layoutRecovery?: { value: unknown };
+  mediaDraft?: LayoutDraft;
+  mediaDraftRecovery?: { value: unknown };
   copyDrafts?: Record<string, string>;
 } | null {
-  if (!raw || raw.length > 100_000) return null;
+  if (!raw || raw.length > MAX_QUEUE_STORAGE_LENGTH) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return null;
@@ -173,6 +182,25 @@ export function parseStoredQueue(
       : null;
     const layoutRecovery =
       hasLayout && !layout?.success ? { value: job?.layout } : undefined;
+    const hasMediaDraft = Object.hasOwn(stored, 'mediaDraft');
+    const rawMedia = hasMediaDraft
+      ? mediaDraftSchema.safeParse(stored.mediaDraft)
+      : null;
+    const mediaDraft = rawMedia?.success
+      ? (rawMedia.data as LayoutDraft)
+      : undefined;
+    const parsedMedia = mediaDraft ? parseLayoutDraft(mediaDraft) : null;
+    // Raw strings never replace effective geometry on hydration. A forged valid
+    // draft for another layout remains blocked until an explicit edit or reset.
+    const mediaDraftRecovery =
+      hasMediaDraft &&
+      (!rawMedia?.success ||
+        (parsedMedia &&
+          (!validJob ||
+            !layout?.success ||
+            JSON.stringify(parsedMedia) !== JSON.stringify(layout.data))))
+        ? { value: stored.mediaDraft }
+        : undefined;
     // Optional drafts never replace validated counts or adopt values after another
     // entry changes. Preserve blank distinctly from a missing draft on reload.
     const copyDrafts = Object.fromEntries(
@@ -212,6 +240,8 @@ export function parseStoredQueue(
           }
         : { ...fallbackJob },
       ...(layoutRecovery ? { layoutRecovery } : {}),
+      ...(mediaDraft ? { mediaDraft } : {}),
+      ...(mediaDraftRecovery ? { mediaDraftRecovery } : {}),
       copyDrafts,
     };
   } catch {

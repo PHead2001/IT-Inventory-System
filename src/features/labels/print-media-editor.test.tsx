@@ -10,18 +10,24 @@ it('retains invalid raw fields and requires valid custom geometry or explicit re
   expect(changed).toHaveBeenLastCalledWith(
     expect.objectContaining({ mode: 'sheet', sheetWidth: 2159 }),
     true,
+    expect.objectContaining({ mode: 'sheet' }),
   );
   fireEvent.change(screen.getByLabelText('Label width (mm)'), {
     target: { value: '90.' },
   });
   expect(screen.getByLabelText('Label width (mm)')).toHaveValue('90.');
-  expect(changed).toHaveBeenLastCalledWith(null, false);
+  expect(changed).toHaveBeenLastCalledWith(
+    null,
+    false,
+    expect.objectContaining({ labelWidth: '90.' }),
+  );
   fireEvent.change(screen.getByLabelText('Label width (mm)'), {
     target: { value: '90.1' },
   });
   expect(changed).toHaveBeenLastCalledWith(
     expect.objectContaining({ labelWidth: 901 }),
     true,
+    expect.objectContaining({ labelWidth: '90.1' }),
   );
   fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
     target: { value: 'single' },
@@ -29,10 +35,11 @@ it('retains invalid raw fields and requires valid custom geometry or explicit re
   expect(changed).toHaveBeenLastCalledWith(
     { version: 1, mode: 'single', labelWidth: 901, labelHeight: 500 },
     true,
+    expect.objectContaining({ mode: 'single' }),
   );
   expect(screen.queryByLabelText('Top margin (mm)')).toBeNull();
   fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
     target: { value: 'preset' },
   });
-  expect(changed).toHaveBeenLastCalledWith(null, true);
+  expect(changed).toHaveBeenLastCalledWith(null, true, null);
 });

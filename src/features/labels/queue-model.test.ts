@@ -192,3 +192,37 @@ it('constructs a validated cached job, retains old media and preserves invalid m
     expect(result?.job).toEqual(defaultJob);
   }
 });
+
+it('retains bounded raw media and rejects forged or oversized media without losing the queue', () => {
+  const stored = {
+    entries: [entry(1)],
+    filters: defaultFilters,
+    job: {
+      ...defaultJob,
+      layout: { version: 1, mode: 'single', labelWidth: 700, labelHeight: 350 },
+    },
+  };
+  const raw = { mode: 'single', labelWidth: '70.', labelHeight: '35' };
+  expect(
+    parseStoredQueue(JSON.stringify({ ...stored, mediaDraft: raw }))
+      ?.mediaDraft,
+  ).toEqual(raw);
+  for (const invalid of [
+    { ...raw, extra: 'ignored?' },
+    { ...raw, labelWidth: 'x'.repeat(81) },
+    { ...raw, labelWidth: '80' },
+    null,
+  ]) {
+    const parsed = parseStoredQueue(
+      JSON.stringify({ ...stored, mediaDraft: invalid }),
+    );
+    expect(parsed?.entries).toEqual(stored.entries);
+    expect(parsed?.job.layout).toEqual(stored.job.layout);
+    expect(parsed?.mediaDraftRecovery).toEqual({ value: invalid });
+  }
+  expect(
+    parseStoredQueue(
+      JSON.stringify({ ...stored, mediaDraft: { ...raw, labelWidth: '70' } }),
+    )?.mediaDraftRecovery,
+  ).toBeUndefined();
+});

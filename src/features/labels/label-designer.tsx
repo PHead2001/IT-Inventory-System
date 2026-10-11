@@ -27,7 +27,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
 import { PrintMediaEditor } from './print-media-editor';
-import type { PrintLayout } from './print-layout';
+import {
+  parseLayoutDraft,
+  type LayoutDraft,
+  type PrintLayout,
+} from './print-layout';
 import type {
   CategoryRef,
   LocationRef,
@@ -63,6 +67,7 @@ import {
   defaultFilters,
   defaultJob,
   MAX_COPIES,
+  MAX_QUEUE_STORAGE_LENGTH,
   MAX_COPY_DRAFT_LENGTH,
   MAX_DISTINCT,
   MAX_LABELS,
@@ -264,6 +269,10 @@ function LabelDesignerWorkspace({
   };
   const [job, setJob] = useState<JobSettings>(defaults);
   const [layoutValid, setLayoutValid] = useState(true);
+  const [mediaDraft, setMediaDraft] = useState<LayoutDraft | null>(null);
+  const [mediaDraftRecovery, setMediaDraftRecovery] = useState<{
+    value: unknown;
+  } | null>(null);
   const [layoutRecovery, setLayoutRecovery] = useState<{
     value: unknown;
   } | null>(null);
@@ -307,7 +316,11 @@ function LabelDesignerWorkspace({
     setFallbackPending(false);
     setFormatAcknowledged(false);
   };
-  const changeMedia = (next: JobSettings, valid = true) => {
+  const changeMedia = (
+    next: JobSettings,
+    valid = true,
+    rawDraft: LayoutDraft | null = mediaDraft,
+  ) => {
     geometryEpoch.current++;
     setMediaGeneration(geometryEpoch.current);
     activePrintAbort.current?.abort();
@@ -317,8 +330,10 @@ function LabelDesignerWorkspace({
     setFallbackPending(false);
     setLayoutValid(valid);
     setJob(next);
+    setMediaDraft(rawDraft);
     if (valid) {
       setLayoutRecovery(null);
+      setMediaDraftRecovery(null);
     }
   };
   const byId = useMemo(
@@ -344,6 +359,8 @@ function LabelDesignerWorkspace({
     setMediaGeneration(geometryEpoch.current);
     setCopyDrafts({});
     setLayoutRecovery(null);
+    setMediaDraft(null);
+    setMediaDraftRecovery(null);
     setLayoutValid(true);
     setMediaReset((value) => value + 1);
     setFormatAcknowledged(false);
@@ -427,7 +444,14 @@ function LabelDesignerWorkspace({
         setDraftState(stored.filters);
         setJob(stored.job);
         setLayoutRecovery(stored.layoutRecovery ?? null);
-        setLayoutValid(!stored.layoutRecovery);
+        setMediaDraft(stored.mediaDraft ?? null);
+        setMediaDraftRecovery(stored.mediaDraftRecovery ?? null);
+        setLayoutValid(
+          !stored.layoutRecovery &&
+            !stored.mediaDraftRecovery &&
+            (!stored.mediaDraft ||
+              Boolean(parseLayoutDraft(stored.mediaDraft))),
+        );
         setCopyDrafts(
           Object.fromEntries(
             Object.entries(stored.copyDrafts ?? {}).filter(([id]) =>
@@ -455,15 +479,20 @@ function LabelDesignerWorkspace({
     )
       return;
     try {
-      sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          entries,
-          filters,
-          copyDrafts,
-          job: layoutRecovery ? { ...job, layout: layoutRecovery.value } : job,
-        }),
-      );
+      const serialized = JSON.stringify({
+        entries,
+        filters,
+        copyDrafts,
+        ...(mediaDraftRecovery
+          ? { mediaDraft: mediaDraftRecovery.value }
+          : mediaDraft
+            ? { mediaDraft }
+            : {}),
+        job: layoutRecovery ? { ...job, layout: layoutRecovery.value } : job,
+      });
+      if (serialized.length > MAX_QUEUE_STORAGE_LENGTH)
+        throw new Error('Label job exceeds local storage budget');
+      sessionStorage.setItem(storageKey, serialized);
     } catch {
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
@@ -477,6 +506,8 @@ function LabelDesignerWorkspace({
     admitted,
     layoutRecovery,
     copyDrafts,
+    mediaDraft,
+    mediaDraftRecovery,
   ]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
@@ -1971,11 +2002,15 @@ function LabelDesignerWorkspace({
               value={job.size}
               disabled={busy}
               onChange={(event) => {
-                changeMedia({
-                  ...job,
-                  size: event.target.value as JobSettings['size'],
-                  layout: null,
-                });
+                changeMedia(
+                  {
+                    ...job,
+                    size: event.target.value as JobSettings['size'],
+                    layout: null,
+                  },
+                  true,
+                  null,
+                );
                 setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
@@ -1993,11 +2028,15 @@ function LabelDesignerWorkspace({
               value={job.page}
               disabled={busy}
               onChange={(event) => {
-                changeMedia({
-                  ...job,
-                  page: event.target.value as JobSettings['page'],
-                  layout: null,
-                });
+                changeMedia(
+                  {
+                    ...job,
+                    page: event.target.value as JobSettings['page'],
+                    layout: null,
+                  },
+                  true,
+                  null,
+                );
                 setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
@@ -2045,11 +2084,12 @@ function LabelDesignerWorkspace({
           layout={job.layout}
           size={job.size}
           page={job.page}
-          onChange={(layout: PrintLayout | null, valid) =>
-            changeMedia(valid ? { ...job, layout } : job, valid)
+          initialDraft={mediaDraft}
+          onChange={(layout: PrintLayout | null, valid, draft) =>
+            changeMedia(valid ? { ...job, layout } : job, valid, draft)
           }
         />
-        {layoutRecovery && (
+        {(layoutRecovery || mediaDraftRecovery) && (
           <p role="alert" className={styles.error}>
             The saved print dimensions are invalid. Your queue is retained.
             Review new dimensions or reset the print media before printing.
@@ -2060,7 +2100,7 @@ function LabelDesignerWorkspace({
             type="button"
             className={styles.secondaryButton}
             onClick={() => {
-              changeMedia({ ...job, layout: null });
+              changeMedia({ ...job, layout: null }, true, null);
               setMediaReset((value) => value + 1);
             }}
           >

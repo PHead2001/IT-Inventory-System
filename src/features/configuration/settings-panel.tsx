@@ -7,7 +7,12 @@ import { Input } from '@/components/ui/input';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
-import { normalizeCategoryName, type RemovalReview } from './contracts';
+import {
+  configurationError,
+  normalizeCategoryName,
+  type RemovalReview,
+  type LabelSettingsBinding,
+} from './contracts';
 import { PrintMediaEditor } from '@/features/labels/print-media-editor';
 import type { PrintLayout } from '@/features/labels/print-layout';
 import {
@@ -33,11 +38,13 @@ function codeFor(name: string) {
 export function SettingsPanel({
   categories,
   labelDefaults,
+  labelBinding,
   canManage,
   mode = 'both',
 }: {
   categories?: ConfigurationCategory[];
   labelDefaults?: LabelDefaults;
+  labelBinding?: LabelSettingsBinding;
   canManage: boolean;
   mode?: 'both' | 'categories' | 'labels';
 }) {
@@ -81,6 +88,26 @@ export function SettingsPanel({
     labelDefaults?.layout ?? null,
   );
   const [layoutValid, setLayoutValid] = useState(true);
+  const [labelVersion, setLabelVersion] = useState(
+    labelDefaults?.version ?? null,
+  );
+  const [labelUncertain, setLabelUncertain] = useState(false);
+  const [labelOwner] = useState(labelBinding);
+  const labelOwnerChanged =
+    labelOwner?.actorId !== labelBinding?.actorId ||
+    labelOwner?.backend !== labelBinding?.backend;
+  const labelSubmitted = useRef<{
+    operation: 'label_defaults_update';
+    requestId: string;
+    payload: Record<string, unknown>;
+    expectedActorId?: string;
+    expectedBackend?: string;
+  } | null>(null);
+  const inFlight = useRef(false);
+  const newerLabelDefaults =
+    labelDefaults &&
+    (labelVersion === null ||
+      BigInt(labelDefaults.version) > BigInt(labelVersion));
   const [mediaReset, setMediaReset] = useState(0);
   const active = (categories ?? []).filter(
     (item) => item.active && !item.removed_at,
@@ -98,21 +125,70 @@ export function SettingsPanel({
       | 'category_remove'
       | 'label_defaults_update',
     payload: Record<string, unknown>,
-    onSuccess?: () => void,
+    onSuccess?: (version: string | null) => void,
     reviewedSourceName?: string,
   ) => {
+    if (inFlight.current || pending) return;
+    if (operation === 'label_defaults_update' && labelOwnerChanged) return;
     const key = JSON.stringify([operation, payload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
     setReceipt({ key, id: requestId });
     setMessage('');
+    const command =
+      operation === 'label_defaults_update' &&
+      labelUncertain &&
+      labelSubmitted.current
+        ? labelSubmitted.current
+        : {
+            operation,
+            requestId,
+            payload,
+            ...(operation === 'label_defaults_update' && labelOwner
+              ? {
+                  expectedActorId: labelOwner.actorId,
+                  expectedBackend: labelOwner.backend,
+                }
+              : {}),
+          };
+    if (operation === 'label_defaults_update')
+      labelSubmitted.current = {
+        ...command,
+        operation: 'label_defaults_update',
+      };
+    inFlight.current = true;
     startTransition(async () => {
-      const result = await submitConfiguration({
-        operation,
-        requestId,
-        payload,
-      });
+      let result;
+      try {
+        result = await submitConfiguration(command);
+      } catch {
+        result = configurationError(undefined);
+      } finally {
+        inFlight.current = false;
+      }
       if (!result.ok) {
         setMessage(result.message);
+        if (operation === 'label_defaults_update') {
+          const knownRejection = [
+            'P1001',
+            'P1002',
+            'P1008',
+            'P1009',
+            'P1012',
+            'P1016',
+            '55P03',
+            '57014',
+          ].includes(result.code);
+          const unresolved =
+            !knownRejection ||
+            (labelUncertain &&
+              ['P1001', 'P1009', 'P1012', 'P1016', '55P03', '57014'].includes(
+                result.code,
+              ));
+          // A timeout or pre-replay rejection of this attempt cannot resolve
+          // an earlier lost response. Keep its original command available.
+          setLabelUncertain(unresolved);
+          if (!unresolved) labelSubmitted.current = null;
+        }
         if (operation === 'category_remove' && result.code === 'P1017') {
           setReview(null);
           setReceipt(null);
@@ -120,6 +196,11 @@ export function SettingsPanel({
         return;
       }
       setReceipt(null);
+      if (operation === 'label_defaults_update') {
+        setLabelUncertain(false);
+        labelSubmitted.current = null;
+        if (result.result.version) setLabelVersion(result.result.version);
+      }
       setMessage(
         result.result.changed
           ? {
@@ -130,7 +211,7 @@ export function SettingsPanel({
             }[operation]
           : 'No values changed.',
       );
-      onSuccess?.();
+      onSuccess?.(result.result.version);
       router.refresh();
     });
   };
@@ -561,7 +642,9 @@ export function SettingsPanel({
               <select
                 className="experience-field min-h-11 w-full px-3"
                 value={size}
-                disabled={!canManage || pending}
+                disabled={
+                  !canManage || pending || labelUncertain || labelOwnerChanged
+                }
                 onChange={(event) => {
                   setSize(event.target.value as LabelDefaults['size']);
                   setLayout(null);
@@ -581,7 +664,9 @@ export function SettingsPanel({
               <select
                 className="experience-field min-h-11 w-full px-3"
                 value={page}
-                disabled={!canManage || pending}
+                disabled={
+                  !canManage || pending || labelUncertain || labelOwnerChanged
+                }
                 onChange={(event) => {
                   setPage(event.target.value as LabelDefaults['page']);
                   setLayout(null);
@@ -602,7 +687,9 @@ export function SettingsPanel({
                 aria-describedby="shared-barcode-help"
                 className="experience-field min-h-11 w-full px-3"
                 value={format}
-                disabled={!canManage || pending}
+                disabled={
+                  !canManage || pending || labelUncertain || labelOwnerChanged
+                }
                 onChange={(event) =>
                   setFormat(event.target.value as LabelDefaults['format'])
                 }
@@ -623,19 +710,63 @@ export function SettingsPanel({
             layout={layout}
             size={size}
             page={page}
-            disabled={!canManage || pending}
+            disabled={
+              !canManage || pending || labelUncertain || labelOwnerChanged
+            }
             onChange={(next, valid) => {
               setLayoutValid(valid);
               if (valid) setLayout(next);
             }}
           />
+          {newerLabelDefaults && canManage && (
+            <div className="space-y-2">
+              <p role="status" className="text-sm">
+                Shared defaults changed elsewhere. Load the latest defaults to
+                replace your unsaved label choices.
+              </p>
+              <Button
+                type="button"
+                disabled={pending || labelUncertain || labelOwnerChanged}
+                onClick={() => {
+                  setLabelVersion(labelDefaults.version);
+                  setSize(labelDefaults.size);
+                  setPage(labelDefaults.page);
+                  setFormat(labelDefaults.format);
+                  setLayout(labelDefaults.layout ?? null);
+                  setLayoutValid(true);
+                  setMediaReset((value) => value + 1);
+                  setReceipt(null);
+                  setMessage('');
+                }}
+              >
+                Load latest shared defaults
+              </Button>
+            </div>
+          )}
+          {labelUncertain && (
+            <p role="status" className="text-sm">
+              The label settings result could not be confirmed. Retry the same
+              save before changing these choices.
+            </p>
+          )}
+          {labelOwnerChanged && (
+            <p role="status" className="text-sm">
+              Return to this workspace’s original account and environment to
+              continue these label settings.
+            </p>
+          )}
           {canManage && (
             <Button
               type="button"
-              disabled={pending || !layoutValid}
+              disabled={
+                pending ||
+                !layoutValid ||
+                labelVersion === null ||
+                labelOwnerChanged
+              }
               onClick={() =>
                 submit('label_defaults_update', {
-                  expected_version: labelDefaults.version,
+                  expected_version: labelVersion,
                   size,
                   page,
                   format,
@@ -643,7 +774,9 @@ export function SettingsPanel({
                 })
               }
             >
-              Save shared defaults
+              {labelUncertain
+                ? 'Retry same label settings save'
+                : 'Save shared defaults'}
             </Button>
           )}
         </section>

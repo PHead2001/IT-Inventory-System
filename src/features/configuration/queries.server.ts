@@ -2,6 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import { printLayoutSchema } from '@/features/labels/print-layout';
 import { requireMember } from '@/lib/auth/session.server';
+import { supabaseConfig } from '@/lib/supabase/config';
 
 const category = z.object({
   id: z.uuid(),
@@ -56,6 +57,10 @@ export async function getLabelSettings() {
   if (error) throw new Error('Shared label defaults could not be loaded.');
   return {
     labelDefaults: labelDefaults.parse(data),
+    labelBinding: {
+      actorId: member.user_id,
+      backend: new URL(supabaseConfig().url).origin,
+    },
     canManage: member.role === 'staff' && member.can_manage_configuration,
   };
 }

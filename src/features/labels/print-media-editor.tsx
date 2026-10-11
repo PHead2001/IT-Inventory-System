@@ -4,6 +4,8 @@ import {
   defaultCustomLayout,
   layoutDraft,
   parseLayoutDraft,
+  MAX_MEDIA_DRAFT_LENGTH,
+  type LayoutDraft,
   type PrintLayout,
 } from './print-layout';
 
@@ -24,25 +26,34 @@ export function PrintMediaEditor({
   size,
   page,
   disabled = false,
+  initialDraft,
   onChange,
 }: {
   layout?: PrintLayout | null;
   size: '90x50' | '70x35';
   page: 'letter' | 'A4';
   disabled?: boolean;
-  onChange: (layout: PrintLayout | null, valid: boolean) => void;
+  initialDraft?: LayoutDraft | null;
+  onChange: (
+    layout: PrintLayout | null,
+    valid: boolean,
+    draft: LayoutDraft | null,
+  ) => void;
 }) {
-  const [draft, setDraft] = useState(() =>
-    layoutDraft(layout ?? defaultCustomLayout(size, page)),
+  const [draft, setDraft] = useState(
+    () =>
+      initialDraft ?? layoutDraft(layout ?? defaultCustomLayout(size, page)),
   );
   const [mode, setMode] = useState<'preset' | 'sheet' | 'single'>(
-    layout?.mode ?? 'preset',
+    (initialDraft?.mode as 'sheet' | 'single' | undefined) ??
+      layout?.mode ??
+      'preset',
   );
   const valid = mode === 'preset' || Boolean(parseLayoutDraft(draft));
   const update = (next: typeof draft) => {
     setDraft(next);
     const parsed = parseLayoutDraft(next);
-    onChange(parsed, Boolean(parsed));
+    onChange(parsed, Boolean(parsed), next);
   };
   return (
     <fieldset disabled={disabled} className="space-y-3">
@@ -55,7 +66,7 @@ export function PrintMediaEditor({
           onChange={(event) => {
             const nextMode = event.target.value as typeof mode;
             setMode(nextMode);
-            if (nextMode === 'preset') onChange(null, true);
+            if (nextMode === 'preset') onChange(null, true, null);
             else update({ ...draft, mode: nextMode });
           }}
         >
@@ -75,6 +86,7 @@ export function PrintMediaEditor({
                   className="experience-field mt-1 block min-h-11 w-full px-3 text-base"
                   type="text"
                   inputMode="decimal"
+                  maxLength={MAX_MEDIA_DRAFT_LENGTH}
                   value={draft[field] ?? ''}
                   aria-invalid={!valid}
                   onChange={(event) =>

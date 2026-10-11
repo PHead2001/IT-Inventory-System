@@ -96,6 +96,21 @@ export function defaultCustomLayout(
 }
 
 export type LayoutDraft = Record<string, string>;
+export const MAX_MEDIA_DRAFT_LENGTH = 80;
+const rawDimension = z.string().max(MAX_MEDIA_DRAFT_LENGTH);
+export const mediaDraftSchema = z.strictObject({
+  mode: z.enum(['sheet', 'single']),
+  labelWidth: rawDimension,
+  labelHeight: rawDimension,
+  sheetWidth: rawDimension.optional(),
+  sheetHeight: rawDimension.optional(),
+  marginTop: rawDimension.optional(),
+  marginRight: rawDimension.optional(),
+  marginBottom: rawDimension.optional(),
+  marginLeft: rawDimension.optional(),
+  gapX: rawDimension.optional(),
+  gapY: rawDimension.optional(),
+});
 export function layoutDraft(layout: PrintLayout): LayoutDraft {
   return Object.fromEntries(
     Object.entries(layout)

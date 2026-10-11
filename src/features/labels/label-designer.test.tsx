@@ -593,6 +593,96 @@ it('changing barcode type preserves an invalid raw media draft and blocks previe
   );
 });
 
+it.each(['90.', ''])(
+  'retains raw media draft %j and queue copies across reload until correction',
+  async (raw) => {
+    const view = render(<LabelDesigner {...props} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+      target: { value: '3' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+      target: { value: 'sheet' },
+    });
+    fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+      target: { value: raw },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+      target: { value: 'code128' },
+    });
+    const key = queueStorageKey(props.origin, props.memberId);
+    await waitFor(() =>
+      expect(
+        JSON.parse(sessionStorage.getItem(key)!).mediaDraft?.labelWidth,
+      ).toBe(raw),
+    );
+    view.unmount();
+    render(<LabelDesigner {...props} initial={[]} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Label width (mm)')).toHaveValue(raw),
+    );
+    expect(screen.getByRole('combobox', { name: 'Output' })).toHaveValue(
+      'sheet',
+    );
+    expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+      'code128',
+    );
+    expect(
+      screen.getAllByRole('spinbutton', { name: 'Copies' })[0],
+    ).toHaveValue(3);
+    expect(printButton()).toBeDisabled();
+    expect(screen.queryByLabelText('Print preview')).toBeNull();
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+      target: { value: '90.1' },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Print preview')).toBeVisible(),
+    );
+    expect(JSON.parse(sessionStorage.getItem(key)!).job.layout.labelWidth).toBe(
+      901,
+    );
+  },
+);
+
+it('blocks a forged raw draft for different valid geometry before native printing and requires explicit reset', async () => {
+  const key = queueStorageKey(props.origin, props.memberId);
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: {
+        ...defaultJob,
+        layout: {
+          version: 1,
+          mode: 'single',
+          labelWidth: 700,
+          labelHeight: 350,
+        },
+      },
+      mediaDraft: { mode: 'single', labelWidth: '80', labelHeight: '35' },
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+  await screen.findByText(/The saved print dimensions are invalid/);
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('80');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+  expect(JSON.parse(sessionStorage.getItem(key)!).mediaDraft).toBeUndefined();
+});
+
 it('changing barcode type preserves invalid cached media until explicit reset', async () => {
   const badLayout = {
     version: 1,
@@ -3101,6 +3191,7 @@ it.each(['retry', 'first attempt'] as const)(
         ],
         filters: defaultFilters,
         job: { ...defaultJob, layout: { version: 999 } },
+        mediaDraft: { mode: 'single', labelWidth: '90.', labelHeight: '50' },
         copyDrafts: { [`asset:${assetId}`]: '101' },
       }),
     );
@@ -3180,6 +3271,7 @@ it.each(['retry', 'first attempt'] as const)(
         const stored = JSON.parse(value);
         expect(stored.entries).toEqual([]);
         expect(stored.copyDrafts).toEqual({});
+        expect(stored.mediaDraft).toBeUndefined();
         expect(stored.job).toEqual(defaultJob);
       }
     expect(sessionStorage.getItem(logoutAcknowledgementKey)).toBe(generation);
