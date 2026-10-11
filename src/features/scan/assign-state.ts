@@ -231,6 +231,7 @@ export function assignReducer(
         candidate: null,
         matches: [],
         search: null,
+        truncated: false,
         command: null,
         sourceId: '',
         units: '1',
