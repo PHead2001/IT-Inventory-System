@@ -462,12 +462,18 @@ function Wait-DetachedRunner($State, $Config) {
         } catch { $result = $null }
         # A transport outage may be retried read-only. A successfully received
         # malformed/different receipt is an integrity failure, never adopted.
-        if ($null -ne $result -and $result.ExitCode -eq 0) { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
+        if ($null -ne $result -and $result.ExitCode -eq 0) {
+            try { $receipt = ConvertFrom-RunnerGuestReceipt $result.Output $journal }
+            catch {
+                try { $_.Exception.Data['runnerFailureClass'] = 'receipt-invalid' } catch { }
+                throw
+            }
+        }
         if ($null -eq $receipt) {
             [void](Save-RunnerLaunchEvent $State 'transport-lost')
         } elseif ($receipt.phase -ceq 'exited') {
             [void](Save-RunnerLaunchEvent $State 'runner-exited' $journal.runnerId $journal.launchId $receipt.exitCode)
-            if ($receipt.exitCode -ne 0) { throw 'Detached runner ended abnormally; check GitHub Actions job state.' }
+            if ($receipt.exitCode -ne 0) { throw (New-RunnerExecutionFailure 'runner-exit' $receipt.exitCode) }
             return
         } else { [void](Save-RunnerLaunchEvent $State 'receipt' $journal.runnerId $journal.launchId) }
         Start-Sleep -Seconds 1
@@ -807,10 +813,17 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
             return [pscustomobject]@{ name = $name; id = $runnerId; outcome = 'runner-exited' }
         } catch {
             $sessionFailure = $_
+            Write-RunnerSessionFailure $name $sessionFailure $script:RunnerOperationStage
             throw
         } finally {
             $verificationFailure = $null
-            if ($verificationReady) { try { Assert-SessionAlive $state } catch { $verificationFailure = $_ } }
+            if ($verificationReady) {
+                try { Assert-SessionAlive $state }
+                catch {
+                    $verificationFailure = $_
+                    Write-RunnerSessionFailure $name $verificationFailure $script:RunnerOperationStage
+                }
+            }
             $mutex = Enter-RunnerLock
             try {
                 $current = Get-RunnerState
@@ -824,6 +837,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
                 }
                 if ($null -ne $verificationFailure) { throw $verificationFailure }
             } catch {
+                Write-RunnerSessionFailure $name $_ 'cleanup' -LockHeld
                 Write-RunnerFailure 'cleanup' 'STAGE_FAILED' $name
                 throw
             } finally { Exit-RunnerLock $mutex }
@@ -1264,6 +1278,10 @@ function Invoke-SupervisorLoop {
                 }
             }
         } catch {
+            # A session catch retained its initiating failure before finally.
+            # Fallback captures preclaim/verification failures only once, and
+            # later idle errors have no validated session identity to overwrite.
+            Write-RunnerSessionFailure $script:RunnerSessionName $_ $script:RunnerOperationStage -FirstOnly
             if ($script:RunnerOperationStage -cin @('memory-admission', 'queue-inspection', 'pilot-consumption') -and
                 (Test-Path -LiteralPath (Join-Path $script:RunnerRoot 'stop.requested'))) { return }
             # The next bounded poll may retry inspection. An unresolved durable

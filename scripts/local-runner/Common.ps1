@@ -158,7 +158,7 @@ function Write-RunnerCleanupObservation([string] $Origin, [string] $Reason, $Sta
             $record.errorLine = [Math]::Max(0, [Math]::Min(100000, [int]$Failure.InvocationInfo.ScriptLineNumber))
         }
         if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
-        Assert-RunnerProtectedPath $script:RunnerRoot
+        Assert-SecureRoot
         $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'failure-cleanup.json')
         Assert-StateIdentity $State
         if ($State.vmName -cnotmatch '^ITIR-[0-9a-f]{32}$') { throw 'Invalid diagnostic instance.' }
@@ -203,6 +203,124 @@ function Write-RunnerSessionFailureObservation($State, $Failure) {
         Write-RunnerCleanupObservation '' '' $State ([DateTime]::Parse($captured.atUtc)) -CapturedRecord $captured
     } catch {
         try { Write-Warning 'RUNNER_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    }
+}
+
+function New-RunnerExecutionFailure([ValidateSet('runner-exit')][string] $Class, [int] $ExitCode = 0) {
+    # Only these trusted call sites tag a failure. No guest text is accepted.
+    $failure = [Management.Automation.RuntimeException]::new('Runner execution failed; consult the bounded session failure record.')
+    $failure.Data['runnerFailureClass'] = $Class
+    if ($Class -ceq 'runner-exit') { $failure.Data['runnerFailureExitCode'] = $ExitCode }
+    return $failure
+}
+
+function Get-RunnerSessionFailureEnums {
+    return @{
+        stage = @('idle', 'preflight', 'disk-copy', 'disk-clone', 'key-generation', 'vm-creation', 'vm-configuration', 'network-isolation', 'vm-boot', 'guest-readiness', 'image-clone-readiness', 'image-preparation', 'runner-download', 'runner-transfer', 'jit-registration', 'job-execution', 'memory-admission', 'queue-inspection', 'pilot-consumption', 'pilot-verification', 'cleanup', 'other')
+        source = @('Runner.ps1', 'Common.ps1', 'PreparedImage.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'other')
+        exceptionType = @('System.Management.Automation.RuntimeException', 'System.Management.Automation.CmdletInvocationException', 'System.Management.Automation.CommandNotFoundException', 'System.Management.Automation.ParameterBindingException', 'System.InvalidOperationException', 'System.IO.IOException', 'System.UnauthorizedAccessException', 'System.TimeoutException', 'System.ArgumentException', 'other')
+        category = @('NotSpecified', 'InvalidData', 'InvalidOperation', 'InvalidArgument', 'ObjectNotFound', 'PermissionDenied', 'ResourceUnavailable', 'OperationTimeout', 'ReadError', 'WriteError', 'ParserError', 'SecurityError', 'ConnectionError', 'LimitsExceeded', 'other')
+        errorId = @('RuntimeException', 'CommandNotFoundException', 'ParameterBindingException', 'PositionalParameterNotFound', 'NativeCommandError', 'other')
+        failureClass = @('receipt-invalid', 'runner-exit', 'other')
+        capture = @('complete', 'unavailable')
+    }
+}
+
+function New-RunnerSessionFailureRecord($Failure, [string] $Stage) {
+    $enums = Get-RunnerSessionFailureEnums
+    $record = [ordered]@{ atUtc = [DateTime]::UtcNow.ToString('o'); stage = 'other'; capture = 'unavailable'; source = 'other'; line = 0; exceptionType = 'other'; hResult = 0; category = 'other'; errorId = 'other'; failureClass = 'other'; exitCode = $null }
+    if ($Stage -cin $enums.stage) { $record.stage = $Stage }
+    try {
+        if ($Failure -isnot [Management.Automation.ErrorRecord] -or $null -eq $Failure.Exception -or $null -eq $Failure.InvocationInfo) { return $record }
+        $source = [IO.Path]::GetFileName($Failure.InvocationInfo.ScriptName)
+        if ($source -cin $enums.source) { $record.source = $source }
+        $record.line = [Math]::Max(0, [Math]::Min(100000, $Failure.InvocationInfo.ScriptLineNumber))
+        $type = $Failure.Exception.GetType().FullName
+        if ($type -cin $enums.exceptionType) { $record.exceptionType = $type }
+        $record.hResult = [int]$Failure.Exception.HResult
+        $category = $Failure.CategoryInfo.Category.ToString()
+        if ($category -cin $enums.category) { $record.category = $category }
+        if ($Failure.FullyQualifiedErrorId -cin $enums.errorId) { $record.errorId = $Failure.FullyQualifiedErrorId }
+        # Read only fixed scalar tags, never serialize the Data dictionary.
+        $class = $Failure.Exception.Data['runnerFailureClass']
+        if ($class -is [string] -and $class -cin @('receipt-invalid', 'runner-exit')) {
+            $record.failureClass = $class
+            $exit = $Failure.Exception.Data['runnerFailureExitCode']
+            if ($class -ceq 'runner-exit' -and $exit -is [int]) { $record.exitCode = $exit }
+        }
+        $record.capture = 'complete'
+    } catch { $record.capture = 'unavailable' }
+    return $record
+}
+
+function Assert-RunnerSessionFailureJournal($Journal) {
+    if ($Journal -isnot [pscustomobject] -or (@($Journal.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'schema,sessions' -or
+        $Journal.schema -isnot [int] -or $Journal.schema -ne 1 -or $Journal.sessions -isnot [array] -or $Journal.sessions.Count -gt 8) { throw 'Invalid session failure journal.' }
+    $enums = Get-RunnerSessionFailureEnums; $seen = @{}
+    foreach ($session in $Journal.sessions) {
+        if ($session -isnot [pscustomobject] -or (@($session.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'first,latest,sessionId,vmId' -or
+            $session.sessionId -isnot [string] -or $session.sessionId -cnotmatch '^[0-9a-f]{32}$' -or [guid]$session.sessionId -eq [guid]::Empty -or $seen.ContainsKey($session.sessionId)) { throw 'Invalid session failure identity.' }
+        $seen[$session.sessionId] = $true
+        if ($null -ne $session.vmId -and ($session.vmId -isnot [string] -or $session.vmId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or [guid]$session.vmId -eq [guid]::Empty)) { throw 'Invalid session failure VM identity.' }
+        foreach ($record in @($session.first, $session.latest)) {
+            if ($record -isnot [pscustomobject] -or (@($record.PSObject.Properties.Name | Sort-Object) -join ',') -cne 'atUtc,capture,category,errorId,exceptionType,exitCode,failureClass,hResult,line,source,stage' -or
+                $record.atUtc -isnot [string] -or [DateTime]::Parse($record.atUtc).ToUniversalTime().ToString('o') -cne $record.atUtc) { throw 'Invalid session failure projection.' }
+            foreach ($key in $enums.Keys) { if ($record.$key -isnot [string] -or $record.$key -cnotin $enums[$key]) { throw 'Invalid session failure enum.' } }
+            if ($record.line -isnot [int] -or $record.line -lt 0 -or $record.line -gt 100000 -or $record.hResult -isnot [int] -or
+                ($null -ne $record.exitCode -and ($record.exitCode -isnot [int] -or $record.failureClass -cne 'runner-exit'))) { throw 'Invalid session failure number.' }
+        }
+    }
+    if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $Journal -Depth 6 -Compress)) -gt 16384) { throw 'Session failure journal bound.' }
+}
+
+function Write-RunnerSessionFailure([string] $SessionName, $Failure, [string] $Stage, [switch] $LockHeld, [switch] $FirstOnly) {
+    # One state lock protects this bounded root journal independently of the
+    # ephemeral state. A missing state can never erase attributed evidence.
+    $mutex = $null
+    try {
+        if ($null -eq $Failure -or $SessionName -cnotmatch '^ITIR-[0-9a-f]{32}$' -or [guid]$SessionName.Substring(5) -eq [guid]::Empty) { return }
+        $record = New-RunnerSessionFailureRecord $Failure $Stage
+        if (-not $LockHeld) { $mutex = Enter-RunnerLock }
+        Assert-SecureRoot
+        $path = Assert-OwnedPath (Join-Path $script:RunnerRoot 'session-failures.json')
+        $sessions = @()
+        if (Test-Path -LiteralPath $path) {
+            Assert-RunnerProtectedPath $path
+            if ((Get-Item -LiteralPath $path).Length -gt 16384) { throw 'Session failure journal bound.' }
+            $existing = Read-RunnerJson $path
+            Assert-RunnerSessionFailureJournal $existing
+            $sessions = @($existing.sessions)
+        }
+        $id = $SessionName.Substring(5)
+        $prior = @($sessions | Where-Object { $_.sessionId -ceq $id })
+        if ($FirstOnly -and $prior.Count -eq 1) { return }
+        $vmId = if ($prior.Count -eq 1) { $prior[0].vmId } else { $null }
+        # VM attribution is optional and best effort; do not invoke providers or
+        # use a different/stale session's state to infer identity or health.
+        try {
+            $current = Get-RunnerState
+            if ($null -ne $current -and $current.vmName -ceq $SessionName -and $current.PSObject.Properties.Name -contains 'vmId') {
+                if ($current.vmId -isnot [string] -or $current.vmId -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or [guid]$current.vmId -eq [guid]::Empty) { throw 'Invalid diagnostic VM identity.' }
+                $known = ([guid]$current.vmId).ToString()
+                if ($null -ne $vmId -and $vmId -cne $known) { throw 'Changed diagnostic VM identity.' }
+                $vmId = $known
+            }
+        } catch { $record.capture = 'unavailable' }
+        $entry = [ordered]@{ sessionId = $id; vmId = $vmId; first = $record; latest = $record }
+        if ($prior.Count -eq 1) { $entry.first = $prior[0].first }
+        $sessions = @($sessions | Where-Object { $_.sessionId -cne $id }) + @($entry)
+        if ($sessions.Count -gt 8) { $sessions = @($sessions | Select-Object -Last 8) }
+        $journal = [ordered]@{ schema = 1; sessions = @($sessions) }
+        Assert-RunnerSessionFailureJournal (ConvertTo-Json -InputObject $journal -Depth 6 -Compress | ConvertFrom-Json)
+        Write-RunnerJson $path $journal
+        Assert-RunnerProtectedPath $path
+    } catch {
+        try { Write-Warning 'RUNNER_SESSION_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { }
+    } finally {
+        if ($null -ne $mutex) {
+            try { Exit-RunnerLock $mutex }
+            catch { try { Write-Warning 'RUNNER_SESSION_FAILURE_CAPTURE_UNAVAILABLE' -WarningAction Continue } catch { } }
+        }
     }
 }
 

@@ -393,6 +393,44 @@ The watchdog checks every recorded guardian process identity even when guardian 
 
 Failed liveness and cleanup decisions retain a bounded, nonsecret observation of the checks already evaluated. An exception's `runnerFailureObservation` contains only fixed reason/phase enums, Boolean checks, UTC time and numeric deadline/progress values. The protected `failure-cleanup.json` keeps the first decision and the latest secondary observation for a validated session/owner-start identity within 4096 UTF-8 bytes. Schema 3 permits an unrecorded VM ID only when the state has no GUID property and its phase is initial (phase not recorded) or creating; this is not proof that no VM exists. Owned/sealed-off state requires a nonempty valid GUID. Schema 2 remains readable; the next valid write uses schema 3. Unrecorded-to-known promotion for the same session/owner preserves the first observation. A known GUID cannot be downgraded, and a different known GUID or owner rotates the record. It contains no credentials, raw state, exception messages, command arguments or paths. Unavailable capture is explicit and cannot prevent canonical cleanup. Malformed historical evidence remains retained rather than being silently replaced. Diagnostic evidence never authorizes cleanup. Reviewed preparation helpers capture this evidence before updating and after the attempt, distinguishing prior records from the current attempt by time and identity; readers must understand schema 3 before installing this update. A propagated deadline/Stop exception is not proof of the initiating cause; live preparation failures remain unexplained until the retained checks establish it. Healthy liveness performs no diagnostic writes.
 
+Ordinary session exceptions also retain a separate protected
+`C:\ProgramData\ITInventoryLocalRunner\session-failures.json`. Schema 1 contains at
+most eight validated session GUIDs, each with the first failure and latest secondary
+failure, plus an optional recorded VM GUID. A missing VM GUID means attribution was
+unavailable, never that a VM is absent. The owner catch captures the initiating
+exception before cleanup; cleanup failures update only the latest record. Capture
+is best effort. Existing cleanup mutex/provider failures can still affect the
+propagated error; the retained first diagnostic identifies the initiating failure
+when publication succeeded. The supervisor fallback adds a
+session only when it has no existing record. Later idle inspection errors cannot
+replace session evidence. Successful sessions add no records.
+
+The complete UTF-8 journal is capped at 16 KiB, checked before reading existing
+bytes and again before publication. Oldest entries by last recorded failure are
+evicted when a ninth session is added; there are no per-session files or archives.
+The record survives canonical session cleanup and bundle updates. Each failure
+contains only UTC time, an allowlisted stage, capture availability, allowlisted
+source basename and numeric script line, allowlisted exception type, integer
+HResult, allowlisted error category/error-ID class, and a fixed execution failure
+class with an optional integer exit code. The receipt monitor tags invalid receipt
+syntax/identity as `receipt-invalid` and a validated nonzero runner exit as
+`runner-exit`; arbitrary messages are never interpreted to infer these classes.
+Unknown values become `other`. Messages, stack traces, full paths, arguments,
+target objects, exception data objects, environment/authentication values and
+guest output are omitted rather than text-sanitized.
+
+For an owner-approved diagnostic read, use an elevated shell and the installed
+`bin\Common.ps1` helpers: check the protected file is at most 16 KiB before
+`Read-RunnerJson`, then call `Assert-RunnerSessionFailureJournal` before extracting
+the exact session entry. Preserve a corrupt or oversized journal for separate
+investigation; writers refuse to replace it and emit only
+`RUNNER_SESSION_FAILURE_CAPTURE_UNAVAILABLE`. Capture and lock-release failures
+are best effort and cannot change canonical cleanup, authorize pickup or relaunch,
+or turn an unknown failure into healthy state. `Session.Failure.Tests.ps1`, in the
+canonical contract gate, executes the projection, atomic publication, bounded
+retention, real receipt-monitor error branches and owner catch/finally under
+Windows PowerShell 5.1 with disposable files and mocked host providers.
+
 Protected state readers share the writers' existing reentrant state mutex across existence and JSON reads. Session liveness evaluates its fresh state and Stop decision coherently under that mutex, samples time after lock waits, and releases the mutex before recovery waits. A captured session exception is persisted before that invocation's canonical cleanup removes ephemeral state, preserving its original observed decision rather than reconstructing it from later state. Missing state and invalid identity still fail closed. Canonical native publication stress reproduced a sharing exception with unlocked readers; the locked fixture completed 1000 writes and 10034 reads without errors or nulls. Only an earlier noncanonical null-backup stress returned null. Cleanup-order regressions establish attached-observation retention. These checks prove the repaired source contracts; a live `state-absent` observation alone does not identify who removed state or prove the initiating cause.
 
 After the credential-free builder shuts down gracefully and its exact Off VM registration is authoritatively removed, the owner commits a sealed preparation state with the scrub proof, image binding and fenced recovery generation. The guardian remains active while bulk disk copying runs outside the state mutex. Its sealed supervision path checks the exact preparation identity, owner/guardian processes, Stop, deadlines, progress, committed proof, authoritative VM absence and remaining disk/configuration references before refreshing progress. It never treats a missing ordinary job or verifier VM as a preparation seal, resumes a removed VM or accepts old network/probe outcomes. Watchdog and session liveness retain the same guards. Session liveness samples evaluation time after heartbeat and the fresh protected-state read, then rechecks Stop and the current deadline; guardian progress that advanced during the mutex wait is evaluated against that later time, while true future progress still refuses continuation. Candidate retention still requires fresh post-copy proof and unchanged image selection. Provider uncertainty, reappearing registration, cancellation or invalid proof fails closed through canonical cleanup.

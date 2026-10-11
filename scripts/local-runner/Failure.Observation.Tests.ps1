@@ -12,6 +12,7 @@ foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     }
 }
 $script:RunnerRoot = 'C:\synthetic-runner'; $script:RunnerStatePath = 'C:\synthetic-runner\state.json'
+$script:RunnerOperationStage = 'job-execution'
 $script:checks = 0
 function Check([string] $Name, [scriptblock] $Work) { & $Work; $script:checks++; Write-Host "PASS $Name" }
 function Require([bool] $Condition) { if (-not $Condition) { throw 'Diagnostic regression assertion failed.' } }
@@ -39,6 +40,7 @@ function Test-Path([string] $LiteralPath) {
     return $null -ne $script:record
 }
 function Assert-RunnerProtectedPath {}
+function Assert-SecureRoot {}
 function Assert-StateIdentity {}
 function Save-Heartbeat { $script:heartbeat++ }
 function Test-RunnerProcessIdentity([int] $ProcessId) {
@@ -64,6 +66,7 @@ function Exit-RunnerLock { $script:events += 'unlock' }
 function Invoke-RunnerSupervisorRecovery {}
 function Remove-RunnerInstance { $script:events += 'cleanup'; if ($script:cleanupFails) { throw 'SECRET cleanup failure' }; $script:removed = $true }
 function Write-RunnerFailure {}
+function Write-RunnerSessionFailure {}
 function Get-Failure([scriptblock] $Work) { try { & $Work } catch { return $_ }; throw 'Expected guard failure.' }
 
 Check 'Stop decision is captured from the same disappearing-state read, preserving the boolean API' {
