@@ -22,6 +22,7 @@ import {
 } from '@zxing/library';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { useStandardQrLabelJob } from './label-job-controls';
 import { decodeInventoryFrame } from '../../src/features/scan/decode-frame';
 
 const code = (prefix: string) =>
@@ -291,7 +292,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
   await expect(page.getByRole('link', { name: 'Print label' })).toBeVisible();
   await noHorizontalOverflow(page);
   await page.goto('/labels?location=' + locationCode);
-  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
+  await useStandardQrLabelJob(page);
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',
@@ -386,7 +387,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('link', { name: 'Print asset label' }),
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
-  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
+  await useStandardQrLabelJob(page);
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',
@@ -459,7 +460,7 @@ test('office storage and property custody keep an asset UUID and avoid fictional
     page.getByRole('link', { name: 'Print asset label' }),
   ).toHaveAttribute('href', '/labels?asset=' + assetId);
   await page.goto('/labels?asset=' + assetId);
-  await page.getByRole('combobox', { name: 'Barcode type' }).selectOption('qr');
+  await useStandardQrLabelJob(page);
   await expect(
     page.getByRole('status').filter({
       hasText: 'Print preview refreshed from current inventory',

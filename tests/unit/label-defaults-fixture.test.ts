@@ -1,8 +1,10 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Page, Route } from '@playwright/test';
+import type { ProtectedPrivacyBinding } from '../../src/lib/auth/protected-binding';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   observedLabelDefaultsCommand,
+  isSettingsPrivacyReadArguments,
   withOwnedLabelDefaults,
 } from '../e2e/label-defaults-fixture';
 const transport = vi.hoisted(() => ({ createClient: vi.fn() }));
@@ -29,6 +31,13 @@ const selected = {
   layout: null,
 };
 const requestId = 'bea94cf9-138b-4764-839b-fa463563a91c';
+const binding = {
+  actorId: 'bea94cf9-138b-4764-839b-fa463563a91c',
+  backend: 'http://127.0.0.1:54321',
+  role: 'staff',
+  canManageConfiguration: true,
+} satisfies ProtectedPrivacyBinding;
+const generation = 'baa94cf9-138b-4764-839b-fa463563a91c';
 type Args = { p_request_id: string; p_payload: Record<string, unknown> };
 function client(initial: Record<string, unknown> = starting) {
   let state = { ...initial },
@@ -111,7 +120,7 @@ function client(initial: Record<string, unknown> = starting) {
           postData: () => observedBody,
         }),
         continue:
-          observedBody === '[]' ? privacyRead : send ? forward : async () => {},
+          observedBody !== body ? privacyRead : send ? forward : async () => {},
         abort,
       } as unknown as Route);
     },
@@ -128,26 +137,29 @@ describe('owned shared label defaults fixture', () => {
     vi.stubEnv('LOCAL_SERVICE_ROLE_KEY', 'must-not-be-used');
   });
   afterEach(() => vi.unstubAllEnvs());
-  it('forwards privacy-generation reads without claiming mutation ownership or changing cleanup identity', async () => {
-    const caller = client();
-    transport.createClient.mockReturnValue(caller);
-    await withOwnedLabelDefaults(caller.page, async (defaults) => {
-      await caller.dispatch(true, '[]');
-      expect(caller.rpc).not.toHaveBeenCalled();
-      expect(caller.state()).toEqual(starting);
-      defaults.reviewSave(selected);
-      await caller.dispatch();
-      await caller.dispatch(true, '[]');
-      await defaults.confirmSaved();
-    });
-    expect(caller.privacyRead).toHaveBeenCalledTimes(2);
-    expect(caller.abort).not.toHaveBeenCalled();
-    expect(caller.rpc.mock.calls.slice(0, 2)).toEqual([
-      ['label_defaults_update', caller.args],
-      ['label_defaults_update', caller.args],
-    ]);
-    expect(caller.state()).toEqual({ ...starting, version: '43' });
-  });
+  it.each([{ args: [] }, { args: [binding] }, { args: [generation] }])(
+    'forwards known privacy read %j without claiming mutation ownership or changing cleanup identity',
+    async ({ args }) => {
+      const caller = client();
+      transport.createClient.mockReturnValue(caller);
+      await withOwnedLabelDefaults(caller.page, async (defaults) => {
+        await caller.dispatch(true, JSON.stringify(args));
+        expect(caller.rpc).not.toHaveBeenCalled();
+        expect(caller.state()).toEqual(starting);
+        defaults.reviewSave(selected);
+        await caller.dispatch();
+        await caller.dispatch(true, JSON.stringify(args));
+        await defaults.confirmSaved();
+      });
+      expect(caller.privacyRead).toHaveBeenCalledTimes(2);
+      expect(caller.abort).not.toHaveBeenCalled();
+      expect(caller.rpc.mock.calls.slice(0, 2)).toEqual([
+        ['label_defaults_update', caller.args],
+        ['label_defaults_update', caller.args],
+      ]);
+      expect(caller.state()).toEqual({ ...starting, version: '43' });
+    },
+  );
   it.each([layout, null])(
     'restores explicit original layout %j after a later assertion fails',
     async (originalLayout) => {
@@ -319,6 +331,82 @@ describe('owned shared label defaults fixture', () => {
     expect(caller.abort).toHaveBeenCalledWith('failed');
     expect(caller.rpc).not.toHaveBeenCalled();
   });
+  it.each([
+    'unsupported flight serialization',
+    JSON.stringify([{ ...binding, actorId: 'invalid' }]),
+    JSON.stringify([{ operation: 'other_mutation', requestId, payload: {} }]),
+  ])(
+    'restores a captured save before reporting a later invalid action %s',
+    async (invalidBody) => {
+      const caller = client();
+      transport.createClient.mockReturnValue(caller);
+      let originalError: unknown;
+      try {
+        observedLabelDefaultsCommand(invalidBody);
+      } catch (error) {
+        originalError = error;
+      }
+      await expect(
+        withOwnedLabelDefaults(caller.page, async (defaults) => {
+          defaults.reviewSave(selected);
+          await caller.dispatch();
+          await defaults.confirmSaved();
+          await caller.dispatch(true, invalidBody);
+        }),
+      ).rejects.toThrow((originalError as Error).message);
+      expect(caller.abort).toHaveBeenCalledWith('failed');
+      expect(caller.privacyRead).not.toHaveBeenCalled();
+      expect(caller.forward).toHaveBeenCalledOnce();
+      expect(caller.rpc.mock.calls[1]).toEqual([
+        'label_defaults_update',
+        caller.args,
+      ]);
+      expect(caller.rpc.mock.calls[2][1].p_payload.expected_version).toBe('42');
+      expect(caller.state()).toEqual({ ...starting, version: '43' });
+    },
+  );
+  it('does not restore over an external change after a later invalid action', async () => {
+    const caller = client();
+    transport.createClient.mockReturnValue(caller);
+    await expect(
+      withOwnedLabelDefaults(caller.page, async (defaults) => {
+        defaults.reviewSave(selected);
+        await caller.dispatch();
+        caller.external('43');
+        await caller.dispatch(true, 'unsupported flight serialization');
+      }),
+    ).rejects.toThrow();
+    expect(caller.rpc).toHaveBeenCalledTimes(2);
+    expect(caller.rpc.mock.calls[1]).toEqual([
+      'label_defaults_update',
+      caller.args,
+    ]);
+    expect(caller.state()).toEqual({ ...selected, version: '43' });
+  });
+  it.each([
+    { args: [{ ...binding, operation: 'label_defaults_update' }] },
+    { args: [{ ...binding, actorId: 'invalid' }] },
+    { args: ['invalid-generation'] },
+    { args: [binding, generation] },
+    { args: [{ operation: 'other_mutation', requestId, payload: {} }] },
+  ])(
+    'aborts unrecognized or malformed action %j without write ownership',
+    async ({ args }) => {
+      const caller = client();
+      transport.createClient.mockReturnValue(caller);
+      await expect(
+        withOwnedLabelDefaults(caller.page, async (defaults) => {
+          defaults.reviewSave(selected);
+          await caller.dispatch(true, JSON.stringify(args));
+        }),
+      ).rejects.toThrow();
+      expect(caller.abort).toHaveBeenCalledWith('failed');
+      expect(caller.privacyRead).not.toHaveBeenCalled();
+      expect(caller.forward).not.toHaveBeenCalled();
+      expect(caller.rpc).not.toHaveBeenCalled();
+      expect(caller.state()).toEqual(starting);
+    },
+  );
   it('does not restore after failed settlement or rebase onto a newer version', async () => {
     const caller = client();
     transport.createClient.mockReturnValue(caller);
@@ -397,4 +485,64 @@ describe('observed Next Settings action mapping', () => {
   ])('rejects unknown or invalid transport %s', (body) => {
     expect(() => observedLabelDefaultsCommand(body)).toThrow();
   });
+});
+
+describe('Settings privacy action argument classification', () => {
+  const command = {
+    operation: 'label_defaults_update',
+    requestId,
+    payload: { expected_version: '41', ...selected },
+  };
+  it.each([
+    { args: [] },
+    { args: [generation] },
+    { args: [generation.toUpperCase()] },
+    { args: [binding] },
+    {
+      args: [
+        {
+          ...binding,
+          role: 'viewer',
+          canManageConfiguration: false,
+          backend: 'https://owned.supabase.co',
+        },
+      ],
+    },
+  ])('recognizes only a known privacy argument contract: %j', ({ args }) => {
+    expect(isSettingsPrivacyReadArguments(args)).toBe(true);
+  });
+  const invalid = [
+    null,
+    {},
+    '[]',
+    [null],
+    [undefined],
+    ['absent'],
+    ['invalid-generation'],
+    [{ ...binding, actorId: 'invalid' }],
+    [{ ...binding, backend: 'http://127.0.0.1:54321/' }],
+    [{ ...binding, backend: 'https://user:password@owned.supabase.co' }],
+    [{ ...binding, backend: 'https://owned.supabase.co/path' }],
+    [{ ...binding, backend: 'file:///local' }],
+    [{ ...binding, role: 'admin' }],
+    [{ ...binding, canManageConfiguration: 'true' }],
+    [
+      {
+        actorId: binding.actorId,
+        backend: binding.backend,
+        role: binding.role,
+      },
+    ],
+    [{ ...binding, operation: 'label_defaults_update' }],
+    [{ ...binding, payload: { size: '70x35' } }],
+    [binding, generation],
+    [command],
+    [command, binding],
+  ];
+  it.each(invalid.map((args) => ({ args })))(
+    'does not exempt malformed reads or mutation shapes: %j',
+    ({ args }) => {
+      expect(isSettingsPrivacyReadArguments(args)).toBe(false);
+    },
+  );
 });

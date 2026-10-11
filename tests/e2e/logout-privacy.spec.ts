@@ -230,8 +230,17 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
   }
 });
 
-// This runs the real Next/Auth workspace. Only the late safe head write is
-// synthetic: it exercises delayed metadata reconciliation, not streaming timing.
+// This runs the real Next/Auth workspace. The late head writes and retained
+// secondary-title nodes are synthetic reconciliation stimuli, not streaming proof.
+async function expectRetainedTitles(page: Page, title: string) {
+  await expect(page).toHaveTitle(title);
+  await expect
+    .poll(async () => {
+      const titles = await page.locator('head title').allTextContents();
+      return titles.length > 0 && titles.every((value) => value === title);
+    })
+    .toBe(true);
+}
 test('private document title clears on real privacy failure and logout, then restores the same mounted draft', async ({
   page,
   context,
@@ -248,6 +257,18 @@ test('private document title clears on real privacy failure and logout, then res
       nextTitle.textContent = 'Individual asset · IT Inventory';
       document.head.querySelector('title')?.replaceWith(nextTitle);
     });
+  };
+  const lateRetainedHead = async (privateTitle: string) => {
+    await page.evaluate((privateText) => {
+      const first = document.head.querySelector('title');
+      if (first) first.textContent = 'IT Inventory';
+      for (const value of [privateText, 'Delayed private secondary title']) {
+        const title = document.createElement('title');
+        title.dataset.privacyTitleFixture = 'retained';
+        title.textContent = value;
+        document.head.append(title);
+      }
+    }, privateTitle);
   };
   await page.route('**/inventory/assets/**', async (route) => {
     const request = route.request();
@@ -270,28 +291,32 @@ test('private document title clears on real privacy failure and logout, then res
     );
     await signIn(page, fixture.emails.staff);
     await page.goto(`/inventory/assets/${assetId}`);
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
     const form = await openRecordTask(page, 'Edit asset metadata');
     const name = form.getByLabel('Name', { exact: true });
     await name.fill(draftName);
     const retainedInput = await name.elementHandle();
     expect(retainedInput).not.toBeNull();
     // The document follows the authorized saved record, not an unsaved edit.
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
     await lateSafeHead();
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
 
     rejectPrivacy = true;
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     const retry = page.getByRole('button', { name: 'Retry privacy cleanup' });
     await expect(retry).toBeVisible();
-    await expect(page).toHaveTitle('IT Inventory');
+    await expectRetainedTitles(page, 'IT Inventory');
     await expect(form).not.toBeVisible();
     expect(await retainedInput!.evaluate((input) => input.isConnected)).toBe(
       true,
     );
     await lateSafeHead();
-    await expect(page).toHaveTitle('IT Inventory');
+    await lateRetainedHead(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, 'IT Inventory');
+    expect(
+      await page.locator('title[data-privacy-title-fixture]').count(),
+    ).toBeGreaterThanOrEqual(2);
     rejectPrivacy = false;
     await retry.click();
     await expect(form).toBeVisible();
@@ -302,7 +327,7 @@ test('private document title clears on real privacy failure and logout, then res
         retainedInput!,
       ),
     ).toBe(true);
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
 
     // Server logout changes the real generation even without a client Auth event
     // in this retained tab. The original owner's verification must revoke it.
@@ -312,10 +337,10 @@ test('private document title clears on real privacy failure and logout, then res
     await expect(other).toHaveURL(/\/login$/);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(retry).toBeVisible();
-    await expect(page).toHaveTitle('IT Inventory');
+    await expectRetainedTitles(page, 'IT Inventory');
     await expect(form).not.toBeVisible();
     await lateSafeHead();
-    await expect(page).toHaveTitle('IT Inventory');
+    await expectRetainedTitles(page, 'IT Inventory');
     await signIn(other, fixture.emails.staff);
     await retry.click();
     await expect(form).toBeVisible();
@@ -326,9 +351,9 @@ test('private document title clears on real privacy failure and logout, then res
         retainedInput!,
       ),
     ).toBe(true);
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
     await lateSafeHead();
-    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await expectRetainedTitles(page, `${assetName} · IT Inventory`);
     const record = await owned.caller
       .from('serialized_assets')
       .select('name,version')
@@ -339,6 +364,13 @@ test('private document title clears on real privacy failure and logout, then res
     expect(String(record.data!.version)).toBe('1');
   } finally {
     rejectPrivacy = false;
+    await page
+      .evaluate(() =>
+        document.head
+          .querySelectorAll('title[data-privacy-title-fixture]')
+          .forEach((node) => node.remove()),
+      )
+      .catch(() => {});
     await page.unroute('**/inventory/assets/**');
     await other?.close();
     await owned.cleanup();

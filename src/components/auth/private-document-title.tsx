@@ -28,6 +28,18 @@ export function createPrivateDocumentTitleController() {
   const owner = {};
   let retired = true;
   let observer: MutationObserver | null = null;
+  const writeTitles = (title: string) => {
+    const titles = document.head.querySelectorAll('title');
+    if (!titles.length) {
+      document.title = title;
+      return;
+    }
+    // Preserve Next-owned nodes while clearing private text from every retained
+    // title, including secondary nodes that document.title does not expose.
+    for (const node of titles) {
+      if (node.textContent !== title) node.textContent = title;
+    }
+  };
   const apply = () => {
     if (retired || documentOwner !== owner) return;
     const liveGrant =
@@ -45,7 +57,7 @@ export function createPrivateDocumentTitleController() {
       : liveGrant
         ? safeRouteDocumentTitle(liveGrant.navigation)
         : safeDocumentTitle;
-    if (document.title !== title) document.title = title;
+    writeTitles(title);
   };
   return {
     register(routePath: string, title: string) {
@@ -55,8 +67,7 @@ export function createPrivateDocumentTitleController() {
       return () => {
         if (registration?.token !== token) return;
         registration = null;
-        if (!retired && documentOwner === owner)
-          document.title = safeDocumentTitle;
+        if (!retired && documentOwner === owner) writeTitles(safeDocumentTitle);
         apply();
       };
     },
@@ -78,9 +89,11 @@ export function createPrivateDocumentTitleController() {
           records.some(
             (record) =>
               record.target instanceof HTMLTitleElement ||
-              record.target.parentNode instanceof HTMLTitleElement ||
+              record.target.parentElement?.closest('title') ||
               [...record.addedNodes, ...record.removedNodes].some(
-                (node) => node instanceof HTMLTitleElement,
+                (node) =>
+                  node instanceof Element &&
+                  (node.matches('title') || node.querySelector('title')),
               ),
           )
         )

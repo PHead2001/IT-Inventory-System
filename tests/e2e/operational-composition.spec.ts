@@ -11,6 +11,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { chooseLocation } from './location-picker';
+import { useStandardQrLabelJob } from './label-job-controls';
 import { captureE2eEvidence } from '../../scripts/e2e-diagnostics';
 import {
   expectRecordStatus,
@@ -524,8 +525,10 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   const secondURL = page.url(),
     secondId = new URL(secondURL).pathname.split('/').at(-1)!;
   await page.goto('/labels?asset=' + secondId);
+  await useStandardQrLabelJob(page);
   await expect(page.getByText(/1 distinct record · 1 label/)).toBeVisible();
   await page.goto('/labels?asset=' + id);
+  await useStandardQrLabelJob(page);
   await expect(page.getByText(/2 distinct records.*2 labels/)).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Print selected labels/ }),

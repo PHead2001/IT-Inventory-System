@@ -87,7 +87,12 @@ beforeEach(() => {
     generation: { status: 'absent' },
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.head
+    .querySelectorAll('[data-title-regression]')
+    .forEach((node) => node.remove());
+});
 it('clears all acknowledged password logout namespaces before navigating without retaining password fields', async () => {
   seed();
   actions.setPassword.mockResolvedValueOnce({
@@ -1228,6 +1233,13 @@ it('synchronously clears revoked names, restores only fresh same-owner titles, a
   await waitFor(() =>
     expect(document.title).toBe('Private quantity · IT Inventory'),
   );
+  const retainedTitles = Array.from({ length: 2 }, () => {
+    const node = document.createElement('title');
+    node.dataset.titleRegression = 'retained';
+    node.textContent = 'Private quantity · IT Inventory';
+    document.head.append(node);
+    return node;
+  });
   let finish!: (value: { status: 'absent' }) => void;
   actions.readLogoutPrivacyGeneration.mockImplementationOnce(
     () =>
@@ -1238,6 +1250,12 @@ it('synchronously clears revoked names, restores only fresh same-owner titles, a
   act(() => {
     revokePrivatePresentation();
     expect(document.title).toBe('IT Inventory');
+    expect(
+      [...document.head.querySelectorAll('title')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(Array.from({ length: 3 }, () => 'IT Inventory'));
+    expect(retainedTitles.every((node) => node.isConnected)).toBe(true);
   });
   await waitFor(() => expect(finish).toBeTypeOf('function'));
   expect(input).not.toBeVisible();
@@ -1245,6 +1263,15 @@ it('synchronously clears revoked names, restores only fresh same-owner titles, a
   await act(async () => finish({ status: 'absent' }));
   await waitFor(() =>
     expect(document.title).toBe('Private quantity · IT Inventory'),
+  );
+  await waitFor(() =>
+    expect(
+      [...document.head.querySelectorAll('title')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(
+      Array.from({ length: 3 }, () => 'Private quantity · IT Inventory'),
+    ),
   );
   expect(screen.getByLabelText('Draft')).toBe(input);
   expect(input).toHaveValue('unsaved draft');

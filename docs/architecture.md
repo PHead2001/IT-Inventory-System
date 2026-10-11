@@ -5,7 +5,10 @@ Caller-authorized cached page readers remain the only source of private names.
 Successful page slots register those names with explicit server route paths in the
 mounted Auth privacy controller; its accepted owner/navigation and privacy epochs
 control client-only document titles. Failed verification or revocation clears the
-title synchronously without replacing retained forms or recovery commands.
+title synchronously without replacing retained forms or recovery commands. Every
+retained head title node receives the current safe or authorized title; secondary
+Next-owned nodes remain in place, and delayed title insertions/replacements are
+reconciled without rewriting already-correct text.
 
 Retirement presets fill the existing editable free-text reason on both storage
 and site retirement forms. An optional note remains a separate draft field and

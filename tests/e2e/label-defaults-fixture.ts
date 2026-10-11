@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { isLogoutGeneration } from '../../src/lib/auth/privacy-barrier';
+import type { ProtectedPrivacyBinding } from '../../src/lib/auth/protected-binding';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, type Page, type Route } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
@@ -13,6 +16,31 @@ type Defaults = {
   layout: PrintLayout | null;
 };
 type Snapshot = Defaults & { version: string };
+
+// These are the exact argument contracts of the protected Settings privacy
+// reads. Payload classification is test routing only, never authorization.
+const privacyBindingRead: z.ZodType<ProtectedPrivacyBinding> = z.strictObject({
+  actorId: z.uuid(),
+  backend: z.string().refine((value) => {
+    try {
+      const url = new URL(value);
+      return ['http:', 'https:'].includes(url.protocol) && url.origin === value;
+    } catch {
+      return false;
+    }
+  }),
+  role: z.enum(['viewer', 'staff']),
+  canManageConfiguration: z.boolean(),
+});
+export function isSettingsPrivacyReadArguments(args: unknown): boolean {
+  if (!Array.isArray(args)) return false;
+  return (
+    args.length === 0 ||
+    (args.length === 1 &&
+      (isLogoutGeneration(args[0]) ||
+        privacyBindingRead.safeParse(args[0]).success))
+  );
+}
 
 export function observedLabelDefaultsCommand(body: string | null) {
   const args: unknown = JSON.parse(body ?? 'null');
@@ -71,10 +99,10 @@ export async function withOwnedLabelDefaults(
       )
         return route.continue();
       try {
-        // The shared privacy gate also reads its generation from this route.
-        // Its known no-argument action is not a label-defaults mutation.
+        // The shared gate reads its original binding and logout generation
+        // (including acknowledgement) through this same Settings route.
         const args: unknown = JSON.parse(request.postData() ?? 'null');
-        if (Array.isArray(args) && args.length === 0) return route.continue();
+        if (isSettingsPrivacyReadArguments(args)) return route.continue();
         const command = observedLabelDefaultsCommand(request.postData());
         expect(ownership.reviewed).not.toBeNull();
         const next = ownership.reviewed!;
@@ -123,8 +151,10 @@ export async function withOwnedLabelDefaults(
     } finally {
       try {
         const owned = ownership.reviewed;
-        if (ownership.captureError) throw ownership.captureError;
-        if (owned) {
+        // A later rejected action does not erase ownership of an already
+        // validated Save. Settle and restore that intent before reporting it.
+        // Without a captured intent, an invalid action must never create a write.
+        if (owned && (!ownership.captureError || ownership.submitted)) {
           expect(ownership.submitted).not.toBeNull();
           const command = ownership.submitted!;
           // Replaying the SAME business request settles any in-flight commit.
@@ -159,6 +189,7 @@ export async function withOwnedLabelDefaults(
             });
           }
         }
+        if (ownership.captureError) throw ownership.captureError;
       } finally {
         await page.unroute(routePattern, observe);
       }

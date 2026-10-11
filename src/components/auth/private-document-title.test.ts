@@ -1,6 +1,8 @@
-import { expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { waitFor } from '@testing-library/react';
 import {
   assignmentEpoch,
+  invalidateAssignmentCallbacks,
   readPrivacyRevocationRevision,
   revokePrivatePresentation,
 } from '@/features/scan/assign-batch';
@@ -108,4 +110,221 @@ it('restores only a static generic label for a verified missing private route an
   owner.accept({ ...grant(), navigation: '/unknown/Private-name?' });
   expect(document.title).toBe('IT Inventory');
   retire();
+});
+
+describe('all retained head title nodes', () => {
+  const cleanups: (() => void)[] = [];
+  beforeEach(() => {
+    document.head.querySelectorAll('title').forEach((node) => node.remove());
+  });
+  afterEach(() => {
+    cleanups
+      .splice(0)
+      .reverse()
+      .forEach((cleanup) => cleanup());
+    document.head.querySelectorAll('title').forEach((node) => node.remove());
+  });
+  const mount = () => {
+    const controller = createPrivateDocumentTitleController();
+    const retire = controller.mount();
+    cleanups.push(retire);
+    return { controller, retire };
+  };
+  const appendTitles = (values: string[]) =>
+    values.map((value) => {
+      const node = document.createElement('title');
+      node.textContent = value;
+      document.head.append(node);
+      return node;
+    });
+  const expectTitles = (
+    expected: string,
+    nodes = [...document.head.querySelectorAll('title')],
+  ) => {
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes.map((node) => node.textContent)).toEqual(
+      nodes.map(() => expected),
+    );
+    expect(nodes.every((node) => document.head.contains(node))).toBe(true);
+  };
+
+  it.each([
+    { order: 'safe first', values: ['IT Inventory', 'Retained private name'] },
+    {
+      order: 'private first',
+      values: ['Retained private name', 'IT Inventory'],
+    },
+    {
+      order: 'three nodes',
+      values: ['IT Inventory', 'Retained private name', 'Another private name'],
+    },
+  ])(
+    'clear synchronously sanitizes and preserves retained nodes: $order',
+    ({ values }) => {
+      const { controller } = mount();
+      controller.register('/owned', 'Authorized private name');
+      controller.accept(grant());
+      document.head.querySelectorAll('title').forEach((node) => node.remove());
+      const nodes = appendTitles(values);
+      controller.clear();
+      expectTitles('IT Inventory', nodes);
+      expect([...document.head.querySelectorAll('title')]).toEqual(nodes);
+    },
+  );
+
+  it('mount synchronously masks every preexisting title without replacing the nodes', () => {
+    const nodes = appendTitles([
+      'IT Inventory',
+      'Preexisting private name',
+      'Other private name',
+    ]);
+    mount();
+    expectTitles('IT Inventory', nodes);
+    expect([...document.head.querySelectorAll('title')]).toEqual(nodes);
+  });
+
+  it('creates a normal title when head has none, then scrubs every title on mount and fresh authority', () => {
+    const { controller } = mount();
+    expectTitles('IT Inventory');
+    document.head.querySelectorAll('title').forEach((node) => node.remove());
+    controller.register('/owned', 'Authorized private name');
+    expectTitles('IT Inventory');
+    const nodes = appendTitles(['Old private one', 'Old private two']);
+    controller.accept(grant());
+    expectTitles('Authorized private name');
+    expect(nodes.every((node) => node.isConnected)).toBe(true);
+    controller.accept({ ...grant(), navigation: '/inventory?' });
+    expectTitles('Inventory · IT Inventory');
+  });
+
+  it.each([
+    'unregister',
+    'revocation epoch',
+    'callback epoch',
+    'unmount',
+  ] as const)('%s removes authority from every retained title', (action) => {
+    const { controller, retire } = mount();
+    const unregister = controller.register('/owned', 'Authorized private name');
+    const authority = grant();
+    controller.accept(authority);
+    const nodes = appendTitles([
+      'Retained private one',
+      'Retained private two',
+    ]);
+    if (action === 'unregister') unregister();
+    else if (action === 'unmount') retire();
+    else {
+      if (action === 'revocation epoch') revokePrivatePresentation();
+      else invalidateAssignmentCallbacks();
+      controller.accept(authority);
+    }
+    expectTitles('IT Inventory');
+    expect(nodes.every((node) => node.isConnected)).toBe(true);
+  });
+
+  it('sanitizes late Next head append, replacement and text mutation after clear', async () => {
+    const { controller } = mount();
+    controller.register('/owned', 'Authorized private name');
+    controller.accept(grant());
+    controller.clear();
+    const nodes = appendTitles(['IT Inventory', 'Late private append']);
+    await waitFor(() => expectTitles('IT Inventory'));
+    const replacement = document.createElement('title');
+    replacement.textContent = 'Late private replacement';
+    nodes[1].replaceWith(replacement);
+    await waitFor(() => expectTitles('IT Inventory'));
+    replacement.firstChild!.textContent = 'Late private character data';
+    await waitFor(() => expectTitles('IT Inventory'));
+    controller.accept(grant());
+    expectTitles('Authorized private name');
+  });
+
+  it('sanitizes titles appended or replaced inside a retained head wrapper', async () => {
+    const { controller } = mount();
+    controller.clear();
+    const wrapper = document.createElement('div');
+    const nested = document.createElement('title');
+    nested.textContent = 'Late wrapped private name';
+    wrapper.append(nested);
+    document.head.append(wrapper);
+    cleanups.push(() => wrapper.remove());
+    await waitFor(() => expectTitles('IT Inventory'));
+    const replacement = document.createElement('div');
+    const next = document.createElement('title');
+    next.textContent = 'Replacement wrapped private name';
+    replacement.append(next);
+    wrapper.replaceWith(replacement);
+    cleanups.push(() => replacement.remove());
+    await waitFor(() => expectTitles('IT Inventory'));
+    expect(next.isConnected).toBe(true);
+  });
+
+  it('a retired controller and its registration cleanup cannot rewrite its replacement nodes', async () => {
+    const first = mount();
+    const unregister = first.controller.register('/owned', 'Old private owner');
+    first.controller.accept(grant());
+    const nodes = appendTitles(['Old private one', 'Old private two']);
+    const second = mount();
+    second.controller.register('/owned', 'Replacement private owner');
+    second.controller.accept(grant());
+    first.retire();
+    first.controller.clear();
+    first.controller.accept(grant());
+    unregister();
+    expectTitles('Replacement private owner');
+    nodes[1].textContent = 'Late old metadata';
+    await waitFor(() => expectTitles('Replacement private owner'));
+    second.retire();
+    expectTitles('IT Inventory');
+    first.controller.accept(grant());
+    expectTitles('IT Inventory');
+  });
+
+  it('refreshes authority and remounts with a new grant without replaying an old title', async () => {
+    const { controller, retire } = mount();
+    controller.register('/owned', 'Owned private name');
+    const stale = grant();
+    controller.accept(stale);
+    appendTitles(['Old retained one', 'Old retained two']);
+    revokePrivatePresentation();
+    controller.accept(stale);
+    expectTitles('IT Inventory');
+    controller.accept(grant());
+    expectTitles('Owned private name');
+    retire();
+    controller.accept(grant());
+    expectTitles('IT Inventory');
+    const unmountAgain = controller.mount();
+    cleanups.push(unmountAgain);
+    controller.accept({ ...grant(), navigation: '/inventory?' });
+    expectTitles('Inventory · IT Inventory');
+    controller.register('/inventory', 'Current authorized name');
+    expectTitles('Current authorized name');
+    appendTitles(['Late Next title']);
+    await waitFor(() => expectTitles('Current authorized name'));
+  });
+
+  it('skips already-correct nodes and converges after repairing head mutations', async () => {
+    const { controller } = mount();
+    const nodes = appendTitles(['IT Inventory', 'Private one', 'Private two']);
+    const writes: Node[] = [];
+    const observer = new MutationObserver((records) =>
+      writes.push(...records.map((record) => record.target)),
+    );
+    observer.observe(document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    cleanups.push(() => observer.disconnect());
+    controller.clear();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectTitles('IT Inventory');
+    expect(writes).toEqual([nodes[1], nodes[2]]);
+    writes.length = 0;
+    controller.clear();
+    controller.accept(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes).toEqual([]);
+  });
 });
