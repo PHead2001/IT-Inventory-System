@@ -456,6 +456,64 @@ export function roomVisibilityWitnesses(snapshot: WitnessSnapshot) {
   return roomVisibilityWitnessReport(snapshot).witnesses;
 }
 
+/** Current diagnostic ray at the requested/actual pixel, independent of picking
+ * telemetry. Return only canonical surface identity and distance, no scene data. */
+export function roomRayWitnessAt(
+  snapshot: WitnessSnapshot,
+  point: { x: number; y: number },
+) {
+  if (
+    snapshot.triangles.length > 25000 ||
+    ![
+      point.x,
+      point.y,
+      snapshot.frame.x,
+      snapshot.frame.y,
+      snapshot.frame.width,
+      snapshot.frame.height,
+    ].every(Number.isFinite) ||
+    snapshot.frame.width <= 0 ||
+    snapshot.frame.height <= 0
+  )
+    throw new Error('Room diagnostic ray input bound');
+  const x = ((point.x - snapshot.frame.x) / snapshot.frame.width) * 2 - 1;
+  const y = 1 - ((point.y - snapshot.frame.y) / snapshot.frame.height) * 2;
+  if (Math.abs(x) > 1 || Math.abs(y) > 1)
+    return { code: null, distance: null, inside: false };
+  const inverse = new Matrix4()
+    .multiplyMatrices(
+      new Matrix4().fromArray(snapshot.projection),
+      new Matrix4().fromArray(snapshot.view),
+    )
+    .invert();
+  const origin = new Vector3(x, y, -1).applyMatrix4(inverse);
+  const far = new Vector3(x, y, 1).applyMatrix4(inverse);
+  const ray = new Ray(origin, far.clone().sub(origin).normalize());
+  const maximum = origin.distanceTo(far);
+  let code: string | null = null,
+    distance = Infinity;
+  for (const face of snapshot.triangles) {
+    const a = new Vector3().fromArray(face.vertices, 0),
+      b = new Vector3().fromArray(face.vertices, 3),
+      c = new Vector3().fromArray(face.vertices, 6);
+    const hit =
+      face.side === 1
+        ? ray.intersectTriangle(c, b, a, true, new Vector3())
+        : ray.intersectTriangle(a, b, c, face.side !== 2, new Vector3());
+    if (!hit) continue;
+    const measured = origin.distanceTo(hit);
+    if (measured <= maximum && measured < distance) {
+      code = face.code;
+      distance = measured;
+    }
+  }
+  return {
+    code,
+    distance: Number.isFinite(distance) ? distance : null,
+    inside: true,
+  };
+}
+
 /** Actual DOM overlay/action coverage decides where a real mesh journey can start. */
 export async function uncoveredRoomWitnesses(
   page: Page,

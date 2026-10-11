@@ -72,6 +72,49 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe('shared room visibility transaction', () => {
+  it('opt-in observation retains the actual current result without changing resolution or continuation decisions', () => {
+    const actual = fixture(),
+      baseline = fixture();
+    const target = { __roomLayoutDiagnosticsEnabled: true } as Window;
+    const observed = new RoomVisibilityBatch(
+      actual.scene,
+      actual.camera,
+      actual.projection,
+      target,
+    );
+    observed.refresh(viewport, []);
+    baseline.batch.refresh(viewport, []);
+    const result = observed.resolve(
+      actual.origin,
+      'ITC-S1A',
+      new Vector3(0, 0, 1),
+    );
+    const expected = baseline.batch.resolve(
+      baseline.origin,
+      'ITC-S1A',
+      new Vector3(0, 0, 1),
+    );
+    expect(result.status).toBe(expected.status);
+    if (result.status === 'visible' && expected.status === 'visible')
+      expect(result.anchor.toArray()).toEqual(expected.anchor.toArray());
+    expect(observed.finish()).toEqual(baseline.batch.finish());
+    expect(observed.needsFrame).toBe(baseline.batch.needsFrame);
+    expect(target.__roomVisibilitySnapshot).toMatchObject({
+      revision: actual.projection.revision,
+      complete: true,
+      entries: [
+        {
+          code: 'ITC-S1A',
+          status: result.status,
+          reason: null,
+          work: result.stats,
+        },
+      ],
+    });
+    observed.refresh(viewport, []);
+    observed.finish();
+    expect(target.__roomVisibilitySnapshot!.entries).toEqual([]);
+  });
   it('refreshes once and shares authoritative ray work across labels, then reuses proven same-view results', () => {
     const { scene, origin, batch, projection } = fixture();
     const second = origin.clone();

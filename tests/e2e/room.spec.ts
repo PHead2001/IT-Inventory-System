@@ -12,6 +12,7 @@ import {
   enableRoomLayoutDiagnostics,
   reportRoomLayoutFailure,
   type RoomLayoutWitnessStage,
+  type RoomPointerAttempt,
 } from './room-layout-diagnostics';
 import {
   observeRoomScene,
@@ -2376,6 +2377,7 @@ async function assertOccupiedWitnessActions(
   scene: WitnessSnapshot,
   counts: RoomOccupancy,
   witnesses = roomVisibilityWitnesses(scene),
+  onWitness?: (attempt: RoomPointerAttempt) => void,
 ) {
   expect(
     witnesses.size,
@@ -2384,6 +2386,11 @@ async function assertOccupiedWitnessActions(
   const viewer = page.getByTestId('room-viewer');
   const boxes = [];
   for (const code of witnesses.keys()) {
+    onWitness?.({
+      expectedCode: code,
+      point: witnesses.get(code)![0],
+      candidates: witnesses.get(code)!,
+    });
     expect(
       counts[code],
       'authorized occupied leaf snapshot for ' + code,
@@ -2455,12 +2462,16 @@ async function assertOccupiedWitnessActionsWithDiagnostics(
   stage: RoomLayoutWitnessStage,
   witnesses = roomVisibilityWitnesses(scene),
 ) {
+  let target: RoomPointerAttempt | undefined;
   try {
     const result = await assertOccupiedWitnessActions(
       page,
       scene,
       counts,
       witnesses,
+      (attempt) => {
+        target = attempt;
+      },
     );
     await reportRoomLayoutFailure(
       page,
@@ -2474,9 +2485,41 @@ async function assertOccupiedWitnessActionsWithDiagnostics(
       page,
       bindingBounds.map((binding) => binding.code),
       stage,
+      'failure',
+      target,
     );
     throw error;
   }
+}
+
+/** Keep the independently chosen code while refreshing real DOM coverage.
+ * Hover can repack neighboring controls after the previous journey. */
+async function currentUncoveredRoomPoint(
+  page: Page,
+  attempt: RoomPointerAttempt,
+) {
+  for (let capture = 0; capture < 2; capture++) {
+    const current = await uncoveredRoomWitnesses(
+      page,
+      new Map([[attempt.expectedCode, attempt.candidates]]),
+    );
+    const point = current.get(attempt.expectedCode);
+    if (point) {
+      attempt.point = point;
+      return point;
+    }
+    if (capture === 0) {
+      await page.mouse.move(15, 15);
+      await settledLabels(page);
+      const fresh = roomVisibilityWitnesses(await captureRoomWitness(page));
+      attempt.candidates = fresh.get(attempt.expectedCode) ?? [];
+      if (attempt.candidates[0]) attempt.point = attempt.candidates[0];
+    }
+  }
+  throw new Error(
+    'Independent target has no currently uncovered canvas sample: ' +
+      attempt.expectedCode,
+  );
 }
 
 test('375px populated room gives every independently witnessed opaque target an action with More and selected long text', async ({
@@ -2687,21 +2730,55 @@ test('375px populated room gives every independently witnessed opaque target an 
       uncovered.size,
       'actual canvas journeys reach independently witnessed surfaces',
     ).toBeGreaterThan(0);
-    for (const [code, point] of uncovered) {
-      await page.mouse.move(point.x, point.y);
-      await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
-      // The expected code came from independent triangles, never this telemetry.
-      await expect(
-        viewer.locator('[data-room-label-code="' + code + '"]'),
-      ).toBeVisible();
+    for (const [code, originalPoint] of uncovered) {
+      const attempt: RoomPointerAttempt = {
+        expectedCode: code,
+        point: originalPoint,
+        candidates: witnesses.get(code)!,
+      };
+      try {
+        const point = await currentUncoveredRoomPoint(page, attempt);
+        await page.mouse.move(point.x, point.y);
+        await expect(canvas).toHaveAttribute('data-hover-visible-code', code);
+        // The expected code came from independent triangles, never this telemetry.
+        await expect(
+          viewer.locator('[data-room-label-code="' + code + '"]'),
+        ).toBeVisible();
+      } catch (error) {
+        await reportRoomLayoutFailure(
+          page,
+          bindingBounds.map((binding) => binding.code),
+          scenario,
+          'failure',
+          attempt,
+        );
+        throw error;
+      }
     }
     await page.mouse.move(15, 15);
     await settledLabels(page);
     if (scenario === 'fit-open') {
-      const [code, point] = [...uncovered][0];
+      const [code, originalPoint] = [...uncovered][0];
       selectedCode = code;
-      await page.mouse.click(point.x, point.y);
-      await selected(page, code);
+      const attempt: RoomPointerAttempt = {
+        expectedCode: code,
+        point: originalPoint,
+        candidates: witnesses.get(code)!,
+      };
+      try {
+        const point = await currentUncoveredRoomPoint(page, attempt);
+        await page.mouse.click(point.x, point.y);
+        await selected(page, code);
+      } catch (error) {
+        await reportRoomLayoutFailure(
+          page,
+          bindingBounds.map((binding) => binding.code),
+          scenario,
+          'failure',
+          attempt,
+        );
+        throw error;
+      }
       await page.getByRole('button', { name: 'Fit room', exact: true }).click();
       if ((await more.getAttribute('aria-expanded')) !== 'true')
         await more.click();

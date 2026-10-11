@@ -16,6 +16,7 @@ import {
 } from './exposed-anchor';
 import { ProjectedVisibleSurface } from './projected-visible-surface';
 import type { LabelArea } from './label-layout';
+import { createRoomVisibilityDiagnostics } from './label-layout-diagnostics';
 
 /** One actual scene revision and cooperative work budget for the whole batch.
  * DOM masks are part of the measured revision, including viewport scrolling.
@@ -36,15 +37,23 @@ export class RoomVisibilityBatch {
   private obstructions: LabelArea[] = [];
   private failure: string | null = 'viewport not measured';
   readonly projection: ProjectedVisibleSurface;
+  private diagnostics: ReturnType<typeof createRoomVisibilityDiagnostics>;
+  private observed = new Map<
+    Group,
+    { code: string; result: ExposedAnchorResult }
+  >();
   constructor(
     scene: Object3D,
     camera: Camera,
     projection = new ProjectedVisibleSurface(scene, camera),
+    diagnosticTarget?: Window,
   ) {
     this.projection = projection;
+    this.diagnostics = createRoomVisibilityDiagnostics(diagnosticTarget);
   }
   refresh(viewport: LabelArea, obstructions: LabelArea[]) {
     this.active.clear();
+    this.observed.clear();
     this.pendingCodes.clear();
     this.viewport = viewport;
     this.obstructions = obstructions;
@@ -76,14 +85,15 @@ export class RoomVisibilityBatch {
     this.active.add(origin);
     if (!this.failure && !this.projection.revisionChecked) {
       this.pendingCodes.add(code);
-      return {
+      return this.observe(origin, code, {
         status: this.projection.pending ? 'pending' : 'unresolved',
         reason: 'scene revision pending',
         stats: this.projection.stats,
-      };
+      });
     }
     const previous = this.results.get(origin);
-    if (previous?.code === code) return previous.result;
+    if (previous?.code === code)
+      return this.observe(origin, code, previous.result);
     const result: ExposedAnchorResult = this.failure
       ? {
           status: 'unresolved',
@@ -102,9 +112,16 @@ export class RoomVisibilityBatch {
         );
     if (result.status !== 'pending') this.results.set(origin, { code, result });
     else this.pendingCodes.add(code);
+    return this.observe(origin, code, result);
+  }
+  private observe(origin: Group, code: string, result: ExposedAnchorResult) {
+    if (this.diagnostics) this.observed.set(origin, { code, result });
     return result;
   }
   finish() {
+    this.diagnostics?.publish(this.projection.revision, [
+      ...this.observed.values(),
+    ]);
     for (const origin of this.results.keys())
       if (!this.active.has(origin)) this.results.delete(origin);
     const activeCodes = new Set(this.pendingCodes);
@@ -150,7 +167,13 @@ export function RoomVisibilityProvider({
 }) {
   const { scene, camera, gl, invalidate } = useThree();
   const batch = useMemo(
-    () => new RoomVisibilityBatch(scene, camera),
+    () =>
+      new RoomVisibilityBatch(
+        scene,
+        camera,
+        undefined,
+        typeof window === 'undefined' ? undefined : window,
+      ),
     [scene, camera],
   );
   const publication = useRef('');

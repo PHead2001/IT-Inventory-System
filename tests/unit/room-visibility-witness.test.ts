@@ -17,6 +17,7 @@ import {
 import {
   roomVisibilityWitnesses,
   roomVisibilityWitnessReport,
+  roomRayWitnessAt,
   captureRoomWitness,
   type WitnessSnapshot,
   type WitnessTriangle,
@@ -160,6 +161,23 @@ function snapshot(
     masks: [],
   };
 }
+it('diagnostic rays independently distinguish target, opaque foreground and the actual shifted pointer', () => {
+  const scene = snapshot([
+    ...plane('DRAWER', -1, 1, 0),
+    ...plane('FRONT', -0.5, 0.5, 1),
+  ]);
+  const expected = roomVisibilityWitnesses(scene).get('DRAWER')![0];
+  expect(roomRayWitnessAt(scene, expected).code).toBe('DRAWER');
+  expect(roomRayWitnessAt(scene, { x: 200, y: 200 }).code).toBe('FRONT');
+  expect(roomRayWitnessAt(scene, { x: -1, y: 200 })).toEqual({
+    code: null,
+    distance: null,
+    inside: false,
+  });
+  expect(() => roomRayWitnessAt(scene, { x: NaN, y: 0 })).toThrow(
+    'input bound',
+  );
+});
 it('finds partially exposed edge patches even when an opaque unbound blocker hides the center', () => {
   const result = roomVisibilityWitnesses(
     snapshot([...plane('DRAWER', -1, 1, 0), ...plane(null, -0.5, 0.5, 1)]),
