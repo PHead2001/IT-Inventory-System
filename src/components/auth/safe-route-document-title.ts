@@ -56,7 +56,10 @@ export function safeRouteDocumentTitle(navigation: string): string {
     segments[3] === 'open' &&
     ['quantity', 'asset'].includes(segments[4])
   )
-    label = 'Record existing equipment';
+    label =
+      segments[4] === 'asset'
+        ? 'Record existing individual asset'
+        : 'Record existing quantity item';
   if (segments.length === 4 && segments[1] === 'settings') {
     if (segments[2] === 'forms' && ASSET_UUID.test(segments[3]))
       label = 'Category forms';

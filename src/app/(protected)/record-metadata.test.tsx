@@ -113,7 +113,7 @@ const routes = [
   },
   {
     path: './sites/[code]/open/[kind]/page',
-    generic: 'Record existing equipment · IT Inventory',
+    generic: 'Record existing quantity item · IT Inventory',
     read: reads.site,
     params: { code: 'PRIVATE-SITE', kind: 'quantity' },
     title: 'Record existing quantity item at Private site · IT Inventory',

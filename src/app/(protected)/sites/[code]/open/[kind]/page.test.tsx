@@ -80,9 +80,11 @@ it.each([
     expect(document.title).toBe(
       `Record existing ${label} at Private office name · IT Inventory`,
     );
-    const metadata = opening.generateMetadata();
+    const metadata = await opening.generateMetadata({
+      params: Promise.resolve({ code: 'PRIVATE-CODE', kind }),
+    });
     expect(metadata.title).toEqual({
-      absolute: 'Record existing equipment · IT Inventory',
+      absolute: `Record existing ${label} · IT Inventory`,
     });
     expect(metadata.title).not.toEqual(ancestorMetadata.title);
     expect(JSON.stringify(metadata)).not.toMatch(
@@ -128,7 +130,11 @@ it.each([
       revocation: readPrivacyRevocationRevision(),
       callbacks: assignmentEpoch(),
     });
-    document.title = opening.generateMetadata().title.absolute;
+    document.title = (
+      await opening.generateMetadata({
+        params: Promise.resolve({ code: 'PRIVATE-CODE', kind: 'asset' }),
+      })
+    ).title.absolute;
     const view = render(
       <PrivateDocumentTitleContext value={owner}>
         {await opening.default({
@@ -139,8 +145,32 @@ it.each([
     expect(
       screen.queryByRole('form', { name: 'Opening holdings' }),
     ).not.toBeInTheDocument();
-    expect(document.title).toBe('Record existing equipment · IT Inventory');
+    expect(document.title).toBe(
+      'Record existing individual asset · IT Inventory',
+    );
     view.unmount();
     retire();
+  },
+);
+
+it.each([
+  ['quantity', 'Record existing quantity item'],
+  ['asset', 'Record existing individual asset'],
+  ['unsupported', 'Record existing equipment'],
+  ['asset?name=Private office name', 'Record existing equipment'],
+])(
+  'keeps %s opening metadata static and read-free before authorization',
+  async (kind, label) => {
+    guard.site.mockClear();
+    guard.member.mockClear();
+    const metadata = await opening.generateMetadata({
+      params: Promise.resolve({ code: 'PRIVATE-CODE', kind }),
+    });
+    expect(metadata.title.absolute).toBe(`${label} · IT Inventory`);
+    expect(JSON.stringify(metadata)).not.toMatch(
+      /PRIVATE-CODE|Private office name/,
+    );
+    expect(guard.site).not.toHaveBeenCalled();
+    expect(guard.member).not.toHaveBeenCalled();
   },
 );

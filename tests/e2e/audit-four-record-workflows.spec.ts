@@ -328,7 +328,9 @@ test('record and form titles name only their authorized readable record, includi
     await expect(viewer).toHaveTitle(route.title);
   }
   await viewer.goto(routes.at(-1)!.url);
-  await expect(viewer).toHaveTitle('Record existing equipment · IT Inventory');
+  await expect(viewer).toHaveTitle(
+    'Record existing quantity item · IT Inventory',
+  );
   await expect(
     viewer.getByText('Read-only access.', { exact: false }),
   ).toBeVisible();
