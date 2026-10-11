@@ -72,8 +72,11 @@ select is(pg_temp.compile_choices('[
 
 create function pg_temp.legacy_paths_unchanged() returns boolean language plpgsql as $$
 declare category uuid:=gen_random_uuid(); revision uuid:=gen_random_uuid(); field uuid:=gen_random_uuid();
-  first uuid:=gen_random_uuid(); second uuid:=gen_random_uuid(); child uuid:=gen_random_uuid(); result boolean;
-  blank_first uuid:=gen_random_uuid(); blank_second uuid:=gen_random_uuid(); literal uuid:=gen_random_uuid();
+  reordered uuid:=gen_random_uuid();
+  first uuid:='00000000-0000-4000-8000-000000000001'; second uuid:='00000000-0000-4000-8000-000000000002';
+  child uuid:='00000000-0000-4000-8000-000000000003'; result boolean;
+  blank_first uuid:='00000000-0000-4000-8000-000000000004'; blank_second uuid:='00000000-0000-4000-8000-000000000005';
+  literal uuid:='00000000-0000-4000-8000-000000000006';
 begin
   begin
     insert into public.categories(id,code,name) values(category,'LEGACY-'||upper(replace(category::text,'-','')),'Legacy '||category::text);
@@ -98,12 +101,27 @@ begin
       and private.metadata_option_path(revision,field,blank_second)=array[chr(65279)||' (3)']
       and private.metadata_option_path(revision,field,literal)=array['(2)']
       and private.metadata_value_valid(revision,field,to_jsonb(child::text));
+    -- A separate published revision changes only navigation order. Neither the
+    -- original publication nor its answers are updated to stabilize labels.
+    insert into public.category_form_revisions(id,category_id,status,revision_number,draft_definition)
+      values(reordered,category,'draft',3,'{"fields":[],"layout":[]}');
+    insert into public.form_revision_fields(revision_id,field_id,label,applies_to,required,sort_order)
+      select reordered,field_id,label,applies_to,required,sort_order
+      from public.form_revision_fields where revision_id=revision;
+    insert into public.form_revision_options(revision_id,field_id,option_id,parent_option_id,label,active,sort_order)
+      select reordered,field_id,option_id,parent_option_id,label,active,5-sort_order
+      from public.form_revision_options where revision_id=revision;
+    update public.category_form_revisions set status='published',published_at=now() where id=reordered;
+    result:=result and private.metadata_option_paths(reordered,field,array[child,first,second,blank_first,blank_second,literal])
+      =private.metadata_option_paths(revision,field,array[child,first,second,blank_first,blank_second,literal])
+      and (select sort_order=0 and label='USB' from public.form_revision_options where revision_id=revision and option_id=first)
+      and (select sort_order=5 from public.form_revision_options where revision_id=reordered and option_id=first);
     raise exception using errcode='P9999',message='rollback_test_fixture';
   exception when sqlstate 'P9999' then return result;
   end;
 end;
 $$;
-select ok(pg_temp.legacy_paths_unchanged(), 'legacy choice and ambiguous ancestor get stable disambiguation without rewriting labels, IDs or answers');
+select ok(pg_temp.legacy_paths_unchanged(), 'published reorder preserves duplicate, inactive, literal-suffix and ancestor display identity without rewriting original choices');
 
 select * from finish();
 rollback;

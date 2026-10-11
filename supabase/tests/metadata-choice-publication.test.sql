@@ -157,6 +157,11 @@ begin
       'fields',(select count(*) from public.metadata_fields),'options',(select count(*) from public.metadata_options),
       'revisions',(select count(*) from public.category_form_revisions),'events',(select count(*) from public.form_publication_events),
       'receipts',(select count(*) from private.mutation_requests),'reviews',(select count(*) from private.form_save_reviews));
+    if outcome='ok' and change_kind='reorder' and
+      private.metadata_option_paths(revision,field,array(select (value->>'id')::uuid from jsonb_array_elements(choices)))
+      is distinct from private.metadata_option_paths((select published_form_revision_id from public.categories where id=category),field,
+        array(select (value->>'id')::uuid from jsonb_array_elements(choices)))
+      then outcome:='published reorder changed choice display identity'; end if;
     if outcome<>'ok' and before_state<>after_state then outcome:='partial write after '||outcome; end if;
     if (select draft_definition::text from public.category_form_revisions where id=revision)<>original
       or (select to_jsonb(e)::text from public.quantity_events e where id=event)<>original_event
