@@ -1076,7 +1076,7 @@ it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
       changed: true,
     });
     render(<CustodyChangeForm {...retirementProps} />);
-    fireEvent.click(screen.getByRole('button', { name: preset, exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: preset }));
     expect(screen.getByLabelText('Reason (required)')).toHaveValue(preset);
     const form = screen.getByRole('form', { name: 'Retire asset at site' });
     fireEvent.submit(form);
@@ -1084,13 +1084,17 @@ it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
     expect(submitCustody).not.toHaveBeenCalled();
     fireEvent.submit(form);
     await waitFor(() => expect(submitCustody).toHaveBeenCalledOnce());
-    expect(vi.mocked(submitCustody).mock.calls[0][0].payload).toEqual({
-      action: 'retire',
-      asset_id: id(1),
-      expected_version: '7',
-      reason: preset,
-      reference: null,
-      source_site_id: site.id,
+    expect(vi.mocked(submitCustody).mock.calls[0][0]).toEqual({
+      operation: 'asset_site_change',
+      requestId: expect.any(String),
+      payload: {
+        action: 'retire',
+        asset_id: id(1),
+        expected_version: '7',
+        reason: preset,
+        reference: null,
+        source_site_id: site.id,
+      },
     });
   },
 );
@@ -1104,7 +1108,7 @@ it('keeps a manual site retirement reason and optional note stable through refre
       changed: true,
     });
   const view = render(<CustodyChangeForm {...retirementProps} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Sold', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Sold' }));
   fireEvent.change(screen.getByLabelText('Reason (required)'), {
     target: { value: 'Sold after owner approval' },
   });
@@ -1128,7 +1132,9 @@ it('keeps a manual site retirement reason and optional note stable through refre
   fireEvent.submit(form);
   await screen.findByText(/result could not be confirmed/i);
   const command = vi.mocked(submitCustody).mock.calls[0][0];
-  expect(command.payload.reason).toBe('Sold after owner approval — Invoice 42');
+  expect(command).toMatchObject({
+    payload: { reason: 'Sold after owner approval — Invoice 42' },
+  });
   expect(screen.getByLabelText('Retirement note (optional)')).toBeDisabled();
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry same custody transaction' }),

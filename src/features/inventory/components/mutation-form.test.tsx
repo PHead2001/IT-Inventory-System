@@ -1040,7 +1040,7 @@ it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
       changed: true,
     });
     render(<MutationForm {...retirementProps} />);
-    fireEvent.click(screen.getByRole('button', { name: preset, exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: preset }));
     expect(screen.getByLabelText('Reason (required)')).toHaveValue(preset);
     const form = screen.getByRole('form', { name: 'Retire asset' });
     fireEvent.submit(form);
@@ -1065,7 +1065,7 @@ it('retains edited retirement reason and optional note through rerender, review 
       changed: true,
     });
   const view = render(<MutationForm {...retirementProps} />);
-  fireEvent.click(screen.getByRole('button', { name: 'RMA', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'RMA' }));
   fireEvent.change(screen.getByLabelText('Reason (required)'), {
     target: { value: 'RMA approved by vendor' },
   });
