@@ -6,7 +6,14 @@ import {
 } from './queue-model';
 import type { LiveLabel } from './queue.server';
 
-export type SelectedLabel = QueueKey & { name: string };
+export type SelectedLabel = QueueKey & {
+  name: string;
+  itemCode?: string | null;
+  humanId?: string | null;
+  assetTag?: string | null;
+  tag?: string | null;
+  holdingContext?: string;
+};
 
 /** Explicit selection is ordered and deduplicated by typed persistence identity. */
 export function selectLabelRows(
@@ -52,19 +59,56 @@ export function projectLabelSelection(
     const id = queueIdentity(selectedRow);
     const row = resolved.get(id);
     if (!row) unavailable.push(selectedRow);
-    else if (queued.has(id)) already.push({ ...selectedRow, name: row.name });
+    else if (queued.has(id)) already.push(row);
     else added.push(row);
   }
   const next = [...entries, ...added.map(labelQueueEntry)];
-  return { next: validQueue(next) ? next : null, added, already, unavailable };
+  return {
+    next: validQueue(next) ? next : null,
+    added,
+    already,
+    unavailable,
+    selection: selected,
+  };
 }
 
 export function labelSelectionSummary(
   result: ReturnType<typeof projectLabelSelection>,
 ): string {
+  const kindNames = {
+    quantity: 'Quantity item',
+    asset: 'Individual asset',
+    location: 'Location',
+  };
+  const outcomes = [...result.added, ...result.already, ...result.unavailable];
+  const base = (row: SelectedLabel) => `${row.name} (${kindNames[row.kind]})`;
+  const counts = new Map<string, number>();
+  for (const row of outcomes)
+    counts.set(base(row), (counts.get(base(row)) ?? 0) + 1);
+  // Ordinals belong to the original explicit selection, never to an outcome group.
+  // Display context is ephemeral; typed keys remain the only queue identity.
+  const ordinals = new Map(
+    result.selection.map((row, index) => [queueIdentity(row), index + 1]),
+  );
+  const display = (row: SelectedLabel) => {
+    if (counts.get(base(row)) === 1) return base(row);
+    const identifier =
+      row.kind === 'quantity'
+        ? (row.humanId ?? row.itemCode)
+        : row.kind === 'asset'
+          ? (row.tag ?? row.assetTag)
+          : null;
+    const context = identifier
+      ? `${row.kind === 'quantity' ? 'item code' : 'asset tag'} ${identifier}`
+      : [
+          row.holdingContext,
+          `selected record ${ordinals.get(queueIdentity(row))}`,
+        ]
+          .filter(Boolean)
+          .join('; ');
+    return `${row.name} (${kindNames[row.kind]}; ${context})`;
+  };
   const names = (rows: SelectedLabel[]) =>
-    rows.length
-      ? rows.map((row) => `${row.name} (${row.kind} ${row.key})`).join(', ')
-      : 'none';
+    rows.length ? rows.map(display).join(', ') : 'none';
   return `Added: ${names(result.added)}. Already present: ${names(result.already)}. Unavailable to this account: ${names(result.unavailable)}.`;
 }

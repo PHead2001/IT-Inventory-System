@@ -2,8 +2,35 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(path, 'utf8');
+const unresolvedTokens = (source: string, globals: ReadonlySet<string>) => {
+  const localDeclarations = new Set(
+    Array.from(
+      source.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g),
+      (match) => match[1],
+    ),
+  );
+  return Array.from(
+    source.matchAll(/var\((--[\w-]+)\)/g),
+    (match) => match[1],
+  ).filter((token) => !globals.has(token) && !localDeclarations.has(token));
+};
 
 describe('semantic screen palette budget', () => {
+  it('allows only shared or same-module declarations', () => {
+    const globals = new Set(['--surface']);
+    expect(
+      unresolvedTokens(
+        '--offset: 1rem; top: var(--offset); color: var(--surface);',
+        globals,
+      ),
+    ).toEqual([]);
+    expect(unresolvedTokens('color: var(--missing);', globals)).toEqual([
+      '--missing',
+    ]);
+    expect(unresolvedTokens('top: var(--offset);', globals)).toEqual([
+      '--offset',
+    ]);
+  });
   it('keeps module and illustration colors in the shared palette', () => {
     for (const path of [
       'src/features/labels/label-workspace.module.css',
@@ -35,9 +62,10 @@ describe('semantic screen palette budget', () => {
       'src/components/ui/button.tsx',
       'src/components/ui/input.tsx',
     ]) {
-      for (const match of read(path).matchAll(/var\((--[\w-]+)\)/g)) {
-        expect(declarations.has(match[1]), `${path}: ${match[1]}`).toBe(true);
-      }
+      expect(
+        unresolvedTokens(read(path), new Set(declarations.keys())),
+        path,
+      ).toEqual([]);
     }
     for (const match of read(
       'src/features/room/scene/scene-palette.tsx',

@@ -256,14 +256,7 @@ export function TaskWorkspace({
           <h3 ref={heading} tabIndex={-1} className="font-semibold">
             {activeLabel}
           </h3>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={locked}
-            onClick={() => change(null)}
-          >
-            Close task
-          </Button>
+
           <TaskResetContext.Provider
             value={() => {
               if (stateRef.current.pending || stateRef.current.uncertain)
@@ -283,6 +276,14 @@ export function TaskWorkspace({
               </TaskStateContext.Provider>
             </TaskDiscardContext.Provider>
           </TaskResetContext.Provider>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={locked}
+            onClick={() => change(null)}
+          >
+            Close task
+          </Button>
         </div>
       )}
     </section>

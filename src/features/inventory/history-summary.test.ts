@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { historySummary } from './history-summary';
+import { historyEventTitle, historySummary } from './history-summary';
 import type { HistoryEvent, LocationRef } from './contracts-ui';
 const location = (id: string, breadcrumb: string) =>
   ({ id, breadcrumb }) as LocationRef;
@@ -242,3 +242,19 @@ it('does not turn an asset custody correction into a quantity count correction',
     }),
   ).toBe('Historical site → Corrected site');
 });
+
+it.each([
+  ['site_assigned', 'asset', 'Assigned to site'],
+  ['site_issued', 'asset', 'Assigned to site'],
+  ['site_issued', 'quantity', 'Issued to site'],
+  ['site_returned', 'asset', 'Returned from site'],
+  ['site_corrected', 'quantity', 'Site count corrected'],
+  ['site_corrected', 'asset', 'Site custody corrected'],
+  ['site_written_off', 'quantity', 'Quantity written off at site'],
+  ['site_retired', 'asset', 'Asset retired at site'],
+] as const)(
+  'uses the custody vocabulary for %s %s',
+  (eventType, kind, title) => {
+    expect(historyEventTitle({ ...event, eventType, kind })).toBe(title);
+  },
+);

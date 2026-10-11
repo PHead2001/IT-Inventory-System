@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   labelQueueEntry,
+  labelSelectionSummary,
   projectLabelSelection,
   selectLabelRows,
 } from './label-selection';
@@ -37,6 +38,82 @@ describe('explicit label selection', () => {
     expect(result.added).toEqual([row(2)]);
     expect(result.already).toEqual([row(1)]);
     expect(result.unavailable).toEqual([row(3)]);
+  });
+  it('announces added, present and unavailable names with readable types, never persistence keys', () => {
+    const quantity = row(1);
+    const asset = row(1, 'asset');
+    const location = { ...row(3), kind: 'location' as const, key: 'ITC-S3A' };
+    const result = projectLabelSelection(
+      [labelQueueEntry(quantity)],
+      [asset, quantity, location],
+      [asset, quantity],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      'Added: Same name (Individual asset). Already present: Same name (Quantity item). Unavailable to this account: Same name (Location).',
+    );
+    for (const selected of [asset, quantity, location])
+      expect(summary).not.toContain(selected.key);
+    expect(summary).not.toMatch(/\((?:asset|quantity|location)\b/);
+    expect(result.next).toEqual([
+      labelQueueEntry(quantity),
+      labelQueueEntry(asset),
+    ]);
+    expect(result.unavailable).toEqual([location]);
+  });
+  it('preserves intentionally authored UUID name text in every outcome', () => {
+    const name = 'Device 11111111-1111-4111-8111-111111111111';
+    const added = { ...row(1, 'asset'), name };
+    const already = { ...row(2), name };
+    const unavailable = { ...row(3), name };
+    const result = projectLabelSelection(
+      [labelQueueEntry(already)],
+      [added, already, unavailable],
+      [added, already],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      `Added: ${name} (Individual asset). Already present: ${name} (Quantity item; selected record 2). Unavailable to this account: ${name} (Quantity item; selected record 3).`,
+    );
+    for (const selected of [added, already, unavailable])
+      expect(summary).not.toContain(selected.key);
+  });
+  it('distinguishes same-name quantity outcomes with current item codes instead of stale selection context', () => {
+    const added = { ...row(1), humanId: 'ADP-USB', holdingContext: 'Shelf A' };
+    const already = {
+      ...row(2),
+      humanId: 'ADP-HDMI',
+      holdingContext: 'Shelf B',
+    };
+    const result = projectLabelSelection(
+      [{ ...labelQueueEntry(already), copies: 7 }],
+      [{ ...already, humanId: 'OLD-CODE', itemCode: 'STALE-CODE' }, added],
+      [added, already],
+    );
+    expect(labelSelectionSummary(result)).toBe(
+      'Added: Same name (Quantity item; item code ADP-USB). Already present: Same name (Quantity item; item code ADP-HDMI). Unavailable to this account: none.',
+    );
+    expect(result.next).toEqual([
+      { ...labelQueueEntry(already), copies: 7 },
+      labelQueueEntry(added),
+    ]);
+  });
+  it('uses asset tags and locations and allocates unidentified ordinals across the entire original selection', () => {
+    const added = { ...row(1, 'asset'), tag: 'LAP-A' };
+    const already = { ...row(2, 'asset'), tag: 'LAP-B' };
+    const missing = { ...row(3), holdingContext: 'Closet / Shelf A' };
+    const quantity = { ...row(4), holdingContext: 'Closet / Shelf B' };
+    const result = projectLabelSelection(
+      [labelQueueEntry(already)],
+      [missing, already, quantity, added],
+      [added, quantity, already],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      'Added: Same name (Quantity item; Closet / Shelf B; selected record 3), Same name (Individual asset; asset tag LAP-A). Already present: Same name (Individual asset; asset tag LAP-B). Unavailable to this account: Same name (Quantity item; Closet / Shelf A; selected record 1).',
+    );
+    for (const selected of [added, already, missing, quantity])
+      expect(summary).not.toContain(selected.key);
   });
   it('accepts 200 identities and rejects an over-limit projection without a prefix', () => {
     const rows = Array.from({ length: 201 }, (_, n) => row(n));

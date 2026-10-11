@@ -1,5 +1,7 @@
 'use client';
 import { OperationalTimestamp } from '@/components/operational-time';
+import { CopyTechnicalDetails } from '@/components/copy-technical-details';
+import { custodyEventLabel } from './vocabulary';
 import { countLabel } from '@/lib/count';
 import type { CustodyReceipt } from './contracts';
 
@@ -25,16 +27,14 @@ export function CustodyReceiptView({
       : null;
   return (
     <section aria-label="Committed custody receipt" className="space-y-3">
-      <h3 className="text-lg font-semibold capitalize">
-        {receipt.operation.replaceAll('_', ' ')} · Custody saved
+      <h3 className="text-lg font-semibold">
+        {custodyEventLabel(
+          receipt.operation,
+          receipt.quantity === null ? 'asset' : 'quantity',
+        )}
       </h3>
       {reviewedName && (
-        <p className="break-words font-medium">
-          {reviewedName}{' '}
-          <span className="text-sm font-normal text-slate-400">
-            (name reviewed for this operation)
-          </span>
-        </p>
+        <p className="break-words font-medium">{reviewedName} </p>
       )}
       {correction ? (
         <>
@@ -122,12 +122,9 @@ export function CustodyReceiptView({
       <p className="text-xs text-slate-400">
         Receipt balances describe this event. Current holdings may change later.
       </p>
-      <details>
-        <summary className="cursor-pointer py-2 text-sm text-cyan-300">
-          Operation identity
-        </summary>
-        <p className="break-all text-xs">{receipt.eventId}</p>
-      </details>
+      <CopyTechnicalDetails
+        details={`Operation: ${receipt.eventId}\nOperation type: ${receipt.operation}\nRecorded instant: ${receipt.createdAt}`}
+      />
     </section>
   );
 }

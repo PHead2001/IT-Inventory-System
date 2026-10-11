@@ -60,7 +60,7 @@ describe('workspace navigation', () => {
     const stack = navigation.parentElement;
     expect(stack).toHaveClass('experience-nav-stack');
     expect(
-      screen.queryByRole('button', { name: 'Reduce motion locally' }),
+      screen.queryByRole('switch', { name: 'Reduce motion in this browser' }),
     ).not.toBeInTheDocument();
     expect(stack).toContainElement(
       screen.getByRole('button', { name: 'Menu' }),

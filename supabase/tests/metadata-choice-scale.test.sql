@@ -19,7 +19,10 @@ insert into public.metadata_fields(id,category_id,field_type)
   select field,category,'multi_select' from choice_scale_fixture;
 insert into public.form_revision_fields(revision_id,field_id,label,applies_to,required,rules,sort_order)
   select revision,field,'Legacy maximum choices',array['quantity'],false,'{"maxSelections":1000}',0 from choice_scale_fixture;
-create temporary table choice_scale_options as select n position,gen_random_uuid() id,
+-- Canonical UUID order is deliberately the reverse of selected/navigation order.
+-- Literal ordinals are predictable without asking the production helper for expectations.
+create temporary table choice_scale_options as select n position,1001-n canonical_ordinal,
+  ('00000000-0000-4000-8000-'||lpad((1001-n)::text,12,'0'))::uuid id,
   left(repeat('StraßeΣꭰﬃ',30),200) label from generate_series(1,1000) n;
 insert into public.metadata_options(id,field_id)
   select o.id,f.field from choice_scale_options o cross join choice_scale_fixture f;
@@ -79,11 +82,11 @@ select is((select r.doc->f.field::text->'value' from choice_scale_read r cross j
   (select custom_values->f.field::text->'value' from choice_scale_values cross join choice_scale_fixture f),
   'max-size detail preserves answer IDs and their order');
 select is((select r.doc->f.field::text->'option_paths'->0->>0 from choice_scale_read r cross join choice_scale_fixture f),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1),
-  'first historical answer retains original spelling and its identity disambiguator');
+  (select label||' (1000)' from choice_scale_options where position=1),
+  'first selected answer retains all 200 Unicode code points with canonical UUID suffix (1000)');
 select is((select r.doc->f.field::text->'option_paths'->999->>0 from choice_scale_read r cross join choice_scale_fixture f),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1000),
-  'last historical answer retains original spelling and its identity disambiguator');
+  (select label from choice_scale_options where position=1000),
+  'last selected answer retains all 200 Unicode code points as the lowest UUID without a suffix');
 
 alter sequence metadata_fold_calls restart with 1;
 update choice_scale_clock set started=clock_timestamp();
@@ -122,8 +125,39 @@ create temporary table choice_scale_history_last as select public.metadata_event
 select is((select jsonb_array_length(doc->'option_paths') from choice_scale_history_last),8,
   'the final history page exposes all eight remaining paths');
 select is((select doc->'option_paths'->7->>0 from choice_scale_history_last),
-  (select label||' [choice '||id::text||']' from choice_scale_options where position=1000),
-  'history reaches the thousandth historical choice');
+  (select label from choice_scale_options where position=1000),
+  'history reaches the thousandth selected choice with its complete lowest-UUID label');
+
+-- Compare all 1,000 complete paths against independent literal fixture labels,
+-- not an expected result computed by metadata_option_paths itself.
+select is((select r.doc->f.field::text->'option_paths' from choice_scale_read r cross join choice_scale_fixture f),
+  (select jsonb_agg(jsonb_build_array(label||case when canonical_ordinal=1 then '' else ' ('||canonical_ordinal::text||')' end) order by position) from choice_scale_options),
+  'all 1000 Unicode labels remain complete and UUID-disambiguated in selected-answer order');
+
+-- Emulate another immutable legacy publication that changes only navigation.
+-- The original revision, persisted answers and event snapshots are never updated.
+create temporary table choice_scale_reordered as select gen_random_uuid() revision;
+insert into public.category_form_revisions(id,category_id,status,revision_number,draft_definition)
+  select r.revision,f.category,'draft',3,'{"fields":[],"layout":[]}'::jsonb
+    from choice_scale_reordered r cross join choice_scale_fixture f;
+insert into public.form_revision_fields(revision_id,field_id,label,applies_to,required,rules,sort_order)
+  select r.revision,p.field_id,p.label,p.applies_to,p.required,p.rules,p.sort_order
+    from choice_scale_reordered r cross join choice_scale_fixture f
+    join public.form_revision_fields p on p.revision_id=f.revision;
+insert into public.form_revision_options(revision_id,field_id,option_id,label,active,sort_order)
+  select r.revision,f.field,o.id,o.label,true,1001-o.position
+    from choice_scale_reordered r cross join choice_scale_fixture f cross join choice_scale_options o;
+update public.category_form_revisions set status='published',published_at=now()
+  where id=(select revision from choice_scale_reordered);
+select is((select private.metadata_option_paths(r.revision,f.field,array(select id from choice_scale_options order by position))
+    from choice_scale_reordered r cross join choice_scale_fixture f),
+  (select original.doc->f.field::text->'option_paths' from choice_scale_read original cross join choice_scale_fixture f),
+  'reordering 1000 published options preserves every UUID label and selected path order');
+select ok((select bool_and(p.sort_order=o.position and p.label=o.label)
+    from public.form_revision_options p join choice_scale_options o on o.id=p.option_id cross join choice_scale_fixture f where p.revision_id=f.revision)
+  and (select q.custom_values=v.custom_values from public.quantity_items q cross join choice_scale_fixture f cross join choice_scale_values v where q.id=f.item)
+  and (select e.after_metadata->'custom_values'=v.custom_values from public.quantity_events e cross join choice_scale_fixture f cross join choice_scale_values v where e.id=f.event_id),
+  'reordered read leaves original compiled spelling/order, stored values and event snapshot unchanged');
 
 select throws_ok($$select private.metadata_option_paths(f.revision,f.field,
   array(select id from choice_scale_options union all select item from choice_scale_fixture))
@@ -136,7 +170,7 @@ select ok(not has_function_privilege('authenticated','private.metadata_option_pa
 -- This is a constructor stress case, not a hierarchy field's stored answer format.
 create temporary table choice_scale_deep as select gen_random_uuid() revision,gen_random_uuid() field;
 insert into public.category_form_revisions(id,category_id,status,revision_number,draft_definition)
-  select d.revision,f.category,'draft',3,'{"fields":[],"layout":[]}'::jsonb
+  select d.revision,f.category,'draft',4,'{"fields":[],"layout":[]}'::jsonb
     from choice_scale_deep d cross join choice_scale_fixture f;
 insert into public.metadata_fields(id,category_id,field_type)
   select d.field,f.category,'hierarchical_select' from choice_scale_deep d cross join choice_scale_fixture f;

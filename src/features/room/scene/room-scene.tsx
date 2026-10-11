@@ -45,7 +45,18 @@ import {
   SelectionEdges,
 } from './scene-palette';
 import { SceneDepth } from './scene-depth';
-import { RoomLabel, knownOccupiedCount } from './room-label';
+import { RoomLabel } from './room-label';
+import {
+  occupiedLocation,
+  occupancyText,
+  type RoomOccupancy,
+  type LocationOccupancy,
+} from '../occupancy-contract';
+import {
+  RoomVisibilityProvider,
+  useRoomVisibilityBatch,
+} from './room-visibility-runtime';
+import { createInitialFramePolicy, hasMeasuredViewport } from './initial-frame';
 import { RoomLabelHtml } from './room-label-html';
 import { SafeCanvas as Canvas } from './safe-canvas';
 import {
@@ -59,7 +70,7 @@ import styles from '../room-visual.module.css';
 export type RoomSceneProps = {
   room: RoomDefinition;
   locationNames?: Record<string, string>;
-  locationEntryCounts?: Record<string, string>;
+  locationOccupancy?: RoomOccupancy;
   showCounts?: boolean;
   onCountsChange?: (show: boolean) => void;
   bindings: RoomBinding[];
@@ -265,7 +276,7 @@ function CameraFacingLabel({
   size,
   prioritySelected,
   hovered,
-  count,
+  occupancy,
   label,
   onSelect,
 }: {
@@ -273,25 +284,42 @@ function CameraFacingLabel({
   size: [number, number, number];
   prioritySelected: boolean;
   hovered: boolean;
-  count?: string;
+  occupancy?: LocationOccupancy;
   label: string;
   onSelect: (code: string) => void;
 }) {
   const { camera, invalidate } = useThree();
+  const visibility = useRoomVisibilityBatch();
+  const registry = useRoomLabelRegistry();
+  const exposed = useRef(false);
+  const isVisible = useCallback(() => exposed.current, []);
   const origin = useRef<Group>(null);
   const anchor = useRef<Group>(null);
   const labelAnchor = node.interaction?.labelAnchor;
   useFrame(() => {
-    if (!labelAnchor || !origin.current || !anchor.current) return;
+    if (!origin.current || !anchor.current) return;
     const localView = cameraFacingDirectionInLocalSpace(camera, origin.current);
-    const next = cameraFacingLabelPosition(size, localView, labelAnchor);
+    const preferred = labelAnchor
+      ? cameraFacingLabelPosition(size, localView, labelAnchor)
+      : ([0, size[2] / 2 + 0.15, 0] as [number, number, number]);
+    const result = visibility.resolve(
+      origin.current,
+      node.locationCode!,
+      new Vector3(...preferred),
+    );
+    exposed.current = result.status === 'visible';
+    if (result.status !== 'visible') {
+      registry.hide(node.id);
+      return;
+    }
+    const next = result.anchor.toArray();
     if (
       anchor.current.position.distanceToSquared(new Vector3(...next)) > 1e-6
     ) {
       anchor.current.position.set(...next);
       invalidate();
     }
-  });
+  }, -0.25);
   const initial = labelAnchor
     ? toScenePosition(labelAnchor)
     : ([0, size[2] / 2 + 0.15, 0] as [number, number, number]);
@@ -300,7 +328,6 @@ function CameraFacingLabel({
       <group ref={anchor} position={initial}>
         <RoomLabelHtml
           center
-          occlude
           style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}
           zIndexRange={[20, 0]}
         >
@@ -310,7 +337,8 @@ function CameraFacingLabel({
             label={label}
             selected={prioritySelected}
             priority={prioritySelected ? 3 : hovered ? 2 : 1}
-            count={count}
+            occupancy={occupancy}
+            isVisible={isVisible}
             onSelect={onSelect}
           />
         </RoomLabelHtml>
@@ -328,7 +356,7 @@ function NodeVisual({
   profiles,
   showAllLabels,
   hoveredCode,
-  locationEntryCounts,
+  locationOccupancy,
   showCounts,
   canSelect,
 }: {
@@ -341,7 +369,7 @@ function NodeVisual({
   onSelect: (code: string) => void;
   showAllLabels: boolean;
   hoveredCode: string | null;
-  locationEntryCounts?: Record<string, string>;
+  locationOccupancy?: RoomOccupancy;
   showCounts: boolean;
   canSelect: () => boolean;
 }) {
@@ -463,20 +491,20 @@ function NodeVisual({
             </mesh>
           )}
           {interactive &&
-            (showAllLabels ||
+            (node.locationCode === selectedCode ||
+              showAllLabels ||
               (showCounts &&
-                knownOccupiedCount(
-                  locationEntryCounts?.[node.locationCode!],
-                ) !== null)) && (
+                occupiedLocation(locationOccupancy?.[node.locationCode!]) !==
+                  null)) && (
               <CameraFacingLabel
                 node={node}
                 label={label}
                 size={node.size}
                 prioritySelected={node.locationCode === selectedCode}
                 hovered={node.locationCode === hoveredCode}
-                count={
+                occupancy={
                   showCounts
-                    ? locationEntryCounts?.[node.locationCode!]
+                    ? locationOccupancy?.[node.locationCode!]
                     : undefined
                 }
                 onSelect={onSelect}
@@ -496,7 +524,7 @@ function NodeVisual({
           profiles={profiles}
           showAllLabels={showAllLabels}
           hoveredCode={hoveredCode}
-          locationEntryCounts={locationEntryCounts}
+          locationOccupancy={locationOccupancy}
           showCounts={showCounts}
           canSelect={canSelect}
         />
@@ -523,7 +551,7 @@ export function finishFocusAnimation(
   camera.zoom = motion.toZoom;
   camera.updateProjectionMatrix();
 }
-function CameraRig({
+export function CameraRig({
   room,
   bindings,
   focusRequest,
@@ -540,6 +568,7 @@ function CameraRig({
   active,
   selectionGesture,
   onDraggingChange,
+  onPassiveDrag,
 }: Pick<
   RoomSceneProps,
   | 'room'
@@ -559,13 +588,15 @@ function CameraRig({
   active: boolean;
   selectionGesture: { current: { suppressSelection: boolean } };
   onDraggingChange: (dragging: boolean) => void;
+  onPassiveDrag: () => void;
 }) {
   const { camera, gl, size, invalidate } = useThree();
   const labelRegistry = useRoomLabelRegistry();
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   useEffect(
-    () => attachMapInput(gl.domElement, active, selectionGesture),
-    [gl, active, selectionGesture],
+    () =>
+      attachMapInput(gl.domElement, active, selectionGesture, onPassiveDrag),
+    [gl, active, selectionGesture, onPassiveDrag],
   );
   const animation = useRef<Animation | null>(null);
   const fitZoom = useRef(1);
@@ -584,6 +615,7 @@ function CameraRig({
     target: Vector3;
     zoom: number;
   } | null>(null);
+  const initialFrame = useRef(createInitialFramePolicy());
   const ready = useRef(false);
   const renderedOnce = useRef(false);
   const viewCallback = useRef(onViewChange);
@@ -592,8 +624,15 @@ function CameraRig({
     viewCallback.current = onViewChange;
   }, [onViewChange]);
   useEffect(() => {
+    if (
+      modeValue.current !== orbitMode &&
+      hasMeasuredViewport(size.width, size.height) &&
+      initializedRoom.current === room
+    )
+      initialFrame.current.manual();
+    // Retain the newest mode while the first measured frame is still pending.
     modeValue.current = orbitMode;
-  }, [orbitMode]);
+  }, [orbitMode, room, size.width, size.height]);
   const reduced = useEffectiveReducedMotion();
   const initialTarget = useMemo(
     () => new Vector3(...toScenePosition(room.camera.target)),
@@ -623,7 +662,12 @@ function CameraRig({
     );
   }, [camera, roomBounds, initialTarget, size, room.camera.fitPadding]);
   const writeTelemetry = useCallback(() => {
-    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    if (
+      !controls.current ||
+      !(camera instanceof OrthographicCamera) ||
+      initializedRoom.current !== room
+    )
+      return;
     const offset = camera.position.clone().sub(controls.current.target);
     const azimuth = Math.atan2(offset.x, offset.z);
     if (lastAzimuth.current === null) unwrappedAzimuth.current = azimuth;
@@ -656,9 +700,14 @@ function CameraRig({
     // Mark placement pending in the same turn as the camera transform, before
     // a caller can treat the previous projected labels as settled.
     labelRegistry.schedule();
-  }, [camera, gl, labelRegistry]);
+  }, [camera, gl, labelRegistry, room]);
   const emitView = useCallback(() => {
-    if (!controls.current || !(camera instanceof OrthographicCamera)) return;
+    if (
+      !controls.current ||
+      !(camera instanceof OrthographicCamera) ||
+      initializedRoom.current !== room
+    )
+      return;
     const view: CameraView = {
       position: camera.position.toArray() as [number, number, number],
       target: controls.current.target.toArray() as [number, number, number],
@@ -668,7 +717,7 @@ function CameraRig({
     if (!validCameraView(view)) return;
     gl.domElement.dataset.cameraView = JSON.stringify(view);
     viewCallback.current?.(view);
-  }, [camera, gl]);
+  }, [camera, gl, room]);
   useEffect(
     () => () => {
       if (!animation.current) emitView();
@@ -705,23 +754,38 @@ function CameraRig({
     return () => canvas.removeEventListener('webglcontextlost', lost);
   }, [gl, onFailure]);
   useEffect(() => {
-    if (!(camera instanceof OrthographicCamera) || !controls.current) return;
+    if (
+      !(camera instanceof OrthographicCamera) ||
+      !controls.current ||
+      !hasMeasuredViewport(size.width, size.height)
+    )
+      return;
     const freshRoom = initializedRoom.current !== room;
+    if (freshRoom && initializedRoom.current !== null)
+      initialFrame.current.reset();
+    const initialAction = initialFrame.current.measure(
+      size.width,
+      size.height,
+      validCameraView(initialView),
+    );
     if (freshRoom) {
       const azimuth = MathUtils.degToRad(room.camera.azimuthDegrees);
       const elevation = MathUtils.degToRad(room.camera.elevationDegrees);
       const distance = Math.max(...room.dimensions) * 3;
-      camera.position
-        .copy(initialTarget)
-        .add(
-          new Vector3(
-            Math.sin(azimuth) * Math.cos(elevation) * distance,
-            Math.sin(elevation) * distance,
-            Math.cos(azimuth) * Math.cos(elevation) * distance,
-          ),
-        );
-      camera.lookAt(initialTarget);
-      controls.current.target.copy(initialTarget);
+      if (initialAction !== 'preserve')
+        camera.position
+          .copy(initialTarget)
+          .add(
+            new Vector3(
+              Math.sin(azimuth) * Math.cos(elevation) * distance,
+              Math.sin(elevation) * distance,
+              Math.cos(azimuth) * Math.cos(elevation) * distance,
+            ),
+          );
+      if (initialAction !== 'preserve') {
+        camera.lookAt(initialTarget);
+        controls.current.target.copy(initialTarget);
+      }
       initializedRoom.current = room;
       animation.current = null;
     }
@@ -730,7 +794,7 @@ function CameraRig({
     fitZoom.current = frame.zoom;
     controls.current.minZoom = fitZoom.current * room.camera.zoomLimits[0];
     controls.current.maxZoom = fitZoom.current * room.camera.zoomLimits[1];
-    if (freshRoom) {
+    if (initialAction === 'fit' || initialAction === 'restore') {
       camera.position.add(frame.target.clone().sub(controls.current.target));
       controls.current.target.copy(frame.target);
       camera.zoom = frame.zoom;
@@ -762,12 +826,20 @@ function CameraRig({
     focusOnRestore,
     focusRequest,
     emitView,
+    size.width,
+    size.height,
   ]);
   useEffect(() => {
     gl.domElement.dataset.orbitMode = orbitMode;
     if (animation.current) onFocusCancel?.();
     animation.current = null;
-    if (!(camera instanceof OrthographicCamera) || !controls.current) return;
+    if (
+      !(camera instanceof OrthographicCamera) ||
+      !controls.current ||
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
+    )
+      return;
     if (orbitMode !== 'guided') {
       emitView();
       return;
@@ -804,6 +876,8 @@ function CameraRig({
     writeTelemetry,
     emitView,
     onFocusCancel,
+    size.width,
+    size.height,
   ]);
   useEffect(() => {
     if (!(camera instanceof OrthographicCamera) || !controls.current) return;
@@ -813,7 +887,14 @@ function CameraRig({
       lastFocusRequest.current.room === room
     )
       return;
+    if (
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
+    )
+      return;
     lastFocusRequest.current = { ...focusRequest, room };
+    if (focusRequest.code || focusRequest.requestId > 0)
+      initialFrame.current.manual();
     const binding = findFocusBinding(bindings, focusRequest.code);
     if (focusRequest.code && !binding) {
       onFocusComplete(null);
@@ -885,9 +966,12 @@ function CameraRig({
       !command.id ||
       command.id === lastCommandId.current ||
       !(camera instanceof OrthographicCamera) ||
-      !controls.current
+      !controls.current ||
+      !hasMeasuredViewport(size.width, size.height) ||
+      initializedRoom.current !== room
     )
       return;
+    initialFrame.current.manual();
     lastCommandId.current = command.id;
     if (animation.current) onFocusCancel?.();
     animation.current = null;
@@ -956,6 +1040,8 @@ function CameraRig({
   }, [
     command,
     camera,
+    size.width,
+    size.height,
     initialTarget,
     room,
     currentFrame,
@@ -994,13 +1080,13 @@ function CameraRig({
       emitView();
       onFocusComplete(motion.code);
     } else invalidate();
-  });
+  }, -0.75);
   return (
     <OrbitControls
       ref={controls}
       makeDefault
       domElement={gl.domElement}
-      enabled={active}
+      enabled={active && hasMeasuredViewport(size.width, size.height)}
       enableDamping={false}
       minAzimuthAngle={
         orbitMode === 'free'
@@ -1027,6 +1113,12 @@ function CameraRig({
       screenSpacePanning
       zoomSpeed={0.7}
       onStart={() => {
+        if (
+          !hasMeasuredViewport(size.width, size.height) ||
+          initializedRoom.current !== room
+        )
+          return;
+        initialFrame.current.manual();
         if (animation.current) onFocusCancel?.();
         animation.current = null;
         manualGesture.current.active = true;
@@ -1039,6 +1131,11 @@ function CameraRig({
           };
       }}
       onChange={() => {
+        if (
+          !hasMeasuredViewport(size.width, size.height) ||
+          initializedRoom.current !== room
+        )
+          return;
         if (
           manualStart.current &&
           controls.current &&
@@ -1056,7 +1153,11 @@ function CameraRig({
         manualGesture.current.active = false;
         onDraggingChange(false);
         manualStart.current = null;
-        emitView();
+        if (
+          hasMeasuredViewport(size.width, size.height) &&
+          initializedRoom.current === room
+        )
+          emitView();
       }}
     />
   );
@@ -1140,8 +1241,16 @@ export default function RoomScene(props: RoomSceneProps) {
     selectedSceneLabel(props.room.nodes, props.selectedCode) ??
     props.selectedCode;
   const [suppressedLabels, setSuppressedLabels] = useState(0);
+  const [overflowCodes, setOverflowCodes] = useState<string[]>([]);
+  const [unresolvedCodes, setUnresolvedCodes] = useState<string[]>([]);
+  const [placementCodes, setPlacementCodes] = useState<string[]>([]);
+  const visibilityRetry = useRef<(() => void) | null>(null);
+  const [inspectedSummary, setInspectedSummary] = useState<string | null>(null);
   const onSuppressionChange = useCallback(
-    (count: number) => setSuppressedLabels(count),
+    (count: number, codes: string[] = []) => {
+      setSuppressedLabels(count);
+      setOverflowCodes(codes);
+    },
     [],
   );
   const manualGesture = useRef({ active: false, lastMotionAt: -Infinity });
@@ -1192,13 +1301,32 @@ export default function RoomScene(props: RoomSceneProps) {
   const [localShowCounts, setShowCounts] = useState(false);
   const showCounts = props.showCounts ?? localShowCounts;
   const surface = useRef<HTMLDivElement>(null);
+  const interactionButton = useRef<HTMLButtonElement>(null);
+  const [dragHint, setDragHint] = useState(false);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDragHint = useCallback(() => {
+    setDragHint(true);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setDragHint(false), 3000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+    },
+    [],
+  );
   const selectionGesture = useRef({ suppressSelection: false });
   const canSelect = useCallback(
     () => !selectionGesture.current.suppressSelection,
     [],
   );
   const registry = useMemo(
-    () => createRoomLabelRegistry(onSuppressionChange),
+    () =>
+      createRoomLabelRegistry(
+        onSuppressionChange,
+        setInspectedSummary,
+        setPlacementCodes,
+      ),
     [onSuppressionChange],
   );
   const hoverLeader = useRef<HTMLSpanElement>(null);
@@ -1214,7 +1342,7 @@ export default function RoomScene(props: RoomSceneProps) {
       tooltipButton.current,
       hoverLeader.current,
       {
-        priority: activeHover.target.code === props.selectedCode ? 3 : 2,
+        priority: activeHover.target.code === props.selectedCode ? 4 : 2,
         locationCode: activeHover.target.code,
       },
     );
@@ -1236,22 +1364,14 @@ export default function RoomScene(props: RoomSceneProps) {
         setDragging(false);
       }
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setActive(false);
-        setDragging(false);
-      }
-    };
     document.addEventListener('pointerdown', leave, true);
-    document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('pointerdown', leave, true);
-      document.removeEventListener('keydown', escape);
     };
   }, [active, setActive]);
   const hoverCount =
     showCounts && activeHover
-      ? knownOccupiedCount(props.locationEntryCounts?.[activeHover.target.code])
+      ? occupiedLocation(props.locationOccupancy?.[activeHover.target.code])
       : null;
   return (
     <div
@@ -1266,10 +1386,16 @@ export default function RoomScene(props: RoomSceneProps) {
       }}
     >
       <RoomToolbar
+        interactionRef={interactionButton}
+        onOverlayChange={registry.invalidateLayout}
         active={active}
         onActiveChange={(next) => {
           setActive(next);
           setDragging(false);
+          if (!next) {
+            selectionGesture.current.suppressSelection = true;
+            manualGesture.current.active = false;
+          }
         }}
         canFocusSelected={props.canFocusSelected}
         onRequestFocus={props.onRequestFocus}
@@ -1301,55 +1427,61 @@ export default function RoomScene(props: RoomSceneProps) {
           <ScenePaletteProvider>
             <ScenePaletteLighting />
             <LabelLayoutProvider registry={registry}>
-              <LabelLayoutDriver registry={registry} />
-              <SceneDepth room={props.room} />
-              <Envelope
-                room={props.room}
-                onRecenter={() => requestCommand('recenter')}
-                canRecenter={(delta) =>
-                  floorDoubleClickAllowed(
-                    delta,
-                    manualGesture.current.active,
-                    manualGesture.current.lastMotionAt,
-                    performance.now(),
-                  )
-                }
-                showAllLabels={showAllLabels}
-              />
-              {props.room.nodes.map((node) => (
-                <NodeVisual
-                  key={node.id}
-                  node={node}
-                  locationNames={props.locationNames}
-                  selectedCode={props.selectedCode}
-                  hasRenderedSelection={renderedSelection}
-                  highlighted={highlighted}
-                  onSelect={props.onSelect}
-                  profiles={props.room.rackFaceProfiles}
+              <RoomVisibilityProvider
+                onUnresolvedChange={setUnresolvedCodes}
+                retryRef={visibilityRetry}
+              >
+                <LabelLayoutDriver registry={registry} />
+                <SceneDepth room={props.room} />
+                <Envelope
+                  room={props.room}
+                  onRecenter={() => requestCommand('recenter')}
+                  canRecenter={(delta) =>
+                    floorDoubleClickAllowed(
+                      delta,
+                      manualGesture.current.active,
+                      manualGesture.current.lastMotionAt,
+                      performance.now(),
+                    )
+                  }
                   showAllLabels={showAllLabels}
-                  hoveredCode={activeHover?.target.code ?? null}
-                  locationEntryCounts={props.locationEntryCounts}
-                  showCounts={showCounts}
-                  canSelect={canSelect}
                 />
-              ))}
-              <CameraRig
-                {...props}
-                command={command}
-                orbitMode={orbitMode}
-                manualGesture={manualGesture}
-                active={active}
-                selectionGesture={selectionGesture}
-                onDraggingChange={setDragging}
-              />
-              <VisibleHoverTracker
-                showAllLabels={showAllLabels}
-                active={active}
-                suspended={active && dragging}
-                retainDuringLabelHandoff={retainDuringLabelHandoff}
-                onHit={onVisibleHover}
-                onCanvasLeave={onCanvasHoverLeave}
-              />
+                {props.room.nodes.map((node) => (
+                  <NodeVisual
+                    key={node.id}
+                    node={node}
+                    locationNames={props.locationNames}
+                    selectedCode={props.selectedCode}
+                    hasRenderedSelection={renderedSelection}
+                    highlighted={highlighted}
+                    onSelect={props.onSelect}
+                    profiles={props.room.rackFaceProfiles}
+                    showAllLabels={showAllLabels}
+                    hoveredCode={activeHover?.target.code ?? null}
+                    locationOccupancy={props.locationOccupancy}
+                    showCounts={showCounts}
+                    canSelect={canSelect}
+                  />
+                ))}
+                <CameraRig
+                  {...props}
+                  command={command}
+                  orbitMode={orbitMode}
+                  manualGesture={manualGesture}
+                  active={active}
+                  selectionGesture={selectionGesture}
+                  onDraggingChange={setDragging}
+                  onPassiveDrag={showDragHint}
+                />
+                <VisibleHoverTracker
+                  showAllLabels={showAllLabels}
+                  active={active}
+                  suspended={active && dragging}
+                  retainDuringLabelHandoff={retainDuringLabelHandoff}
+                  onHit={onVisibleHover}
+                  onCanvasLeave={onCanvasHoverLeave}
+                />
+              </RoomVisibilityProvider>
             </LabelLayoutProvider>
           </ScenePaletteProvider>
         </Canvas>
@@ -1368,7 +1500,7 @@ export default function RoomScene(props: RoomSceneProps) {
               type="button"
               data-hover-tooltip="true"
               data-location-code={activeHover.target.code}
-              aria-label={`Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})${hoverCount !== null ? `; ${hoverCount} active inventory entries: positive-stock quantity items and active individual assets at this destination` : ''}`}
+              aria-label={`Select ${props.locationNames?.[activeHover.target.code] ?? activeHover.target.label} (${activeHover.target.code})${hoverCount !== null ? `; ${occupancyText(hoverCount)} at this location` : ''}`}
               aria-pressed={props.selectedCode === activeHover.target.code}
               onPointerEnter={() => {
                 labelPointer.current = true;
@@ -1396,7 +1528,7 @@ export default function RoomScene(props: RoomSceneProps) {
               {hoverCount !== null && (
                 <span className={styles.countBadge}>
                   {' '}
-                  · {hoverCount} {hoverCount === '1' ? 'item' : 'items'}
+                  · {occupancyText(hoverCount)}
                 </span>
               )}
             </button>
@@ -1409,17 +1541,76 @@ export default function RoomScene(props: RoomSceneProps) {
           {selectedLabel !== props.selectedCode && ` (${props.selectedCode})`}
         </p>
       )}
-      {(showAllLabels || showCounts) && suppressedLabels > 0 && (
-        <p role="status" className={styles.sceneNote}>
-          Some room labels are hidden at this view. Zoom in or use the location
-          picker.
+      {inspectedSummary && (
+        <p className={styles.sceneStatus} data-room-inspected-summary="true">
+          {inspectedSummary}
         </p>
       )}
-      <p className={styles.sceneNote}>
+      {(showAllLabels || showCounts) && suppressedLabels > 0 && (
+        <p role="status" className={styles.sceneNote}>
+          Some optional labels are unavailable in this view. Use the location
+          browser or Center selected.
+        </p>
+      )}
+      {(overflowCodes.length > 0 ||
+        unresolvedCodes.length > 0 ||
+        placementCodes.length > 0) && (
+        <div className={styles.sceneNote}>
+          <p role="status">
+            Some room labels could not be checked or placed. Choose a location
+            below.
+          </p>
+          <button
+            type="button"
+            className={styles.commandButton}
+            onClick={() => {
+              visibilityRetry.current?.();
+              registry.retry();
+            }}
+          >
+            Retry label placement
+          </button>
+          <ul aria-label="Locations with unavailable room labels">
+            {[
+              ...new Set([
+                ...overflowCodes,
+                ...unresolvedCodes,
+                ...placementCodes,
+              ]),
+            ]
+              .sort()
+              .map((code) => (
+                <li key={code}>
+                  <button
+                    type="button"
+                    className={styles.commandButton}
+                    aria-pressed={props.selectedCode === code}
+                    onClick={() => props.onSelect(code)}
+                  >
+                    {props.locationNames?.[code] ?? code}
+                    {props.locationOccupancy?.[code] &&
+                      ` · ${occupancyText(props.locationOccupancy[code])}`}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+      <p role="status" className={styles.sceneNote}>
         {active
-          ? 'Map interaction is on. Done or Escape returns to page scrolling.'
-          : 'Select a location. Use More map controls to interact or get help.'}
+          ? 'Map interaction is on. Ordinary wheel or direct pinch zooms the map.'
+          : 'Map interaction off. Scroll moves the page.'}
       </p>
+      {dragHint && !active && (
+        <p role="status" className={styles.sceneNote}>
+          Interact to rotate. Scroll moves the page.
+        </p>
+      )}
+      {!props.selectedCode && (
+        <p className={styles.sceneNote}>
+          Select a location. Use More map controls for labels, counts and help.
+        </p>
+      )}
     </div>
   );
 }

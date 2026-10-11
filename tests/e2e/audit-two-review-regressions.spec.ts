@@ -255,13 +255,13 @@ test('site count corrections show authoritative signed before and after counts, 
     await issue.getByLabel('Units', { exact: true }).fill('4');
     await issue
       .getByRole('button', {
-        name: 'Review issue stock to a site',
+        name: 'Review issue',
         exact: true,
       })
       .click();
     await issue
       .getByRole('button', {
-        name: 'Confirm issue stock to a site',
+        name: 'Issue to site',
         exact: true,
       })
       .click();
@@ -269,7 +269,7 @@ test('site count corrections show authoritative signed before and after counts, 
       name: 'Custody completion',
       exact: true,
     });
-    await expect(completion).toContainText('Custody saved');
+    await expect(completion).toContainText('Issued to site');
     const issueReceipt = completion.getByRole('region', {
       name: 'Committed custody receipt',
     });
@@ -341,7 +341,7 @@ test('site count corrections show authoritative signed before and after counts, 
         .fill(reference);
       await form
         .getByRole('button', {
-          name: 'Review correct recorded site holding',
+          name: 'Review correction',
           exact: true,
         })
         .click();
@@ -355,11 +355,16 @@ test('site count corrections show authoritative signed before and after counts, 
       await expect(review).toContainText(reference);
       await form
         .getByRole('button', {
-          name: 'Confirm correct recorded site holding',
+          name: 'Save correction',
           exact: true,
         })
         .click();
-      await expect(completion).toContainText('Custody saved');
+      await expect(
+        completion.getByRole('heading', {
+          name: after === before ? 'No change needed' : 'Site count corrected',
+          exact: true,
+        }),
+      ).toBeVisible();
       await expect(completion).toContainText(
         'Count correction at ' + site.name,
       );
@@ -442,7 +447,7 @@ test('site count corrections show authoritative signed before and after counts, 
         await expect(custodyRow).not.toContainText('→');
         await expect(custodyRow).not.toContainText('No destination');
         const recentRow = page
-          .getByRole('heading', { name: 'Site custody corrected', exact: true })
+          .getByRole('heading', { name: 'Site count corrected', exact: true })
           .locator('xpath=ancestor::li[1]')
           .filter({ hasText: 'Reason: ' + reason });
         await expect(

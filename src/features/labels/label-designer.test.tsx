@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import {
   act,
@@ -16,6 +16,26 @@ const mocks = vi.hoisted(() => ({
   query: '',
   getQueueRecords: vi.fn(),
   searchLabelRecords: vi.fn(),
+  readLogoutPrivacyGeneration: vi.fn(),
+  acknowledgeLogoutPrivacyGeneration: vi.fn(),
+  readProtectedPrivacyIdentity: vi.fn(),
+  authChanged: null as
+    null | ((event: string, session: { user: { id: string } } | null) => void),
+}));
+vi.mock('@/lib/supabase/browser', () => ({
+  createSupabaseBrowserClient: () => ({
+    auth: {
+      onAuthStateChange: (fn: typeof mocks.authChanged) => {
+        mocks.authChanged = fn;
+        return { data: { subscription: { unsubscribe: vi.fn() } } };
+      },
+    },
+  }),
+}));
+vi.mock('@/lib/auth/actions', () => ({
+  readLogoutPrivacyGeneration: mocks.readLogoutPrivacyGeneration,
+  acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
+  readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
 }));
 vi.mock('next/navigation', () => {
   const router = { replace: mocks.replace };
@@ -76,6 +96,14 @@ vi.mock('./label-sheet', () => ({
   ),
 }));
 import { LabelDesigner } from './label-designer';
+import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { logoutAcknowledgementKey } from '@/lib/auth/privacy-barrier';
+import { AssignmentScopeGuard } from '@/features/scan/assignment-scope-guard';
+import {
+  invalidateAssignmentPrivacy,
+  readAuthoritativeCleanupRevision,
+  assignmentEpoch,
+} from '@/features/scan/assign-batch';
 
 const quantityId = '7b84a7cf-197b-45b1-8016-87482d124cb4';
 const assetId = 'd6a2c785-1489-4dd0-83ea-d8dc2f249711';
@@ -137,6 +165,13 @@ async function reviewAndAcknowledge(name = 'Laptop') {
 beforeEach(() => {
   mocks.query = '';
   mocks.replace.mockReset();
+  mocks.authChanged = null;
+  mocks.readLogoutPrivacyGeneration
+    .mockReset()
+    .mockResolvedValue({ status: 'absent' });
+  mocks.acknowledgeLogoutPrivacyGeneration
+    .mockReset()
+    .mockResolvedValue({ status: 'match' });
   sessionStorage.clear();
   mocks.getQueueRecords.mockReset().mockResolvedValue([quantity, asset]);
   mocks.searchLabelRecords.mockReset().mockResolvedValue({
@@ -147,6 +182,141 @@ beforeEach(() => {
   });
   vi.stubGlobal('print', vi.fn());
 });
+afterEach(() => vi.restoreAllMocks());
+
+const restoredLocation: LiveLabel = {
+  ...quantity,
+  kind: 'location',
+  key: 'ITC-CLEAR',
+  name: 'Clear Container',
+  path: '/locations/ITC-CLEAR',
+};
+const restoredRows = [asset, quantity, restoredLocation];
+function saveMixedQueue() {
+  const entries = restoredRows.map((record, index) => ({
+    kind: record.kind,
+    key: record.key,
+    copies: index + 2,
+    baselineTag: record.tag,
+    baselineState: record.state,
+    lifecycleAcknowledged: true,
+  }));
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({ entries, filters: defaultFilters, job: defaultJob }),
+  );
+  return entries;
+}
+function expectPrivateQueueIdentity(queue: HTMLElement) {
+  for (const record of restoredRows) {
+    expect(queue).not.toHaveTextContent(record.key);
+    for (const control of within(queue).getAllByRole('button'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+    for (const control of within(queue).getAllByRole('spinbutton'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+  }
+}
+it('restores a mixed queue with human refreshing labels until the authorized deferred read supplies names', async () => {
+  const savedEntries = saveMixedQueue();
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(restoredRows);
+  render(<LabelDesigner {...props} initial={[]} />);
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  await within(queue).findByText('Individual asset 1 · refreshing…');
+  expect(
+    within(queue).getByText('Quantity item 2 · refreshing…'),
+  ).toBeVisible();
+  expect(within(queue).getByText('Location 3 · refreshing…')).toBeVisible();
+  expectPrivateQueueIdentity(queue);
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(mocks.getQueueRecords).toHaveBeenCalledWith(
+      savedEntries.map(({ kind, key }) => ({ kind, key })),
+    ),
+  );
+  await act(async () => finish(restoredRows));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(queue).toHaveTextContent('Laptop');
+  expect(queue).toHaveTextContent('Adapters');
+  expect(queue).toHaveTextContent('Clear Container');
+  expect(
+    within(queue)
+      .getAllByRole('spinbutton')
+      .map((input) => (input as HTMLInputElement).value),
+  ).toEqual(['2', '3', '4']);
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries,
+  ).toEqual(savedEntries);
+});
+it.each(['missing', 'failure'] as const)(
+  'shows human mixed-queue %s states without keys or cached unauthorized names',
+  async (outcome) => {
+    saveMixedQueue();
+    mocks.getQueueRecords.mockResolvedValue(restoredRows);
+    render(<LabelDesigner {...props} initial={[]} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const queue = screen.getByRole('region', { name: 'Label queue' });
+    if (outcome === 'missing') mocks.getQueueRecords.mockResolvedValueOnce([]);
+    else
+      mocks.getQueueRecords.mockRejectedValueOnce(
+        new Error('Private read detail ' + assetId),
+      );
+    fireEvent.click(printButton());
+    const state =
+      outcome === 'missing'
+        ? 'unavailable to this account'
+        : 'refresh failed; retry';
+    await within(queue).findByText('Individual asset 1 · ' + state);
+    expect(within(queue).getByText('Quantity item 2 · ' + state)).toBeVisible();
+    expect(within(queue).getByText('Location 3 · ' + state)).toBeVisible();
+    expectPrivateQueueIdentity(queue);
+    for (const record of restoredRows)
+      expect(queue).not.toHaveTextContent(record.name);
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+    if (outcome === 'failure') {
+      let finish!: (rows: LiveLabel[]) => void;
+      mocks.getQueueRecords.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Retry label refresh' }),
+      );
+      await within(queue).findByText('Individual asset 1 · refreshing…');
+      expectPrivateQueueIdentity(queue);
+      await waitFor(() =>
+        expect(mocks.getQueueRecords).toHaveBeenCalledTimes(3),
+      );
+      await act(async () => finish(restoredRows));
+      await waitFor(() => expect(printButton()).toBeEnabled());
+    } else {
+      fireEvent.click(
+        within(queue).getAllByRole('button', {
+          name: /^Remove$/,
+        })[1],
+      );
+      await waitFor(() =>
+        expect(
+          JSON.parse(
+            sessionStorage.getItem(
+              queueStorageKey(props.origin, props.memberId),
+            )!,
+          ).entries.map((entry: { key: string }) => entry.key),
+        ).toEqual([assetId, restoredLocation.key]),
+      );
+    }
+  },
+);
 
 it('omits empty search paging without changing the existing label queue', async () => {
   render(<LabelDesigner {...props} />);
@@ -717,8 +887,13 @@ it.each([{ memberId: 'member-b' }, { origin: 'https://other.example.test' }])(
       <LabelDesigner {...props} {...scope} initial={[]} addIntent={[]} />,
     );
     await act(async () => finish([asset]));
-    expect(screen.getByText('0 distinct records · 0 labels')).toBeVisible();
+    expect(screen.getByText('0 distinct records · 0 labels')).not.toBeVisible();
     expect(mocks.replace).not.toHaveBeenCalled();
+    view.unmount();
+    render(<LabelDesigner {...props} {...scope} initial={[]} addIntent={[]} />);
+    expect(
+      await screen.findByText('0 distinct records · 0 labels'),
+    ).toBeVisible();
   },
 );
 
@@ -749,7 +924,7 @@ it.each([
   { memberId: 'member-b', origin: props.origin },
   { memberId: props.memberId, origin: 'https://other.example.test' },
 ])(
-  'remounts a changed queue scope and ignores a late old search ($memberId, $origin)',
+  'keeps a changed queue scope masked until a fresh owner entry and ignores a late old search ($memberId, $origin)',
   async (scope) => {
     let finish!: (result: {
       rows: [];
@@ -766,12 +941,18 @@ it.each([
     await waitFor(() =>
       expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(1),
     );
+    const originalSearch = screen.getByRole('textbox', {
+      name: /Name, serial, tag/,
+    });
     const restored = { ...defaultFilters, q: 'Current scope' };
     sessionStorage.setItem(
       queueStorageKey(scope.origin, scope.memberId),
       JSON.stringify({ entries: [], filters: restored, job: defaultJob }),
     );
     view.rerender(<LabelDesigner {...props} {...scope} initial={[]} />);
+    expect(originalSearch).not.toBeVisible();
+    view.unmount();
+    render(<LabelDesigner {...props} {...scope} initial={[]} />);
     await screen.findByText(/0 matching records\. Scroll this list/);
     expect(mocks.searchLabelRecords).toHaveBeenCalledTimes(2);
     expect(mocks.searchLabelRecords).toHaveBeenLastCalledWith(restored);
@@ -865,11 +1046,11 @@ it('describes queued locations as locations while retaining inventory category f
   render(<LabelDesigner {...props} initial={[location, uncategorized]} />);
   await waitFor(() =>
     expect(
-      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · active'),
+      screen.getByText('Shelf 1A · Location · IT Closet / Shelf 1A · Active'),
     ).toBeInTheDocument(),
   );
   expect(
-    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · active'),
+    screen.getByText('Adapters · Uncategorized · ITC-S1A: 3 · Active'),
   ).toBeInTheDocument();
 });
 
@@ -1402,7 +1583,12 @@ it('shows a quantity Item code in search results without replacing its UUID rout
     pageSize: 25,
   });
   render(<LabelDesigner {...props} />);
-  expect(await screen.findByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(await screen.findByText('Item code: SKU-0042')).toHaveClass(
+    'experience-code',
+  );
+  expect(
+    screen.getByText('Active', { selector: '.experience-record-status' }),
+  ).toBeVisible();
   expect(screen.queryByText('ID ' + quantityId)).not.toBeInTheDocument();
   expect(
     screen.getByRole('checkbox', {
@@ -1474,15 +1660,19 @@ it('shows field-aware label-search answers including intentional UUID text witho
   expect(mocks.getQueueRecords).toHaveBeenLastCalledWith([
     { kind: 'quantity', key: quantityId },
   ]);
-  const stored = JSON.parse(
-    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-  );
-  expect(
-    stored.entries.map((entry: { kind: string; key: string }) => ({
-      kind: entry.kind,
-      key: entry.key,
-    })),
-  ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  // The queue text commits before the passive storage effect necessarily runs.
+  // Observe persisted identity directly before asserting reload-safe selection.
+  await waitFor(() => {
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    );
+    expect(
+      stored.entries.map((entry: { kind: string; key: string }) => ({
+        kind: entry.kind,
+        key: entry.key,
+      })),
+    ).toEqual([{ kind: 'quantity', key: quantityId }]);
+  });
   expect(
     screen.getByRole('region', { name: 'Label queue' }),
   ).not.toHaveTextContent('Braided cable');
@@ -1605,14 +1795,14 @@ it('shows one named decision on returning to a changed item and invalidates revi
   expect(screen.getAllByRole('alert')).toHaveLength(1);
   expect(notice).toHaveTextContent('Laptop');
   expect(notice).toHaveTextContent('Individual asset');
-  expect(notice).toHaveTextContent('Lifecycle changed from active to retired.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Active to Retired.');
   expect(
     screen.queryByText('Review required before printing'),
   ).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   let snapshot = within(notice).getByRole('region', { name: 'Review Laptop' });
-  expect(snapshot).toHaveTextContent('Current authorized snapshot: retired');
+  expect(snapshot).toHaveTextContent('Current authorized snapshot: Retired');
   expect(
     within(snapshot).getByRole('link', { name: 'View item details' }),
   ).toHaveAttribute('href', asset.path);
@@ -1628,7 +1818,7 @@ it('shows one named decision on returning to a changed item and invalidates revi
   current = asset;
   fireEvent(window, new Event('focus'));
   notice = await screen.findByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Lifecycle changed from retired to active.');
+  expect(notice).toHaveTextContent('Lifecycle changed from Retired to Active.');
   expect(within(notice).queryByRole('region')).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1664,7 +1854,7 @@ it('requires fresh review when the acknowledgment read returns a different tag o
     ).not.toBeInTheDocument(),
   );
   notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).toHaveTextContent('Identifier changed.');
   expect(printButton()).toBeDisabled();
   const stored = JSON.parse(
@@ -1845,9 +2035,9 @@ it('rejects a delayed acknowledgment after focus advances the queue validation g
   expect(stored.entries[0].lifecycleAcknowledged).toBe(false);
   expect(
     screen.getByRole('alert', { name: 'Label item decisions' }),
-  ).toHaveTextContent('Current state: active.');
+  ).toHaveTextContent('Current state: Active.');
   expect(
-    screen.queryByText(/Current authorized snapshot: retired/),
+    screen.queryByText(/Current authorized snapshot: Retired/),
   ).not.toBeInTheDocument();
   await reviewAndAcknowledge();
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -1898,7 +2088,7 @@ it.each([false, true])(
       );
       expect(
         screen.getByRole('alert', { name: 'Label item decisions' }),
-      ).toHaveTextContent('Current state: active');
+      ).toHaveTextContent('Current state: Active');
     } else {
       await waitFor(() =>
         expect(
@@ -1930,20 +2120,22 @@ it('persists outstanding review when an observed retirement returns to active be
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Current state: active.'),
+    ).toHaveTextContent('Current state: Active.'),
   );
   expect(printButton()).toBeDisabled();
-  expect(
-    JSON.parse(
-      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-    ).entries[0].lifecycleAcknowledged,
-  ).toBe(false);
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries[0].lifecycleAcknowledged,
+    ).toBe(false),
+  );
   view.unmount();
   render(<LabelDesigner {...props} initial={[]} />);
   const notice = await screen.findByRole('alert', {
     name: 'Label item decisions',
   });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   fireEvent.click(within(notice).getByRole('button', { name: 'Review item' }));
   expect(within(notice).queryByRole('checkbox')).not.toBeInTheDocument();
   expect(printButton()).toBeDisabled();
@@ -1968,15 +2160,17 @@ it('latches another item changed in an acknowledgment read even when it restores
     ).toHaveTextContent('Laptop'),
   );
   const notice = screen.getByRole('alert', { name: 'Label item decisions' });
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(notice).not.toHaveTextContent('Adapters');
-  const stored = JSON.parse(
-    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-  );
-  expect(
-    stored.entries.find((entry: { key: string }) => entry.key === assetId)
-      .lifecycleAcknowledged,
-  ).toBe(false);
+  await waitFor(() => {
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    );
+    expect(
+      stored.entries.find((entry: { key: string }) => entry.key === assetId)
+        .lifecycleAcknowledged,
+    ).toBe(false);
+  });
   expect(printButton()).toBeDisabled();
   await reviewAndAcknowledge('Laptop');
   await waitFor(() => expect(printButton()).toBeEnabled());
@@ -2000,7 +2194,7 @@ it('retains a surviving item lifecycle observation beside a missing sibling thro
     name: 'Label item decisions',
   });
   expect(notice).toHaveTextContent('Laptop');
-  expect(notice).toHaveTextContent('Current state: active.');
+  expect(notice).toHaveTextContent('Current state: Active.');
   expect(
     screen.queryByText(/Some queued records are unavailable/),
   ).not.toBeInTheDocument();
@@ -2055,13 +2249,13 @@ it('invalidates an already latched checked review immediately when a duplicate l
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Review item' }));
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
     screen.getByRole('region', { name: 'Review Laptop' }),
-  ).toHaveTextContent('Current authorized snapshot: active');
+  ).toHaveTextContent('Current authorized snapshot: Active');
   expect(window.print).not.toHaveBeenCalled();
 });
 
@@ -2128,7 +2322,7 @@ it('retains review debt when an overlapping manual lookup observes a second chan
   await waitFor(() =>
     expect(
       screen.getByRole('alert', { name: 'Label item decisions' }),
-    ).toHaveTextContent('Lifecycle changed from retired to active.'),
+    ).toHaveTextContent('Lifecycle changed from Retired to Active.'),
   );
   expect(screen.getByText('1 distinct record · 1 label')).toBeVisible();
   expect(window.print).not.toHaveBeenCalled();
@@ -2172,10 +2366,12 @@ it.each([
       name: 'Search result records',
     });
     expect(
-      within(results).getByText(`${display} · ${categoryName} · active`),
-    ).toBeVisible();
+      within(results).getByText(`${display} · ${categoryName} ·`, {
+        exact: false,
+      }),
+    ).toHaveTextContent(`${display} · ${categoryName} · Active`);
     expect(
-      within(results).queryByText(`${kind} · ${categoryName} · active`),
+      within(results).queryByText(`${kind} · ${categoryName} · Active`),
     ).toBeNull();
   },
 );
@@ -2194,7 +2390,7 @@ function labelResults(
       categoryName: row.categoryName ?? '',
       status: row.state,
       assetTag: row.tag,
-      itemCode: null,
+      itemCode: row.humanId ?? null,
       serialNumber: null,
       manufacturer: null,
       model: null,
@@ -2278,14 +2474,73 @@ it('retains explicit selections across pages with named added, present and unava
   fireEvent.click(
     screen.getByRole('button', { name: 'Add selected to queue' }),
   );
-  expect(
-    await screen.findByText(
-      /^Added: Laptop.*Already present: Adapters.*Unavailable to this account: Missing adapters/,
-    ),
-  ).toBeVisible();
+  const feedback = await screen.findByText(
+    'Added: Laptop (Individual asset). Already present: Adapters (Quantity item). Unavailable to this account: Missing adapters (Quantity item).',
+  );
+  expect(feedback).toBeVisible();
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(asset.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    quantity.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    missing.key,
+  );
   expect(screen.getByText('0 selected records')).toBeVisible();
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '2 distinct records \u00b7 2 labels',
+  );
+});
+
+it('distinguishes same-name quantity batch feedback using freshly resolved item codes while preserving typed queue identities', async () => {
+  const already = { ...quantity, humanId: 'ADP-USB' };
+  const added = {
+    ...quantity,
+    key: '00000000-0000-4000-8000-000000000004',
+    humanId: 'ADP-HDMI',
+    holdingContext: 'ITC-S1B: 2',
+  };
+  const search = labelResults([already, added]);
+  search.rows[0].itemCode = 'OLD-USB';
+  search.rows[1].itemCode = 'OLD-HDMI';
+  mocks.searchLabelRecords.mockResolvedValue(search);
+  mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+    Promise.resolve(
+      [already, added].filter((row) => keys.some((key) => key.key === row.key)),
+    ),
+  );
+  render(<LabelDesigner {...props} initial={[already]} />);
+  await screen.findByRole('button', { name: 'In queue' });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  const feedback = await screen.findByText(
+    'Added: Adapters (Quantity item; item code ADP-HDMI). Already present: Adapters (Quantity item; item code ADP-USB). Unavailable to this account: none.',
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    already.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(added.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent('OLD-');
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries.map(
+        ({
+          kind,
+          key,
+          copies,
+        }: {
+          kind: string;
+          key: string;
+          copies: number;
+        }) => ({ kind, key, copies }),
+      ),
+    ).toEqual([
+      { kind: 'quantity', key: already.key, copies: 1 },
+      { kind: 'quantity', key: added.key, copies: 1 },
+    ]),
   );
 });
 
@@ -2340,6 +2595,18 @@ it('discards a delayed selected addition on actor or environment replacement', a
     />,
   );
   await act(async () => finish([quantity]));
+  expect(
+    view.container.querySelector('[aria-label="Label queue"]'),
+  ).not.toBeVisible();
+  view.unmount();
+  render(
+    <LabelDesigner
+      {...props}
+      initial={[]}
+      memberId="member-b"
+      origin="https://other.example.test"
+    />,
+  );
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '0 distinct records',
   );
@@ -2359,4 +2626,212 @@ it('keeps batch historical additions behind the existing lifecycle review', asyn
     await screen.findByRole('button', { name: 'Review item' }),
   ).toBeVisible();
   expect(printButton()).toBeDisabled();
+});
+it('defers label restoration and changed-actor bootstrap while privacy verification is pending', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  const get = vi.spyOn(Storage.prototype, 'getItem');
+  const view = render(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <LabelDesigner {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  expect(mocks.getQueueRecords).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <LabelDesigner {...props} />
+    </PrivacyReadinessContext>,
+  );
+  await screen.findByRole('region', { name: 'Label queue' });
+  await waitFor(() =>
+    expect(get).toHaveBeenCalledWith(
+      queueStorageKey(props.origin, props.memberId),
+    ),
+  );
+  get.mockClear();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <LabelDesigner {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'first' }}>
+      <LabelDesigner {...props} />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'first' }}>
+      <LabelDesigner {...props} memberId="other-actor" />
+    </PrivacyReadinessContext>,
+  );
+  expect(get).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('region', { name: 'Label queue' }),
+  ).not.toBeInTheDocument();
+  get.mockRestore();
+});
+it.each(['retry', 'first attempt'] as const)(
+  'resets a mounted populated label queue after same-generation SIGNED_OUT cleanup succeeds on %s',
+  async (mode) => {
+    const generation = '00000000-0000-4000-8000-000000000001';
+    const key = queueStorageKey(props.origin, props.memberId);
+    mocks.getQueueRecords.mockResolvedValue([asset]);
+    sessionStorage.setItem(logoutAcknowledgementKey, generation);
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        entries: [
+          {
+            kind: asset.kind,
+            key: asset.key,
+            copies: 4,
+            baselineTag: asset.tag,
+            baselineState: asset.state,
+            lifecycleAcknowledged: true,
+          },
+        ],
+        filters: defaultFilters,
+        job: defaultJob,
+      }),
+    );
+    mocks.readLogoutPrivacyGeneration.mockResolvedValue({
+      status: 'valid',
+      generation,
+    });
+    mocks.readProtectedPrivacyIdentity.mockResolvedValue({
+      status: 'match',
+      generation: { status: 'valid', generation },
+    });
+    render(
+      <ProtectedPrivacyBoundary
+        binding={{
+          actorId: props.memberId,
+          backend: 'https://isolated.supabase.co',
+          role: 'staff',
+          canManageConfiguration: true,
+        }}
+      >
+        <AssignmentScopeGuard
+          actorId={props.memberId}
+          backend="https://isolated.supabase.co"
+        />
+        <LabelDesigner {...props} initial={[]} />
+      </ProtectedPrivacyBoundary>,
+    );
+    await screen.findByText('1 distinct record · 4 labels');
+    const remove = Storage.prototype.removeItem;
+    const denied = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(function (this: Storage, target) {
+        if (mode === 'retry' && target === key) return;
+        remove.call(this, target);
+      });
+    const persist = vi.spyOn(Storage.prototype, 'setItem');
+    mocks.readLogoutPrivacyGeneration.mockClear();
+    mocks.readLogoutPrivacyGeneration.mockImplementation(async () => {
+      // Bound a runaway retry so this regression fails without exhausting memory.
+      if (mocks.readLogoutPrivacyGeneration.mock.calls.length > 8)
+        throw new Error(
+          'Privacy verification retried without an external trigger',
+        );
+      return { status: 'valid', generation };
+    });
+    act(() => mocks.authChanged?.('SIGNED_OUT', null));
+    if (mode === 'retry') {
+      expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBe('all');
+      act(() => window.dispatchEvent(new Event('focus')));
+      await screen.findByRole('alert');
+      expect(
+        mocks.readLogoutPrivacyGeneration.mock.calls.length,
+      ).toBeLessThanOrEqual(3);
+      denied.mockRestore();
+      persist.mockClear();
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Retry privacy cleanup' }),
+      );
+    } else {
+      expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBeNull();
+      // No marker remains for this matching-generation recheck to notice.
+      act(() => window.dispatchEvent(new Event('focus')));
+    }
+    await screen.findByText('0 distinct records · 0 labels');
+    expect(
+      within(screen.getByRole('region', { name: 'Label queue' })).queryByText(
+        /Laptop/,
+      ),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(JSON.parse(sessionStorage.getItem(key)!).entries).toEqual([]),
+    );
+    for (const [target, value] of persist.mock.calls)
+      if (target === key) expect(JSON.parse(value).entries).toEqual([]);
+    expect(sessionStorage.getItem(logoutAcknowledgementKey)).toBe(generation);
+    expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBeNull();
+  },
+);
+it('rejects persistence from a late old-instance refresh after cleanup before the readiness reset commits', async () => {
+  const { PrivacyReadinessContext } =
+    await import('@/components/auth/privacy-readiness');
+  const revision = readAuthoritativeCleanupRevision();
+  const key = queueStorageKey(props.origin, props.memberId);
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      entries: [
+        {
+          kind: asset.kind,
+          key: asset.key,
+          copies: 4,
+          baselineTag: asset.tag,
+          baselineState: asset.state,
+          lifecycleAcknowledged: true,
+        },
+      ],
+      filters: defaultFilters,
+      job: defaultJob,
+    }),
+  );
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockReturnValueOnce(
+    new Promise<LiveLabel[]>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const view = render(
+    <PrivacyReadinessContext
+      value={{ ready: true, generation: 'same', cleanupRevision: revision }}
+    >
+      <LabelDesigner {...props} initial={[]} />
+    </PrivacyReadinessContext>,
+  );
+  await waitFor(() => expect(mocks.getQueueRecords).toHaveBeenCalledOnce());
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '1 distinct record · 4 labels',
+  );
+  // Model a queued refresh resolving before React commits the provider's reset.
+  act(() => {
+    expect(invalidateAssignmentPrivacy(true)).toBe(true);
+  });
+  expect(sessionStorage.getItem(key)).toBeNull();
+  await act(async () => finish([{ ...asset, tag: 'changed-after-request' }]));
+  expect(sessionStorage.getItem(key)).toBeNull();
+  view.rerender(
+    <PrivacyReadinessContext
+      value={{
+        ready: true,
+        generation: 'same',
+        cleanupRevision: readAuthoritativeCleanupRevision(),
+        verifiedEpoch: assignmentEpoch(),
+      }}
+    >
+      <LabelDesigner {...props} initial={[]} />
+    </PrivacyReadinessContext>,
+  );
+  await screen.findByText('0 distinct records · 0 labels');
+  await waitFor(() =>
+    expect(JSON.parse(sessionStorage.getItem(key)!).entries).toEqual([]),
+  );
 });

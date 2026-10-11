@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { attachMapInput } from './map-input';
 import { OrthographicCamera, Vector3 } from 'three';
 import { Children, isValidElement, type ReactNode } from 'react';
 import type { RoomNode } from '../schema';
+import type { RoomLabelRegistry } from './label-layout-runtime';
 import RoomScene, {
   finishFocusAnimation,
   hasRenderedSelection,
@@ -111,9 +112,13 @@ describe('rendered mesh selection', () => {
         hasRenderedSelection: false,
       }),
     ]);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Selected location: Office storage (OFFICE-ONLY)',
-    );
+    expect(
+      screen
+        .getAllByRole('status')
+        .find((element) =>
+          element.textContent?.startsWith('Selected location:'),
+        )!,
+    ).toHaveTextContent('Selected location: Office storage (OFFICE-ONLY)');
     const rigProps: Record<string, unknown>[] = [];
     const findRig = (children: ReactNode) =>
       Children.forEach(children, (child) => {
@@ -142,6 +147,38 @@ describe('rendered mesh selection', () => {
 });
 
 describe('room scene controls', () => {
+  it('Fit, Center selected and Recenter dismiss More without changing logical selection or active interaction', async () => {
+    const user = userEvent.setup(),
+      props = sceneProps({ selectedCode: 'ITC-S1A', canFocusSelected: true });
+    render(<RoomScene {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Interact with map' }));
+    for (const name of ['Fit room', 'Center selected', 'Recenter']) {
+      await user.click(
+        screen.getByRole('button', { name: 'More map controls' }),
+      );
+      await user.click(screen.getByRole('button', { name }));
+      expect(
+        screen.queryByRole('region', { name: 'More map controls' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: name === 'Recenter' ? 'More map controls' : name,
+        }),
+      ).toHaveFocus();
+      expect(
+        screen.getByRole('button', { name: 'Done interacting with map' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      expect(
+        screen
+          .getAllByRole('status')
+          .find((element) =>
+            element.textContent?.startsWith('Selected location:'),
+          ),
+      ).toHaveTextContent('ITC-S1A');
+      expect(props.onSelect).not.toHaveBeenCalled();
+    }
+    expect(props.onRequestFocus).toHaveBeenCalledOnce();
+  });
   it('finishes an interrupted focus at its intended valid target and zoom', () => {
     const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 3000);
     const target = new Vector3(2, 3, 4);
@@ -198,11 +235,11 @@ describe('room scene controls', () => {
     const user = userEvent.setup();
     const first = sceneProps();
     const view = render(<RoomScene {...first} />);
-    const toggle = screen.getByRole('button', { name: 'Show all labels' });
+    await user.click(screen.getByRole('button', { name: 'More map controls' }));
+    const toggle = screen.getByRole('button', { name: 'Show labels' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByRole('button', { name: 'More map controls' }));
     expect(screen.getByRole('button', { name: 'Tilt up' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Tilt down' })).toBeEnabled();
     view.rerender(<RoomScene {...sceneProps()} />);
@@ -223,9 +260,13 @@ describe('room scene controls', () => {
       } as RoomSceneProps['room']['nodes'][number],
     ];
     render(<RoomScene {...props} />);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Selected location: Shelf 1A (ITC-S1A)',
-    );
+    expect(
+      screen
+        .getAllByRole('status')
+        .find((element) =>
+          element.textContent?.startsWith('Selected location:'),
+        )!,
+    ).toHaveTextContent('Selected location: Shelf 1A (ITC-S1A)');
   });
 
   it('requires explicit activation and disarms through Done, Escape and focus leaving the map', async () => {
@@ -262,61 +303,41 @@ describe('room scene controls', () => {
     expect(activate()).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it.each(['activation', 'Pan left', 'Controls'])(
-    'releases map interaction with one Escape from the overflow %s control without losing selection',
+  it.each(['Pan left', 'Controls'])(
+    'Escape from %s restores Interact and preserves selection',
     async (control) => {
       const user = userEvent.setup();
       const props = sceneProps({ selectedCode: 'ITC-S1A' });
       render(<RoomScene {...props} />);
+      await user.click(
+        screen.getByRole('button', { name: 'Interact with map' }),
+      );
       const more = screen.getByRole('button', { name: 'More map controls' });
       await user.click(more);
       const panel = screen.getByRole('region', { name: 'More map controls' });
-      // Narrow layouts put activation in the overflow. Use that real button
-      // rather than the primary toolbar's copy, regardless of jsdom layout.
-      await user.click(
-        within(panel).getByRole('button', { name: 'Interact with map' }),
-      );
       expect(
-        within(panel).getByRole('button', {
-          name: 'Done interacting with map',
-        }),
-      ).toHaveAttribute('aria-pressed', 'true');
-      if (control !== 'activation') {
-        await user.click(within(panel).getByRole('button', { name: control }));
-      }
-
+        within(panel).queryByRole('button', { name: /interacting with map/ }),
+      ).toBeNull();
+      await user.click(within(panel).getByRole('button', { name: control }));
       await user.keyboard('{Escape}');
-
-      expect(more).toHaveFocus();
+      const interact = screen.getByRole('button', {
+        name: 'Interact with map',
+      });
+      expect(interact).toHaveFocus();
+      expect(interact).toHaveAttribute('aria-pressed', 'false');
       expect(more).toHaveAttribute('aria-expanded', 'false');
       expect(
-        screen.queryByRole('region', { name: 'More map controls' }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Interact with map' }),
-      ).toHaveAttribute('aria-pressed', 'false');
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Selected location: ITC-S1A',
-      );
+        screen.getByText('Map interaction off. Scroll moves the page.'),
+      ).toHaveAttribute('role', 'status');
+      expect(screen.getByText(/Selected location: ITC-S1A/)).toBeVisible();
       expect(props.onSelect).not.toHaveBeenCalled();
-
-      // Escape leaves ordinary controls usable and resets help disclosure.
+      await user.tab();
+      expect(more).toHaveFocus();
       await user.keyboard('{Enter}');
       expect(screen.getByRole('button', { name: 'Controls' })).toHaveAttribute(
         'aria-expanded',
         'false',
       );
-      const reopened = screen.getByRole('region', {
-        name: 'More map controls',
-      });
-      await user.click(
-        within(reopened).getByRole('button', { name: 'Interact with map' }),
-      );
-      expect(
-        within(reopened).getByRole('button', {
-          name: 'Done interacting with map',
-        }),
-      ).toHaveAttribute('aria-pressed', 'true');
     },
   );
 
@@ -327,7 +348,7 @@ describe('room scene controls', () => {
     await user.click(more);
     await user.click(screen.getByRole('button', { name: /^Controls$/ }));
     expect(
-      screen.getByText(/Item counts are active inventory entries/),
+      screen.getByText(/Counts mark occupied visible locations/),
     ).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Show item counts' }),
@@ -351,4 +372,65 @@ it('shows the live authorized display name for a bound location without changing
   render(<RoomScene {...props} />);
   expect(screen.getByText(/Selected location: Adapters shelf/)).toBeVisible();
   expect(props.room).toBe(room);
+});
+
+it('offers unresolved room locations as native keyboard/touch actions and retries both shared transactions', async () => {
+  const props = sceneProps({
+    selectedCode: 'ITC-S1A',
+    locationNames: { 'ITC-S1A': 'Adapters shelf', 'ITC-D01': 'Spare adapters' },
+  });
+  const user = userEvent.setup();
+  render(<RoomScene {...props} />);
+  let notify: ((codes: string[]) => void) | undefined;
+  let retryRef: { current: (() => void) | null } | undefined;
+  let registry: RoomLabelRegistry | undefined;
+  const find = (children: ReactNode) =>
+    Children.forEach(children, (child) => {
+      if (!isValidElement<Record<string, unknown>>(child)) return;
+      if (child.props.onUnresolvedChange) {
+        notify = child.props.onUnresolvedChange as typeof notify;
+        retryRef = child.props.retryRef as typeof retryRef;
+      }
+      if (child.props.registry)
+        registry = child.props.registry as RoomLabelRegistry;
+      find(child.props.children as ReactNode);
+    });
+  find(sceneCanvas.children);
+  const retryVisibility = vi.fn(),
+    retryPlacement = vi.spyOn(registry!, 'retry');
+  retryRef!.current = retryVisibility;
+  act(() => notify!(['ITC-S1A', 'ITC-D01', 'ITC-S1A']));
+  expect(
+    screen.getByText(/Some room labels could not be checked or placed/),
+  ).toHaveAttribute('role', 'status');
+  const actions = within(
+    screen.getByRole('list', {
+      name: 'Locations with unavailable room labels',
+    }),
+  );
+  expect(actions.getAllByRole('button')).toHaveLength(2);
+  const selected = actions.getByRole('button', { name: 'Adapters shelf' });
+  expect(selected).toHaveAttribute('aria-pressed', 'true');
+  selected.focus();
+  await user.keyboard('{Enter}');
+  expect(props.onSelect).toHaveBeenLastCalledWith('ITC-S1A');
+  await user.pointer([
+    {
+      keys: '[TouchA>]',
+      target: actions.getByRole('button', { name: 'Spare adapters' }),
+    },
+    { keys: '[/TouchA]' },
+  ]);
+  expect(props.onSelect).toHaveBeenLastCalledWith('ITC-D01');
+  await user.click(
+    screen.getByRole('button', { name: 'Retry label placement' }),
+  );
+  expect(retryVisibility).toHaveBeenCalledOnce();
+  expect(retryPlacement).toHaveBeenCalledOnce();
+  act(() => notify!([]));
+  expect(
+    screen.queryByRole('list', {
+      name: 'Locations with unavailable room labels',
+    }),
+  ).toBeNull();
 });

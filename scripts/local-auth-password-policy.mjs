@@ -1,62 +1,29 @@
 // Test-only fixture. Never used by the application or hosted deployment tooling.
 // Keep the original container intact so finally restores its exact configuration.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { verifyLocalAuthTemplates } from './local-auth-templates.mjs';
+import { localDockerSocket } from './local-docker-socket.mjs';
+export { localDockerSocket } from './local-docker-socket.mjs';
 
 const NAME = 'supabase_auth_it-inventory';
 const POLICY = 'GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD';
 const FIXTURE_LABEL = 'it-inventory.test.password-policy';
-export function localDockerSocket(
-  environment = process.env,
-  execute = execFileSync,
-) {
-  const env = { ...environment };
-  delete env.DOCKER_CONTEXT;
-  delete env.DOCKER_HOST;
-  const endpoint = environment.DOCKER_CONTEXT
-    ? JSON.parse(
-        execute(
-          'docker',
-          [
-            'context',
-            'inspect',
-            environment.DOCKER_CONTEXT,
-            '--format',
-            '{{json .Endpoints.docker.Host}}',
-          ],
-          { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-        ),
-      )
-    : environment.DOCKER_HOST ||
-      JSON.parse(
-        execute(
-          'docker',
-          ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],
-          { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-        ),
-      );
-  if (/^npipe:\/\/\/\/\.\/pipe\/[A-Za-z0-9._-]+$/.test(endpoint))
-    return endpoint.slice('npipe://'.length).replaceAll('/', '\\');
-  const url = new URL(endpoint);
-  assert.ok(
-    url.protocol === 'unix:' &&
-      !url.hostname &&
-      !url.username &&
-      !url.password &&
-      !url.port &&
-      !url.search &&
-      !url.hash,
-    'Auth fixture requires a local Docker socket',
-  );
-  return decodeURIComponent(url.pathname);
-}
-
-function engine(socketPath) {
-  return (method, path, payload) =>
+export function localAuthDockerApi(socketPath) {
+  return (
+    method,
+    path,
+    payload,
+    { raw = false, maxBytes = 2_097_152, timeoutMs = 30_000 } = {},
+  ) =>
     new Promise((resolve, reject) => {
       const body = payload ? JSON.stringify(payload) : '';
+      let timer;
+      const fail = (code, message) => {
+        clearTimeout(timer);
+        reject(Object.assign(new Error(message), { code }));
+      };
       const request = http.request(
         {
           socketPath,
@@ -70,39 +37,72 @@ function engine(socketPath) {
             : {},
         },
         (response) => {
-          let output = '';
-          response.setEncoding('utf8');
+          const chunks = [];
+          let bytes = 0;
           response.on('data', (chunk) => {
-            output += chunk;
-            if (output.length > 2_097_152) request.destroy();
+            bytes += chunk.length;
+            if (bytes > maxBytes) {
+              fail(
+                'AUTH_DOCKER_OUTPUT_LIMIT',
+                'Local Auth fixture Docker output exceeded its bound',
+              );
+              request.destroy();
+              return;
+            }
+            chunks.push(chunk);
           });
+          response.on('aborted', () =>
+            fail(
+              'AUTH_DOCKER_TRANSPORT',
+              'Local Auth fixture Docker transport failed',
+            ),
+          );
+          response.on('error', () =>
+            fail(
+              'AUTH_DOCKER_TRANSPORT',
+              'Local Auth fixture Docker transport failed',
+            ),
+          );
           response.on('end', () => {
+            clearTimeout(timer);
             // Docker responses can contain environment secrets. Never echo bodies.
             if (response.statusCode < 200 || response.statusCode >= 300)
-              return reject(
-                new Error(
-                  'Local Auth fixture Docker operation failed (HTTP ' +
-                    response.statusCode +
-                    ')',
-                ),
+              return fail(
+                [408, 429, 500, 502, 503, 504].includes(response.statusCode)
+                  ? 'AUTH_DOCKER_TRANSIENT'
+                  : 'AUTH_DOCKER_OPERATION',
+                'Local Auth fixture Docker operation failed (HTTP ' +
+                  response.statusCode +
+                  ')',
               );
+            const output = Buffer.concat(chunks);
+            if (raw) return resolve(output);
             try {
-              resolve(output ? JSON.parse(output) : null);
+              resolve(
+                output.length ? JSON.parse(output.toString('utf8')) : null,
+              );
             } catch {
-              reject(
-                new Error('Local Auth fixture Docker response was invalid'),
+              fail(
+                'AUTH_DOCKER_RESPONSE',
+                'Local Auth fixture Docker response was invalid',
               );
             }
           });
         },
       );
-      request.setTimeout(30_000, () =>
-        request.destroy(
-          new Error('Local Auth fixture Docker operation timed out'),
-        ),
-      );
+      // Absolute wall time, rather than an idle timeout reset by incoming bytes.
+      timer = setTimeout(() => {
+        fail(
+          'AUTH_DOCKER_TRANSPORT',
+          'Local Auth fixture Docker operation timed out',
+        );
+        request.destroy();
+      }, timeoutMs);
       request.on('error', () =>
-        reject(new Error('Local Auth fixture Docker transport failed')),
+        fail(
+          'AUTH_DOCKER_TRANSPORT',
+          'Local Auth fixture Docker transport failed',
+        ),
       );
       request.end(body);
     });
@@ -188,9 +188,13 @@ export function passwordPolicyConfig(inspected) {
 
 export async function withLocalPasswordPolicy(
   run,
-  { api, environment = process.env } = {},
+  {
+    api,
+    environment = process.env,
+    verifyTemplates = verifyLocalAuthTemplates,
+  } = {},
 ) {
-  api ??= engine(localDockerSocket(environment));
+  api ??= localAuthDockerApi(localDockerSocket(environment));
   const original = await api('GET', '/containers/' + NAME + '/json');
   const config = passwordPolicyConfig(original);
   const marker = randomUUID();
@@ -224,6 +228,7 @@ export async function withLocalPasswordPolicy(
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     assert.ok(healthy, 'Local Auth policy fixture readiness deadline reached');
+    await verifyTemplates('password-policy-replacement', { environment });
     result = await run();
   } catch (error) {
     runFailed = true;

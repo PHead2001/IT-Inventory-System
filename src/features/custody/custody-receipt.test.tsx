@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { expect, it, vi } from 'vitest';
 import type { CustodyReceipt } from './contracts';
 import { CustodyReceiptView } from './custody-receipt';
 
@@ -113,4 +113,38 @@ it('preserves individual asset site-correction endpoints', () => {
   ).toHaveTextContent(
     '1 individual asset · Recorded site name → Corrected site',
   );
+});
+
+it('uses the same assignment title as history and copies precise support details without showing IDs', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  const precise = '2026-10-09T00:37:38.985043+00:00';
+  const { container } = render(
+    <CustodyReceiptView
+      receipt={{
+        ...receipt,
+        operation: 'issued',
+        quantity: null,
+        createdAt: precise,
+      }}
+      reviewedName="Laptop"
+    />,
+  );
+  expect(
+    screen.getByRole('heading', { name: 'Assigned to site' }),
+  ).toBeVisible();
+  expect(container.textContent).not.toContain(receipt.eventId);
+  expect(container.textContent).not.toContain(precise);
+  expect(container.textContent).not.toContain('reviewed for this operation');
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Copy technical details' }),
+  );
+  expect(writeText).toHaveBeenCalledWith(
+    expect.stringContaining(receipt.eventId),
+  );
+  expect(writeText).toHaveBeenCalledWith(expect.stringContaining(precise));
+  expect(await screen.findByText('Technical details copied.')).toBeVisible();
 });

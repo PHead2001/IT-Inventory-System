@@ -217,3 +217,25 @@ it('keeps completed pending work truthful and locked until the follow-up finishe
   fireEvent.click(screen.getByRole('button', { name: 'New transaction' }));
   expect(screen.queryByLabelText('receive entry')).toBeNull();
 });
+
+it('keeps Close task next to the form actions in keyboard order', async () => {
+  const user = userEvent.setup();
+  render(
+    <TaskWorkspace choices={choices} context="Cable">
+      {() => (
+        <form>
+          <button type="button">Review move</button>
+          <button type="button">Cancel</button>
+        </form>
+      )}
+    </TaskWorkspace>,
+  );
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  const cancel = screen.getByRole('button', { name: 'Cancel' });
+  cancel.focus();
+  await user.tab();
+  expect(screen.getByRole('button', { name: 'Close task' })).toHaveFocus();
+  expect(screen.getAllByRole('heading', { name: 'Move stock' })).toHaveLength(
+    1,
+  );
+});
