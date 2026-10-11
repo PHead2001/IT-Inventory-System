@@ -92,10 +92,41 @@ function Show-RunnerImageProgress {
     } catch { Write-Host 'Image preflight observation is unavailable or invalid.' }
 }
 
-function Get-RunnerVerifiedImageLease([string] $Path, [string] $ExpectedHash, [string] $Binding, [string] $Phase = 'image-verification') {
+function Assert-RunnerPreparedImagePath([string] $Path) {
+    $Path = Assert-OwnedPath $Path
+    $directory = Assert-OwnedPath (Join-Path $script:RunnerRoot 'prepared-images')
+    if ([IO.Path]::GetDirectoryName($Path) -ine $directory -or [IO.Path]::GetFileName($Path) -cnotmatch '^[0-9a-f]{32}\.vhdx$') { throw 'Prepared image path is outside its fixed identity namespace.' }
+    Assert-RunnerProtectedPath $directory
+    if (-not (Get-Item -LiteralPath $directory -Force).PSIsContainer -or (Get-Item -LiteralPath $Path -Force).PSIsContainer) { throw 'Prepared image must be a file under its protected directory.' }
+    $acl = Get-Acl -LiteralPath $Path
+    $owners = @('S-1-5-18', 'S-1-5-32-544')
+    if ($owners -cnotcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value) { throw 'Prepared image owner is unexpected.' }
+    # Add-VMHardDiskDrive grants these two native principals read access to a
+    # differencing parent. This exception applies only to sealed image files;
+    # directories, receipts, credentials, tools and the generic base stay strict.
+    $nativeReaders = @('S-1-5-83-0', 'S-1-15-3-1024-2268835264-3721307629-241982045-173645152-1490879176-104643441-2915960892-1612460704')
+    $readMask = [long]([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -ne 'Allow') { continue }
+        $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($owners -ccontains $sid) { continue }
+        $rights = [long]$rule.FileSystemRights
+        if ($nativeReaders -cnotcontains $sid -or $rule.IsInherited -or
+            $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]::None -or
+            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or
+            $rights -le 0 -or $rights -gt $readMask -or ($rights -band (-bnot $readMask)) -ne 0) { throw 'Prepared image grants unexpected access.' }
+    }
+}
+
+function Assert-RunnerImageLeasePath([string] $Path, [bool] $Prepared) {
+    if ($Prepared) { Assert-RunnerPreparedImagePath $Path }
+    else { Assert-RunnerProtectedPath $Path }
+}
+
+function Get-RunnerVerifiedImageLease([string] $Path, [string] $ExpectedHash, [string] $Binding, [string] $Phase = 'image-verification', [switch] $Prepared) {
     if ($ExpectedHash -cnotmatch '^[0-9A-Fa-f]{64}$' -or [string]::IsNullOrEmpty($Binding)) { throw 'Image lease binding is invalid.' }
     $Path = Assert-OwnedPath $Path
-    Assert-RunnerProtectedPath $Path
+    Assert-RunnerImageLeasePath $Path $Prepared.IsPresent
     Initialize-RunnerImageIdentity
     if (-not (Get-Variable RunnerImageLeases -Scope Script -ErrorAction SilentlyContinue)) { $script:RunnerImageLeases = @{} }
     $owner = "$PID|$((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'))"
@@ -106,7 +137,7 @@ function Get-RunnerVerifiedImageLease([string] $Path, [string] $ExpectedHash, [s
         $key = $Path.ToUpperInvariant()
         if ($script:RunnerImageLeases.ContainsKey($key)) {
             $existing = $script:RunnerImageLeases[$key]
-            if ($existing.owner -ceq $owner -and $existing.identity -ceq $identity -and $existing.expectedHash -ieq $ExpectedHash -and $existing.binding -ceq $Binding -and $existing.stream.CanRead) {
+            if ($existing.owner -ceq $owner -and $existing.identity -ceq $identity -and $existing.expectedHash -ieq $ExpectedHash -and $existing.binding -ceq $Binding -and $existing.prepared -eq $Prepared.IsPresent -and $existing.stream.CanRead) {
                 Assert-RunnerImagePreflight
                 return $existing
             }
@@ -114,8 +145,8 @@ function Get-RunnerVerifiedImageLease([string] $Path, [string] $ExpectedHash, [s
             Close-RunnerImageLeases
         }
         if ((Get-RunnerImageStreamHash $stream $Phase) -ine $ExpectedHash) { throw 'Immutable image digest mismatch; pickup refused.' }
-        Assert-RunnerProtectedPath $Path
-        $lease = [pscustomobject]@{ path = $Path; stream = $stream; identity = $identity; owner = $owner; expectedHash = $ExpectedHash; binding = $Binding }
+        Assert-RunnerImageLeasePath $Path $Prepared.IsPresent
+        $lease = [pscustomobject]@{ path = $Path; stream = $stream; identity = $identity; owner = $owner; expectedHash = $ExpectedHash; binding = $Binding; prepared = $Prepared.IsPresent }
         $script:RunnerImageLeases[$key] = $lease
         $stream = $null
         return $lease
@@ -125,7 +156,7 @@ function Get-RunnerVerifiedImageLease([string] $Path, [string] $ExpectedHash, [s
 function New-RunnerImageChild([string] $Path, $Lease) {
     Assert-RunnerImagePreflight
     if ($null -eq $Lease -or -not $Lease.stream.CanRead -or $Lease.owner -cne "$PID|$((Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'))") { throw 'A live process-owned image lease is required.' }
-    Assert-RunnerProtectedPath $Lease.path
+    Assert-RunnerImageLeasePath $Lease.path $Lease.prepared
     $probe = [IO.FileStream]::new($Lease.path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try {
         if ([ITInventory.RunnerImageIdentity]::Read($probe) -cne $Lease.identity) { throw 'Parent path no longer identifies its verified lease.' }
@@ -174,7 +205,7 @@ function Get-RunnerImageRecord {
     $receiptPath = Assert-OwnedPath (Join-Path $directory ($selector.id + '.json'))
     $disk = Assert-OwnedPath (Join-Path $directory ($selector.id + '.vhdx'))
     Assert-RunnerProtectedPath $receiptPath
-    Assert-RunnerProtectedPath $disk
+    Assert-RunnerPreparedImagePath $disk
     if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $selector.receiptHash) { throw 'Prepared image receipt hash differs from selector.' }
     $receipt = Read-RunnerJson $receiptPath
     if ($receipt.schema -ne 1 -or $receipt.tag -cne $script:RunnerTag -or $receipt.id -cne $selector.id -or
@@ -198,7 +229,7 @@ function Get-RunnerImageSelection($Config) {
         return [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false; reason = 'absent' }
     }
     # Corruption never becomes a cache miss, including when installed pins changed.
-    $lease = Get-RunnerVerifiedImageLease $record.path $record.receipt.diskHash ((Get-RunnerJsonEvidence ([ordered]@{ selector = $record.selector; receipt = $record.receipt; binding = (Get-RunnerImageBinding $Config) })).hash)
+    $lease = Get-RunnerVerifiedImageLease $record.path $record.receipt.diskHash ((Get-RunnerJsonEvidence ([ordered]@{ selector = $record.selector; receipt = $record.receipt; binding = (Get-RunnerImageBinding $Config) })).hash) -Prepared
     $binding = Get-RunnerImageBinding $Config
     if ($record.receipt.bindingHash -cne $binding.hash -or $record.receipt.recipeId -cne $binding.recipeId) {
         Write-Host 'Prepared image inputs differ from the installed trusted bundle/base; using the generic base. Prepare image explicitly to refresh.'
@@ -456,7 +487,7 @@ function New-RunnerPreparedImageCandidate($State, $Config, $Binding, $Guest) {
     $retained = $false
     try {
         Copy-RunnerPreparedImageBytes $source $candidate $State
-        Assert-RunnerProtectedPath $candidate
+        Assert-RunnerPreparedImagePath $candidate
         Assert-RunnerImageDiskUnreferenced $candidate
         Invoke-RunnerTransitionCheckpoint 'image-copy'
         $receipt = [ordered]@{ schema = 1; tag = $script:RunnerTag; id = $id; createdUtc = [DateTime]::UtcNow.ToString('o')
@@ -503,7 +534,8 @@ function Assert-RunnerImageCandidate($Candidate, $Config, [switch] $Rehash) {
     $directory = Assert-OwnedPath (Join-Path $script:RunnerRoot 'prepared-images')
     $disk = Join-Path $directory ($Candidate.id + '.vhdx'); $receiptPath = Join-Path $directory ($Candidate.id + '.json')
     if ($Candidate.path -cne $disk -or $Candidate.receiptPath -cne $receiptPath) { throw 'Image candidate paths differ from its protected identity.' }
-    foreach ($path in @($directory, $disk, $receiptPath)) { Assert-RunnerProtectedPath $path }
+    foreach ($path in @($directory, $receiptPath)) { Assert-RunnerProtectedPath $path }
+    Assert-RunnerPreparedImagePath $disk
     if ((Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash -cne $Candidate.receiptHash) { throw 'Image candidate receipt changed.' }
     $receipt = Read-RunnerJson $receiptPath
     $binding = Get-RunnerImageBinding $Config
@@ -518,7 +550,7 @@ function Assert-RunnerImageCandidate($Candidate, $Config, [switch] $Rehash) {
     Assert-RunnerImageDiskUnreferenced $disk
     # The candidate itself is never booted. Both verifier admission and final
     # publication hash this original, outside the guardian's state lock.
-    $lease = Get-RunnerVerifiedImageLease $disk $receipt.diskHash ((Get-RunnerJsonEvidence $receipt).hash)
+    $lease = Get-RunnerVerifiedImageLease $disk $receipt.diskHash ((Get-RunnerJsonEvidence $receipt).hash) -Prepared
     # Publication obtains independent content proof after verifier cleanup,
     # rather than promoting a cached verification flag.
     if ($Rehash -and (Get-RunnerImageStreamHash $lease.stream) -cne $receipt.diskHash) { throw 'Unbooted candidate disk changed.' }
@@ -593,8 +625,8 @@ function Remove-RunnerImageCandidate($Candidate) {
     foreach ($extension in @('vhdx', 'json')) {
         $path = Join-Path $directory ($Candidate.id + '.' + $extension)
         if (Test-Path -LiteralPath $path) {
-            Assert-RunnerProtectedPath $path
-            if ($extension -ceq 'vhdx') { Assert-RunnerImageDiskUnreferenced $path }
+            if ($extension -ceq 'vhdx') { Assert-RunnerPreparedImagePath $path; Assert-RunnerImageDiskUnreferenced $path }
+            else { Assert-RunnerProtectedPath $path }
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
         }
     }
@@ -604,13 +636,16 @@ function Remove-RunnerOldImages($Selector) {
     if (Get-RunnerState) { throw 'Image retention requires no recorded session.' }
     Close-RunnerImageLeases
     $directory = Assert-OwnedPath (Join-Path $script:RunnerRoot 'prepared-images')
+    Assert-RunnerProtectedPath $directory
     foreach ($entry in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
         if ($entry.Name -cnotmatch '^([0-9a-f]{32})\.(vhdx|json)$' -or $entry.PSIsContainer) { throw 'Unrecognized prepared-image retention entry; investigate without deleting it.' }
         $id = $Matches[1]
+        [void](Assert-OwnedPath $entry.FullName)
+        if ($entry.Extension -ceq '.vhdx') { Assert-RunnerPreparedImagePath $entry.FullName }
+        else { Assert-RunnerProtectedPath $entry.FullName }
         if ($id -ceq $Selector.id -or $id -ceq $Selector.previous) { continue }
-        [void](Assert-OwnedPath $entry.FullName); Assert-RunnerProtectedPath $entry.FullName
         $disk = Join-Path $directory ($id + '.vhdx')
-        if (Test-Path -LiteralPath $disk) { Assert-RunnerImageDiskUnreferenced $disk }
+        if (Test-Path -LiteralPath $disk) { Assert-RunnerPreparedImagePath $disk; Assert-RunnerImageDiskUnreferenced $disk }
         Remove-Item -LiteralPath $entry.FullName -Force -ErrorAction Stop
     }
 }

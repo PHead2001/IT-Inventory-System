@@ -38,7 +38,37 @@ function Get-RunnerConfig { return $config }
 [IO.File]::WriteAllText($config.baseVhdx, 'generic-clean-base')
 function Assert-Administrator {}
 function Assert-SecureRoot {}
-function Assert-RunnerProtectedPath([string] $Path) { [void](Assert-OwnedPath $Path); if ($Path -ceq $script:blocked) { throw 'Fixture ACL refusal.' } }
+$script:nativeParentReaders = @{}
+$script:nativeAclFault = ''
+$script:actualPreparedAcl = (Get-Command Assert-RunnerPreparedImagePath).ScriptBlock
+function Assert-RunnerProtectedPath([string] $Path) {
+    [void](Assert-OwnedPath $Path)
+    if ($Path -ceq $script:blocked -or $script:nativeParentReaders.ContainsKey($Path)) { throw 'Fixture ACL refusal.' }
+}
+function Assert-RunnerPreparedImagePath([string] $Path) {
+    if ($Path -ceq $script:blocked) { throw 'Fixture ACL refusal.' }
+    & $script:actualPreparedAcl $Path
+}
+function Get-Acl([string] $LiteralPath) {
+    # Descriptor fixtures only: native attachment is modeled without assigning
+    # permissions to real files. Production's scoped validator runs unchanged.
+    $rules = @()
+    if ($script:nativeParentReaders.ContainsKey($LiteralPath)) {
+        $rules = @('S-1-5-83-0', 'S-1-15-3-1024-2268835264-3721307629-241982045-173645152-1490879176-104643441-2915960892-1612460704' | ForEach-Object {
+            [pscustomobject]@{ IdentityReference = [Security.Principal.SecurityIdentifier]::new($_); AccessControlType = 'Allow'; FileSystemRights = 1179785
+                IsInherited = $false; InheritanceFlags = 0; PropagationFlags = 0 }
+        })
+        switch ($script:nativeAclFault) {
+            'inherited-read' { $rules[0].IsInherited = $true }
+            'inherited-full' { $rules[0].IsInherited = $true; $rules[0].FileSystemRights = 2032127 }
+            'write' { $rules[0].FileSystemRights = 1179787 }
+            'unknown-reader' { $rules[0].IdentityReference = [Security.Principal.SecurityIdentifier]::new('S-1-1-0') }
+        }
+    }
+    $acl = [pscustomobject]@{ Access = $rules }
+    $acl | Add-Member ScriptMethod GetOwner { param($type) return [Security.Principal.SecurityIdentifier]::new('S-1-5-18') }
+    return $acl
+}
 function Get-RunnerImageBinding { return $script:binding }
 function Get-CoherentInstalledRunnerBundle { return [pscustomobject]@{ fixture = $true } }
 function Get-RunnerVmInventory { return $script:vms }
@@ -73,6 +103,7 @@ function Assert-RunnerControlIdle {}
 $script:observationFingerprint = 'a' * 64
 function Get-RunnerNetworkObservation { return [pscustomobject]@{ fingerprint = $script:observationFingerprint; rules = @(); observedUtc = [DateTime]::UtcNow.ToString('o') } }
 function New-FixtureVerification($Candidate) {
+    $script:nativeParentReaders[$Candidate.path] = $true
     $receipt = Read-RunnerJson $Candidate.receiptPath
     return [pscustomobject]@{ schema = 1; candidateId = $Candidate.id; diskHash = $receipt.diskHash; bindingHash = $receipt.bindingHash; recipeId = $receipt.recipeId; bundleHash = $receipt.bundleHash
         purpose = 'verify-image'; diskType = 'Differencing'; parentLease = 'read-only-same-handle'; parentIdentity = '00000001:0000000000000001'; markerProof = 'absent-then-written'; sessionSeconds = 1; cleanupVerified = $true; vmName = ('ITIR-' + [guid]::NewGuid().ToString('N')); vmId = [guid]::NewGuid().ToString(); guestMac = ('02' + [guid]::NewGuid().ToString('N').Substring(0,10).ToUpperInvariant())
@@ -240,6 +271,13 @@ try {
     Publish-FixtureImage $state $config $script:binding $script:guest
     $initial = Get-RunnerImageRecord
     if ((Get-RunnerImageSelection $config).differencing -ne $true) { throw 'Matching new clone proof did not authorize prepared differencing.' }
+    foreach ($fault in @('inherited-read', 'inherited-full', 'write', 'unknown-reader')) {
+        $script:nativeAclFault = $fault
+        try {
+            Assert-Rejected { Get-RunnerImageRecord } "record-$fault"
+            Assert-Rejected { Get-RunnerImageSelection $config } "selection-$fault"
+        } finally { $script:nativeAclFault = '' }
+    }
     $legacyProof = (ConvertTo-Json $initial.receipt.cloneVerification -Depth 8) | ConvertFrom-Json
     $legacyProof.PSObject.Properties.Remove('diskType'); $legacyProof.PSObject.Properties.Remove('parentLease')
     $legacyProof.PSObject.Properties.Remove('successiveChild')
@@ -378,6 +416,7 @@ try {
     function Get-VM([string] $Name, $Id) { if ($null -ne $Id) { return @($script:vms | Where-Object Id -EQ $Id)[0] }; return @($script:vms | Where-Object Name -CEQ $Name)[0] }
     function New-RunnerProfileVm($Name, $Disk, $Instance, $ProfileLabel) {
         if ($ProfileLabel -cne 'it-inventory-heavy') { throw 'Preparation changed fixed resource caps.' }
+        if ($script:childParents.ContainsKey($Disk)) { $script:nativeParentReaders[$script:childParents[$Disk]] = $true }
         $vm = [pscustomobject]@{ Id = [guid]::NewGuid(); Name = $Name; Notes = ''; State = 'Off'; Path = (Join-Path $Instance $Name); disks = @($Disk) }
         $script:vms = @($vm); return $vm
     }
@@ -449,6 +488,11 @@ try {
         $candidate = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'prepare'
         $verification = Invoke-RunnerSession $config $null 'it-inventory-heavy' 'verify-image' $candidate
         $verification | Add-Member -NotePropertyName cleanupVerified -NotePropertyValue $true
+        foreach ($fault in @('inherited-read', 'inherited-full', 'write', 'unknown-reader')) {
+            $script:nativeAclFault = $fault
+            try { Assert-Rejected { Assert-RunnerImageCandidate $candidate $config } "candidate-$fault" }
+            finally { $script:nativeAclFault = '' }
+        }
         Publish-RunnerPreparedImage $candidate $config $verification
         Remove-RunnerImageCandidate $candidate
         if ((Get-RunnerState) -or $script:vms.Count -ne 0) { throw 'Builder/verifier session failed publication/owned cleanup.' }

@@ -181,6 +181,24 @@ parent storage, guardian/recovery and fresh verification on restart remain the
 boundary. This is no persistent verified flag or promise of protection after
 process death.
 
+Prepared-image protection has one narrow native Hyper-V exception. Only
+`prepared-images/<32 lowercase hex>.vhdx` files under the fixed protected runner
+root may carry explicit, noninherited, nonpropagating Allow entries for
+`S-1-5-83-0` and
+`S-1-15-3-1024-2268835264-3721307629-241982045-173645152-1490879176-104643441-2915960892-1612460704`.
+Their positive rights must be a subset of `Read | Synchronize` (1179785).
+The owner must remain SYSTEM or Administrators and the parent directory must
+retain the ordinary strict protection. Other readers, inherited native entries,
+write/delete/ACL/ownership rights and reparse points fail closed. This exception
+is rechecked for candidate verification, publication, each lease/child and
+retention; generic base images, tools, configuration, receipts and credentials
+retain SYSTEM/Administrators-only access. Candidate import still creates a new
+file with its protected directory's descriptor and copies only source bytes.
+Native host probes observed those two read entries appearing on a parent when
+`Add-VMHardDiskDrive` attached its child; copying and `New-VHD` alone did not add
+them. Descriptor fixtures cover this policy without mutating host ACLs; live
+successive-child boot/scrub/publication evidence is still required.
+
 Image preflight uses a ten-minute deadline and 4 MiB hashing chunks with Stop and
 deadline checks between reads, outside the guardian mutex. Protected
 `preflight-observation.json` records only fixed phases, process identity, start,

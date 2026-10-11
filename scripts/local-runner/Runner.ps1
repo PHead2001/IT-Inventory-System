@@ -596,7 +596,7 @@ function Invoke-RunnerSession($Config, $PilotAttempt = $null, [string] $ProfileL
         else { Assert-InstalledHost $Config; [void](Get-OwnerToken) }
         $image = if ($Purpose -ceq 'verify-image') {
             $candidateReceipt = Assert-RunnerImageCandidate $ImageCandidate $Config
-            $lease = Get-RunnerVerifiedImageLease $ImageCandidate.path $candidateReceipt.diskHash ((Get-RunnerJsonEvidence $candidateReceipt).hash)
+            $lease = Get-RunnerVerifiedImageLease $ImageCandidate.path $candidateReceipt.diskHash ((Get-RunnerJsonEvidence $candidateReceipt).hash) -Prepared
             [pscustomobject]@{ path = $ImageCandidate.path; prepared = $true; differencing = $true; lease = $lease }
         } elseif ($preparing) { [pscustomobject]@{ path = $Config.baseVhdx; prepared = $false } } else { Get-RunnerImageSelection $Config }
         $name = "$($script:RunnerPrefix)$([guid]::NewGuid().ToString('N'))"
