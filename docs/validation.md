@@ -470,6 +470,43 @@ client boundary arrival. Preserve generic private-safe route titles and the
 separate document/RSC transport assertions rather than adding duplicate data
 queries or client title overrides solely for this distinction.
 
+## Served build identity
+
+Focused tests in `src/features/build-info` cover metadata classification, conflicting
+production labels, malformed/missing commits, development fallback and the allowlist.
+The Settings route tests retain ordinary member access without configuration privilege;
+existing session tests exercise anonymous, inactive, viewer and staff membership.
+`tests/e2e/build-info.spec.ts` compares the actual production-build manifest with the
+signed-in viewer Settings disclosure, checks anonymous denial, exact time across reload,
+keyboard access and 375 px horizontal overflow. Run it through the canonical
+`npm run test:e2e -- tests/e2e/build-info.spec.ts` with exclusive local backend ownership.
+A unit pass or local build does not prove Vercel metadata, staging synchronization,
+production release or hosted visual acceptance. Retain the `.next/required-server-files.json`
+allowlisted snapshot plus compiled Settings artifact identity as local build evidence;
+never publish the entire environment or manifest containing unrelated configuration.
+
+The dedicated compiled-provenance test in `tests/e2e/build-info.spec.ts` automatically
+runs `node --test tests/build-provenance-compiled.test.mjs` against the existing
+backend-specific build during canonical `npm run test:e2e` and focused build-info runs.
+It uses the current Node executable, a bounded subprocess deadline/output limit and
+sanitized status/TAP assertions; nonzero exit or missing regression execution fails
+the browser suite. No additional build, package script or workflow is introduced.
+The same command can also run directly after `npm run build` without a database.
+It loads the actual compiled Settings page and compares its read-helper result with
+the saved build configuration, then changes runtime environment and repeats calls
+in two fresh processes. This proves literal immutability without a database; it does
+not render an authenticated HTTP request. Boundary tests separately exercise delayed
+worker reload, strict bridge rejection, typegen/import fallback and fresh build lifetimes.
+
+PR51's integration with main `48b3ca79208d6813bc6dc43c5483194796af28bf`
+keeps the Settings build card inside the protected page content gate alongside
+the existing motion controls and navigation. The Settings route regression
+withholds all three during initial privacy verification, admits one copy of each
+after readiness, and masks accepted content after revocation. Earlier branch
+test/build results remain historical; this source integration requires fresh
+focused checks and complete final-candidate certification. Hosted build identity,
+desktop/phone layout and Full/Reduced motion acceptance remain pending.
+
 ## Audit 4.2 working controls
 
 U409/U410/N05–N07 focused regressions cover local/system motion precedence, cross-tab and unavailable-storage behavior, a single location action navigation with matching filter/export query, exact-current-location row suppression with child/site disambiguation, compact informative counts, collapsed settings hierarchy and selected/search ancestor reveal, keyboard tree focus, separate linked validation entries and local-only browse/drop selection. Motion helpers assert saved switch state explicitly. `navigation-workflow.spec.ts` prepares 1280, 375 and 390 px Full/Reduced journeys with screenshots, keyboard switch/tree/validation interactions and location action/export query checks; `files.spec.ts` retains actual file selection/upload journeys and checks the selection promise.

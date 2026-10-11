@@ -8,6 +8,15 @@ import FormsPage from './forms/page';
 import CategoryFormPage from './forms/[categoryId]/page';
 import LabelSettingsPage from './labels/page';
 import { SettingsNavigation } from './settings-navigation';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+vi.mock('@/features/build-info/read.server', () => ({
+  readBuildProvenance: () => ({
+    environment: 'Local',
+    version: '0.1.0',
+    commit: null,
+    buildStarted: null,
+  }),
+}));
 
 const mocks = vi.hoisted(() => ({
   categories: vi.fn(),
@@ -152,6 +161,51 @@ it('offers browser-personal motion preferences on the member Settings landing pa
   expect(
     screen.getByRole('switch', { name: 'Reduce motion in this browser' }),
   ).toBeVisible();
+  expect(mocks.categories).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole('region', { name: 'Build & environment' }),
+  ).toHaveTextContent('Local · Version 0.1.0');
+  expect(screen.getByText('Build support details')).toBeInTheDocument();
+});
+
+it('withholds Settings build identity and motion controls until private content is ready', async () => {
+  const page = await SettingsPage({});
+  const { rerender } = render(
+    <PrivacyReadinessContext value={{ ready: false, generation: 'pending' }}>
+      {page}
+    </PrivacyReadinessContext>,
+  );
+  expect(screen.queryByText('Build support details')).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('link', { name: /Categories/ }),
+  ).not.toBeInTheDocument();
+
+  rerender(
+    <PrivacyReadinessContext value={{ ready: true, generation: 'verified' }}>
+      {page}
+    </PrivacyReadinessContext>,
+  );
+  expect(
+    screen.getByRole('region', { name: 'Build & environment' }),
+  ).toBeVisible();
+  expect(
+    screen.getAllByRole('switch', { name: 'Reduce motion in this browser' }),
+  ).toHaveLength(1);
+  expect(screen.getAllByRole('link', { name: /Categories/ })).toHaveLength(1);
+
+  rerender(
+    <PrivacyReadinessContext
+      value={{ ready: false, visible: false, generation: 'verified' }}
+    >
+      {page}
+    </PrivacyReadinessContext>,
+  );
+  expect(
+    screen.queryByRole('region', { name: 'Build & environment' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText('Build support details')).not.toBeVisible();
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   expect(mocks.categories).not.toHaveBeenCalled();
 });
 
