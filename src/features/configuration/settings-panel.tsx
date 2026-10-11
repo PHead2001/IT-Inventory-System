@@ -92,6 +92,7 @@ export function SettingsPanel({
       | 'label_defaults_update',
     payload: Record<string, unknown>,
     onSuccess?: () => void,
+    reviewedSourceName?: string,
   ) => {
     const key = JSON.stringify([operation, payload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
@@ -117,7 +118,7 @@ export function SettingsPanel({
           ? {
               category_create: `Category added: ${normalizeCategoryName(String(payload.name))}.`,
               category_rename: `Category name saved: ${normalizeCategoryName(String(payload.name))}.`,
-              category_remove: `Category removed: ${categories?.find((category) => category.id === payload.category_id)?.name ?? 'Selected category'}.`,
+              category_remove: `Category removed: ${reviewedSourceName ?? 'Selected category'}.`,
               label_defaults_update: 'Label settings saved.',
             }[operation]
           : 'No values changed.',
@@ -322,9 +323,13 @@ export function SettingsPanel({
                 {canManage && removing === category.id && (
                   <div
                     className="mt-4 space-y-3 rounded border border-amber-700 p-4"
-                    aria-label={'Remove ' + category.name}
+                    aria-label={
+                      'Remove ' + (review?.source_name ?? category.name)
+                    }
                   >
-                    <h3 className="font-semibold">Remove {category.name}?</h3>
+                    <h3 className="font-semibold">
+                      Remove {review?.source_name ?? category.name}?
+                    </h3>
                     <p className="text-sm">
                       Review every affected quantity item and individual asset,
                       including archived and retired records. Current stock and
@@ -440,7 +445,7 @@ export function SettingsPanel({
                             type="button"
                             variant="outline"
                             className="experience-danger-action"
-                            aria-label={'Remove category ' + category.name}
+                            aria-label={'Remove category ' + review.source_name}
                             disabled={pending}
                             onClick={() =>
                               submit(
@@ -454,6 +459,7 @@ export function SettingsPanel({
                                   setRemoving(null);
                                   setReview(null);
                                 },
+                                review.source_name,
                               )
                             }
                           >

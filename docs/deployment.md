@@ -99,7 +99,7 @@ Only temporary transport/readiness failures retry; configuration or content mism
 fails before the expensive build/browser run. Errors name the failing boundary but
 omit template bodies, stderr URLs and container environment. This diagnoses missing
 or inaccessible custom templates without changing Auth policy or email expectations.
-It follows the trusted Kong fetch's redirects and sends no authentication headers,
+It rejects HTTP redirects and sends no authentication headers,
 tokens or cookies. Passing preflight does not prove GoTrue rendered the template or
 that invitation/recovery completion works: the three real captured-email E2E cases
 remain authoritative. It refuses other

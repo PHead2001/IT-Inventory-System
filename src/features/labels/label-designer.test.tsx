@@ -2384,7 +2384,7 @@ function labelResults(
       categoryName: row.categoryName ?? '',
       status: row.state,
       assetTag: row.tag,
-      itemCode: null,
+      itemCode: row.humanId ?? null,
       serialNumber: null,
       manufacturer: null,
       model: null,
@@ -2482,6 +2482,59 @@ it('retains explicit selections across pages with named added, present and unava
   expect(screen.getByText('0 selected records')).toBeVisible();
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '2 distinct records \u00b7 2 labels',
+  );
+});
+
+it('distinguishes same-name quantity batch feedback using freshly resolved item codes while preserving typed queue identities', async () => {
+  const already = { ...quantity, humanId: 'ADP-USB' };
+  const added = {
+    ...quantity,
+    key: '00000000-0000-4000-8000-000000000004',
+    humanId: 'ADP-HDMI',
+    holdingContext: 'ITC-S1B: 2',
+  };
+  const search = labelResults([already, added]);
+  search.rows[0].itemCode = 'OLD-USB';
+  search.rows[1].itemCode = 'OLD-HDMI';
+  mocks.searchLabelRecords.mockResolvedValue(search);
+  mocks.getQueueRecords.mockImplementation((keys: { key: string }[]) =>
+    Promise.resolve(
+      [already, added].filter((row) => keys.some((key) => key.key === row.key)),
+    ),
+  );
+  render(<LabelDesigner {...props} initial={[already]} />);
+  await screen.findByRole('button', { name: 'In queue' });
+  fireEvent.click(screen.getByRole('button', { name: 'Select current page' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add selected to queue' }),
+  );
+  const feedback = await screen.findByText(
+    'Added: Adapters (Quantity item; item code ADP-HDMI). Already present: Adapters (Quantity item; item code ADP-USB). Unavailable to this account: none.',
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    already.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(added.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent('OLD-');
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries.map(
+        ({
+          kind,
+          key,
+          copies,
+        }: {
+          kind: string;
+          key: string;
+          copies: number;
+        }) => ({ kind, key, copies }),
+      ),
+    ).toEqual([
+      { kind: 'quantity', key: already.key, copies: 1 },
+      { kind: 'quantity', key: added.key, copies: 1 },
+    ]),
   );
 });
 

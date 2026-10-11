@@ -73,9 +73,46 @@ describe('explicit label selection', () => {
     );
     const summary = labelSelectionSummary(result);
     expect(summary).toBe(
-      `Added: ${name} (Individual asset). Already present: ${name} (Quantity item). Unavailable to this account: ${name} (Quantity item).`,
+      `Added: ${name} (Individual asset). Already present: ${name} (Quantity item; selected record 2). Unavailable to this account: ${name} (Quantity item; selected record 3).`,
     );
     for (const selected of [added, already, unavailable])
+      expect(summary).not.toContain(selected.key);
+  });
+  it('distinguishes same-name quantity outcomes with current item codes instead of stale selection context', () => {
+    const added = { ...row(1), humanId: 'ADP-USB', holdingContext: 'Shelf A' };
+    const already = {
+      ...row(2),
+      humanId: 'ADP-HDMI',
+      holdingContext: 'Shelf B',
+    };
+    const result = projectLabelSelection(
+      [{ ...labelQueueEntry(already), copies: 7 }],
+      [{ ...already, humanId: 'OLD-CODE', itemCode: 'STALE-CODE' }, added],
+      [added, already],
+    );
+    expect(labelSelectionSummary(result)).toBe(
+      'Added: Same name (Quantity item; item code ADP-USB). Already present: Same name (Quantity item; item code ADP-HDMI). Unavailable to this account: none.',
+    );
+    expect(result.next).toEqual([
+      { ...labelQueueEntry(already), copies: 7 },
+      labelQueueEntry(added),
+    ]);
+  });
+  it('uses asset tags and locations and allocates unidentified ordinals across the entire original selection', () => {
+    const added = { ...row(1, 'asset'), tag: 'LAP-A' };
+    const already = { ...row(2, 'asset'), tag: 'LAP-B' };
+    const missing = { ...row(3), holdingContext: 'Closet / Shelf A' };
+    const quantity = { ...row(4), holdingContext: 'Closet / Shelf B' };
+    const result = projectLabelSelection(
+      [labelQueueEntry(already)],
+      [missing, already, quantity, added],
+      [added, quantity, already],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      'Added: Same name (Quantity item; Closet / Shelf B; selected record 3), Same name (Individual asset; asset tag LAP-A). Already present: Same name (Individual asset; asset tag LAP-B). Unavailable to this account: Same name (Quantity item; Closet / Shelf A; selected record 1).',
+    );
+    for (const selected of [added, already, missing, quantity])
       expect(summary).not.toContain(selected.key);
   });
   it('accepts 200 identities and rejects an over-limit projection without a prefix', () => {
