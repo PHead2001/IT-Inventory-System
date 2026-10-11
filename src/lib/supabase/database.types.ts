@@ -2114,6 +2114,15 @@ export type Database = {
           location_code: string
         }[]
       }
+      inventory_location_occupancy: {
+        Args: { p_location_codes: string[] }
+        Returns: {
+          asset_count: string
+          location_code: string
+          quantity_product_count: string
+          quantity_unit_count: string
+        }[]
+      }
       inventory_normalize_item_code: {
         Args: { p_value: string }
         Returns: string

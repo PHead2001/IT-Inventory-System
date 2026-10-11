@@ -102,12 +102,6 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       'data-selected-code',
       before.data!.code,
     );
-    const showAllLabels = viewer.getByRole('button', {
-      name: 'Show all labels',
-      exact: true,
-    });
-    if ((await showAllLabels.getAttribute('aria-pressed')) !== 'true')
-      await showAllLabels.click();
     const canvas = viewer.locator('canvas');
     await canvas.scrollIntoViewIfNeeded();
     await expect(canvas).toHaveAttribute('data-label-layout-pending', 'false');
@@ -126,6 +120,13 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       name: 'More map controls',
       exact: true,
     });
+    const showLabels = controls.getByRole('button', {
+      name: 'Show labels',
+      exact: true,
+    });
+    if ((await showLabels.getAttribute('aria-pressed')) !== 'true')
+      await showLabels.click();
+    await expect(showLabels).toHaveAttribute('aria-pressed', 'true');
     await controls
       .getByRole('button', { name: 'Free Orbit', exact: true })
       .click();
@@ -146,8 +147,8 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
       body: JSON.stringify({
         viewport: { width: 1280, height: 1100 },
         controls: [
-          'Show all labels',
           'Center selected',
+          'Show labels',
           'Free Orbit',
           'Tilt down ×3',
           'Rotate right ×8',

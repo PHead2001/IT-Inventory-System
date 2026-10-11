@@ -5,6 +5,12 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/session.server', () => ({ requireMember: mocks.member }));
+vi.mock('@/lib/supabase/config', () => ({
+  supabaseConfig: () => ({
+    url: 'https://backend.example',
+    key: 'public-test',
+  }),
+}));
 import { GET } from './route';
 const locations = [
   {
@@ -73,10 +79,26 @@ function caller(userId = 'member', count = '9007199254740993') {
     member: { user_id: userId },
     supabase: {
       from: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(query) }),
-      rpc: vi.fn().mockResolvedValue({
-        data: [{ location_code: 'ITC-D01', entry_count: count }],
-        error: null,
-      }),
+      rpc: vi.fn().mockReturnValue(
+        Object.assign(
+          Promise.resolve({
+            data: [
+              {
+                location_code: 'ITC-D01',
+                quantity_product_count: count,
+                quantity_unit_count: count,
+                asset_count: '0',
+              },
+            ],
+            error: null,
+          }),
+          {
+            abortSignal() {
+              return this;
+            },
+          },
+        ),
+      ),
     },
   };
 }
@@ -88,7 +110,9 @@ beforeEach(() => {
 });
 const request = (space = 'it-closet') =>
   new NextRequest(
-    'https://inventory.example/api/room/occupancy?space=' + space,
+    'https://inventory.example/api/room/occupancy?space=' +
+      space +
+      '&generation=00000000-0000-4000-8000-000000000099',
   );
 it('authorizes before reads and issues one bounded call for modeled active leaves', async () => {
   const result = await GET(request());
@@ -98,17 +122,25 @@ it('authorizes before reads and issues one bounded call for modeled active leave
     'inventory_locations',
   );
   expect(context.supabase.rpc).toHaveBeenCalledExactlyOnceWith(
-    'inventory_location_entry_counts',
+    'inventory_location_occupancy',
     { p_location_codes: ['ITC-D01'] },
   );
   expect(await result.json()).toEqual({
     identity: {
       userId: 'member',
       environment: 'https://inventory.example',
+      backend: 'https://backend.example',
+      generation: '00000000-0000-4000-8000-000000000099',
       spaceId: 'it-closet',
       filter: 'type=all;status=active',
     },
-    counts: { 'ITC-D01': '9007199254740993' },
+    counts: {
+      'ITC-D01': {
+        quantity_product_count: '9007199254740993',
+        quantity_unit_count: '9007199254740993',
+        asset_count: '0',
+      },
+    },
   });
   mocks.member.mockRejectedValue(new Error('denied'));
   await expect(GET(request())).rejects.toThrow('denied');
@@ -118,7 +150,9 @@ it('authorizes before reads and issues one bounded call for modeled active leave
 it('never substitutes another space or invents zero counts on failure', async () => {
   expect((await GET(request('unknown'))).status).toBe(404);
   expect(context.supabase.rpc).not.toHaveBeenCalled();
-  context.supabase.rpc.mockRejectedValue(new Error('private database detail'));
+  context.supabase.rpc.mockImplementationOnce(() => {
+    throw new Error('private database detail');
+  });
   const result = await GET(request());
   expect(result.status).toBe(500);
   expect(await result.json()).toEqual({
@@ -137,11 +171,23 @@ it('isolates overlapping request identities and count clients, then rechecks a d
   const bodies = await Promise.all(results.map((result) => result.json()));
   expect(bodies[0]).toMatchObject({
     identity: { userId: 'first' },
-    counts: { 'ITC-D01': '1' },
+    counts: {
+      'ITC-D01': {
+        quantity_product_count: '1',
+        quantity_unit_count: '1',
+        asset_count: '0',
+      },
+    },
   });
   expect(bodies[1]).toMatchObject({
     identity: { userId: 'second' },
-    counts: { 'ITC-D01': '2' },
+    counts: {
+      'ITC-D01': {
+        quantity_product_count: '2',
+        quantity_unit_count: '2',
+        asset_count: '0',
+      },
+    },
   });
   expect(first.supabase.rpc).toHaveBeenCalledOnce();
   expect(second.supabase.rpc).toHaveBeenCalledOnce();

@@ -160,12 +160,11 @@ function localApi() {
 }
 async function options(page: Page) {
   return Promise.all(
-    settingNames.map((name) =>
-      page
-        .getByRole('combobox', { name, exact: true })
-        .locator('option')
-        .allTextContents(),
-    ),
+    settingNames.map(async (name) => {
+      const combobox = page.getByRole('combobox', { name, exact: true });
+      await expect(combobox).toBeVisible();
+      return combobox.locator('option').allTextContents();
+    }),
   );
 }
 
