@@ -161,6 +161,40 @@ describe('owner-reviewed runner image inputs', () => {
       expect(sha256(readFileSync(`scripts/local-runner/${name}`))).toBe(digest);
     }
     expect(writeImageInputs(process.cwd(), true)).toMatch(/^[A-F0-9]{64}$/);
+
+    const bundle = JSON.parse(
+      readFileSync('scripts/local-runner/Bundle.json', 'utf8'),
+    );
+    const bundleNames = [
+      'Common.ps1',
+      'Runner.ps1',
+      'Guest.Network.ps1',
+      'PreparedImage.ps1',
+      'Image.Prepare.sh',
+      'Image.Inputs.json',
+      'Image.Package.json',
+      'Image.PackageLock.json',
+      'Image.Supabase.toml',
+      'SetupMenu.ps1',
+      'Setup.ps1',
+      'Setup.Download.ps1',
+      'Update.ps1',
+      'Setup.cmd',
+      'Start.cmd',
+      'Restart.cmd',
+      'Stop.cmd',
+      'Status.cmd',
+    ];
+    expect(bundle).toMatchObject({
+      schema: 1,
+      tag: 'it-inventory-local-runner-v1',
+      version: expect.stringMatching(/^\d{4}-\d{2}-\d{2}\.\d+$/),
+    });
+    expect(bundle.files.map(({ name }) => name)).toEqual(bundleNames);
+    for (const { name, hash } of bundle.files) {
+      expect(hash).toMatch(/^[A-F0-9]{64}$/);
+      expect(sha256(readFileSync(`scripts/local-runner/${name}`))).toBe(hash);
+    }
   });
 
   it.each([...LOCAL_STORAGE_IMAGES].slice(0, 3))(
