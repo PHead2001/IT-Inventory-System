@@ -6,7 +6,11 @@ import {
   readPrivacyRevocationRevision,
 } from '@/features/scan/assign-batch';
 
-export const safeDocumentTitle = 'IT Inventory';
+import {
+  safeDocumentTitle,
+  safeRouteDocumentTitle,
+} from './safe-route-document-title';
+export { safeDocumentTitle } from './safe-route-document-title';
 // Ownership only: never retain a document name outside its mounted controller.
 let documentOwner: object | null = null;
 type Grant = {
@@ -32,13 +36,15 @@ export function createPrivateDocumentTitleController() {
       grant.callbacks === assignmentEpoch()
         ? grant
         : null;
-    // With no record registration, ordinary verified route metadata remains owned by Next.
-    if (liveGrant && !registration) return;
     const allowed =
       liveGrant &&
       registration &&
       liveGrant.navigation.split('?')[0] === registration.routePath;
-    const title = allowed ? registration!.title : safeDocumentTitle;
+    const title = allowed
+      ? registration!.title
+      : liveGrant
+        ? safeRouteDocumentTitle(liveGrant.navigation)
+        : safeDocumentTitle;
     if (document.title !== title) document.title = title;
   };
   return {

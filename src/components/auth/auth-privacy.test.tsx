@@ -1334,3 +1334,49 @@ it('does not take ownership of safe public Auth metadata', async () => {
   await screen.findByRole('button', { name: 'Sign in' });
   expect(document.title).toBe('Sign in · IT Inventory');
 });
+
+it('restores preexisting Inventory and Add quantity titles only after current navigation verification without remounting its draft', async () => {
+  routing.pathname = '/inventory';
+  document.title = 'Inventory · IT Inventory';
+  let finish!: (value: { status: 'absent' }) => void;
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const ordinary = () => (
+    <ProtectedTestBoundary>
+      <form aria-label="Ordinary draft">
+        <input aria-label="Ordinary name" defaultValue="draft" />
+      </form>
+    </ProtectedTestBoundary>
+  );
+  const view = render(ordinary());
+  expect(document.title).toBe('IT Inventory');
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  await act(async () => finish({ status: 'absent' }));
+  const input = await screen.findByLabelText('Ordinary name');
+  fireEvent.change(input, { target: { value: 'unchanged unsaved name' } });
+  expect(document.title).toBe('Inventory · IT Inventory');
+  actions.readLogoutPrivacyGeneration.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  routing.pathname = '/inventory/quantity/new';
+  view.rerender(ordinary());
+  expect(document.title).toBe('IT Inventory');
+  await act(async () => {
+    await Promise.resolve();
+  });
+  document.title = 'Old private metadata';
+  await waitFor(() => expect(document.title).toBe('IT Inventory'));
+  await act(async () => finish({ status: 'absent' }));
+  await waitFor(() =>
+    expect(document.title).toBe('Add quantity item · IT Inventory'),
+  );
+  expect(screen.getByLabelText('Ordinary name')).toBe(input);
+  expect(input).toHaveValue('unchanged unsaved name');
+});

@@ -1425,10 +1425,11 @@ interfaceTest(
     await interfaceLogin(page);
     await page.goto('/labels?location=ITC-RED');
     const code = page
-      .locator('.label-card span.font-mono[title="ITC-RED"]')
+      .locator('.label-card span[title="ITC-RED"] > .experience-code')
       .first();
     await expect(code).toBeVisible();
     await expect(code).toHaveText('ITC-RED');
+    await expect(code.locator('..')).toHaveAttribute('title', 'ITC-RED');
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
     const fonts = await code.evaluate((node) => {
       const root = getComputedStyle(document.documentElement);

@@ -62,7 +62,13 @@ controller, with explicit server route paths and opaque registration ownership.
 Revocation, failed verification and route/binding drift synchronously restore
 `IT Inventory`; retained forms and unknown-outcome commands stay mounted. Focused
 privacy regressions cover benign checks, same-owner recovery, stale registrations,
-denied owners and delayed safe head updates. Server metadata regressions verify
+denied owners and delayed safe head updates. Verified ordinary routes restore only
+a repository-authored static title for their current navigation; recognized private
+route shapes have non-sensitive generic fallbacks. Unknown/malformed paths remain
+`IT Inventory`, and no title is learned from previous document metadata or query
+values. Controller and Auth integration regressions cover metadata present before
+mount, navigation masking/reverification and private-to-ordinary transitions.
+Server metadata regressions verify
 that failures and missing records cannot stream private names into the head.
 
 ## U403 choice identity proof

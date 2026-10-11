@@ -1,5 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+// This suite invokes async server pages in jsdom; keep their real read helper
+// and query assertions while stubbing only Next's server-environment marker.
+vi.mock('server-only', () => ({}));
 import SettingsPage from './page';
 import FormsPage from './forms/page';
 import CategoryFormPage from './forms/[categoryId]/page';
