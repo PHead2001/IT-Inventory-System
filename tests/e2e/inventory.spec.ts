@@ -35,6 +35,28 @@ async function choose(form: Locator, label: string, code: string) {
 async function openForm(page: Page, name: string) {
   return openRecordTask(page, name);
 }
+async function savedMoveCompletion(page: Page) {
+  const entityId = new URL(page.url()).pathname.split('/').at(-1)!;
+  const entries = await page.evaluate(
+    (entityId) =>
+      Object.keys(sessionStorage)
+        .filter(
+          (key) =>
+            key.startsWith('it-inventory-move-completion:v1:') &&
+            key.endsWith(`:${entityId}:quantity_move`),
+        )
+        .map((key) => ({ key, raw: sessionStorage.getItem(key)! })),
+    entityId,
+  );
+  expect(entries).toHaveLength(1);
+  const pointer = JSON.parse(entries[0].raw) as {
+    entityId: string;
+    eventId: string;
+  };
+  expect(pointer.entityId).toBe(entityId);
+  expect(Object.keys(pointer).sort()).toEqual(['entityId', 'eventId']);
+  return { ...entries[0], pointer };
+}
 async function openRecordHistory(
   page: Page,
   name: 'View all item history' | 'View all asset history',
@@ -351,7 +373,7 @@ test('a saved event link survives more than one page of newer history and later 
   }
 });
 
-test('quantity move rejects an overdraw and retains committed receipt through data refresh and reload', async ({
+test('quantity move rejects an overdraw and retains its historical receipt when explicit selection opens a fresh move after reload', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -405,24 +427,64 @@ test('quantity move rejects an overdraw and retains committed receipt through da
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
     await expect(form.getByRole('status')).toBeFocused();
+    const committedAt = await form
+      .getByRole('status')
+      .locator('time')
+      .getAttribute('datetime');
+    const saved = await savedMoveCompletion(page);
     await form.getByRole('button', { name: 'Refresh balances' }).click();
     await expect(form.getByRole('status')).toContainText('move completed');
     await expect(
       form.getByRole('button', { name: 'Review move stock' }),
     ).toHaveCount(0);
+    await expectStableReceiptAction(page, 'Move more');
     await page.reload();
     form = await openForm(page, 'Move stock');
+    await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+    await expect(
+      form.getByLabel('Destination location', { exact: true }),
+    ).toHaveText('Select a location');
+    await expect(
+      form.getByRole('button', { name: 'Review move stock' }),
+    ).toBeEnabled();
+    await expect(form.getByRole('button', { name: 'Move more' })).toHaveCount(
+      0,
+    );
     await expect(
       form.getByText('Previous move receipt', { exact: true }),
-    ).toBeVisible();
-    await expect(form.locator('time')).toBeVisible();
-    await expect(form.getByRole('status')).toContainText(
+    ).toHaveCount(0);
+    const lastMove = form.locator('details').filter({
+      has: page.locator('summary').filter({ hasText: /^Last move/ }),
+    });
+    await expect(lastMove).not.toHaveAttribute('open');
+    await expect(lastMove.locator('summary time')).toHaveAttribute(
+      'datetime',
+      committedAt!,
+    );
+    await lastMove.locator('summary').click();
+    await expect(lastMove).toContainText(
+      'Moved 1 unit from Red Container to Black Container',
+    );
+    await expect(lastMove).toContainText(
       'After this move: Red Container 1 unit; Black Container 1 unit',
     );
-    await expectStableReceiptAction(page, 'Move more');
+    expect(await savedMoveCompletion(page)).toEqual(saved);
     await version(page, 2);
-    await beginNewRecordTransaction(page, 'Move more');
-    await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+    await expect(
+      page.getByRole('heading', {
+        name: 'Current stock — 2 available in storage',
+      }),
+    ).toBeVisible();
+    const originalMove = page
+      .getByRole('heading', { name: 'Physically moved', exact: true })
+      .locator('xpath=ancestor::li[1]');
+    await expect(originalMove).toHaveCount(1);
+    await expect(
+      originalMove.locator(
+        `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
+      ),
+    ).toHaveCount(1);
+    await lastMove.locator('summary').click();
     await choose(form, 'Source location', 'ITC-RED');
     await choose(form, 'Destination location', 'ITC-BLACK');
     await form.getByLabel('Quantity to move').fill('1');
@@ -792,9 +854,48 @@ test('quantity core persists multi-location receives, partial and all transfers,
   await expect(movedHistory).toContainText('5 → 8 units (+3)');
   await expect(movedHistory).not.toContainText('Amount not recorded');
   await expect(movedHistory).not.toContainText('No recorded source');
+  const committedAt = await form
+    .getByRole('status')
+    .locator('time')
+    .getAttribute('datetime');
+  const saved = await savedMoveCompletion(page);
   await page.reload();
   form = await openForm(page, 'Move stock');
-  await form.getByRole('button', { name: 'Move more' }).click();
+  await expect(form.getByLabel('Quantity to move')).toHaveValue('');
+  await expect(
+    form.getByLabel('Destination location', { exact: true }),
+  ).toHaveText('Select a location');
+  await expect(
+    form.getByRole('button', { name: 'Review move stock' }),
+  ).toBeEnabled();
+  await expect(form.getByRole('button', { name: 'Move more' })).toHaveCount(0);
+  const lastMove = form
+    .locator('details')
+    .filter({ has: page.locator('summary').filter({ hasText: /^Last move/ }) });
+  await expect(lastMove).not.toHaveAttribute('open');
+  await expect(lastMove.locator('summary time')).toHaveAttribute(
+    'datetime',
+    committedAt!,
+  );
+  await lastMove.locator('summary').click();
+  await expect(lastMove).toContainText('Moved 3 units from 1A to 1B');
+  await expect(lastMove).toContainText(
+    'After this move: 1A 7 units; 1B 8 units',
+  );
+  expect(await savedMoveCompletion(page)).toEqual(saved);
+  await version(page, 3);
+  await expect(
+    page.getByRole('heading', {
+      name: 'Current stock — 15 available in storage',
+    }),
+  ).toBeVisible();
+  await expect(movedHistory).toHaveCount(1);
+  await expect(
+    movedHistory.locator(
+      `a[href="/history/events/quantity/${saved.pointer.eventId}"]`,
+    ),
+  ).toHaveCount(1);
+  await lastMove.locator('summary').click();
   await choose(form, 'Source location', 'ITC-S1A');
   await choose(form, 'Destination location', 'ITC-S1C');
   await form.getByLabel('Move All from this source location').check();

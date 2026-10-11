@@ -578,10 +578,12 @@ it('restores only an authorized receipt after remount with a loading barrier and
   );
   expect(mocks.submit).toHaveBeenCalledOnce();
 });
-it.each([
-  { actorId: '00000000-0000-4000-8000-000000000098' },
-  { backendScope: 'https://other.example.test' },
-])('isolates the saved receipt scope %j', async (other) => {
+it.each(
+  [
+    { actorId: '00000000-0000-4000-8000-000000000098' },
+    { backendScope: 'https://other.example.test' },
+  ].flatMap((scope) => [scope, { ...scope, onRecordPage: true }]),
+)('isolates the saved receipt scope %j', async (other) => {
   sessionStorage.setItem(
     completionKey(),
     JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
@@ -1039,24 +1041,148 @@ it('opens an explicit record-page move from a fresh snapshot while retaining the
   expect(mocks.submit.mock.calls[1][0].payload.expected_version).toBe(8);
 });
 
-it('retains a completed pointer and refuses a guessed fresh form when its current snapshot fails', async () => {
-  sessionStorage.setItem(
-    completionKey(),
-    JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+it.each(['receipt', 'snapshot'] as const)(
+  'retains a completed pointer and refuses a guessed fresh form when its authorized %s read fails',
+  async (read) => {
+    sessionStorage.setItem(
+      completionKey(),
+      JSON.stringify({ entityId: item.id, eventId: committed.eventId }),
+    );
+    mocks[read].mockRejectedValueOnce(new Error('offline'));
+    render(<MutationForm {...props} onRecordPage />);
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('form')).toBeNull();
+    expect(screen.queryByText(/^Last move/)).toBeNull();
+    expect(sessionStorage.getItem(completionKey())).not.toBeNull();
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole('button', { name: 'Retry loading move receipt' }),
+      );
+    await screen.findByLabelText('Quantity to move');
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(mocks.receipt).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedActorId: actorId }),
+    );
+    expect(mocks.snapshot).toHaveBeenCalledWith({
+      entityId: item.id,
+      expectedActorId: actorId,
+    });
+    expect(screen.getByLabelText('Quantity to move')).toHaveValue(null);
+    expect(
+      screen.getByText(/^Last move/).closest('details'),
+    ).not.toHaveAttribute('open');
+  },
+);
+it('opens a fresh record-page move after reload while preserving the exact authorized historical receipt', async () => {
+  const content = (version: number) => (
+    <TaskWorkspace
+      choices={[{ id: 'move', label: 'Move stock' }]}
+      context="This item"
+      recordVersion={version}
+    >
+      {() => (
+        <MutationForm {...props} onRecordPage item={{ ...item, version }} />
+      )}
+    </TaskWorkspace>
   );
-  mocks.snapshot.mockRejectedValueOnce(new Error('offline'));
-  render(<MutationForm {...props} onRecordPage />);
-  await screen.findByRole('alert');
+  const first = render(content(1));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  await prepare();
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await screen.findByRole('button', { name: 'Move more' });
+  const original = mocks.submit.mock.calls[0][0];
+  const pointer = sessionStorage.getItem(completionKey());
+  first.rerender(content(2));
+  await user.click(screen.getByRole('button', { name: 'Refresh balances' }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Refresh balances' }),
+    ).toBeEnabled(),
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('move completed');
+  first.unmount();
+
+  mocks.receipt.mockClear();
+  mocks.snapshot.mockClear();
+
+  let finishReceipt!: (value: typeof committed.movement) => void;
+  let finishSnapshot!: (
+    value: Awaited<ReturnType<typeof mocks.snapshot>>,
+  ) => void;
+  mocks.receipt.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishReceipt = resolve;
+      }),
+  );
+  mocks.snapshot.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishSnapshot = resolve;
+      }),
+  );
+  render(content(2));
+  await user.click(screen.getByRole('button', { name: 'Move stock' }));
+  await waitFor(() => expect(mocks.receipt).toHaveBeenCalledOnce());
   expect(screen.queryByRole('form')).toBeNull();
-  expect(sessionStorage.getItem(completionKey())).not.toBeNull();
-  await userEvent
-    .setup()
-    .click(screen.getByRole('button', { name: 'Retry loading move receipt' }));
-  await screen.findByLabelText('Quantity to move');
-  expect(mocks.submit).not.toHaveBeenCalled();
-  expect(mocks.receipt).toHaveBeenCalledWith(
-    expect.objectContaining({ expectedActorId: actorId }),
+  expect(mocks.receipt).toHaveBeenCalledWith({
+    entityId: item.id,
+    eventId: committed.eventId,
+    expectedActorId: actorId,
+  });
+  await act(async () => finishReceipt(committed.movement));
+  await waitFor(() => expect(mocks.snapshot).toHaveBeenCalledOnce());
+  expect(screen.queryByRole('form')).toBeNull();
+  await act(async () =>
+    finishSnapshot({
+      item: { ...item, version: 7 },
+      locations: props.locations,
+      balances: [{ location: source, quantity: 9 }],
+    }),
   );
+  expect(screen.getByLabelText('Quantity to move')).toHaveValue(null);
+  expect(screen.getByLabelText('Destination location')).toHaveTextContent(
+    'Select a location',
+  );
+  expect(
+    screen.getByText('Recorded source availability: 9 units.'),
+  ).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Move more' })).toBeNull();
+  expect(screen.queryByText('Previous move receipt')).toBeNull();
+  const previous = screen.getByText(/^Last move/).closest('details')!;
+  expect(previous).not.toHaveAttribute('open');
+  expect(previous.querySelector('time')).toHaveAttribute(
+    'datetime',
+    committed.movement.createdAt,
+  );
+  expect(sessionStorage.getItem(completionKey())).toBe(pointer);
+  expect(mocks.submit).toHaveBeenCalledOnce();
+  await user.click(screen.getByText(/^Last move/));
+  expect(previous).toHaveAttribute('open');
+  expect(previous).toHaveTextContent(
+    'Moved 1 unit from Red Container to Black Container.',
+  );
+  expect(previous).toHaveTextContent(
+    'After this move: Red Container 1 unit; Black Container 1 unit.',
+  );
+  expect(sessionStorage.getItem(completionKey())).toBe(pointer);
+  await user.click(screen.getByText(/^Last move/));
+  await prepare();
+  fireEvent.change(screen.getByLabelText('Quantity to move'), {
+    target: { value: '2' },
+  });
+  await user.click(screen.getByRole('button', { name: 'Review move stock' }));
+  expect(
+    screen.getByRole('region', { name: 'Review changes' }),
+  ).toHaveTextContent('9 → 7 units');
+  await user.click(screen.getByRole('button', { name: 'Confirm move stock' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0].requestId).not.toBe(original.requestId);
+  expect(mocks.submit.mock.calls[1][0].payload.expected_version).toBe(7);
+  expect(mocks.submit.mock.calls[1][0].expectedActorId).toBe(actorId);
 });
 it('preserves fresh draft inputs and their version when a newer page snapshot arrives during editing', async () => {
   sessionStorage.setItem(
