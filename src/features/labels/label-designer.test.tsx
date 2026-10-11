@@ -2334,11 +2334,17 @@ it('retains explicit selections across pages with named added, present and unava
   fireEvent.click(
     screen.getByRole('button', { name: 'Add selected to queue' }),
   );
-  expect(
-    await screen.findByText(
-      /^Added: Laptop.*Already present: Adapters.*Unavailable to this account: Missing adapters/,
-    ),
-  ).toBeVisible();
+  const feedback = await screen.findByText(
+    'Added: Laptop (Individual asset). Already present: Adapters (Quantity item). Unavailable to this account: Missing adapters (Quantity item).',
+  );
+  expect(feedback).toBeVisible();
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(asset.key);
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    quantity.key,
+  );
+  expect(feedback.closest('[role="status"]')).not.toHaveTextContent(
+    missing.key,
+  );
   expect(screen.getByText('0 selected records')).toBeVisible();
   expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
     '2 distinct records \u00b7 2 labels',

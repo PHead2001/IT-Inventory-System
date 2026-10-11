@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   labelQueueEntry,
+  labelSelectionSummary,
   projectLabelSelection,
   selectLabelRows,
 } from './label-selection';
@@ -37,6 +38,45 @@ describe('explicit label selection', () => {
     expect(result.added).toEqual([row(2)]);
     expect(result.already).toEqual([row(1)]);
     expect(result.unavailable).toEqual([row(3)]);
+  });
+  it('announces added, present and unavailable names with readable types, never persistence keys', () => {
+    const quantity = row(1);
+    const asset = row(1, 'asset');
+    const location = { ...row(3), kind: 'location' as const, key: 'ITC-S3A' };
+    const result = projectLabelSelection(
+      [labelQueueEntry(quantity)],
+      [asset, quantity, location],
+      [asset, quantity],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      'Added: Same name (Individual asset). Already present: Same name (Quantity item). Unavailable to this account: Same name (Location).',
+    );
+    for (const selected of [asset, quantity, location])
+      expect(summary).not.toContain(selected.key);
+    expect(summary).not.toMatch(/\((?:asset|quantity|location)\b/);
+    expect(result.next).toEqual([
+      labelQueueEntry(quantity),
+      labelQueueEntry(asset),
+    ]);
+    expect(result.unavailable).toEqual([location]);
+  });
+  it('preserves intentionally authored UUID name text in every outcome', () => {
+    const name = 'Device 11111111-1111-4111-8111-111111111111';
+    const added = { ...row(1, 'asset'), name };
+    const already = { ...row(2), name };
+    const unavailable = { ...row(3), name };
+    const result = projectLabelSelection(
+      [labelQueueEntry(already)],
+      [added, already, unavailable],
+      [added, already],
+    );
+    const summary = labelSelectionSummary(result);
+    expect(summary).toBe(
+      `Added: ${name} (Individual asset). Already present: ${name} (Quantity item). Unavailable to this account: ${name} (Quantity item).`,
+    );
+    for (const selected of [added, already, unavailable])
+      expect(summary).not.toContain(selected.key);
   });
   it('accepts 200 identities and rejects an over-limit projection without a prefix', () => {
     const rows = Array.from({ length: 201 }, (_, n) => row(n));

@@ -62,9 +62,14 @@ export function projectLabelSelection(
 export function labelSelectionSummary(
   result: ReturnType<typeof projectLabelSelection>,
 ): string {
+  const kindNames = {
+    quantity: 'Quantity item',
+    asset: 'Individual asset',
+    location: 'Location',
+  };
   const names = (rows: SelectedLabel[]) =>
     rows.length
-      ? rows.map((row) => `${row.name} (${row.kind} ${row.key})`).join(', ')
+      ? rows.map((row) => `${row.name} (${kindNames[row.kind]})`).join(', ')
       : 'none';
   return `Added: ${names(result.added)}. Already present: ${names(result.already)}. Unavailable to this account: ${names(result.unavailable)}.`;
 }
