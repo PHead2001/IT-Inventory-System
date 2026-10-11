@@ -302,8 +302,7 @@ it.each(['missing', 'failure'] as const)(
     } else {
       fireEvent.click(
         within(queue).getAllByRole('button', {
-          name: 'Remove',
-          exact: true,
+          name: /^Remove$/,
         })[1],
       );
       await waitFor(() =>
