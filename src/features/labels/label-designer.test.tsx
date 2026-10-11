@@ -1521,6 +1521,8 @@ it('shows field-aware label-search answers including intentional UUID text witho
   expect(mocks.getQueueRecords).toHaveBeenLastCalledWith([
     { kind: 'quantity', key: quantityId },
   ]);
+  // The queue text commits before the passive storage effect necessarily runs.
+  // Observe persisted identity directly before asserting reload-safe selection.
   await waitFor(() => {
     const stored = JSON.parse(
       sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
@@ -1982,11 +1984,13 @@ it('persists outstanding review when an observed retirement returns to active be
     ).toHaveTextContent('Current state: active.'),
   );
   expect(printButton()).toBeDisabled();
-  expect(
-    JSON.parse(
-      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-    ).entries[0].lifecycleAcknowledged,
-  ).toBe(false);
+  await waitFor(() =>
+    expect(
+      JSON.parse(
+        sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+      ).entries[0].lifecycleAcknowledged,
+    ).toBe(false),
+  );
   view.unmount();
   render(<LabelDesigner {...props} initial={[]} />);
   const notice = await screen.findByRole('alert', {
@@ -2019,13 +2023,15 @@ it('latches another item changed in an acknowledgment read even when it restores
   const notice = screen.getByRole('alert', { name: 'Label item decisions' });
   expect(notice).toHaveTextContent('Current state: active.');
   expect(notice).not.toHaveTextContent('Adapters');
-  const stored = JSON.parse(
-    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
-  );
-  expect(
-    stored.entries.find((entry: { key: string }) => entry.key === assetId)
-      .lifecycleAcknowledged,
-  ).toBe(false);
+  await waitFor(() => {
+    const stored = JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    );
+    expect(
+      stored.entries.find((entry: { key: string }) => entry.key === assetId)
+        .lifecycleAcknowledged,
+    ).toBe(false);
+  });
   expect(printButton()).toBeDisabled();
   await reviewAndAcknowledge('Laptop');
   await waitFor(() => expect(printButton()).toBeEnabled());
