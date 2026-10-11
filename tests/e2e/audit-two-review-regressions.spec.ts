@@ -350,7 +350,13 @@ test('site count corrections show authoritative signed before and after counts, 
         exact: true,
       });
       await expect(review).toBeVisible();
-      await expect(review).toContainText(name);
+      await expect(
+        review.getByRole('heading', {
+          name: 'Review changes for this item',
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(review).toContainText(`This item · ${after} units`);
       await expect(review).toContainText(reason);
       await expect(review).toContainText(reference);
       await form

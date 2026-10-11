@@ -56,6 +56,9 @@ test('explicit completed task reentry starts fresh, while an unconfirmed move re
     'datetime',
     /.+/,
   );
+  // The first move left stock in two locations, so a fresh move has no
+  // implicit source. Choose the holding whose next unit will be moved.
+  await chooseLocation(form, 'Source location', 'ITC-RED');
   await chooseLocation(form, 'Destination location', 'ITC-BLACK');
   await form.getByLabel('Quantity to move').fill('1');
   await form.getByRole('button', { name: 'Review move stock' }).click();
@@ -102,7 +105,7 @@ for (const kind of ['quantity', 'asset'] as const) {
       await auditLogin(page);
       const category = await auditCategory(page);
       const name =
-        'Cat6 Ethernet patch cable, snagless RJ45 connectors, blue jacket, certified network installation, office replacement stock, extra flexible shielded copper ' +
+        'Cat6 <b>Ethernet</b> 🔌 patch cable, snagless RJ45, blue jacket, certified network installation, office replacement stock, extra flexible shielded copper ' +
         crypto.randomUUID().slice(0, 16);
       const identifier =
         `TEST-PR52-${kind === 'asset' ? 'ASSET' : 'SKU'}-` +
@@ -142,18 +145,21 @@ for (const kind of ['quantity', 'asset'] as const) {
       expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1);
       const tasks = page.getByRole('heading', { name: 'Tasks', exact: true });
       const expectTasksWithinFirstScreen = async () => {
-        await page.evaluate(async () => {
-          await document.fonts.ready;
-          window.scrollTo(0, 0);
-        });
-        await expect
-          .poll(() =>
-            tasks.evaluate(
-              (element) =>
-                element.getBoundingClientRect().bottom + window.scrollY,
-            ),
-          )
-          .toBeLessThanOrEqual(812);
+        for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+          await page.emulateMedia({ reducedMotion });
+          await page.evaluate(async () => {
+            await document.fonts.ready;
+            window.scrollTo(0, 0);
+          });
+          await expect
+            .poll(() =>
+              tasks.evaluate(
+                (element) =>
+                  element.getBoundingClientRect().bottom + window.scrollY,
+              ),
+            )
+            .toBeLessThanOrEqual(812);
+        }
       };
       await expectTasksWithinFirstScreen();
       expect(
@@ -165,6 +171,10 @@ for (const kind of ['quantity', 'asset'] as const) {
         page.getByRole('region', { name: 'Record tasks' }),
       ).toContainText('This item');
       const toggle = page.getByRole('button', { name: 'Show full name' });
+      expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expect(
+        (await header.locator('summary').boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(44);
       await toggle.focus();
       await page.keyboard.press('Enter');
       await expect(

@@ -88,6 +88,7 @@ function client(initial: Record<string, unknown> = starting) {
     await rpc('label_defaults_update', args);
   });
   const abort = vi.fn(async () => {});
+  const privacyRead = vi.fn(async () => {});
   return {
     page,
     from,
@@ -100,6 +101,7 @@ function client(initial: Record<string, unknown> = starting) {
     body,
     forward,
     abort,
+    privacyRead,
     dispatch: async (send = true, observedBody = body) => {
       await handler!({
         request: () => ({
@@ -108,7 +110,8 @@ function client(initial: Record<string, unknown> = starting) {
           url: () => 'http://localhost:3000/settings/labels',
           postData: () => observedBody,
         }),
-        continue: send ? forward : async () => {},
+        continue:
+          observedBody === '[]' ? privacyRead : send ? forward : async () => {},
         abort,
       } as unknown as Route);
     },
@@ -125,6 +128,26 @@ describe('owned shared label defaults fixture', () => {
     vi.stubEnv('LOCAL_SERVICE_ROLE_KEY', 'must-not-be-used');
   });
   afterEach(() => vi.unstubAllEnvs());
+  it('forwards privacy-generation reads without claiming mutation ownership or changing cleanup identity', async () => {
+    const caller = client();
+    transport.createClient.mockReturnValue(caller);
+    await withOwnedLabelDefaults(caller.page, async (defaults) => {
+      await caller.dispatch(true, '[]');
+      expect(caller.rpc).not.toHaveBeenCalled();
+      expect(caller.state()).toEqual(starting);
+      defaults.reviewSave(selected);
+      await caller.dispatch();
+      await caller.dispatch(true, '[]');
+      await defaults.confirmSaved();
+    });
+    expect(caller.privacyRead).toHaveBeenCalledTimes(2);
+    expect(caller.abort).not.toHaveBeenCalled();
+    expect(caller.rpc.mock.calls.slice(0, 2)).toEqual([
+      ['label_defaults_update', caller.args],
+      ['label_defaults_update', caller.args],
+    ]);
+    expect(caller.state()).toEqual({ ...starting, version: '43' });
+  });
   it.each([layout, null])(
     'restores explicit original layout %j after a later assertion fails',
     async (originalLayout) => {

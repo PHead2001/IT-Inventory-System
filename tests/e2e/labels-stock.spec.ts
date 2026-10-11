@@ -1,4 +1,5 @@
 import { fits } from './viewport-controls';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
@@ -1317,10 +1318,16 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
     id = new URL(page.url()).pathname.split('/').at(-1)!;
     owned.assets.add(id);
     await page.reload();
-    await expect(page.getByText(tag, { exact: true })).toBeVisible();
-    await expect(page.getByText(serial, { exact: true })).toBeVisible();
-    await expectCodeFont(page.getByText(tag, { exact: true }));
-    await expectCodeFont(page.getByText(serial, { exact: true }));
+    const recordHeader = page
+      .getByRole('main')
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name, exact: true }) });
+    await expect(recordHeader).toHaveCount(1);
+    const facts = recordHeader.locator('dl');
+    await expect(facts.getByText(tag, { exact: true })).toBeVisible();
+    await expect(facts.getByText(serial, { exact: true })).toBeVisible();
+    await expectCodeFont(facts.getByText(tag, { exact: true }));
+    await expectCodeFont(facts.getByText(serial, { exact: true }));
     await page.goto('/scan');
     await page
       .getByLabel('Paste a label URL, barcode text, or exact identifier')
@@ -1488,7 +1495,7 @@ interfaceTest(
       interfaceRecord.categoryId,
       interfaceRecord.categoryName,
     ])
-      await expect(page.locator('head title')).not.toContainText(privateValue);
+      await expectPrivateTitleExcluded(page, privateValue);
 
     const currentRecord = page.locator('section').filter({
       has: page.getByRole('heading', {

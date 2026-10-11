@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { withinViewport } from './viewport-controls';
 import {
@@ -1275,9 +1276,7 @@ interfaceTest(
       ).toBeVisible();
       await expect(page.getByRole('main')).toHaveCount(1);
       await expect(page).toHaveTitle(/IT Inventory/);
-      await expect(page.locator('head title')).not.toContainText(
-        path.split('/').at(-1)!,
-      );
+      await expectPrivateTitleExcluded(page, path.split('/').at(-1)!);
       await page.screenshot({
         path: info.outputPath(
           `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,

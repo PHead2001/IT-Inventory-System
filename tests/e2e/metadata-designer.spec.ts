@@ -1,4 +1,5 @@
 import { fits } from './viewport-controls';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { openRecordTask } from './record-task-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -842,9 +843,7 @@ interfaceTest(
         interfaceRecord.categoryId,
         interfaceRecord.name,
       ])
-        await expect(page.locator('head title')).not.toContainText(
-          privateValue,
-        );
+        await expectPrivateTitleExcluded(page, privateValue);
     }
   },
 );

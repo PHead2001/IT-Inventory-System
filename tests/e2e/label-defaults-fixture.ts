@@ -71,6 +71,10 @@ export async function withOwnedLabelDefaults(
       )
         return route.continue();
       try {
+        // The shared privacy gate also reads its generation from this route.
+        // Its known no-argument action is not a label-defaults mutation.
+        const args: unknown = JSON.parse(request.postData() ?? 'null');
+        if (Array.isArray(args) && args.length === 0) return route.continue();
         const command = observedLabelDefaultsCommand(request.postData());
         expect(ownership.reviewed).not.toBeNull();
         const next = ownership.reviewed!;

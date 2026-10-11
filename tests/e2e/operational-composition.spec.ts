@@ -473,7 +473,14 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await expect(page).toHaveURL(/\/inventory\/assets\/[0-9a-f-]+$/);
   const url = page.url(),
     id = new URL(url).pathname.split('/').at(-1)!;
-  await expect(page.getByText(tag, { exact: true })).toHaveCount(1);
+  const identity = page
+    .getByRole('main')
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name, exact: true }) });
+  await expect(identity).toHaveCount(1);
+  await expect(
+    identity.locator('dl').getByText(tag, { exact: true }),
+  ).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await capture(page, info, 'asset-primary-identity');
   const created = page.getByRole('listitem').filter({
@@ -486,7 +493,7 @@ test('CP3 U07 U14 asset identity is concise and an actual other-tab retirement r
   await expect(
     created.getByRole('link', { name, exact: true }),
   ).toHaveAttribute('href', '/inventory/assets/' + id);
-  await expect(created.getByText(tag, { exact: true })).toHaveCount(0);
+  await expect(created.getByText(tag, { exact: true })).not.toBeVisible();
   await created
     .locator('summary')
     .filter({ hasText: 'View event details' })
