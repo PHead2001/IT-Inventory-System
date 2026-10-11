@@ -75,11 +75,13 @@ that failures and missing records cannot stream private names into the head.
 
 U407's phone record regressions include a populated asset tag or quantity SKU,
 and the asset's complete storage breadcrumb and Show in room link. The Tasks
-heading is measured from the document top at 375 × 812 after fonts are ready,
-so retained browser scroll cannot conceal an off-screen heading. An odd final
+heading's bottom is measured from the document top at 375 × 812 after fonts
+are ready, including the retired asset's Last recorded custody state, so retained
+browser scroll cannot conceal a partially or fully off-screen heading. An odd final
 header fact spans both phone columns, keeping custody and identifier content
 readable without narrowing the three-line name or removing its keyboard
-disclosure. Browser geometry acceptance still requires running the real E2E
+disclosure. Phone hero padding and header/fact gaps are reduced without changing
+text sizes or 44 px controls. Browser geometry acceptance still requires running the real E2E
 suite against the final candidate.
 
 ## U403 choice identity proof

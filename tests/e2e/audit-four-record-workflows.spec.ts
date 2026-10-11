@@ -141,13 +141,21 @@ for (const kind of ['quantity', 'asset'] as const) {
       }));
       expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1);
       const tasks = page.getByRole('heading', { name: 'Tasks', exact: true });
-      await expect
-        .poll(() =>
-          tasks.evaluate(
-            (element) => element.getBoundingClientRect().top + window.scrollY,
-          ),
-        )
-        .toBeLessThanOrEqual(812);
+      const expectTasksWithinFirstScreen = async () => {
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          window.scrollTo(0, 0);
+        });
+        await expect
+          .poll(() =>
+            tasks.evaluate(
+              (element) =>
+                element.getBoundingClientRect().bottom + window.scrollY,
+            ),
+          )
+          .toBeLessThanOrEqual(812);
+      };
+      await expectTasksWithinFirstScreen();
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -170,6 +178,29 @@ for (const kind of ['quantity', 'asset'] as const) {
         page.getByRole('button', { name: 'Show full name' }),
       ).toBeFocused();
       await expect(heading).toHaveText(name);
+      if (kind === 'asset') {
+        const retirement = await openRecordTask(page, 'Retire asset');
+        await retirement
+          .getByLabel('Reason (required)', { exact: true })
+          .fill('Owned long-header retired-state regression');
+        await retirement
+          .getByRole('button', { name: 'Review retire asset', exact: true })
+          .click();
+        await retirement
+          .getByRole('button', { name: 'Confirm retire asset', exact: true })
+          .click();
+        await expect(retirement.getByRole('status')).toContainText(
+          'Saved successfully.',
+        );
+        await page.reload();
+        await expect(
+          facts.getByText('Last recorded custody', { exact: true }),
+        ).toBeVisible();
+        await expectTasksWithinFirstScreen();
+        await expect(
+          facts.getByText(identifier, { exact: true }),
+        ).toBeVisible();
+      }
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.evaluate(() => document.fonts.ready);
       await expect
