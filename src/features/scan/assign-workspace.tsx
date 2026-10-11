@@ -1614,7 +1614,9 @@ function AssignmentFields({
                 {match.label} ·{' '}
                 {match.kind === 'quantity'
                   ? 'Quantity item'
-                  : 'Individual asset'}{' '}
+                  : match.kind === 'location'
+                    ? 'Location'
+                    : 'Individual asset'}{' '}
                 · <RecordStatus status={match.state} />
               </Button>
             </li>

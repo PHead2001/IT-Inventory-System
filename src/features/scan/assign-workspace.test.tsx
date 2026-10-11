@@ -618,6 +618,111 @@ it('shows ambiguous identities for manual choice without submitting or silently 
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 
+it('labels an exact location match correctly and preserves its location path when selected for rejected assignment inspection', async () => {
+  const location = {
+    kind: 'location',
+    path: '/locations/ITC-RED',
+    label: 'Red (ITC-RED)',
+    state: 'active',
+  };
+  mocks.find.mockResolvedValue({
+    ok: true,
+    status: 'ambiguous',
+    matches: [
+      location,
+      match,
+      {
+        kind: 'asset',
+        path: '/inventory/assets/' + id(11),
+        label: 'Laptop',
+        state: 'active',
+      },
+    ],
+  });
+  const rejection =
+    'This label identifies a location. Select an existing quantity item or individual asset to assign.';
+  mocks.inspect.mockResolvedValueOnce({ ok: false, message: rejection });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'ITC-RED' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  const chooser = await screen.findByRole('list', {
+    name: 'Choose inventory record',
+  });
+  expect(
+    within(chooser).getByRole('button', {
+      name: 'Adapters · Quantity item · Active',
+    }),
+  ).toBeVisible();
+  expect(
+    within(chooser).getByRole('button', {
+      name: 'Laptop · Individual asset · Active',
+    }),
+  ).toBeVisible();
+  expect(mocks.inspect).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(chooser).getByRole('button', {
+      name: 'Red (ITC-RED) · Location · Active',
+    }),
+  );
+  await screen.findByText(rejection, { selector: '[role="status"]' });
+  expect(mocks.find).toHaveBeenCalledWith({
+    actorId: props.actorId,
+    text: 'ITC-RED',
+    mode: 'identifier',
+  });
+  expect(mocks.inspect).toHaveBeenCalledExactlyOnceWith({
+    actorId: props.actorId,
+    path: location.path,
+    siteId: site.id,
+  });
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Confirm assign' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it('keeps a found LOC label as a location target and rejects it without offering asset assignment', async () => {
+  const path = '/locations/ITC-RED';
+  mocks.find.mockResolvedValue({
+    ok: true,
+    status: 'found',
+    matches: [
+      { kind: 'location', path, label: 'Red (ITC-RED)', state: 'active' },
+    ],
+  });
+  const rejection =
+    'This label identifies a location. Select an existing quantity item or individual asset to assign.';
+  mocks.inspect.mockResolvedValue({ ok: false, message: rejection });
+  render(<AssignmentWorkspace {...props} />);
+  fireEvent.change(screen.getByLabelText('Scan, paste, or search inventory'), {
+    target: { value: 'LOC:ITC-RED' },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
+  await screen.findByText(rejection, { selector: '[role="status"]' });
+  expect(mocks.find).toHaveBeenCalledWith({
+    actorId: props.actorId,
+    text: 'LOC:ITC-RED',
+    mode: 'identifier',
+  });
+  expect(mocks.inspect).toHaveBeenCalledExactlyOnceWith({
+    actorId: props.actorId,
+    path,
+    siteId: site.id,
+  });
+  expect(
+    screen.queryByRole('region', { name: 'Review assignment' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Confirm assign' }),
+  ).not.toBeInTheDocument();
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
 it('pages distinct search candidates without losing destination/ticket and inspects only the selected typed record', async () => {
   const later = {
     kind: 'asset',
