@@ -2325,10 +2325,30 @@ it('removes outside Cancel release listeners on unmount while restoration is pen
     await act(async () => finish({ ok: true, candidate }));
     expect(readBatch(scope).raw).toBe(before);
     expect(mocks.submit).not.toHaveBeenCalled();
+    let finishNext!: (value: unknown) => void;
+    mocks.inspect.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishNext = resolve;
+      }),
+    );
     render(<AssignmentWorkspace {...props} />);
+    // Historical review is already mounted while restoration still owns focus.
+    // Its presence alone cannot establish that the fresh inspection completed.
     expect(
-      await screen.findByRole('region', { name: 'Review assignment' }),
+      screen.getByRole('button', { name: 'Cancel inspection' }),
     ).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeDisabled();
+    expect(readBatch(scope).raw).toBe(before);
+    await act(async () => finishNext({ ok: true, candidate }));
+    expect(
+      screen.getByRole('region', { name: 'Review assignment' }),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Confirm assign' }),
+    ).toBeEnabled();
+    expect(mocks.submit).not.toHaveBeenCalled();
   } finally {
     add.mockRestore();
     remove.mockRestore();
