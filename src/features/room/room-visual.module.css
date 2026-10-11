@@ -345,7 +345,9 @@
   pointer-events: none;
 }
 /* Placement is measured synchronously, including under the global Reduced
-   duration override. Even a 0.01ms transition delays these geometry transforms. */
+   duration override. Even a 0.01ms transition delays geometry and can leave
+   the demand-rendered scene using an obsolete popup occlusion mask. */
+.moreMenu,
 .labelProjection,
 .labelProjection *,
 .hoverAnchor,

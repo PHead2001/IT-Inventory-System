@@ -2545,31 +2545,39 @@ test('375px populated room gives every independently witnessed opaque target an 
       name: 'More map controls',
       exact: true,
     });
-    const toolbar = page.getByRole('toolbar', { name: 'Room camera controls' });
-    const [bar, popup, frame, visual] = await Promise.all([
-      toolbar.boundingBox(),
-      panel.boundingBox(),
-      canvas.boundingBox(),
-      panel.evaluate((element) => ({
-        top: window.visualViewport?.offsetTop ?? 0,
-        fullHeight: Math.min(
-          parseFloat(
-            getComputedStyle(element).getPropertyValue('--room-menu-height'),
-          ) || 200,
-          (window.visualViewport?.height ?? window.innerHeight) * 0.35,
-          element.scrollHeight + 2,
-        ),
-      })),
-    ]);
-    expect(bar).not.toBeNull();
-    expect(popup).not.toBeNull();
-    expect(frame).not.toBeNull();
-    if (bar!.y - visual.top - 9 >= visual.fullHeight) {
-      await expect(panel).toHaveAttribute('data-placement', 'above');
-      expect(popup!.y).toBeGreaterThanOrEqual(visual.top + 4);
-      expect(popup!.y + popup!.height).toBeLessThanOrEqual(bar!.y - 5);
-      expect(popup!.y + popup!.height).toBeLessThanOrEqual(frame!.y);
-    }
+    // Scroll/resize schedules popup placement on rAF. Read every rectangle and
+    // the resulting placement together on each retry, never reuse a below-menu
+    // rectangle captured before awaiting the later "above" attribute.
+    await expect
+      .poll(() =>
+        panel.evaluate((element) => {
+          const surface = element.closest('[data-room-surface]');
+          const bar = surface
+            ?.querySelector('[role="toolbar"]')
+            ?.getBoundingClientRect();
+          const frame = surface
+            ?.querySelector('canvas')
+            ?.getBoundingClientRect();
+          if (!bar || !frame) return false;
+          const popup = element.getBoundingClientRect();
+          const top = window.visualViewport?.offsetTop ?? 0;
+          const fullHeight = Math.min(
+            parseFloat(
+              getComputedStyle(element).getPropertyValue('--room-menu-height'),
+            ) || 200,
+            (window.visualViewport?.height ?? window.innerHeight) * 0.35,
+            element.scrollHeight + 2,
+          );
+          return (
+            bar.top - top - 9 < fullHeight ||
+            (element.getAttribute('data-placement') === 'above' &&
+              popup.top >= top + 4 &&
+              popup.bottom <= bar.top - 5 &&
+              popup.bottom <= frame.top)
+          );
+        }),
+      )
+      .toBe(true);
   };
   await more.click();
   await assertMoreOutsideCanvasWhenAboveFits();
