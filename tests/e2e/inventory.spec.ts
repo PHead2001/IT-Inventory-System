@@ -442,8 +442,11 @@ test('quantity move rejects an overdraw and retains its historical receipt when 
     form = await openForm(page, 'Move stock');
     await expect(form.getByLabel('Quantity to move')).toHaveValue('');
     await expect(
-      form.getByLabel('Destination location', { exact: true }),
-    ).toHaveText('Select a location');
+      form.getByRole('combobox', {
+        name: 'Destination location',
+        exact: true,
+      }),
+    ).toHaveText(/^Select a location/);
     await expect(
       form.getByRole('button', { name: 'Review move stock' }),
     ).toBeEnabled();
@@ -863,8 +866,11 @@ test('quantity core persists multi-location receives, partial and all transfers,
   form = await openForm(page, 'Move stock');
   await expect(form.getByLabel('Quantity to move')).toHaveValue('');
   await expect(
-    form.getByLabel('Destination location', { exact: true }),
-  ).toHaveText('Select a location');
+    form.getByRole('combobox', {
+      name: 'Destination location',
+      exact: true,
+    }),
+  ).toHaveText(/^Select a location/);
   await expect(
     form.getByRole('button', { name: 'Review move stock' }),
   ).toBeEnabled();
