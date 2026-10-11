@@ -738,7 +738,7 @@ function LabelDesignerWorkspace({
               (row) => queueIdentity(row) === queueIdentity(key),
             )?.name ??
             locations.find((location) => location.code === key.key)?.name ??
-            key.key,
+            `Selected ${recordKind(key.kind).toLowerCase()}`,
         },
       ],
       false,
@@ -1754,15 +1754,22 @@ function LabelDesignerWorkspace({
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}
             <div className={styles.queueList}>
-              {entries.map((entry) => {
+              {entries.map((entry, index) => {
                 const id = queueIdentity(entry),
                   record = byId.get(id);
+                const readState = refreshPending
+                  ? 'refreshing…'
+                  : refreshFailed
+                    ? 'refresh failed; retry'
+                    : unavailable.includes(id)
+                      ? 'unavailable to this account'
+                      : 'loading…';
                 return (
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
                         ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
-                        : `${id} · unavailable`}
+                        : `${recordKind(entry.kind)} ${index + 1} · ${readState}`}
                     </span>
                     <div className={styles.queueActions}>
                       <label className={styles.copies}>

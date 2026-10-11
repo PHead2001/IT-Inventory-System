@@ -184,6 +184,141 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+const restoredLocation: LiveLabel = {
+  ...quantity,
+  kind: 'location',
+  key: 'ITC-CLEAR',
+  name: 'Clear Container',
+  path: '/locations/ITC-CLEAR',
+};
+const restoredRows = [asset, quantity, restoredLocation];
+function saveMixedQueue() {
+  const entries = restoredRows.map((record, index) => ({
+    kind: record.kind,
+    key: record.key,
+    copies: index + 2,
+    baselineTag: record.tag,
+    baselineState: record.state,
+    lifecycleAcknowledged: true,
+  }));
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({ entries, filters: defaultFilters, job: defaultJob }),
+  );
+  return entries;
+}
+function expectPrivateQueueIdentity(queue: HTMLElement) {
+  for (const record of restoredRows) {
+    expect(queue).not.toHaveTextContent(record.key);
+    for (const control of within(queue).getAllByRole('button'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+    for (const control of within(queue).getAllByRole('spinbutton'))
+      expect(control).not.toHaveAccessibleName(new RegExp(record.key));
+  }
+}
+it('restores a mixed queue with human refreshing labels until the authorized deferred read supplies names', async () => {
+  const savedEntries = saveMixedQueue();
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue(restoredRows);
+  render(<LabelDesigner {...props} initial={[]} />);
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  await within(queue).findByText('Individual asset 1 · refreshing…');
+  expect(
+    within(queue).getByText('Quantity item 2 · refreshing…'),
+  ).toBeVisible();
+  expect(within(queue).getByText('Location 3 · refreshing…')).toBeVisible();
+  expectPrivateQueueIdentity(queue);
+  expect(printButton()).toBeDisabled();
+  await waitFor(() =>
+    expect(mocks.getQueueRecords).toHaveBeenCalledWith(
+      savedEntries.map(({ kind, key }) => ({ kind, key })),
+    ),
+  );
+  await act(async () => finish(restoredRows));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(queue).toHaveTextContent('Laptop');
+  expect(queue).toHaveTextContent('Adapters');
+  expect(queue).toHaveTextContent('Clear Container');
+  expect(
+    within(queue)
+      .getAllByRole('spinbutton')
+      .map((input) => (input as HTMLInputElement).value),
+  ).toEqual(['2', '3', '4']);
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries,
+  ).toEqual(savedEntries);
+});
+it.each(['missing', 'failure'] as const)(
+  'shows human mixed-queue %s states without keys or cached unauthorized names',
+  async (outcome) => {
+    saveMixedQueue();
+    mocks.getQueueRecords.mockResolvedValue(restoredRows);
+    render(<LabelDesigner {...props} initial={[]} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const queue = screen.getByRole('region', { name: 'Label queue' });
+    if (outcome === 'missing') mocks.getQueueRecords.mockResolvedValueOnce([]);
+    else
+      mocks.getQueueRecords.mockRejectedValueOnce(
+        new Error('Private read detail ' + assetId),
+      );
+    fireEvent.click(printButton());
+    const state =
+      outcome === 'missing'
+        ? 'unavailable to this account'
+        : 'refresh failed; retry';
+    await within(queue).findByText('Individual asset 1 · ' + state);
+    expect(within(queue).getByText('Quantity item 2 · ' + state)).toBeVisible();
+    expect(within(queue).getByText('Location 3 · ' + state)).toBeVisible();
+    expectPrivateQueueIdentity(queue);
+    for (const record of restoredRows)
+      expect(queue).not.toHaveTextContent(record.name);
+    expect(printButton()).toBeDisabled();
+    expect(window.print).not.toHaveBeenCalled();
+    if (outcome === 'failure') {
+      let finish!: (rows: LiveLabel[]) => void;
+      mocks.getQueueRecords.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Retry label refresh' }),
+      );
+      await within(queue).findByText('Individual asset 1 · refreshing…');
+      expectPrivateQueueIdentity(queue);
+      await waitFor(() =>
+        expect(mocks.getQueueRecords).toHaveBeenCalledTimes(3),
+      );
+      await act(async () => finish(restoredRows));
+      await waitFor(() => expect(printButton()).toBeEnabled());
+    } else {
+      fireEvent.click(
+        within(queue).getAllByRole('button', {
+          name: 'Remove',
+          exact: true,
+        })[1],
+      );
+      await waitFor(() =>
+        expect(
+          JSON.parse(
+            sessionStorage.getItem(
+              queueStorageKey(props.origin, props.memberId),
+            )!,
+          ).entries.map((entry: { key: string }) => entry.key),
+        ).toEqual([assetId, restoredLocation.key]),
+      );
+    }
+  },
+);
+
 it('omits empty search paging without changing the existing label queue', async () => {
   render(<LabelDesigner {...props} />);
   expect(
