@@ -14,6 +14,7 @@ import {
 } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { PNG } from 'pngjs';
+import { PDFDocument } from 'pdf-lib';
 import {
   BinaryBitmap,
   BarcodeFormat,
@@ -28,6 +29,59 @@ import { chooseLocation } from './location-picker';
 
 const rootCode = 'ITC';
 test.use({ deviceScaleFactor: 2 });
+
+for (const width of [1280, 390]) {
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    test(`invalid Copies retains its draft and explicit recovery at ${width}px with ${reducedMotion} motion`, async ({
+      page,
+    }, testInfo) => {
+      await signIn(page);
+      await page.setViewportSize({ width, height: 844 });
+      await page.emulateMedia({ reducedMotion });
+      await page.goto('/labels?location=ITC-RED');
+      const queue = page.getByRole('region', { name: 'Label queue' });
+      const copies = queue.getByRole('spinbutton', {
+        name: 'Copies',
+        exact: true,
+      });
+      const print = page.getByRole('button', { name: /Print selected labels/ });
+      await expect(print).toBeEnabled();
+      await copies.fill('101');
+      await expect(copies).toHaveValue('101');
+      await expect(copies).toHaveAttribute('aria-invalid', 'true');
+      await expect(copies).toHaveAccessibleDescription(
+        /“101” is invalid.*1–100.*500.*Last valid count: 1 copy/,
+      );
+      await expect(print).toBeDisabled();
+      await expect(page.locator('.label-print-root')).toHaveCount(0);
+      await copies.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: testInfo.outputPath('invalid-copies.png'),
+      });
+      await page.reload();
+      await expect(copies).toHaveValue('101');
+      await expect(print).toBeDisabled();
+      await queue.getByRole('button', { name: 'Revert Copies' }).click();
+      await expect(copies).toHaveValue('1');
+      await expect(print).toBeEnabled();
+      await copies.fill('');
+      await expect(copies).toHaveAccessibleDescription(
+        /Empty value is invalid/,
+      );
+      await expect(print).toBeDisabled();
+      await copies.fill('2');
+      await expect(copies).not.toHaveAttribute('aria-invalid', 'true');
+      await expect(print).toBeEnabled();
+      await expect(page.locator('.label-card')).toHaveCount(2);
+      expect(
+        await page
+          .locator('body')
+          .evaluate((body) => body.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await queue.getByRole('button', { name: 'Clear queue' }).click();
+    });
+  }
+}
 
 test('one-time label links survive removal and reload, clear obsolete lifecycle warnings, and allow an intentional re-add', async ({
   page,
@@ -401,6 +455,7 @@ async function verifiedPreviewPdf(
     .locator('.label-print-root')
     .evaluate((node) => node.setAttribute('data-print-authorized', 'true'));
   try {
+    await page.emulateMedia({ media: 'print' });
     return await page.pdf({
       path: destination,
       preferCSSPageSize: true,
@@ -410,8 +465,49 @@ async function verifiedPreviewPdf(
     await page
       .locator('.label-print-root')
       .evaluate((node) => node.removeAttribute('data-print-authorized'));
+    await page.emulateMedia({ media: 'screen' });
   }
 }
+
+test('custom single-label media survives reload, rejects incomplete drafts and prints exact pages', async ({
+  page,
+}, info) => {
+  await signIn(page, 'viewer');
+  await page.goto('/labels?location=ITC-D01');
+  const queue = page.getByRole('region', { name: 'Label queue' });
+  await expect(queue).toContainText('1 distinct record');
+  await page.getByRole('combobox', { name: 'Output' }).selectOption('single');
+  await page.getByLabel('Label width (mm)').fill('90.1');
+  await page.getByLabel('Label height (mm)').fill('50.2');
+  await queue.getByLabel('Copies', { exact: true }).fill('3');
+  await readyPreview(page, 3);
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Output' })).toHaveValue(
+    'single',
+  );
+  await expect(page.getByLabel('Label width (mm)')).toHaveValue('90.1');
+  await expect(queue.getByLabel('Copies', { exact: true })).toHaveValue('3');
+  await page.getByLabel('Label width (mm)').fill('90.');
+  await expect(
+    page.getByRole('button', { name: /Print selected labels/ }),
+  ).toBeDisabled();
+  await expect(page.locator('.label-print-root')).toHaveCount(0);
+  await page.getByLabel('Label width (mm)').fill('90.1');
+  await readyPreview(page, 3);
+  const bytes = await verifiedPreviewPdf(
+    page,
+    info.outputPath('custom-single.pdf'),
+    info,
+  );
+  const pdf = await PDFDocument.load(bytes);
+  expect(pdf.getPageCount()).toBe(3);
+  for (const sheet of pdf.getPages()) {
+    expect(Math.abs(sheet.getWidth() - (90.1 * 72) / 25.4)).toBeLessThan(1);
+    expect(Math.abs(sheet.getHeight() - (50.2 * 72) / 25.4)).toBeLessThan(1);
+  }
+  await page.getByRole('combobox', { name: 'Output' }).selectOption('preset');
+  await expect(page.getByLabel('Label width (mm)')).toHaveCount(0);
+});
 
 test('larger labels retry normal text fitting while preserving the QR and print barrier', async ({
   page,

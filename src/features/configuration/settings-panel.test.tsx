@@ -197,6 +197,7 @@ it('saves shared label defaults using the existing version and payload keys', as
           size: '70x35',
           page: 'A4',
           format: 'code128',
+          layout: null,
         },
       }),
     ),

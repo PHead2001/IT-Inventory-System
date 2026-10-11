@@ -1,5 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
+import { printLayoutSchema } from '@/features/labels/print-layout';
 import { requireMember } from '@/lib/auth/session.server';
 
 const category = z.object({
@@ -15,6 +16,7 @@ const labelDefaults = z.object({
   size: z.enum(['90x50', '70x35']),
   page: z.enum(['letter', 'A4']),
   format: z.enum(['qr', 'code128']),
+  layout: printLayoutSchema.nullable().optional(),
   version: z.string().regex(/^[1-9]\d*$/),
 });
 export type ConfigurationCategory = z.infer<typeof category>;
@@ -24,7 +26,7 @@ export async function getLabelDefaults(): Promise<LabelDefaults> {
   const { supabase } = await requireMember();
   const { data, error } = await supabase
     .from('configuration_label_defaults')
-    .select('size,page,format,version')
+    .select('size,page,format,version,layout')
     .single();
   if (error) throw new Error('Shared label defaults could not be loaded.');
   return labelDefaults.parse(data);
@@ -49,7 +51,7 @@ export async function getLabelSettings() {
   const { supabase, member } = await requireMember();
   const { data, error } = await supabase
     .from('configuration_label_defaults')
-    .select('size,page,format,version')
+    .select('size,page,format,version,layout')
     .single();
   if (error) throw new Error('Shared label defaults could not be loaded.');
   return {
@@ -68,7 +70,7 @@ export async function getConfiguration() {
       .order('code'),
     supabase
       .from('configuration_label_defaults')
-      .select('size,page,format,version')
+      .select('size,page,format,version,layout')
       .single(),
   ]);
   if (categories.error || defaults.error)

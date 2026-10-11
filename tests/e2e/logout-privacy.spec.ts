@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
+import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
+import { openRecordTask } from './record-task-controls';
 import { isLogoutGeneration } from '../../src/lib/auth/privacy-barrier';
 // No credentials or private token URLs in browser artifacts.
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
@@ -225,5 +227,120 @@ test('real query-only Scan navigation withholds assignment storage bootstrap whi
   } finally {
     release();
     await page.unroute('**/scan*');
+  }
+});
+
+// This runs the real Next/Auth workspace. Only the late safe head write is
+// synthetic: it exercises delayed metadata reconciliation, not streaming timing.
+test('private document title clears on real privacy failure and logout, then restores the same mounted draft', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(120_000);
+  const owned = await acceptanceFixtures();
+  let other: Page | undefined;
+  let rejectPrivacy = false;
+  const assetName = `Title privacy ${owned.suffix}`;
+  const draftName = `Unsaved title draft ${owned.suffix}`;
+  const lateSafeHead = async () => {
+    await page.evaluate(() => {
+      const nextTitle = document.createElement('title');
+      nextTitle.textContent = 'Individual asset · IT Inventory';
+      document.head.querySelector('title')?.replaceWith(nextTitle);
+    });
+  };
+  await page.route('**/inventory/assets/**', async (route) => {
+    const request = route.request();
+    let noArgumentPrivacyAction = false;
+    if (request.method() === 'POST' && request.headers()['next-action']) {
+      try {
+        const args: unknown = request.postDataJSON();
+        noArgumentPrivacyAction = Array.isArray(args) && args.length === 0;
+      } catch {
+        noArgumentPrivacyAction = false;
+      }
+    }
+    if (rejectPrivacy && noArgumentPrivacyAction) await route.abort('failed');
+    else await route.continue();
+  });
+  try {
+    const assetId = await owned.asset(
+      assetName,
+      await owned.location('ITC-RED'),
+    );
+    await signIn(page, fixture.emails.staff);
+    await page.goto(`/inventory/assets/${assetId}`);
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    const form = await openRecordTask(page, 'Edit asset metadata');
+    const name = form.getByLabel('Name', { exact: true });
+    await name.fill(draftName);
+    const retainedInput = await name.elementHandle();
+    expect(retainedInput).not.toBeNull();
+    // The document follows the authorized saved record, not an unsaved edit.
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await lateSafeHead();
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+
+    rejectPrivacy = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    const retry = page.getByRole('button', { name: 'Retry privacy cleanup' });
+    await expect(retry).toBeVisible();
+    await expect(page).toHaveTitle('IT Inventory');
+    await expect(form).not.toBeVisible();
+    expect(await retainedInput!.evaluate((input) => input.isConnected)).toBe(
+      true,
+    );
+    await lateSafeHead();
+    await expect(page).toHaveTitle('IT Inventory');
+    rejectPrivacy = false;
+    await retry.click();
+    await expect(form).toBeVisible();
+    await expect(name).toHaveValue(draftName);
+    expect(
+      await name.evaluate(
+        (input, original) => input === original,
+        retainedInput!,
+      ),
+    ).toBe(true);
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+
+    // Server logout changes the real generation even without a client Auth event
+    // in this retained tab. The original owner's verification must revoke it.
+    other = await context.newPage();
+    await other.goto('/inventory');
+    await other.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(other).toHaveURL(/\/login$/);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(retry).toBeVisible();
+    await expect(page).toHaveTitle('IT Inventory');
+    await expect(form).not.toBeVisible();
+    await lateSafeHead();
+    await expect(page).toHaveTitle('IT Inventory');
+    await signIn(other, fixture.emails.staff);
+    await retry.click();
+    await expect(form).toBeVisible();
+    await expect(name).toHaveValue(draftName);
+    expect(
+      await name.evaluate(
+        (input, original) => input === original,
+        retainedInput!,
+      ),
+    ).toBe(true);
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    await lateSafeHead();
+    await expect(page).toHaveTitle(`${assetName} · IT Inventory`);
+    const record = await owned.caller
+      .from('serialized_assets')
+      .select('name,version')
+      .eq('id', assetId)
+      .single();
+    expect(record.error).toBeNull();
+    expect(record.data!.name).toBe(assetName);
+    expect(String(record.data!.version)).toBe('1');
+  } finally {
+    rejectPrivacy = false;
+    await page.unroute('**/inventory/assets/**');
+    await other?.close();
+    await owned.cleanup();
   }
 });

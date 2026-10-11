@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { printLayoutSchema } from '@/features/labels/print-layout';
 
 const uuid = z.uuid();
 const version = z.union([
@@ -37,6 +38,7 @@ const schemas = {
     size: z.enum(['90x50', '70x35']),
     page: z.enum(['letter', 'A4']),
     format: z.enum(['qr', 'code128']),
+    layout: printLayoutSchema.nullable().optional(),
   }),
 };
 export type ConfigurationOperation = keyof typeof schemas;

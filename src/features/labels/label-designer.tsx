@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,8 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
+import { PrintMediaEditor } from './print-media-editor';
+import type { PrintLayout } from './print-layout';
 import type {
   CategoryRef,
   LocationRef,
@@ -60,6 +63,7 @@ import {
   defaultFilters,
   defaultJob,
   MAX_COPIES,
+  MAX_COPY_DRAFT_LENGTH,
   MAX_DISTINCT,
   MAX_LABELS,
   parseStoredQueue,
@@ -218,6 +222,16 @@ function LabelDesignerWorkspace({
     initial.map(entryFor),
   );
   const currentEntries = useRef(initial.map(entryFor));
+  const copyNoticeId = useId();
+  const [copyDrafts, setCopyDraftsState] = useState<Record<string, string>>({});
+  const currentCopyDrafts = useRef<Record<string, string>>({});
+  const copiesEpoch = useRef(0);
+  const [copyGeneration, setCopyGeneration] = useState(0);
+  const copiesValid = Object.keys(copyDrafts).length === 0;
+  const setCopyDrafts = useCallback((next: Record<string, string>) => {
+    currentCopyDrafts.current = next;
+    setCopyDraftsState(next);
+  }, []);
   const setEntries = useCallback((update: SetStateAction<QueueEntry[]>) => {
     const next =
       typeof update === 'function' ? update(currentEntries.current) : update;
@@ -249,6 +263,13 @@ function LabelDesignerWorkspace({
     setDraftState(next);
   };
   const [job, setJob] = useState<JobSettings>(defaults);
+  const [layoutValid, setLayoutValid] = useState(true);
+  const [layoutRecovery, setLayoutRecovery] = useState<{
+    value: unknown;
+  } | null>(null);
+  const [mediaReset, setMediaReset] = useState(0);
+  const geometryEpoch = useRef(0);
+  const [mediaGeneration, setMediaGeneration] = useState(0);
   const [locationCode, setLocationCode] = useState('');
   const [search, setSearch] = useState<{
     rows: LabelCandidate[];
@@ -277,6 +298,29 @@ function LabelDesignerWorkspace({
   const selectionKey = entries.map(queueIdentity).join('|');
   const clearPrintAuthorization = useRef<(() => void) | null>(null);
   const activePrintAbort = useRef<AbortController | null>(null);
+  const cancelCopyPrint = () => {
+    copiesEpoch.current++;
+    setCopyGeneration(copiesEpoch.current);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    setReadySheetKey('');
+    setFallbackPending(false);
+    setFormatAcknowledged(false);
+  };
+  const changeMedia = (next: JobSettings, valid = true) => {
+    geometryEpoch.current++;
+    setMediaGeneration(geometryEpoch.current);
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    setReadySheetKey('');
+    setFormatAcknowledged(false);
+    setFallbackPending(false);
+    setLayoutValid(valid);
+    setJob(next);
+    if (valid) {
+      setLayoutRecovery(null);
+    }
+  };
   const byId = useMemo(
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
@@ -294,6 +338,16 @@ function LabelDesignerWorkspace({
     queueEpoch.current++;
     manualClearEpoch.current++;
     selectionEpoch.current++;
+    copiesEpoch.current++;
+    geometryEpoch.current++;
+    setCopyGeneration(copiesEpoch.current);
+    setMediaGeneration(geometryEpoch.current);
+    setCopyDrafts({});
+    setLayoutRecovery(null);
+    setLayoutValid(true);
+    setMediaReset((value) => value + 1);
+    setFormatAcknowledged(false);
+    setFallbackPending(false);
     activePrintAbort.current?.abort();
     clearPrintAuthorization.current?.();
     restoredStorageKey.current = storageKey;
@@ -320,6 +374,7 @@ function LabelDesignerWorkspace({
     storageKey,
     setEntries,
     setLive,
+    setCopyDrafts,
   ]);
 
   useEffect(
@@ -327,6 +382,8 @@ function LabelDesignerWorkspace({
       queueEpoch.current++;
       manualClearEpoch.current++;
       selectionEpoch.current++;
+      copiesEpoch.current++;
+      geometryEpoch.current++;
       activePrintAbort.current?.abort();
       clearPrintAuthorization.current?.();
     },
@@ -369,13 +426,25 @@ function LabelDesignerWorkspace({
         setFilters(stored.filters);
         setDraftState(stored.filters);
         setJob(stored.job);
+        setLayoutRecovery(stored.layoutRecovery ?? null);
+        setLayoutValid(!stored.layoutRecovery);
+        setCopyDrafts(
+          Object.fromEntries(
+            Object.entries(stored.copyDrafts ?? {}).filter(([id]) =>
+              currentEntries.current.some(
+                (entry) => queueIdentity(entry) === id,
+              ),
+            ),
+          ),
+        );
+        setMediaReset((value) => value + 1);
       }
       setHydrated(true);
     });
     return () => {
       current = false;
     };
-  }, [storageKey, setEntries, admitted]);
+  }, [storageKey, setEntries, admitted, setCopyDrafts]);
   useEffect(() => {
     // An old passive effect can run before the boundary's reset commits. Fence
     // its writes against the live wipe revision, not only captured readiness.
@@ -388,13 +457,27 @@ function LabelDesignerWorkspace({
     try {
       sessionStorage.setItem(
         storageKey,
-        JSON.stringify({ entries, filters, job }),
+        JSON.stringify({
+          entries,
+          filters,
+          copyDrafts,
+          job: layoutRecovery ? { ...job, layout: layoutRecovery.value } : job,
+        }),
       );
     } catch {
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job, admitted]);
+  }, [
+    storageKey,
+    hydrated,
+    entries,
+    filters,
+    job,
+    admitted,
+    layoutRecovery,
+    copyDrafts,
+  ]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.
@@ -590,6 +673,13 @@ function LabelDesignerWorkspace({
     setLive,
   ]);
   const removeEntries = (ids: Set<string>, clear = false) => {
+    setCopyDrafts(
+      Object.fromEntries(
+        Object.entries(currentCopyDrafts.current).filter(
+          ([id]) => !clear && !ids.has(id),
+        ),
+      ),
+    );
     removalReviews.current = Object.fromEntries(
       Object.entries(reviewed).filter(([id]) => !clear && !ids.has(id)),
     );
@@ -934,6 +1024,8 @@ function LabelDesignerWorkspace({
   };
   const print = async () => {
     if (
+      Object.keys(currentCopyDrafts.current).length > 0 ||
+      !layoutValid ||
       intentPending ||
       !prepared ||
       !printRows ||
@@ -945,6 +1037,14 @@ function LabelDesignerWorkspace({
     )
       return;
     const epoch = ++queueEpoch.current;
+    const printGeometryEpoch = geometryEpoch.current;
+    const printCopiesEpoch = copiesEpoch.current;
+    const currentPrint = () =>
+      epoch === queueEpoch.current &&
+      printGeometryEpoch === geometryEpoch.current &&
+      printCopiesEpoch === copiesEpoch.current &&
+      Object.keys(currentCopyDrafts.current).length === 0 &&
+      !printAbort.signal.aborted;
     activePrintAbort.current?.abort();
     const printAbort = new AbortController();
     activePrintAbort.current = printAbort;
@@ -954,7 +1054,7 @@ function LabelDesignerWorkspace({
       const fresh = await getQueueRecords(
         entries.map(({ kind, key }) => ({ kind, key })),
       );
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       currentReadVerified = true;
       const observed = latchObservedChanges(currentEntries.current, fresh);
       if (observed !== currentEntries.current) setEntries(observed);
@@ -985,6 +1085,8 @@ function LabelDesignerWorkspace({
         : null;
       const printGeneration = refreshedRows
         ? JSON.stringify([
+            printGeometryEpoch,
+            printCopiesEpoch,
             selectionKey,
             totalCopies(entries),
             job,
@@ -1015,9 +1117,9 @@ function LabelDesignerWorkspace({
         printGeneration,
         totalCopies(entries),
         printAbort.signal,
-        () => epoch === queueEpoch.current,
+        currentPrint,
       );
-      if (readiness === 'cancelled' || epoch !== queueEpoch.current) return;
+      if (readiness === 'cancelled' || !currentPrint()) return;
       if (readiness !== 'ready') {
         setMessage(
           'Wait for every code and label text to fit, or choose a larger label.',
@@ -1037,13 +1139,13 @@ function LabelDesignerWorkspace({
         );
         return;
       }
-      if (epoch !== queueEpoch.current || printAbort.signal.aborted) return;
+      if (!currentPrint()) return;
       // The final check grants exactly one print lifecycle. A second
       // beforeprint (including Ctrl/Cmd+P) cannot reuse that grant.
       clearPrintAuthorization.current?.();
       let armed = true;
       const beforePrint = () => {
-        if (armed) {
+        if (armed && currentPrint()) {
           armed = false;
           sheet.dataset.printAuthorized = 'true';
         } else delete sheet.dataset.printAuthorized;
@@ -1065,7 +1167,7 @@ function LabelDesignerWorkspace({
         clear();
       }
     } catch {
-      if (epoch !== queueEpoch.current) return;
+      if (!currentPrint()) return;
       setValidatedKey('');
       setRefreshFailed(true);
       if (!currentReadVerified) {
@@ -1083,17 +1185,28 @@ function LabelDesignerWorkspace({
       setBusy(false);
     }
   };
-  const setCopies = (identity: string, value: number) => {
-    const next = updateCopies(entries, identity, value);
-    if (!next) {
-      setMessage(
-        `Use 1–${MAX_COPIES} copies per record and at most ${MAX_LABELS} labels total.`,
-      );
+  const setCopies = (identity: string, raw: string) => {
+    if (
+      !currentEntries.current.some((entry) => queueIdentity(entry) === identity)
+    )
       return;
-    }
-    setEntries(next);
-    activePrintAbort.current?.abort();
-    clearPrintAuthorization.current?.();
+    cancelCopyPrint();
+    const next =
+      raw.trim() === ''
+        ? null
+        : updateCopies(currentEntries.current, identity, Number(raw));
+    const drafts = { ...currentCopyDrafts.current };
+    if (next) {
+      delete drafts[identity];
+      setEntries(next);
+    } else drafts[identity] = raw.slice(0, MAX_COPY_DRAFT_LENGTH);
+    setCopyDrafts(drafts);
+  };
+  const revertCopies = (identity: string) => {
+    cancelCopyPrint();
+    const drafts = { ...currentCopyDrafts.current };
+    delete drafts[identity];
+    setCopyDrafts(drafts);
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -1117,6 +1230,8 @@ function LabelDesignerWorkspace({
       ? expandLabels(entries, prepared)
       : printRows;
   const sheetKey = JSON.stringify([
+    mediaGeneration,
+    copyGeneration,
     selectionKey,
     totalCopies(entries),
     job,
@@ -1125,7 +1240,7 @@ function LabelDesignerWorkspace({
   useEffect(() => {
     let current = true;
     const sheet = document.querySelector<HTMLElement>('.label-print-root');
-    if (!sheet || !displayRows?.length) return;
+    if (!copiesValid || !layoutValid || !sheet || !displayRows?.length) return;
     const check = () => {
       if (!current) return;
       const cards = Array.from(
@@ -1178,7 +1293,7 @@ function LabelDesignerWorkspace({
     };
     // Sheet identity captures rows and layout; readiness follows the rendered DOM.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetKey, formatAcknowledged]);
+  }, [sheetKey, formatAcknowledged, layoutValid, copiesValid]);
 
   return (
     <div className={styles.workspace}>
@@ -1764,6 +1879,8 @@ function LabelDesignerWorkspace({
                     : unavailable.includes(id)
                       ? 'unavailable to this account'
                       : 'loading…';
+                const invalidCopies = Object.hasOwn(copyDrafts, id);
+                const noticeId = `${copyNoticeId}-copies-${index}`;
                 return (
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
@@ -1772,20 +1889,54 @@ function LabelDesignerWorkspace({
                         : `${recordKind(entry.kind)} ${index + 1} · ${readState}`}
                     </span>
                     <div className={styles.queueActions}>
-                      <label className={styles.copies}>
-                        Copies{' '}
-                        <input
-                          type="number"
-                          min={1}
-                          max={MAX_COPIES}
-                          disabled={busy}
-                          value={entry.copies}
-                          onChange={(event) =>
-                            setCopies(id, Number(event.target.value))
-                          }
-                          className={styles.copiesInput}
-                        />
-                      </label>
+                      <div className={styles.copiesControl}>
+                        <label className={styles.copies}>
+                          Copies{' '}
+                          <input
+                            type="number"
+                            min={1}
+                            max={MAX_COPIES}
+                            disabled={busy}
+                            value={
+                              invalidCopies ? copyDrafts[id] : entry.copies
+                            }
+                            aria-invalid={invalidCopies || undefined}
+                            aria-describedby={
+                              invalidCopies ? noticeId : undefined
+                            }
+                            onChange={(event) =>
+                              setCopies(id, event.target.value)
+                            }
+                            className={styles.copiesInput}
+                          />
+                        </label>
+                        {invalidCopies && (
+                          <>
+                            <p
+                              id={noticeId}
+                              role="status"
+                              className={styles.copyNotice}
+                            >
+                              {copyDrafts[id] === ''
+                                ? 'Empty value'
+                                : `“${copyDrafts[id]}”`}{' '}
+                              is invalid. Use whole numbers from 1–{MAX_COPIES}{' '}
+                              copies per record and at most {MAX_LABELS} labels
+                              total. Last valid count: {entry.copies}{' '}
+                              {entry.copies === 1 ? 'copy' : 'copies'}. Printing
+                              is paused until corrected or reverted.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className={styles.textButton}
+                              onClick={() => revertCopies(id)}
+                            >
+                              Revert Copies
+                            </button>
+                          </>
+                        )}
+                      </div>
                       <button
                         type="button"
                         disabled={busy || !hydrated}
@@ -1820,11 +1971,12 @@ function LabelDesignerWorkspace({
               value={job.size}
               disabled={busy}
               onChange={(event) => {
-                setJob({
+                changeMedia({
                   ...job,
                   size: event.target.value as JobSettings['size'],
+                  layout: null,
                 });
-                clearPrintAuthorization.current?.();
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1841,11 +1993,12 @@ function LabelDesignerWorkspace({
               value={job.page}
               disabled={busy}
               onChange={(event) => {
-                setJob({
+                changeMedia({
                   ...job,
                   page: event.target.value as JobSettings['page'],
+                  layout: null,
                 });
-                clearPrintAuthorization.current?.();
+                setMediaReset((value) => value + 1);
               }}
               className={styles.settingSelect}
             >
@@ -1863,10 +2016,13 @@ function LabelDesignerWorkspace({
               value={job.format}
               disabled={busy}
               onChange={(event) => {
-                setJob({
-                  ...job,
-                  format: event.target.value as JobSettings['format'],
-                });
+                changeMedia(
+                  {
+                    ...job,
+                    format: event.target.value as JobSettings['format'],
+                  },
+                  layoutValid,
+                );
                 clearPrintAuthorization.current?.();
                 setFormatAcknowledged(false);
                 setFallbackPending(false);
@@ -1884,6 +2040,33 @@ function LabelDesignerWorkspace({
         <p id="job-barcode-help" className={styles.subtle}>
           {barcodeTypeHelp}
         </p>
+        <PrintMediaEditor
+          key={mediaReset}
+          layout={job.layout}
+          size={job.size}
+          page={job.page}
+          onChange={(layout: PrintLayout | null, valid) =>
+            changeMedia(valid ? { ...job, layout } : job, valid)
+          }
+        />
+        {layoutRecovery && (
+          <p role="alert" className={styles.error}>
+            The saved print dimensions are invalid. Your queue is retained.
+            Review new dimensions or reset the print media before printing.
+          </p>
+        )}
+        {!layoutValid && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => {
+              changeMedia({ ...job, layout: null });
+              setMediaReset((value) => value + 1);
+            }}
+          >
+            Reset print media
+          </button>
+        )}
         <p className={styles.subtle}>
           New jobs start with the shared choices in Settings. Print at actual
           size / 100%. Code 128 asset tags require reprinting if the tag
@@ -1959,6 +2142,8 @@ function LabelDesignerWorkspace({
           <button
             type="button"
             disabled={
+              !copiesValid ||
+              !layoutValid ||
               intentPending ||
               !prepared ||
               busy ||
@@ -1985,6 +2170,7 @@ function LabelDesignerWorkspace({
               <span
                 className={styles.statusDot}
                 data-ready={
+                  copiesValid &&
                   !!prepared &&
                   !busy &&
                   !refreshPending &&
@@ -2001,22 +2187,24 @@ function LabelDesignerWorkspace({
                 }
               />
               <span className={styles.statusText}>
-                {refreshFailed
-                  ? 'Refresh failed — retry before printing'
-                  : refreshPending
-                    ? 'Checking current records — printing paused'
-                    : pendingChanges.length ||
-                        unavailable.length ||
-                        fallbackPending
-                      ? 'Review required before printing'
-                      : readySheetKey === sheetKey &&
-                          validatedKey === selectionKey
-                        ? 'Sheet ready for final print check'
-                        : 'Preparing codes and layout — printing paused'}
+                {!copiesValid
+                  ? 'Correct or revert Copies — printing paused'
+                  : refreshFailed
+                    ? 'Refresh failed — retry before printing'
+                    : refreshPending
+                      ? 'Checking current records — printing paused'
+                      : pendingChanges.length ||
+                          unavailable.length ||
+                          fallbackPending
+                        ? 'Review required before printing'
+                        : readySheetKey === sheetKey &&
+                            validatedKey === selectionKey
+                          ? 'Sheet ready for final print check'
+                          : 'Preparing codes and layout — printing paused'}
               </span>
             </div>
           )}
-        {displayRows && (
+        {copiesValid && layoutValid && displayRows && (
           <div className={styles.sheetFrame}>
             <LabelSheet
               records={displayRows}
@@ -2026,6 +2214,7 @@ function LabelDesignerWorkspace({
               page={job.page}
               format={job.format}
               generation={sheetKey}
+              layout={job.layout}
             />
           </div>
         )}

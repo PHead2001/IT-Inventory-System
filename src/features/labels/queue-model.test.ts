@@ -24,6 +24,35 @@ const entry = (index: number, copies = 1): QueueEntry => ({
   lifecycleAcknowledged: true,
 });
 
+it('restores bounded copy drafts only for queued identities, including blank, without replacing validated counts', () => {
+  const id = queueIdentity(entry(1));
+  const stored = {
+    entries: [entry(1, 3)],
+    filters: defaultFilters,
+    job: defaultJob,
+  };
+  expect(parseStoredQueue(JSON.stringify(stored))?.copyDrafts).toEqual({});
+  for (const raw of ['', '101', '1.5', '3', '9'.repeat(100)]) {
+    const parsed = parseStoredQueue(
+      JSON.stringify({
+        ...stored,
+        copyDrafts: { [id]: raw, [queueIdentity(entry(2))]: '101' },
+      }),
+    );
+    expect(parsed?.entries[0].copies).toBe(3);
+    expect(parsed?.copyDrafts).toEqual({ [id]: raw.slice(0, 80) });
+  }
+  expect(
+    parseStoredQueue(JSON.stringify({ ...stored, copyDrafts: { [id]: 101 } }))
+      ?.copyDrafts,
+  ).toEqual({});
+  expect(
+    parseStoredQueue(
+      JSON.stringify({ ...stored, copyDrafts: { [id]: '9'.repeat(100_000) } }),
+    ),
+  ).toBeNull();
+});
+
 describe('mixed label queue bounds', () => {
   it('allows 200 distinct records and 500 physical labels, then rejects either excess', () => {
     const full = Array.from({ length: 200 }, (_, index) =>
@@ -127,4 +156,39 @@ describe('session-scoped queue', () => {
       remove.mockRestore();
     }
   });
+});
+
+it('constructs a validated cached job, retains old media and preserves invalid media for explicit recovery', () => {
+  const stored = {
+    entries: [entry(1)],
+    filters: defaultFilters,
+    job: defaultJob,
+  };
+  const custom = {
+    version: 1,
+    mode: 'single',
+    labelWidth: 700,
+    labelHeight: 350,
+  };
+  expect(parseStoredQueue(JSON.stringify(stored))?.job).toEqual(defaultJob);
+  const valid = parseStoredQueue(
+    JSON.stringify({
+      ...stored,
+      job: { ...defaultJob, layout: custom, arbitrary: 'discard' },
+    }),
+  );
+  expect(valid?.job).toEqual({ ...defaultJob, layout: custom });
+  for (const invalid of [
+    { ...custom, labelWidth: 30 },
+    { ...custom, labelWidth: null },
+    { ...custom, extra: 0 },
+    'not geometry',
+  ]) {
+    const result = parseStoredQueue(
+      JSON.stringify({ ...stored, job: { ...defaultJob, layout: invalid } }),
+    );
+    expect(result?.entries).toEqual(stored.entries);
+    expect(result?.layoutRecovery).toEqual({ value: invalid });
+    expect(result?.job).toEqual(defaultJob);
+  }
 });

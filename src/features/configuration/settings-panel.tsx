@@ -8,6 +8,8 @@ import { OperationalTimestamp } from '@/components/operational-time';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
 import { normalizeCategoryName, type RemovalReview } from './contracts';
+import { PrintMediaEditor } from '@/features/labels/print-media-editor';
+import type { PrintLayout } from '@/features/labels/print-layout';
 import {
   labelSettingText,
   labelSizeOptions,
@@ -75,6 +77,11 @@ export function SettingsPanel({
   const [size, setSize] = useState(labelDefaults?.size ?? '90x50');
   const [page, setPage] = useState(labelDefaults?.page ?? 'letter');
   const [format, setFormat] = useState(labelDefaults?.format ?? 'qr');
+  const [layout, setLayout] = useState<PrintLayout | null>(
+    labelDefaults?.layout ?? null,
+  );
+  const [layoutValid, setLayoutValid] = useState(true);
+  const [mediaReset, setMediaReset] = useState(0);
   const active = (categories ?? []).filter(
     (item) => item.active && !item.removed_at,
   );
@@ -555,9 +562,12 @@ export function SettingsPanel({
                 className="experience-field min-h-11 w-full px-3"
                 value={size}
                 disabled={!canManage || pending}
-                onChange={(event) =>
-                  setSize(event.target.value as LabelDefaults['size'])
-                }
+                onChange={(event) => {
+                  setSize(event.target.value as LabelDefaults['size']);
+                  setLayout(null);
+                  setLayoutValid(true);
+                  setMediaReset((value) => value + 1);
+                }}
               >
                 {labelSizeOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -572,9 +582,12 @@ export function SettingsPanel({
                 className="experience-field min-h-11 w-full px-3"
                 value={page}
                 disabled={!canManage || pending}
-                onChange={(event) =>
-                  setPage(event.target.value as LabelDefaults['page'])
-                }
+                onChange={(event) => {
+                  setPage(event.target.value as LabelDefaults['page']);
+                  setLayout(null);
+                  setLayoutValid(true);
+                  setMediaReset((value) => value + 1);
+                }}
               >
                 {paperSizeOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -605,16 +618,28 @@ export function SettingsPanel({
           <p id="shared-barcode-help" className="text-sm text-slate-400">
             {barcodeTypeHelp}
           </p>
+          <PrintMediaEditor
+            key={mediaReset}
+            layout={layout}
+            size={size}
+            page={page}
+            disabled={!canManage || pending}
+            onChange={(next, valid) => {
+              setLayoutValid(valid);
+              if (valid) setLayout(next);
+            }}
+          />
           {canManage && (
             <Button
               type="button"
-              disabled={pending}
+              disabled={pending || !layoutValid}
               onClick={() =>
                 submit('label_defaults_update', {
                   expected_version: labelDefaults.version,
                   size,
                   page,
                   format,
+                  layout,
                 })
               }
             >

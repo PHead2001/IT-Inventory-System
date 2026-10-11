@@ -1,4 +1,5 @@
 import { ASSET_UUID, LOCATION_CODE } from '@/features/scan/targets';
+import { printLayoutSchema, type PrintLayout } from './print-layout';
 export type LabelKind = 'location' | 'asset' | 'quantity';
 export type QueueKey = { kind: LabelKind; key: string };
 export type QueueEntry = QueueKey & {
@@ -19,6 +20,7 @@ export type JobSettings = {
   size: '90x50' | '70x35';
   page: 'letter' | 'A4';
   format: 'qr' | 'code128';
+  layout?: PrintLayout | null;
 };
 export const defaultFilters: LabelSearchFilters = {
   q: '',
@@ -36,6 +38,7 @@ export const defaultJob: JobSettings = {
 export const MAX_DISTINCT = 200;
 export const MAX_LABELS = 500;
 export const MAX_COPIES = 100;
+export const MAX_COPY_DRAFT_LENGTH = 80;
 
 export function queueIdentity(value: QueueKey): string {
   return value.kind + ':' + value.key;
@@ -119,13 +122,16 @@ export function parseStoredQueue(
   entries: QueueEntry[];
   filters: LabelSearchFilters;
   job: JobSettings;
+  layoutRecovery?: { value: unknown };
+  copyDrafts?: Record<string, string>;
 } | null {
   if (!raw || raw.length > 100_000) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return null;
     const stored = value as Record<string, unknown>;
-    if (!Array.isArray(stored.entries)) return null;
+    if (!Array.isArray(stored.entries) || stored.entries.length > MAX_DISTINCT)
+      return null;
     const entries = stored.entries.map((item) => {
       if (!item || typeof item !== 'object') return null;
       const row = item as Record<string, unknown>;
@@ -156,6 +162,33 @@ export function parseStoredQueue(
       return null;
     const filters = stored.filters as LabelSearchFilters | undefined;
     const job = stored.job as JobSettings | undefined;
+    const validJob =
+      job &&
+      ['90x50', '70x35'].includes(job.size) &&
+      ['letter', 'A4'].includes(job.page) &&
+      ['qr', 'code128'].includes(job.format);
+    const hasLayout = Boolean(job && Object.hasOwn(job, 'layout'));
+    const layout = hasLayout
+      ? printLayoutSchema.nullable().safeParse(job?.layout)
+      : null;
+    const layoutRecovery =
+      hasLayout && !layout?.success ? { value: job?.layout } : undefined;
+    // Optional drafts never replace validated counts or adopt values after another
+    // entry changes. Preserve blank distinctly from a missing draft on reload.
+    const copyDrafts = Object.fromEntries(
+      (entries as QueueEntry[]).flatMap((entry) => {
+        const id = queueIdentity(entry);
+        const drafts = stored.copyDrafts;
+        if (!drafts || typeof drafts !== 'object' || Array.isArray(drafts))
+          return [];
+        const raw = Object.hasOwn(drafts, id)
+          ? (drafts as Record<string, unknown>)[id]
+          : undefined;
+        return typeof raw === 'string'
+          ? [[id, raw.slice(0, MAX_COPY_DRAFT_LENGTH)]]
+          : [];
+      }),
+    );
     return {
       entries: entries as QueueEntry[],
       filters:
@@ -170,13 +203,16 @@ export function parseStoredQueue(
         filters.page >= 1
           ? filters
           : defaultFilters,
-      job:
-        job &&
-        ['90x50', '70x35'].includes(job.size) &&
-        ['letter', 'A4'].includes(job.page) &&
-        ['qr', 'code128'].includes(job.format)
-          ? job
-          : fallbackJob,
+      job: validJob
+        ? {
+            size: job.size,
+            page: job.page,
+            format: job.format,
+            ...(hasLayout && layout?.success ? { layout: layout.data } : {}),
+          }
+        : { ...fallbackJob },
+      ...(layoutRecovery ? { layoutRecovery } : {}),
+      copyDrafts,
     };
   } catch {
     return null;
