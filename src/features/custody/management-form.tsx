@@ -976,7 +976,7 @@ export function LocationManagementForm({
         Rename {baseline.name}
       </h2>
       <p className="text-sm text-slate-300">
-        Storage structure is maintained with reviewed room code. This action
+        Storage layout changes require an application update. This action
         changes only the display name. Permanent code: {baseline.code}.
       </p>
       <label className="block space-y-2">

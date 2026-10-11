@@ -25,6 +25,11 @@ import {
 } from './route-pending';
 import RouteLink from './route-link';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 import { SettingsPanel } from '@/features/configuration/settings-panel';
 import {
   InventoryBackLink,
@@ -58,10 +63,11 @@ const runtime = vi.hoisted(() => ({
   actionPrivacy: '',
 }));
 vi.mock('@/lib/auth/actions', () => ({
-  logout: (form: FormData) => {
+  signOutSession: () => {
     runtime.actionPrivacy =
       document.documentElement.dataset.routeMotionPrivate ?? '';
-    runtime.logout(form);
+    runtime.logout();
+    return Promise.resolve({ ok: false, message: 'Sign-out unavailable.' });
   },
 }));
 vi.mock('@/features/configuration/actions', () => ({
@@ -242,10 +248,20 @@ function HeldTask({ work }: { work: Promise<void> }) {
   );
 }
 const view = (children: ReactNode, actorId = 'staff') => (
-  <RouteMotionProvider key={actorId} actorId={actorId}>
-    <Probe />
-    {children}
-  </RouteMotionProvider>
+  <PrivacyReadinessContext
+    value={{
+      ready: true,
+      visible: true,
+      generation: 'route-fixture',
+      revocationRevision: readPrivacyRevocationRevision(),
+      verifiedEpoch: assignmentEpoch(),
+    }}
+  >
+    <RouteMotionProvider key={actorId} actorId={actorId}>
+      <Probe />
+      {children}
+    </RouteMotionProvider>
+  </PrivacyReadinessContext>
 );
 
 beforeEach(() => {
@@ -1143,7 +1159,7 @@ it('hash Back keeps a still-mounted Settings request busy until its actual actio
       finish({ ok: true, result: { changed: true } });
       await work;
     });
-    await screen.findByText('Category name saved.');
+    await screen.findByText('Category name saved: Updated source.');
     expect(screen.getByRole('button', { name: 'Rename Source' })).toBeEnabled();
     expect(runtime.refresh).toHaveBeenCalledOnce();
   } finally {

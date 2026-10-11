@@ -72,6 +72,7 @@ export function SceneDepth({ room }: { room: RoomDefinition }) {
               0.03,
             ])}
             rotation={[-Math.PI / 2, 0, 0]}
+            userData={{ hoverPassThrough: true }}
             raycast={() => {}}
           >
             <planeGeometry args={[max[0] - min[0] + 8, max[1] - min[1] + 8]} />

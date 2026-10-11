@@ -153,11 +153,11 @@ export function ValidationSummary({ issues }: { issues: FieldIssue[] }) {
           : 'Correct the highlighted fields before continuing.'}
       </p>
       {issues.length > 0 && (
-        <ul>
+        <ul className="list-disc space-y-2 pl-5">
           {issues.map((issue) => (
             <li key={issue.id}>
               <a
-                className="underline"
+                className="inline-flex min-h-11 items-center underline"
                 href={'#' + issue.id}
                 onClick={(event) => {
                   event.preventDefault();

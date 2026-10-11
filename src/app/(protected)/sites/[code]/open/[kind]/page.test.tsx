@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 vi.mock('@/lib/auth/session.server', () => ({

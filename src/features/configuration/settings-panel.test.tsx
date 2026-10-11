@@ -89,7 +89,9 @@ it('reports the committed category outcome instead of generic settings success',
     target: { value: 'Updated source' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
-  expect(await screen.findByText('Category name saved.')).toBeVisible();
+  expect(
+    await screen.findByText('Category name saved: Updated source.'),
+  ).toBeVisible();
   expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 
@@ -428,7 +430,7 @@ it('allows an unreferenced last category to be deleted and shows the empty state
     name: 'Removal impact review',
   });
   expect(review).toHaveTextContent(
-    'truly unreferenced category will be deleted',
+    'category has no inventory or history references',
   );
   const confirm = within(review).getByRole('button', {
     name: 'Remove category Source',
@@ -436,10 +438,66 @@ it('allows an unreferenced last category to be deleted and shows the empty state
   await waitFor(() => expect(confirm).toBeEnabled());
   fireEvent.click(confirm);
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('Category removed: Source.')).toBeVisible();
   view.rerender(
     <SettingsPanel categories={[]} labelDefaults={defaults} canManage />,
   );
   expect(screen.getByText(/No active categories/)).toBeInTheDocument();
+});
+
+it('names removal confirmation and committed feedback from the reviewed snapshot despite stale category props', async () => {
+  const reviewed = impact(null, '0');
+  reviewed.review.source_name = 'Renamed on the server';
+  reviewed.review.source_version = '2';
+  mocks.review.mockResolvedValue(reviewed);
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(
+    <SettingsPanel mode="categories" categories={[source]} canManage />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Source' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Review impact' }));
+  const review = await screen.findByRole('region', {
+    name: 'Removal impact review',
+  });
+  expect(
+    screen.getByRole('heading', { name: 'Remove Renamed on the server?' }),
+  ).toBeVisible();
+  const confirm = within(review).getByRole('button', {
+    name: 'Remove category Renamed on the server',
+  });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(mocks.submit.mock.calls[0][0].payload).toEqual({
+    category_id: source.id,
+    replacement_id: null,
+    review_token: token,
+  });
+  expect(
+    screen.queryByText('Category removed: Renamed on the server.'),
+  ).toBeNull();
+  view.rerender(
+    <SettingsPanel
+      mode="categories"
+      categories={[{ ...source, name: 'Another stale prop' }]}
+      canManage
+    />,
+  );
+  await act(async () => finish({ ok: true, result: { changed: true } }));
+  expect(
+    await screen.findByText('Category removed: Renamed on the server.'),
+  ).toBeVisible();
+  expect(screen.queryByText('Category removed: Source.')).toBeNull();
+  expect(
+    screen.queryByText('Category removed: Another stale prop.'),
+  ).toBeNull();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 
 it('keeps an authored form category for history and shows target metadata gaps before removal', async () => {
@@ -473,3 +531,49 @@ it('keeps an authored form category for history and shows target metadata gaps b
   );
   expect(review).toHaveTextContent('retained for readable history');
 });
+
+it('names the category only after its creation commits', async () => {
+  let finish!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+  fireEvent.change(screen.getByLabelText('Display name'), {
+    target: { value: 'Adapters' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+  expect(screen.queryByText('Category added: Adapters.')).toBeNull();
+  await act(async () => finish({ ok: true, result: { changed: true } }));
+  expect(await screen.findByText('Category added: Adapters.')).toBeVisible();
+});
+
+it.each(['create', 'rename'] as const)(
+  'shows the normalized committed category name after %s without waiting for refresh',
+  async (operation) => {
+    mocks.submit.mockResolvedValue({ ok: true, result: { changed: true } });
+    render(<SettingsPanel mode="categories" categories={[source]} canManage />);
+    if (operation === 'rename')
+      fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+    fireEvent.change(
+      screen.getByLabelText(
+        operation === 'create' ? 'Display name' : 'New category name',
+      ),
+      { target: { value: '  USB   Adapters\t and   Cables  ' } },
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: operation === 'create' ? 'Add category' : 'Save name',
+      }),
+    );
+    const expected =
+      operation === 'create'
+        ? 'Category added: USB Adapters and Cables.'
+        : 'Category name saved: USB Adapters and Cables.';
+    // textContent preserves repeated spaces that accessible queries normalize.
+    expect((await screen.findByText(expected)).textContent).toBe(expected);
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  },
+);

@@ -29,6 +29,7 @@ export type LocationPickerProps = {
   /** Current item balances for source options; omitted counts remain unknown. */
   availability?: Record<string, number>;
   allowAll?: boolean;
+  emptyLabel?: string;
   required?: boolean;
   disabled?: boolean;
   error?: string;
@@ -51,6 +52,7 @@ export function LocationPicker({
   sourceIds,
   availability,
   allowAll = false,
+  emptyLabel = 'All locations',
   required = false,
   disabled = false,
   error,
@@ -59,6 +61,10 @@ export function LocationPicker({
   description,
   className = '',
 }: LocationPickerProps) {
+  const emptyAccessibleLabel =
+    emptyLabel === 'All locations'
+      ? 'All locations, no location filter'
+      : emptyLabel;
   const stockLabel = (location: LocationRef | null | undefined) =>
     location && availability && Object.hasOwn(availability, location.id)
       ? `${countLabel(availability[location.id], 'unit')} available`
@@ -482,7 +488,7 @@ export function LocationPicker({
                   ? selectedValue
                   : 'Unavailable location'
                 : allowAll
-                  ? 'All locations'
+                  ? emptyLabel
                   : 'Select a location')}
           </span>
           {unavailable && (
@@ -598,7 +604,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${location.breadcrumb}, ${location.code}${stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                          : 'All locations, no location filter'
+                          : emptyAccessibleLabel
                       }
                       id={listId + '-' + index}
                       aria-selected={selectedValue === optionValue}
@@ -611,11 +617,14 @@ export function LocationPicker({
                     >
                       <span className="min-w-0">
                         <span className="block font-medium text-slate-100">
-                          {location?.name ?? 'All locations'}
+                          {location?.name ?? emptyLabel}
                           {selectedValue === optionValue ? ' ✓' : ''}
                         </span>
                         <span className="block break-words text-xs text-slate-400">
-                          {location?.breadcrumb ?? 'No location filter'}
+                          {location?.breadcrumb ??
+                            (emptyLabel === 'All locations'
+                              ? 'No location filter'
+                              : emptyLabel)}
                         </span>
                         {stockLabel(location) && (
                           <span className="block text-sm text-slate-300">
@@ -681,7 +690,7 @@ export function LocationPicker({
                       aria-label={
                         location
                           ? `${location.name}, ${isNavigation ? 'navigation group' : isGroup ? 'selectable group' : 'selectable location'}, ${location.code}${!isNavigation && stockLabel(location) ? ', ' + stockLabel(location) : ''}`
-                          : 'All locations, no location filter'
+                          : emptyAccessibleLabel
                       }
                       tabIndex={
                         effectiveActiveTreeId === rowId ||
@@ -729,7 +738,7 @@ export function LocationPicker({
                         {row?.hasChildren ? (isExpanded ? '⌄' : '›') : '·'}
                       </span>
                       <span className="min-w-0 flex-1 font-medium break-words">
-                        {location?.name ?? 'All locations'}
+                        {location?.name ?? emptyLabel}
                         {selectedRow ? ' ✓' : ''}
                         {!isNavigation && stockLabel(location) && (
                           <span className="block text-sm font-normal text-slate-300">

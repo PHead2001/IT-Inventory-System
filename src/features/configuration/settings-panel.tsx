@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { OperationalTimestamp } from '@/components/operational-time';
 import { reviewCategoryRemoval, submitConfiguration } from './actions';
 import type { ConfigurationCategory, LabelDefaults } from './queries.server';
-import type { RemovalReview } from './contracts';
+import { normalizeCategoryName, type RemovalReview } from './contracts';
 import {
   labelSettingText,
   labelSizeOptions,
@@ -97,6 +97,7 @@ export function SettingsPanel({
       | 'label_defaults_update',
     payload: Record<string, unknown>,
     onSuccess?: () => void,
+    reviewedSourceName?: string,
   ) => {
     const key = JSON.stringify([operation, payload]);
     const requestId = receipt?.key === key ? receipt.id : crypto.randomUUID();
@@ -122,9 +123,9 @@ export function SettingsPanel({
       setMessage(
         result.result.changed
           ? {
-              category_create: 'Category added.',
-              category_rename: 'Category name saved.',
-              category_remove: 'Category removed.',
+              category_create: `Category added: ${normalizeCategoryName(String(payload.name))}.`,
+              category_rename: `Category name saved: ${normalizeCategoryName(String(payload.name))}.`,
+              category_remove: `Category removed: ${reviewedSourceName ?? 'Selected category'}.`,
               label_defaults_update: 'Label settings saved.',
             }[operation]
           : 'No values changed.',
@@ -208,7 +209,7 @@ export function SettingsPanel({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0 break-words">
                     <strong>{category.name}</strong>
-                    <span className="ml-3 text-sm text-slate-400">
+                    <span className="experience-code ml-3 text-sm text-slate-400">
                       {category.code}
                     </span>
                     {!category.active && (
@@ -331,9 +332,13 @@ export function SettingsPanel({
                 {canManage && removing === category.id && (
                   <div
                     className="mt-4 space-y-3 rounded border border-amber-700 p-4"
-                    aria-label={'Remove ' + category.name}
+                    aria-label={
+                      'Remove ' + (review?.source_name ?? category.name)
+                    }
                   >
-                    <h3 className="font-semibold">Remove {category.name}?</h3>
+                    <h3 className="font-semibold">
+                      Remove {review?.source_name ?? category.name}?
+                    </h3>
                     <p className="text-sm">
                       Review every affected quantity item and individual asset,
                       including archived and retired records. Current stock and
@@ -417,7 +422,7 @@ export function SettingsPanel({
                           also reference this category.{' '}
                           {review.will_tombstone
                             ? 'The category will be removed from active choices but retained for readable history.'
-                            : 'This truly unreferenced category will be deleted.'}
+                            : 'This category has no inventory or history references and will be removed.'}
                         </p>
                         <p>
                           {review.authored_revision_count} authored form
@@ -449,7 +454,7 @@ export function SettingsPanel({
                             type="button"
                             variant="outline"
                             className="experience-danger-action"
-                            aria-label={'Remove category ' + category.name}
+                            aria-label={'Remove category ' + review.source_name}
                             disabled={pending}
                             onClick={() =>
                               submit(
@@ -463,6 +468,7 @@ export function SettingsPanel({
                                   setRemoving(null);
                                   setReview(null);
                                 },
+                                review.source_name,
                               )
                             }
                           >

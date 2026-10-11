@@ -1,8 +1,12 @@
 'use client';
 import { useRouteRouter as useRouter } from '@/components/experience/route-pending';
+import { recordStatusLabel } from '@/lib/record-status';
+import { RecordStatus } from '@/components/record-status';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,7 +14,17 @@ import {
   type SetStateAction,
 } from 'react';
 import Link from '@/components/experience/route-link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import {
+  PrivateRestorationGate,
+  usePrivacyReadiness,
+  usePrivacyRevocationRevision,
+} from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readAuthoritativeCleanupRevision,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
+
 import { flushSync } from 'react-dom';
 import { waitForSheetReadiness } from './sheet-readiness';
 import type {
@@ -156,10 +170,14 @@ type LabelDesignerProps = {
 
 export function LabelDesigner(props: LabelDesignerProps) {
   return (
-    <LabelDesignerWorkspace
-      key={queueStorageKey(props.origin, props.memberId)}
-      {...props}
-    />
+    <PrivateRestorationGate
+      scope={queueStorageKey(props.origin, props.memberId)}
+    >
+      <LabelDesignerWorkspace
+        key={queueStorageKey(props.origin, props.memberId)}
+        {...props}
+      />
+    </PrivateRestorationGate>
   );
 }
 
@@ -173,6 +191,14 @@ function LabelDesignerWorkspace({
   addIntent = emptyIntent,
   defaults = defaultJob,
 }: LabelDesignerProps) {
+  const privacy = usePrivacyReadiness();
+  const revocationRevision = usePrivacyRevocationRevision();
+  const observedRevocation = useRef(readPrivacyRevocationRevision());
+  const [revoked, setRevoked] = useState(false);
+  const admitted =
+    privacy.ready && (!revoked || privacy.verifiedEpoch === assignmentEpoch());
+  const cleanupRevision = useRef(readAuthoritativeCleanupRevision());
+  const restoredStorageKey = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const query = useSearchParams().toString();
@@ -257,6 +283,46 @@ function LabelDesignerWorkspace({
     () => new Map(live.map((record) => [queueIdentity(record), record])),
     [live],
   );
+  useLayoutEffect(() => {
+    const wiped = readAuthoritativeCleanupRevision();
+    if (
+      observedRevocation.current === revocationRevision &&
+      cleanupRevision.current === wiped
+    )
+      return;
+    observedRevocation.current = revocationRevision;
+    setRevoked(true);
+    cleanupRevision.current = wiped;
+    queueEpoch.current++;
+    manualClearEpoch.current++;
+    selectionEpoch.current++;
+    activePrintAbort.current?.abort();
+    clearPrintAuthorization.current?.();
+    restoredStorageKey.current = storageKey;
+    setEntries([]);
+    setLive([]);
+    setSelected([]);
+    setSearch(null);
+    setFilters(defaultFilters);
+    setDraftState(defaultFilters);
+    setJob(defaultJob);
+    setPrintRows(null);
+    setPrepared(null);
+    setPendingChanges([]);
+    setReviewed({});
+    removalReviews.current = {};
+    setValidatedKey('');
+    setReadySheetKey('');
+    setMessage('');
+    setQueueFeedback('');
+    setHydrated(true);
+  }, [
+    revocationRevision,
+    privacy.cleanupRevision,
+    storageKey,
+    setEntries,
+    setLive,
+  ]);
 
   useEffect(
     () => () => {
@@ -270,11 +336,17 @@ function LabelDesignerWorkspace({
   );
 
   useEffect(() => {
+    if (!admitted || restoredStorageKey.current === storageKey) return;
     let current = true;
     // Hydration is asynchronous so React does not render a second, synchronous
     // state cascade while mounting. The cleanup also ignores a late RPC reply.
     queueMicrotask(() => {
-      if (!current) return;
+      if (
+        !current ||
+        cleanupRevision.current !== readAuthoritativeCleanupRevision()
+      )
+        return;
+      restoredStorageKey.current = storageKey;
       let stored: ReturnType<typeof parseStoredQueue> = null;
       try {
         stored = parseStoredQueue(
@@ -305,9 +377,16 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [storageKey, setEntries]);
+  }, [storageKey, setEntries, admitted]);
   useEffect(() => {
-    if (!hydrated) return;
+    // An old passive effect can run before the boundary's reset commits. Fence
+    // its writes against the live wipe revision, not only captured readiness.
+    if (
+      !hydrated ||
+      !admitted ||
+      cleanupRevision.current !== readAuthoritativeCleanupRevision()
+    )
+      return;
     try {
       sessionStorage.setItem(
         storageKey,
@@ -317,11 +396,11 @@ function LabelDesignerWorkspace({
       // Search and printing remain available with an in-memory queue.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [storageKey, hydrated, entries, filters, job]);
+  }, [storageKey, hydrated, entries, filters, job, admitted]);
   useEffect(() => {
     // Restore the caller's filters before issuing a search. Otherwise revisits
     // query defaults and then immediately query the restored filters again.
-    if (!hydrated) return;
+    if (!hydrated || !admitted) return;
     let current = true;
     void searchLabelRecords(filters)
       .then((result) => {
@@ -333,7 +412,7 @@ function LabelDesignerWorkspace({
     return () => {
       current = false;
     };
-  }, [filters, hydrated]);
+  }, [filters, hydrated, admitted]);
 
   const invalidate = useCallback(
     (preserveRemovalReviews = false) => {
@@ -661,7 +740,7 @@ function LabelDesignerWorkspace({
               (row) => queueIdentity(row) === queueIdentity(key),
             )?.name ??
             locations.find((location) => location.code === key.key)?.name ??
-            key.key,
+            `Selected ${recordKind(key.kind).toLowerCase()}`,
         },
       ],
       false,
@@ -1293,7 +1372,7 @@ function LabelDesignerWorkspace({
                     </Link>
                     <p className={styles.resultMeta}>
                       {recordKind(record.kind)} · {record.categoryName} ·{' '}
-                      {record.status}
+                      <RecordStatus status={record.status} />
                     </p>
                     <p className={styles.resultMeta}>
                       {record.kind === 'quantity' ? 'Holdings: ' : 'Location: '}
@@ -1309,11 +1388,26 @@ function LabelDesignerWorkspace({
                           record.itemCode && `Item code: ${record.itemCode}`,
                           record.assetTag,
                           record.serialNumber,
-                          record.manufacturer,
-                          record.model,
                         ]
                           .filter(Boolean)
-                          .join(' · ')}
+                          .map((code, index) => (
+                            <span key={index} className="experience-code">
+                              {index > 0 && ' · '}
+                              {code}
+                            </span>
+                          ))}
+                        {[record.manufacturer, record.model]
+                          .filter(Boolean)
+                          .map((label, index) => (
+                            <span key={index}>
+                              {(record.itemCode ||
+                                record.assetTag ||
+                                record.serialNumber ||
+                                index > 0) &&
+                                ' · '}
+                              {label}
+                            </span>
+                          ))}
                       </p>
                     )}
                     {record.customPreview &&
@@ -1522,8 +1616,8 @@ function LabelDesignerWorkspace({
                         </h4>
                         <p className={styles.subtle}>
                           {stateChanged
-                            ? `Lifecycle changed from ${entry.baselineState} to ${row.state}.`
-                            : `Current state: ${row.state}.`}
+                            ? `Lifecycle changed from ${recordStatusLabel(entry.baselineState)} to ${recordStatusLabel(row.state)}.`
+                            : `Current state: ${recordStatusLabel(row.state)}.`}
                           {tagChanged ? ' Identifier changed.' : ''}
                         </p>
                         <div className={styles.queueActions}>
@@ -1570,7 +1664,8 @@ function LabelDesignerWorkspace({
                             aria-label={`Review ${row.name}`}
                           >
                             <p className={styles.subtle}>
-                              Current authorized snapshot: {row.state}
+                              Current authorized snapshot:{' '}
+                              <RecordStatus status={row.state} />
                               {row.tag
                                 ? ` · Tag ${row.tag}`
                                 : row.kind === 'asset'
@@ -1661,15 +1756,22 @@ function LabelDesignerWorkspace({
               <p className={styles.empty}>Add a record or location to begin.</p>
             )}
             <div className={styles.queueList}>
-              {entries.map((entry) => {
+              {entries.map((entry, index) => {
                 const id = queueIdentity(entry),
                   record = byId.get(id);
+                const readState = refreshPending
+                  ? 'refreshing…'
+                  : refreshFailed
+                    ? 'refresh failed; retry'
+                    : unavailable.includes(id)
+                      ? 'unavailable to this account'
+                      : 'loading…';
                 return (
                   <div key={id} className={styles.queueEntry}>
                     <span className={styles.queueName}>
                       {record
-                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${record.state}`
-                        : `${id} · unavailable`}
+                        ? `${record.name} · ${record.kind === 'location' ? 'Location' : (record.categoryName ?? 'Uncategorized')} · ${record.holdingContext} · ${recordStatusLabel(record.state)}`
+                        : `${recordKind(entry.kind)} ${index + 1} · ${readState}`}
                     </span>
                     <div className={styles.queueActions}>
                       <label className={styles.copies}>

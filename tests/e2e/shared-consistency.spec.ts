@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expect, test, type Page, type Locator } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -10,6 +10,7 @@ import {
   openRecordTask,
 } from './record-task-controls';
 import { displayedInstant } from '../helpers/displayed-instant';
+import { exactOperationalTime as exactTime } from '../helpers/operational-time';
 import { auditCreateRecord } from './audit-two-controls';
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 
@@ -159,12 +160,11 @@ function localApi() {
 }
 async function options(page: Page) {
   return Promise.all(
-    settingNames.map((name) =>
-      page
-        .getByRole('combobox', { name, exact: true })
-        .locator('option')
-        .allTextContents(),
-    ),
+    settingNames.map(async (name) => {
+      const combobox = page.getByRole('combobox', { name, exact: true });
+      await expect(combobox).toBeVisible();
+      return combobox.locator('option').allTextContents();
+    }),
   );
 }
 
@@ -291,21 +291,33 @@ for (const fallback of [false, true]) {
         );
       expect(rows).toHaveLength(2);
       const [headers, row] = rows;
-      expect(headers.slice(-3)).toEqual([
+      expect(new Set(headers).size).toBe(headers.length);
+      const column = (name: string) => {
+        expect(headers.filter((header) => header === name)).toHaveLength(1);
+        return headers.indexOf(name);
+      };
+      const metadataColumns = [
         'Item Code (SKU)',
         'Display timezone',
         'Exported at (display zone)',
-      ]);
-      expect(row[headers.indexOf('Name')]).toBe(name);
-      expect(row[headers.indexOf('Display timezone')]).toBe(
+        'Type label',
+        'Status label',
+        'Custody label',
+      ];
+      const skuColumn = column('Item Code (SKU)');
+      expect(metadataColumns.map(column)).toEqual(
+        metadataColumns.map((_, offset) => skuColumn + offset),
+      );
+      expect(row[column('Name')]).toBe(name);
+      expect(row[column('Display timezone')]).toBe(
         fallback ? 'UTC (UTC fallback)' : zone,
       );
-      const displayTime = row[headers.indexOf('Exported at (display zone)')];
+      const displayTime = row[column('Exported at (display zone)')];
       expect(displayTime).toContain(zone);
       if (fallback) expect(displayTime).toContain('UTC (UTC fallback)');
       expect(displayedInstant(displayTime)).toBe(
         Math.floor(
-          new Date(row[headers.indexOf('Exported At (UTC)')]).getTime() / 1000,
+          new Date(row[column('Exported At (UTC)')]).getTime() / 1000,
         ) * 1000,
       );
       expect(download.suggestedFilename()).toMatch(/\d{8}T\d{6}Z\.csv$/);
@@ -729,23 +741,3 @@ test('shared print defaults persist while job overrides and printable output ret
     await reader.auth.signOut({ scope: 'local' });
   }
 });
-
-async function exactTime(time: Locator) {
-  const summary = time.locator('xpath=parent::summary');
-  if (await summary.count()) {
-    const disclosure = summary.locator('xpath=parent::details');
-    await summary.focus();
-    if (
-      !(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open))
-    )
-      await summary.press('Enter');
-    await expect(disclosure).toHaveAttribute('open', '');
-    const exact = disclosure.locator(':scope > p').first();
-    await expect(exact).toBeVisible();
-    await expect(disclosure).toContainText(
-      (await time.getAttribute('datetime'))!,
-    );
-    return exact;
-  }
-  return time;
-}

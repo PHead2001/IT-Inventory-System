@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({

@@ -1,3 +1,4 @@
+import { custodyEventLabel } from '@/features/custody/vocabulary';
 import type { HistoryEvent } from './contracts-ui';
 import { countLabel } from '@/lib/count';
 
@@ -11,17 +12,11 @@ const eventNames: Record<string, string> = {
   restored: 'Restored',
   location_corrected: 'Recorded location corrected',
   retired: 'Asset retired',
-  site_opened: 'Site opening recorded',
-  site_issued: 'Issued to site',
-  site_assigned: 'Assigned to site',
-  site_returned: 'Returned from site',
-  site_transferred: 'Transferred between sites',
-  site_corrected: 'Site custody corrected',
-  site_written_off: 'Written off at site',
-  site_retired: 'Retired at site',
 };
 export const historyEventTitle = (event: HistoryEvent) =>
-  eventNames[event.eventType] ?? event.eventType;
+  event.eventType.startsWith('site_')
+    ? custodyEventLabel(event.eventType, event.kind)
+    : (eventNames[event.eventType] ?? 'Inventory updated');
 
 type LedgerLine = HistoryEvent['lines'][number];
 const locationLabel = (location: HistoryEvent['fromLocation']) =>
@@ -133,7 +128,8 @@ export function historySummary(event: HistoryEvent): string | null {
   const endpoints = endpointSummary(event);
   if (endpoints) return endpoints;
   // The heading already names these operations. Details retain their snapshots/reason.
-  if (eventNames[event.eventType]) return null;
+  if (eventNames[event.eventType] || event.eventType.startsWith('site_'))
+    return null;
   if (event.metadataChanges.length || event.customMetadataChanged)
     return 'Record details updated';
   return 'Historical operation details unavailable';

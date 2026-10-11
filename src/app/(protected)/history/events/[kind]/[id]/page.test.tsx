@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 // Protected page readiness receives the same mocked request actor as its reads.
 vi.mock('@/lib/auth/session.server', () => ({
   requireMember: async () => ({

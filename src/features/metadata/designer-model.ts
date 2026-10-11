@@ -5,7 +5,7 @@ import {
 } from './contracts';
 import { z } from 'zod';
 import { controlKinds, controlVisible, formKinds } from './effective-controls';
-import { ambiguousOptionIds, optionDisplayLabels } from './option-label';
+import { invalidOptionCollisionIds, optionDisplayLabels } from './option-label';
 
 export type Field = MetadataDefinition['fields'][number];
 export type Section = MetadataDefinition['layout'][number];
@@ -480,7 +480,10 @@ function defaultObeysRules(field: Field): boolean {
   }
 }
 
-export function designerIssues(def: MetadataDefinition): string[] {
+export function designerIssues(
+  def: MetadataDefinition,
+  publishedBaseline?: MetadataDefinition,
+): string[] {
   const issues: string[] = [];
   const effective = (kind: 'quantity' | 'asset') =>
     def.layout.flatMap((section) =>
@@ -521,12 +524,16 @@ export function designerIssues(def: MetadataDefinition): string[] {
   const controls = def.layout.flatMap((section) => section.controls);
   for (const field of def.fields) {
     const optionIndex = buildOptionIndex(field.options);
-    const ambiguous = ambiguousOptionIds(field.options);
+    const ambiguous = invalidOptionCollisionIds(
+      field.options,
+      publishedBaseline?.fields.find((before) => before.id === field.id)
+        ?.options,
+    );
     for (const option of field.options.filter((entry) =>
       ambiguous.has(entry.id),
     ))
       issues.push(
-        `${field.label || 'A field'}: ${optionPath(field.options, option.id)} has an indistinguishable active sibling. Rename or retire one choice before publishing.`,
+        `${field.label || 'A field'}: ${optionIndex.paths.get(option.id) ?? option.label} has an indistinguishable active choice in this field. Rename or retire one choice before publishing.`,
       );
     if (!field.label.trim()) issues.push('A field needs a label.');
     if (field.applies_to.length === 0)

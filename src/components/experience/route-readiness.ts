@@ -14,9 +14,10 @@ export function createRouteReadiness(
 ) {
   const roots = new Map<symbol, ReadyContent>();
   let closed = false;
+  let suspended = false;
   let history: { epoch: number; finish: () => void } | undefined;
   const active = (content: ReadyContent) => {
-    if (closed) return false;
+    if (closed || suspended) return false;
     if (
       content.actorId !== actorId ||
       !content.contentIdentity ||
@@ -54,7 +55,7 @@ export function createRouteReadiness(
       };
     },
     history: () => {
-      if (closed) return;
+      if (closed || suspended) return;
       history?.finish();
       history = { epoch: pending.snapshot().epoch, finish: pending.register() };
       for (const content of roots.values()) {
@@ -67,6 +68,14 @@ export function createRouteReadiness(
     cancel: () => {
       history?.finish();
       history = undefined;
+    },
+    suspend: () => {
+      suspended = true;
+      history?.finish();
+      history = undefined;
+    },
+    resume: () => {
+      if (!closed) suspended = false;
     },
     close: () => {
       closed = true;

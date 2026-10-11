@@ -1,3 +1,5 @@
+import { fits } from './viewport-controls';
+import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { expectScopedInteractiveTransitions } from './interactive-style-contract';
 import { acceptanceFixtures } from './audit-three-acceptance-fixtures';
 import { expectRecordVersion, openRecordTask } from './record-task-controls';
@@ -651,17 +653,21 @@ test('denied camera has manual fallback, rejects external text and opens exact r
   });
   await page.goto('/scan');
   await page.getByRole('button', { name: 'Start camera' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    'Camera permission was denied',
-  );
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Camera permission was denied' }),
+  ).toBeVisible();
   const input = page.getByLabel(
     'Paste a label URL, barcode text, or exact identifier',
   );
   await input.fill('https://example.com/locations/ITC');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText(
-    'not a supported inventory label',
-  );
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'not a supported inventory label' }),
+  ).toBeVisible();
   await expect(page).toHaveURL(/\/scan$/);
   await input.fill('LOC:ITC-S1A');
   await page.getByRole('button', { name: 'Open', exact: true }).click();
@@ -1291,3 +1297,160 @@ test('mixed-case zero-prefixed punctuated asset tag retains exact spelling acros
     await owned.cleanup();
   }
 });
+
+interfaceTest(
+  'local UI and code fonts load on an existing location label',
+  async ({ page }) => {
+    await interfaceLogin(page);
+    await page.goto('/labels?location=ITC-RED');
+    const code = page
+      .locator('.label-card span.font-mono[title="ITC-RED"]')
+      .first();
+    await expect(code).toBeVisible();
+    await expect(code).toHaveText('ITC-RED');
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    const fonts = await code.evaluate((node) => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        body: getComputedStyle(document.body).fontFamily,
+        code: getComputedStyle(node).fontFamily,
+        ui: root
+          .getPropertyValue('--font-ui')
+          .split(',')[0]
+          .trim()
+          .replaceAll('"', ''),
+        mono: root
+          .getPropertyValue('--font-code')
+          .split(',')[0]
+          .trim()
+          .replaceAll('"', ''),
+        loaded: [...document.fonts]
+          .filter((face) => face.status === 'loaded')
+          .map((face) => face.family.replaceAll('"', '')),
+        resources: performance
+          .getEntriesByType('resource')
+          .map((entry) => entry.name),
+      };
+    });
+    expect(fonts.ui).not.toBe('');
+    expect(fonts.mono).not.toBe('');
+    expect(fonts.body.replaceAll('"', '')).toContain(fonts.ui);
+    expect(fonts.code.replaceAll('"', '')).toContain(fonts.mono);
+    expect(fonts.loaded).toContain(fonts.ui);
+    expect(fonts.loaded).toContain(fonts.mono);
+    expect(
+      new Set(
+        fonts.resources.filter((resource) => {
+          const url = new URL(resource);
+          return (
+            url.origin === new URL(page.url()).origin &&
+            /^\/_next\/static\/media\/[^/]+\.woff2$/.test(url.pathname)
+          );
+        }),
+      ).size,
+    ).toBeGreaterThanOrEqual(2);
+  },
+);
+
+interfaceTest(
+  'loaded local fonts and populated scan and labels remain usable at phone widths',
+  async ({ page, interfaceRecord }, info) => {
+    await interfaceLogin(page);
+    const origin = new URL(process.env.APP_ORIGIN!);
+    expect(['localhost', '127.0.0.1']).toContain(origin.hostname);
+    const id = interfaceRecord.id;
+    await page.goto(`/inventory/quantity/${id}`);
+    await expect(page).toHaveTitle('Quantity item · IT Inventory');
+    for (const privateValue of [
+      interfaceRecord.id,
+      interfaceRecord.categoryId,
+      interfaceRecord.name,
+    ])
+      await expect(page.locator('head title')).not.toContainText(privateValue);
+
+    const currentRecord = page.locator('section').filter({
+      has: page.getByRole('heading', {
+        name: interfaceRecord.name,
+        exact: true,
+        level: 1,
+      }),
+    });
+    await expect(currentRecord).toHaveCount(1);
+    const code = currentRecord
+      .getByText('Item code (SKU)', { exact: true })
+      .locator('..')
+      .locator('dd');
+    await expect(code).toBeVisible();
+    await expect(code).toHaveText(interfaceRecord.itemCode);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    const fonts = await code.evaluate((node) => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        body: getComputedStyle(document.body).fontFamily,
+        code: getComputedStyle(node).fontFamily,
+        ui: root
+          .getPropertyValue('--font-ui')
+          .split(',')[0]
+          .trim()
+          .replaceAll('"', ''),
+        mono: root
+          .getPropertyValue('--font-code')
+          .split(',')[0]
+          .trim()
+          .replaceAll('"', ''),
+        loaded: [...document.fonts]
+          .filter((face) => face.status === 'loaded')
+          .map((face) => face.family.replaceAll('"', '')),
+        resources: performance
+          .getEntriesByType('resource')
+          .map((entry) => entry.name),
+      };
+    });
+    expect(fonts.ui).not.toBe('');
+    expect(fonts.mono).not.toBe('');
+    expect(fonts.body.replaceAll('"', '')).toContain(fonts.ui);
+    expect(fonts.code.replaceAll('"', '')).toContain(fonts.mono);
+    expect(fonts.loaded).toContain(fonts.ui);
+    expect(fonts.loaded).toContain(fonts.mono);
+    expect(
+      new Set(
+        fonts.resources.filter((resource) => {
+          const url = new URL(resource);
+          return (
+            url.origin === new URL(page.url()).origin &&
+            /^\/_next\/static\/media\/[^/]+\.woff2$/.test(url.pathname)
+          );
+        }),
+      ).size,
+    ).toBeGreaterThanOrEqual(2);
+    for (const width of [375, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`/labels?quantity=${id}`);
+      await expect(page.locator('.label-card')).not.toHaveCount(0);
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await expect(
+        page.getByRole('combobox', { name: 'Label size', exact: true }),
+      ).toBeEnabled();
+      await fits(page);
+      await page.screenshot({
+        path: info.outputPath(`labels-${width}.png`),
+        fullPage: true,
+      });
+      await page.goto('/scan');
+      const manual = page.getByRole('textbox').first();
+      await manual.fill(
+        new URL(`/inventory/quantity/${id}`, process.env.APP_ORIGIN!).href,
+      );
+      await expect(
+        page.getByRole('button', { name: 'Open', exact: true }),
+      ).toBeEnabled();
+      await fits(page);
+      await page.screenshot({
+        path: info.outputPath(`scan-${width}.png`),
+        fullPage: true,
+      });
+      await page.getByRole('button', { name: 'Open', exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/inventory/quantity/${id}$`));
+    }
+  },
+);

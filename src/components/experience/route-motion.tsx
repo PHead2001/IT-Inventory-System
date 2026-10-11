@@ -5,11 +5,22 @@ import {
   useContext,
   useEffect,
   useInsertionEffect,
+  useLayoutEffect,
   useRef,
   useMemo,
   useState,
   useSyncExternalStore,
 } from 'react';
+import {
+  usePrivacyReadiness,
+  usePrivacyRevocationRevision,
+} from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  subscribePrivacyRevocation,
+} from '@/features/scan/assign-batch';
+import { freshPresentationGrant } from './presentation-privacy';
 import { flushSync } from 'react-dom';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
@@ -38,6 +49,7 @@ const RouteMotionContext = createContext<{
   readiness: ReturnType<typeof createRouteReadiness>;
   lifecycleRef: { current: boolean };
   providerToken: symbol;
+  withdrawGrant: () => void;
 } | null>(null);
 // Client insertion effects alone bind this opaque presentation owner. No actor,
 // credentials, request state or private DOM is stored in a module singleton.
@@ -70,8 +82,9 @@ export function useInvalidateRouteMotion() {
       currentRouteProvider !== context.providerToken
     )
       return;
-    context?.pending.cancel(true);
-    context?.readiness.close();
+    context.withdrawGrant();
+    context.pending.cancel(true);
+    context.readiness.close();
     invalidateRouteMotion(context?.state);
   };
 }
@@ -83,12 +96,27 @@ export function RouteMotionProvider({
   actorId: string;
   children: React.ReactNode;
 }) {
-  const [state] = useState(createRouteMotionState);
-  const [pending] = useState(createRoutePendingState);
+  const privacy = usePrivacyReadiness();
+  const privacyRevision = usePrivacyRevocationRevision();
+  const mountedActor = useRef(actorId);
+  const suspended = useRef(true);
+  const acceptedGrant = useRef<{ revision: number; epoch: number } | null>(
+    null,
+  );
+  const [state] = useState(() => {
+    const value = createRouteMotionState();
+    value.suspend(false);
+    return value;
+  });
+  const [pending] = useState(() => {
+    const value = createRoutePendingState();
+    value.suspend();
+    return value;
+  });
   const lifecycleRef = useRef(true);
   const [providerToken] = useState(() => Symbol());
-  const [readiness] = useState(() =>
-    createRouteReadiness(actorId, pending, (key) => {
+  const [readiness] = useState(() => {
+    const value = createRouteReadiness(actorId, pending, (key) => {
       const intent = state.snapshot();
       if (!intent) return;
       const destination = new URL(key, location.origin);
@@ -98,8 +126,10 @@ export function RouteMotionProvider({
         key !== routeKey(list.pathname, list.searchParams)
       )
         state.finish(intent.name);
-    }),
-  );
+    });
+    value.suspend();
+    return value;
+  });
   const [owners] = useState(createRoutePendingOwners);
   const mountedOwners = useSyncExternalStore(
     owners.subscribe,
@@ -111,7 +141,11 @@ export function RouteMotionProvider({
       state: pending,
       owners,
       beginNavigation: (href: string) => {
-        if (!lifecycleRef.current || currentRouteProvider !== providerToken)
+        if (
+          !lifecycleRef.current ||
+          currentRouteProvider !== providerToken ||
+          !state.valid()
+        )
           return;
         const epoch = pending.snapshot().epoch;
         return {
@@ -123,7 +157,11 @@ export function RouteMotionProvider({
         };
       },
       navigation: (href: string) => {
-        if (!lifecycleRef.current || currentRouteProvider !== providerToken)
+        if (
+          !lifecycleRef.current ||
+          currentRouteProvider !== providerToken ||
+          !state.valid()
+        )
           return;
         readiness.cancel();
         const target = state.acceptNavigation(href, pending.snapshot().epoch);
@@ -133,7 +171,11 @@ export function RouteMotionProvider({
         else state.retire();
       },
       terminal: () => {
-        if (!lifecycleRef.current || currentRouteProvider !== providerToken)
+        if (
+          !lifecycleRef.current ||
+          currentRouteProvider !== providerToken ||
+          !state.valid()
+        )
           return;
         // Generic route failure retires presentation, not verified actor eligibility.
         // An already-invalid access scope is never re-enabled here.
@@ -157,13 +199,33 @@ export function RouteMotionProvider({
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
-    document.documentElement.dataset.routeMotionPrivate = 'true';
+    const suspendPresentation = () => {
+      if (!lifecycleRef.current || currentRouteProvider !== providerToken)
+        return;
+      document.documentElement.dataset.routeMotionPrivate = 'false';
+      suspended.current = true;
+      acceptedGrant.current = null;
+      // Invalidate the store generation before cancellation can invoke apply.
+      state.suspend();
+      pending.suspend();
+      readiness.suspend();
+      cancelRouteSnapshots();
+    };
+    const unbindPrivacy = subscribePrivacyRevocation(suspendPresentation);
+    document.documentElement.dataset.routeMotionPrivate = 'false';
     const unbind = bindRouteActionResults(
       () => {
-        if (!lifecycleRef.current || currentRouteProvider !== providerToken)
+        if (
+          !lifecycleRef.current ||
+          currentRouteProvider !== providerToken ||
+          !state.valid()
+        )
           return;
-        pending.cancel();
-        readiness.cancel();
+        document.documentElement.dataset.routeMotionPrivate = 'false';
+        suspended.current = true;
+        acceptedGrant.current = null;
+        pending.cancel(true);
+        readiness.close();
         invalidateRouteMotion(state);
       },
       undefined,
@@ -173,9 +235,13 @@ export function RouteMotionProvider({
       },
     );
     return () => {
+      unbindPrivacy();
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      if (ownsDocument) {
+        acceptedGrant.current = null;
+      }
       pending.cancel(true, false);
       owners.dispose();
       readiness.close();
@@ -184,14 +250,47 @@ export function RouteMotionProvider({
         invalidateRouteMotion(state, false);
       } else state.invalidate(false);
     };
+  }, [state, pending, scope, readiness, owners, lifecycleRef, providerToken]);
+  useLayoutEffect(() => {
+    if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
+    if (mountedActor.current === actorId && freshPresentationGrant(privacy)) {
+      if (suspended.current && state.resume()) {
+        suspended.current = false;
+        readiness.resume();
+        pending.resume();
+      }
+      if (state.valid()) {
+        acceptedGrant.current = {
+          revision: privacy.revocationRevision!,
+          epoch: privacy.verifiedEpoch!,
+        };
+        document.documentElement.dataset.routeMotionPrivate = 'true';
+      }
+    } else if (!(
+      mountedActor.current === actorId &&
+      !privacy.ready &&
+      privacy.visible === true &&
+      !suspended.current &&
+      privacy.revocationRevision === readPrivacyRevocationRevision() &&
+      state.valid() &&
+      acceptedGrant.current?.revision === privacy.revocationRevision &&
+      acceptedGrant.current?.epoch === assignmentEpoch()
+    )) {
+      document.documentElement.dataset.routeMotionPrivate = 'false';
+      suspended.current = true;
+      acceptedGrant.current = null;
+      state.suspend();
+      pending.suspend();
+      readiness.suspend();
+      cancelRouteSnapshots();
+    }
   }, [
-    state,
+    privacy,
+    privacyRevision,
     actorId,
+    state,
     pending,
-    scope,
     readiness,
-    owners,
-    lifecycleRef,
     providerToken,
   ]);
   useEffect(() => {
@@ -203,6 +302,9 @@ export function RouteMotionProvider({
         currentRouteProvider !== providerToken
       )
         return;
+      document.documentElement.dataset.routeMotionPrivate = 'false';
+      suspended.current = true;
+      acceptedGrant.current = null;
       pending.cancel(true);
       readiness.close();
       invalidateRouteMotion(state);
@@ -261,6 +363,11 @@ export function RouteMotionProvider({
         readiness,
         lifecycleRef,
         providerToken,
+        withdrawGrant: () => {
+          document.documentElement.dataset.routeMotionPrivate = 'false';
+          suspended.current = true;
+          acceptedGrant.current = null;
+        },
       }}
     >
       <RoutePendingContext.Provider value={scope}>

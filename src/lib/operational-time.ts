@@ -74,6 +74,19 @@ export function formatOperationalTimestamp(
   const era = part('era') === 'AD' ? '' : ` ${part('era')}`;
   return {
     text: `${part('day')} ${part('month')} ${part('year')}${era}, ${part('hour')}:${part('minute')}:${part('second')} ${offset}${zone}${fallback ? ' (UTC fallback)' : ''}`,
+    accessibleText:
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: validated.timeZone,
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(date) +
+      ' at ' +
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: validated.timeZone,
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(date),
     dateTime: value,
     timeZone: validated.timeZone,
     offset,

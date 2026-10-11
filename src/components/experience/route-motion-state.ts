@@ -81,6 +81,7 @@ export function createRouteMotionState() {
     target: Omit<TitleIntent, 'name'> | null;
   } | null = null;
   let valid = true;
+  let suspended = false;
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((listener) => listener());
   return {
@@ -91,8 +92,22 @@ export function createRouteMotionState() {
       };
     },
     snapshot: () => intent,
-    valid: () => valid,
+    valid: () => valid && !suspended,
+    suspend(notifyListeners = true) {
+      suspended = true;
+      navigation = null;
+      intent = null;
+      origin = null;
+      if (notifyListeners) notify();
+    },
+    resume() {
+      if (!valid) return false;
+      suspended = false;
+      notify();
+      return true;
+    },
     beginNavigation(href: string, epoch: number) {
+      if (!valid || suspended) return () => {};
       const token = Symbol();
       navigation = { token, href, epoch, target: null };
       return () => {
@@ -100,9 +115,11 @@ export function createRouteMotionState() {
       };
     },
     stageNavigation(target: Omit<TitleIntent, 'name'> | null) {
+      if (!valid || suspended) return;
       if (navigation) navigation.target = target;
     },
     acceptNavigation(href: string, epoch: number) {
+      if (!valid || suspended) return null;
       const accepted = navigation;
       navigation = null;
       return accepted?.href === href && accepted.epoch === epoch
@@ -110,7 +127,7 @@ export function createRouteMotionState() {
         : null;
     },
     arm(target: Omit<TitleIntent, 'name'>) {
-      if (!valid) return;
+      if (!valid || suspended) return;
       intent = { ...target, name: `inventory-title-${crypto.randomUUID()}` };
       origin = target;
       notify();
@@ -127,6 +144,7 @@ export function createRouteMotionState() {
       notify();
     },
     backTarget(record: RecordIdentity, returnTo: string) {
+      if (!valid || suspended) return null;
       if (!origin || record.kind !== origin.kind || record.id !== origin.id)
         return null;
       const target = titleTarget(record, returnTo, origin.holding);
@@ -136,6 +154,7 @@ export function createRouteMotionState() {
         : null;
     },
     back(from: string, to: string) {
+      if (!valid || suspended) return;
       // History can reuse an origin, but never authorize a future Link gesture.
       navigation = null;
       if (

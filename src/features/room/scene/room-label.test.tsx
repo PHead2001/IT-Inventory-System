@@ -1,20 +1,59 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { RoomLabel, knownOccupiedCount } from './room-label';
+import { RoomLabel } from './room-label';
 import {
   LabelLayoutProvider,
   createRoomLabelRegistry,
 } from './label-layout-runtime';
 
 describe('room counts', () => {
-  it.each([undefined, '0', '-1', 'NaN', 'Infinity', '1.5', '01', ''])(
-    'does not present %s as occupied stock',
-    (count) => {
-      expect(knownOccupiedCount(count)).toBeNull();
-    },
-  );
-  it('preserves counts beyond number precision', () => {
-    expect(knownOccupiedCount('9007199254740993')).toBe('9007199254740993');
+  it('retains the full long name and distinct counts for keyboard focus, then restores its compact marker', async () => {
+    const registry = createRoomLabelRegistry(vi.fn());
+    const register = vi.spyOn(registry, 'register');
+    const user = userEvent.setup();
+    const label =
+      'Shared equipment drawer for replacement laptop adapters and carefully packed networking accessories';
+    render(
+      <LabelLayoutProvider registry={registry}>
+        <RoomLabel
+          id="long"
+          code="ITC-D01"
+          label={label}
+          priority={1}
+          occupancy={{
+            quantity_product_count: '1',
+            quantity_unit_count: '31',
+            asset_count: '2',
+          }}
+          onSelect={vi.fn()}
+        />
+      </LabelLayoutProvider>,
+    );
+    const button = screen.getByRole('button', {
+      name: `Select ${label} (ITC-D01); 1 product / 31 units / 2 assets at this location`,
+    });
+    expect(register.mock.lastCall?.[3]).toMatchObject({
+      mandatory: true,
+      compact: true,
+      priority: 3,
+    });
+    await user.tab();
+    expect(button).toHaveFocus();
+    expect(register.mock.lastCall?.[3]).toMatchObject({
+      mandatory: true,
+      compact: true,
+      preferFull: true,
+      inspection: 'focus',
+      priority: 3,
+    });
+    expect(button).toHaveTextContent(label);
+    await user.tab();
+    expect(register.mock.lastCall?.[3]).toMatchObject({
+      mandatory: true,
+      compact: true,
+      priority: 3,
+    });
   });
   it('registers one measured label including its truthful active-entry count', () => {
     const registry = createRoomLabelRegistry(vi.fn());
@@ -27,21 +66,31 @@ describe('room counts', () => {
           label="Drawer 1"
           priority={3}
           selected
-          count="3"
+          occupancy={{
+            quantity_product_count: '1',
+            quantity_unit_count: '31',
+            asset_count: '2',
+          }}
           onSelect={vi.fn()}
         />
       </LabelLayoutProvider>,
     );
     expect(
       screen.getByRole('button', {
-        name: /Select Drawer 1.*3 active inventory entries/,
+        name: /Select Drawer 1.*1 product \/ 31 units \/ 2 assets/,
       }),
-    ).toHaveTextContent('3 items');
+    ).toHaveTextContent('1 product / 31 units / 2 assets');
     expect(register).toHaveBeenCalledWith(
       'drawer',
       expect.any(HTMLButtonElement),
       expect.any(HTMLSpanElement),
-      { priority: 3, locationCode: 'ITC-D01', interactive: true },
+      expect.objectContaining({
+        priority: 4,
+        locationCode: 'ITC-D01',
+        interactive: true,
+        mandatory: true,
+        compact: false,
+      }),
     );
   });
   it('omits unknown and known-zero badges without fabricating empty-drawer text', () => {
@@ -65,7 +114,11 @@ describe('room counts', () => {
           code="ITC-D01"
           label="Drawer 1"
           priority={1}
-          count="0"
+          occupancy={{
+            quantity_product_count: '0',
+            quantity_unit_count: '0',
+            asset_count: '0',
+          }}
           onSelect={vi.fn()}
         />
       </LabelLayoutProvider>,

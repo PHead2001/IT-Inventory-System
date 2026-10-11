@@ -1,0 +1,5858 @@
+{
+  "schema": 1,
+  "stage": "fit-open",
+  "complete": true,
+  "scene": {
+    "view": [
+      0.9396926207859082, -0.2801664995932355, 0.196174694969011, 0,
+      -2.77555756156289e-17, 0.5735764363510459, 0.8191520442889917, 0,
+      -0.34202014332566866, -0.769751131320057, 0.538985544695756, 0,
+      -61.01435910252526, -65.9797265441511, -380.95356942298037,
+      0.9999999999999998
+    ],
+    "projection": [
+      0.01258236268251756, 0, 0, 0, 0, 0.00971432412988488, 0, 0, 0, 0,
+      -0.0006666888896296543, 0, 0, 0, -1.000066668888963, 1
+    ],
+    "frame": { "x": 30, "y": 399.046875, "width": 315, "height": 408 },
+    "masks": [
+      { "left": 126, "top": 138.046875, "right": 346, "bottom": 338.046875 }
+    ],
+    "meshes": [
+      { "index": 0, "topology": "triangles", "geometry": "buffer" },
+      { "index": 1, "topology": "triangles", "geometry": "buffer" },
+      { "index": 2, "topology": "triangles", "geometry": "buffer" },
+      { "index": 3, "topology": "triangles", "geometry": "buffer" },
+      { "index": 4, "topology": "triangles", "geometry": "buffer" },
+      { "index": 5, "topology": "triangles", "geometry": "buffer" },
+      { "index": 6, "topology": "triangles", "geometry": "box" },
+      { "index": 7, "topology": "triangles", "geometry": "box" },
+      { "index": 8, "topology": "triangles", "geometry": "box" },
+      { "index": 9, "topology": "triangles", "geometry": "box" },
+      { "index": 10, "topology": "triangles", "geometry": "box" },
+      { "index": 11, "topology": "triangles", "geometry": "box" },
+      { "index": 12, "topology": "triangles", "geometry": "box" },
+      { "index": 13, "topology": "triangles", "geometry": "box" },
+      { "index": 14, "topology": "triangles", "geometry": "box" },
+      { "index": 15, "topology": "triangles", "geometry": "box" },
+      { "index": 16, "topology": "triangles", "geometry": "box" },
+      { "index": 17, "topology": "triangles", "geometry": "box" },
+      { "index": 18, "topology": "triangles", "geometry": "box" },
+      { "index": 19, "topology": "triangles", "geometry": "box" },
+      { "index": 20, "topology": "triangles", "geometry": "box" },
+      { "index": 21, "topology": "triangles", "geometry": "box" },
+      { "index": 22, "topology": "triangles", "geometry": "box" },
+      { "index": 23, "topology": "triangles", "geometry": "box" },
+      { "index": 24, "topology": "triangles", "geometry": "box" },
+      { "index": 25, "topology": "triangles", "geometry": "box" },
+      { "index": 26, "topology": "triangles", "geometry": "box" },
+      { "index": 27, "topology": "triangles", "geometry": "box" },
+      { "index": 28, "topology": "triangles", "geometry": "box" },
+      { "index": 29, "topology": "triangles", "geometry": "box" },
+      { "index": 30, "topology": "triangles", "geometry": "box" },
+      { "index": 31, "topology": "triangles", "geometry": "box" },
+      { "index": 32, "topology": "triangles", "geometry": "box" },
+      { "index": 33, "topology": "triangles", "geometry": "box" },
+      { "index": 34, "topology": "triangles", "geometry": "box" },
+      { "index": 35, "topology": "triangles", "geometry": "box" },
+      { "index": 36, "topology": "triangles", "geometry": "box" },
+      { "index": 37, "topology": "triangles", "geometry": "box" },
+      { "index": 38, "topology": "triangles", "geometry": "box" },
+      { "index": 39, "topology": "triangles", "geometry": "box" },
+      { "index": 40, "topology": "triangles", "geometry": "box" },
+      { "index": 41, "topology": "triangles", "geometry": "box" },
+      { "index": 42, "topology": "triangles", "geometry": "box" },
+      { "index": 43, "topology": "triangles", "geometry": "box" },
+      { "index": 44, "topology": "triangles", "geometry": "box" },
+      { "index": 45, "topology": "triangles", "geometry": "box" },
+      { "index": 46, "topology": "triangles", "geometry": "box" },
+      { "index": 47, "topology": "triangles", "geometry": "box" },
+      { "index": 48, "topology": "triangles", "geometry": "box" },
+      { "index": 49, "topology": "triangles", "geometry": "box" },
+      { "index": 50, "topology": "triangles", "geometry": "box" },
+      { "index": 51, "topology": "triangles", "geometry": "box" },
+      { "index": 52, "topology": "triangles", "geometry": "box" },
+      { "index": 53, "topology": "triangles", "geometry": "box" },
+      { "index": 54, "topology": "triangles", "geometry": "box" },
+      { "index": 55, "topology": "triangles", "geometry": "box" },
+      { "index": 56, "topology": "triangles", "geometry": "box" },
+      { "index": 57, "topology": "triangles", "geometry": "box" },
+      { "index": 58, "topology": "triangles", "geometry": "box" },
+      { "index": 59, "topology": "triangles", "geometry": "box" },
+      { "index": 60, "topology": "triangles", "geometry": "box" },
+      { "index": 61, "topology": "triangles", "geometry": "box" },
+      { "index": 62, "topology": "triangles", "geometry": "box" },
+      { "index": 63, "topology": "triangles", "geometry": "box" },
+      { "index": 64, "topology": "triangles", "geometry": "box" },
+      { "index": 65, "topology": "triangles", "geometry": "box" },
+      { "index": 66, "topology": "triangles", "geometry": "box" },
+      { "index": 67, "topology": "triangles", "geometry": "box" },
+      { "index": 68, "topology": "triangles", "geometry": "box" },
+      { "index": 69, "topology": "triangles", "geometry": "box" },
+      { "index": 70, "topology": "triangles", "geometry": "box" },
+      { "index": 71, "topology": "triangles", "geometry": "box" }
+    ],
+    "triangles": [
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, 0, 84, -2, 0, 84, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, -2, 0, 84, -2, -126, 84, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -126, 0, -2, -126, 0, 0, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, -2, -126, 0, -2, 0, 0, 0, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -126, 0, 0, 0, 84, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, 0, 84, 0, 0, 84, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, -2, 0, 0, -2, -126, 84, -2, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, -2, -126, 84, -2, -126, 84, -2, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, 0, 0, -2, 0, 84, 0, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, -2, 0, 84, -2, 0, 84, 0, 0],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, -126, 84, -2, -126, 0, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, -2, -126, 0, -2, -126, 0, 0, -126],
+        "sourceMesh": 6
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, 0, 0, 0, 0, 0, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, 0, 0, 0, -126, 0, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 6, -126, -2, 0, -126, -2, 6, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 0, -126, -2, 0, 0, -2, 6, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 6, -126, -2, 6, 0, 0, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 6, 0, 0, 6, 0, 0, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 0, 0, -2, 0, -126, 0, 0, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 0, -126, 0, 0, -126, 0, 0, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 6, 0, -2, 0, 0, 0, 6, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [-2, 0, 0, 0, 0, 0, 0, 6, 0],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, -126, 0, 0, -126, -2, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -126, -2, 0, -126, -2, 6, -126],
+        "sourceMesh": 7
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [86, 6, 0, 86, 0, 0, 86, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [86, 0, 0, 86, 0, -126, 86, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, -126, 84, 0, -126, 84, 6, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, -126, 84, 0, 0, 84, 6, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, -126, 84, 6, 0, 86, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, 0, 86, 6, 0, 86, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, 0, 84, 0, -126, 86, 0, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, -126, 86, 0, -126, 86, 0, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, 0, 84, 0, 0, 86, 6, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, 0, 86, 0, 0, 86, 6, 0],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [86, 6, -126, 86, 0, -126, 84, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [86, 0, -126, 84, 0, -126, 84, 6, -126],
+        "sourceMesh": 8
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, -126, 84, 0, -126, 84, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, -126, 84, 0, -128, 84, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, -128, 0, 0, -128, 0, 6, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -128, 0, 0, -126, 0, 6, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, -128, 0, 6, -126, 84, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, -126, 84, 6, -126, 84, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -126, 0, 0, -128, 84, 0, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -128, 84, 0, -128, 84, 0, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 6, -126, 0, 0, -126, 84, 6, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [0, 0, -126, 84, 0, -126, 84, 6, -126],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 6, -128, 84, 0, -128, 0, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [84, 0, -128, 0, 0, -128, 0, 6, -128],
+        "sourceMesh": 9
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [78, 1, 1, 78, 0, 1, 78, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [78, 0, 1, 78, 0, -1, 78, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 1, -1, 42, 0, -1, 42, 1, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 0, -1, 42, 0, 1, 42, 1, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 1, -1, 42, 1, 1, 78, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 1, 1, 78, 1, 1, 78, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 0, 1, 42, 0, -1, 78, 0, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 0, -1, 78, 0, -1, 78, 0, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 1, 1, 42, 0, 1, 78, 1, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [42, 0, 1, 78, 0, 1, 78, 1, 1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [78, 1, -1, 78, 0, -1, 42, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [78, 0, -1, 42, 0, -1, 42, 1, -1],
+        "sourceMesh": 10
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [16, 81, -6, 16, 80, -6, 16, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [16, 80, -6, 16, 80, -30, 16, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 81, -30, 0, 80, -30, 0, 81, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 80, -30, 0, 80, -6, 0, 81, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 81, -30, 0, 81, -6, 16, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 81, -6, 16, 81, -6, 16, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 80, -6, 0, 80, -30, 16, 80, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 80, -30, 16, 80, -30, 16, 80, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 81, -6, 0, 80, -6, 16, 81, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [0, 80, -6, 16, 80, -6, 16, 81, -6],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [16, 81, -30, 16, 80, -30, 0, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1A",
+        "side": 0,
+        "vertices": [16, 80, -30, 0, 80, -30, 0, 81, -30],
+        "sourceMesh": 11
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [16, 81, -30, 16, 80, -30, 16, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [16, 80, -30, 16, 80, -54, 16, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 81, -54, 0, 80, -54, 0, 81, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 80, -54, 0, 80, -30, 0, 81, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 81, -54, 0, 81, -30, 16, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 81, -30, 16, 81, -30, 16, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 80, -30, 0, 80, -54, 16, 80, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 80, -54, 16, 80, -54, 16, 80, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 81, -30, 0, 80, -30, 16, 81, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [0, 80, -30, 16, 80, -30, 16, 81, -30],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [16, 81, -54, 16, 80, -54, 0, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1B",
+        "side": 0,
+        "vertices": [16, 80, -54, 0, 80, -54, 0, 81, -54],
+        "sourceMesh": 12
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [16, 81, -54, 16, 80, -54, 16, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [16, 80, -54, 16, 80, -78, 16, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 81, -78, 0, 80, -78, 0, 81, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 80, -78, 0, 80, -54, 0, 81, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 81, -78, 0, 81, -54, 16, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 81, -54, 16, 81, -54, 16, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 80, -54, 0, 80, -78, 16, 80, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 80, -78, 16, 80, -78, 16, 80, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 81, -54, 0, 80, -54, 16, 81, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [0, 80, -54, 16, 80, -54, 16, 81, -54],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [16, 81, -78, 16, 80, -78, 0, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S1C",
+        "side": 0,
+        "vertices": [16, 80, -78, 0, 80, -78, 0, 81, -78],
+        "sourceMesh": 13
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [16, 49, -6, 16, 48, -6, 16, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [16, 48, -6, 16, 48, -30, 16, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 49, -30, 0, 48, -30, 0, 49, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 48, -30, 0, 48, -6, 0, 49, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 49, -30, 0, 49, -6, 16, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 49, -6, 16, 49, -6, 16, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 48, -6, 0, 48, -30, 16, 48, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 48, -30, 16, 48, -30, 16, 48, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 49, -6, 0, 48, -6, 16, 49, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [0, 48, -6, 16, 48, -6, 16, 49, -6],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [16, 49, -30, 16, 48, -30, 0, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2A",
+        "side": 0,
+        "vertices": [16, 48, -30, 0, 48, -30, 0, 49, -30],
+        "sourceMesh": 14
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [16, 49, -30, 16, 48, -30, 16, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [16, 48, -30, 16, 48, -54, 16, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 49, -54, 0, 48, -54, 0, 49, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 48, -54, 0, 48, -30, 0, 49, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 49, -54, 0, 49, -30, 16, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 49, -30, 16, 49, -30, 16, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 48, -30, 0, 48, -54, 16, 48, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 48, -54, 16, 48, -54, 16, 48, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 49, -30, 0, 48, -30, 16, 49, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [0, 48, -30, 16, 48, -30, 16, 49, -30],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [16, 49, -54, 16, 48, -54, 0, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2B",
+        "side": 0,
+        "vertices": [16, 48, -54, 0, 48, -54, 0, 49, -54],
+        "sourceMesh": 15
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [16, 49, -54, 16, 48, -54, 16, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [16, 48, -54, 16, 48, -78, 16, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 49, -78, 0, 48, -78, 0, 49, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 48, -78, 0, 48, -54, 0, 49, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 49, -78, 0, 49, -54, 16, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 49, -54, 16, 49, -54, 16, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 48, -54, 0, 48, -78, 16, 48, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 48, -78, 16, 48, -78, 16, 48, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 49, -54, 0, 48, -54, 16, 49, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [0, 48, -54, 16, 48, -54, 16, 49, -54],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [16, 49, -78, 16, 48, -78, 0, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-S2C",
+        "side": 0,
+        "vertices": [16, 48, -78, 0, 48, -78, 0, 49, -78],
+        "sourceMesh": 16
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [16, 45, -6, 16, 42, -6, 16, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [16, 42, -6, 16, 42, -30, 16, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 45, -30, 0, 42, -30, 0, 45, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 42, -30, 0, 42, -6, 0, 45, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 45, -30, 0, 45, -6, 16, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 45, -6, 16, 45, -6, 16, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 42, -6, 0, 42, -30, 16, 42, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 42, -30, 16, 42, -30, 16, 42, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 45, -6, 0, 42, -6, 16, 45, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [0, 42, -6, 16, 42, -6, 16, 45, -6],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [16, 45, -30, 16, 42, -30, 0, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [16, 42, -30, 0, 42, -30, 0, 45, -30],
+        "sourceMesh": 17
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -14.400000095367432,
+          16.60000001192093, 43.19999998807907, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -14.400000095367432,
+          16.60000001192093, 43.19999998807907, -21.59999990463257,
+          16.60000001192093, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -21.59999990463257,
+          15.999999988079072, 43.19999998807907, -21.59999990463257,
+          15.999999988079072, 43.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -21.59999990463257,
+          15.999999988079072, 43.19999998807907, -14.400000095367432,
+          15.999999988079072, 43.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -21.59999990463257,
+          15.999999988079072, 43.80000001192093, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -14.400000095367432,
+          15.999999988079072, 43.19999998807907, -21.59999990463257,
+          16.60000001192093, 43.19999998807907, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -21.59999990463257,
+          16.60000001192093, 43.19999998807907, -21.59999990463257,
+          16.60000001192093, 43.19999998807907, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -14.400000095367432,
+          15.999999988079072, 43.19999998807907, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -14.400000095367432,
+          16.60000001192093, 43.19999998807907, -14.400000095367432,
+          16.60000001192093, 43.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -21.59999990463257,
+          16.60000001192093, 43.19999998807907, -21.59999990463257,
+          15.999999988079072, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D01",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -21.59999990463257,
+          15.999999988079072, 43.19999998807907, -21.59999990463257,
+          15.999999988079072, 43.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 18
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [16, 45, -30, 16, 42, -30, 16, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [16, 42, -30, 16, 42, -54, 16, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 45, -54, 0, 42, -54, 0, 45, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 42, -54, 0, 42, -30, 0, 45, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 45, -54, 0, 45, -30, 16, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 45, -30, 16, 45, -30, 16, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 42, -30, 0, 42, -54, 16, 42, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 42, -54, 16, 42, -54, 16, 42, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 45, -30, 0, 42, -30, 16, 45, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [0, 42, -30, 16, 42, -30, 16, 45, -30],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [16, 45, -54, 16, 42, -54, 0, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [16, 42, -54, 0, 42, -54, 0, 45, -54],
+        "sourceMesh": 19
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -38.40000009536743,
+          16.60000001192093, 43.19999998807907, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -38.40000009536743,
+          16.60000001192093, 43.19999998807907, -45.59999990463257,
+          16.60000001192093, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -45.59999990463257,
+          15.999999988079072, 43.19999998807907, -45.59999990463257,
+          15.999999988079072, 43.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -45.59999990463257,
+          15.999999988079072, 43.19999998807907, -38.40000009536743,
+          15.999999988079072, 43.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -45.59999990463257,
+          15.999999988079072, 43.80000001192093, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -38.40000009536743,
+          15.999999988079072, 43.19999998807907, -45.59999990463257,
+          16.60000001192093, 43.19999998807907, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -45.59999990463257,
+          16.60000001192093, 43.19999998807907, -45.59999990463257,
+          16.60000001192093, 43.19999998807907, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -38.40000009536743,
+          15.999999988079072, 43.19999998807907, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -38.40000009536743,
+          16.60000001192093, 43.19999998807907, -38.40000009536743,
+          16.60000001192093, 43.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -45.59999990463257,
+          16.60000001192093, 43.19999998807907, -45.59999990463257,
+          15.999999988079072, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D02",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -45.59999990463257,
+          15.999999988079072, 43.19999998807907, -45.59999990463257,
+          15.999999988079072, 43.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 20
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [16, 45, -54, 16, 42, -54, 16, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [16, 42, -54, 16, 42, -78, 16, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 45, -78, 0, 42, -78, 0, 45, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 42, -78, 0, 42, -54, 0, 45, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 45, -78, 0, 45, -54, 16, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 45, -54, 16, 45, -54, 16, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 42, -54, 0, 42, -78, 16, 42, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 42, -78, 16, 42, -78, 16, 42, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 45, -54, 0, 42, -54, 16, 45, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [0, 42, -54, 16, 42, -54, 16, 45, -54],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [16, 45, -78, 16, 42, -78, 0, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [16, 42, -78, 0, 42, -78, 0, 45, -78],
+        "sourceMesh": 21
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -62.40000009536743,
+          16.60000001192093, 43.19999998807907, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -62.40000009536743,
+          16.60000001192093, 43.19999998807907, -69.59999990463257,
+          16.60000001192093, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -69.59999990463257,
+          15.999999988079072, 43.19999998807907, -69.59999990463257,
+          15.999999988079072, 43.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -69.59999990463257,
+          15.999999988079072, 43.19999998807907, -62.40000009536743,
+          15.999999988079072, 43.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -69.59999990463257,
+          15.999999988079072, 43.80000001192093, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -62.40000009536743,
+          15.999999988079072, 43.19999998807907, -69.59999990463257,
+          16.60000001192093, 43.19999998807907, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -69.59999990463257,
+          16.60000001192093, 43.19999998807907, -69.59999990463257,
+          16.60000001192093, 43.19999998807907, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.80000001192093, -62.40000009536743,
+          15.999999988079072, 43.19999998807907, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 43.19999998807907, -62.40000009536743,
+          16.60000001192093, 43.19999998807907, -62.40000009536743,
+          16.60000001192093, 43.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.80000001192093, -69.59999990463257,
+          16.60000001192093, 43.19999998807907, -69.59999990463257,
+          15.999999988079072, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D03",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 43.19999998807907, -69.59999990463257,
+          15.999999988079072, 43.19999998807907, -69.59999990463257,
+          15.999999988079072, 43.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 22
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [16, 41, -6, 16, 34, -6, 16, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [16, 34, -6, 16, 34, -30, 16, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 41, -30, 0, 34, -30, 0, 41, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 34, -30, 0, 34, -6, 0, 41, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 41, -30, 0, 41, -6, 16, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 41, -6, 16, 41, -6, 16, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 34, -6, 0, 34, -30, 16, 34, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 34, -30, 16, 34, -30, 16, 34, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 41, -6, 0, 34, -6, 16, 41, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [0, 34, -6, 16, 34, -6, 16, 41, -6],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [16, 41, -30, 16, 34, -30, 0, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [16, 34, -30, 0, 34, -30, 0, 41, -30],
+        "sourceMesh": 23
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -14.400000095367432,
+          16.60000001192093, 37.19999998807907, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -14.400000095367432,
+          16.60000001192093, 37.19999998807907, -21.59999990463257,
+          16.60000001192093, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -21.59999990463257,
+          15.999999988079072, 37.19999998807907, -21.59999990463257,
+          15.999999988079072, 37.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -21.59999990463257,
+          15.999999988079072, 37.19999998807907, -14.400000095367432,
+          15.999999988079072, 37.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -21.59999990463257,
+          15.999999988079072, 37.80000001192093, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -14.400000095367432,
+          15.999999988079072, 37.19999998807907, -21.59999990463257,
+          16.60000001192093, 37.19999998807907, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -21.59999990463257,
+          16.60000001192093, 37.19999998807907, -21.59999990463257,
+          16.60000001192093, 37.19999998807907, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -14.400000095367432,
+          15.999999988079072, 37.19999998807907, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -14.400000095367432,
+          16.60000001192093, 37.19999998807907, -14.400000095367432,
+          16.60000001192093, 37.80000001192093, -14.400000095367432
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -21.59999990463257,
+          16.60000001192093, 37.19999998807907, -21.59999990463257,
+          15.999999988079072, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D04",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -21.59999990463257,
+          15.999999988079072, 37.19999998807907, -21.59999990463257,
+          15.999999988079072, 37.80000001192093, -21.59999990463257
+        ],
+        "sourceMesh": 24
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [16, 41, -30, 16, 34, -30, 16, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [16, 34, -30, 16, 34, -54, 16, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 41, -54, 0, 34, -54, 0, 41, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 34, -54, 0, 34, -30, 0, 41, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 41, -54, 0, 41, -30, 16, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 41, -30, 16, 41, -30, 16, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 34, -30, 0, 34, -54, 16, 34, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 34, -54, 16, 34, -54, 16, 34, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 41, -30, 0, 34, -30, 16, 41, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [0, 34, -30, 16, 34, -30, 16, 41, -30],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [16, 41, -54, 16, 34, -54, 0, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [16, 34, -54, 0, 34, -54, 0, 41, -54],
+        "sourceMesh": 25
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -38.40000009536743,
+          16.60000001192093, 37.19999998807907, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -38.40000009536743,
+          16.60000001192093, 37.19999998807907, -45.59999990463257,
+          16.60000001192093, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -45.59999990463257,
+          15.999999988079072, 37.19999998807907, -45.59999990463257,
+          15.999999988079072, 37.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -45.59999990463257,
+          15.999999988079072, 37.19999998807907, -38.40000009536743,
+          15.999999988079072, 37.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -45.59999990463257,
+          15.999999988079072, 37.80000001192093, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -38.40000009536743,
+          15.999999988079072, 37.19999998807907, -45.59999990463257,
+          16.60000001192093, 37.19999998807907, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -45.59999990463257,
+          16.60000001192093, 37.19999998807907, -45.59999990463257,
+          16.60000001192093, 37.19999998807907, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -38.40000009536743,
+          15.999999988079072, 37.19999998807907, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -38.40000009536743,
+          16.60000001192093, 37.19999998807907, -38.40000009536743,
+          16.60000001192093, 37.80000001192093, -38.40000009536743
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -45.59999990463257,
+          16.60000001192093, 37.19999998807907, -45.59999990463257,
+          15.999999988079072, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D05",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -45.59999990463257,
+          15.999999988079072, 37.19999998807907, -45.59999990463257,
+          15.999999988079072, 37.80000001192093, -45.59999990463257
+        ],
+        "sourceMesh": 26
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [16, 41, -54, 16, 34, -54, 16, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [16, 34, -54, 16, 34, -78, 16, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 41, -78, 0, 34, -78, 0, 41, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 34, -78, 0, 34, -54, 0, 41, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 41, -78, 0, 41, -54, 16, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 41, -54, 16, 41, -54, 16, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 34, -54, 0, 34, -78, 16, 34, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 34, -78, 16, 34, -78, 16, 34, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 41, -54, 0, 34, -54, 16, 41, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [0, 34, -54, 16, 34, -54, 16, 41, -54],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [16, 41, -78, 16, 34, -78, 0, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [16, 34, -78, 0, 34, -78, 0, 41, -78],
+        "sourceMesh": 27
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -62.40000009536743,
+          16.60000001192093, 37.19999998807907, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -62.40000009536743,
+          16.60000001192093, 37.19999998807907, -69.59999990463257,
+          16.60000001192093, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -69.59999990463257,
+          15.999999988079072, 37.19999998807907, -69.59999990463257,
+          15.999999988079072, 37.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -69.59999990463257,
+          15.999999988079072, 37.19999998807907, -62.40000009536743,
+          15.999999988079072, 37.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -69.59999990463257,
+          15.999999988079072, 37.80000001192093, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -62.40000009536743,
+          15.999999988079072, 37.19999998807907, -69.59999990463257,
+          16.60000001192093, 37.19999998807907, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -69.59999990463257,
+          16.60000001192093, 37.19999998807907, -69.59999990463257,
+          16.60000001192093, 37.19999998807907, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.80000001192093, -62.40000009536743,
+          15.999999988079072, 37.19999998807907, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 37.19999998807907, -62.40000009536743,
+          16.60000001192093, 37.19999998807907, -62.40000009536743,
+          16.60000001192093, 37.80000001192093, -62.40000009536743
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.80000001192093, -69.59999990463257,
+          16.60000001192093, 37.19999998807907, -69.59999990463257,
+          15.999999988079072, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": "ITC-D06",
+        "side": 0,
+        "vertices": [
+          16.60000001192093, 37.19999998807907, -69.59999990463257,
+          15.999999988079072, 37.19999998807907, -69.59999990463257,
+          15.999999988079072, 37.80000001192093, -69.59999990463257
+        ],
+        "sourceMesh": 28
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 81, -6.000000011920929, 1.399999988079071, 0,
+          -6.000000011920929, 1.399999988079071, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 0, -6.000000011920929, 1.399999988079071, 0,
+          -7.399999988079071, 1.399999988079071, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -7.399999988079071, 1.1920928910669204e-8,
+          0, -7.399999988079071, 1.1920928910669204e-8, 81, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -7.399999988079071, 1.1920928910669204e-8,
+          0, -6.000000011920929, 1.1920928910669204e-8, 81, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -7.399999988079071, 1.1920928910669204e-8,
+          81, -6.000000011920929, 1.399999988079071, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -6.000000011920929, 1.399999988079071, 81,
+          -6.000000011920929, 1.399999988079071, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -6.000000011920929, 1.1920928910669204e-8,
+          0, -7.399999988079071, 1.399999988079071, 0, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -7.399999988079071, 1.399999988079071, 0,
+          -7.399999988079071, 1.399999988079071, 0, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -6.000000011920929, 1.1920928910669204e-8,
+          0, -6.000000011920929, 1.399999988079071, 81, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -6.000000011920929, 1.399999988079071, 0,
+          -6.000000011920929, 1.399999988079071, 81, -6.000000011920929
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 81, -7.399999988079071, 1.399999988079071, 0,
+          -7.399999988079071, 1.1920928910669204e-8, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 0, -7.399999988079071, 1.1920928910669204e-8, 0,
+          -7.399999988079071, 1.1920928910669204e-8, 81, -7.399999988079071
+        ],
+        "sourceMesh": 29
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 81, -76.60000001192093, 1.399999988079071, 0,
+          -76.60000001192093, 1.399999988079071, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 0, -76.60000001192093, 1.399999988079071, 0,
+          -77.99999998807907, 1.399999988079071, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -77.99999998807907, 1.1920928910669204e-8,
+          0, -77.99999998807907, 1.1920928910669204e-8, 81, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -77.99999998807907, 1.1920928910669204e-8,
+          0, -76.60000001192093, 1.1920928910669204e-8, 81, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -77.99999998807907, 1.1920928910669204e-8,
+          81, -76.60000001192093, 1.399999988079071, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -76.60000001192093, 1.399999988079071, 81,
+          -76.60000001192093, 1.399999988079071, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -76.60000001192093, 1.1920928910669204e-8,
+          0, -77.99999998807907, 1.399999988079071, 0, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -77.99999998807907, 1.399999988079071, 0,
+          -77.99999998807907, 1.399999988079071, 0, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 81, -76.60000001192093, 1.1920928910669204e-8,
+          0, -76.60000001192093, 1.399999988079071, 81, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.1920928910669204e-8, 0, -76.60000001192093, 1.399999988079071, 0,
+          -76.60000001192093, 1.399999988079071, 81, -76.60000001192093
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 81, -77.99999998807907, 1.399999988079071, 0,
+          -77.99999998807907, 1.1920928910669204e-8, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          1.399999988079071, 0, -77.99999998807907, 1.1920928910669204e-8, 0,
+          -77.99999998807907, 1.1920928910669204e-8, 81, -77.99999998807907
+        ],
+        "sourceMesh": 30
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 81, -6.000000011920929, 15.999999988079072, 0,
+          -6.000000011920929, 15.999999988079072, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 0, -6.000000011920929, 15.999999988079072, 0,
+          -7.399999988079071, 15.999999988079072, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -7.399999988079071, 14.60000001192093, 0,
+          -7.399999988079071, 14.60000001192093, 81, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -7.399999988079071, 14.60000001192093, 0,
+          -6.000000011920929, 14.60000001192093, 81, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -7.399999988079071, 14.60000001192093, 81,
+          -6.000000011920929, 15.999999988079072, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -6.000000011920929, 15.999999988079072, 81,
+          -6.000000011920929, 15.999999988079072, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -6.000000011920929, 14.60000001192093, 0,
+          -7.399999988079071, 15.999999988079072, 0, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -7.399999988079071, 15.999999988079072, 0,
+          -7.399999988079071, 15.999999988079072, 0, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -6.000000011920929, 14.60000001192093, 0,
+          -6.000000011920929, 15.999999988079072, 81, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -6.000000011920929, 15.999999988079072, 0,
+          -6.000000011920929, 15.999999988079072, 81, -6.000000011920929
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 81, -7.399999988079071, 15.999999988079072, 0,
+          -7.399999988079071, 14.60000001192093, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 0, -7.399999988079071, 14.60000001192093, 0,
+          -7.399999988079071, 14.60000001192093, 81, -7.399999988079071
+        ],
+        "sourceMesh": 31
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 81, -76.60000001192093, 15.999999988079072, 0,
+          -76.60000001192093, 15.999999988079072, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 0, -76.60000001192093, 15.999999988079072, 0,
+          -77.99999998807907, 15.999999988079072, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -77.99999998807907, 14.60000001192093, 0,
+          -77.99999998807907, 14.60000001192093, 81, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -77.99999998807907, 14.60000001192093, 0,
+          -76.60000001192093, 14.60000001192093, 81, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -77.99999998807907, 14.60000001192093, 81,
+          -76.60000001192093, 15.999999988079072, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -76.60000001192093, 15.999999988079072, 81,
+          -76.60000001192093, 15.999999988079072, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -76.60000001192093, 14.60000001192093, 0,
+          -77.99999998807907, 15.999999988079072, 0, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -77.99999998807907, 15.999999988079072, 0,
+          -77.99999998807907, 15.999999988079072, 0, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 81, -76.60000001192093, 14.60000001192093, 0,
+          -76.60000001192093, 15.999999988079072, 81, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          14.60000001192093, 0, -76.60000001192093, 15.999999988079072, 0,
+          -76.60000001192093, 15.999999988079072, 81, -76.60000001192093
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 81, -77.99999998807907, 15.999999988079072, 0,
+          -77.99999998807907, 14.60000001192093, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          15.999999988079072, 0, -77.99999998807907, 14.60000001192093, 0,
+          -77.99999998807907, 14.60000001192093, 81, -77.99999998807907
+        ],
+        "sourceMesh": 32
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [84, 62, -86, 84, 61, -86, 84, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [84, 61, -86, 84, 61, -110, 84, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 62, -110, 68, 61, -110, 68, 62, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 61, -110, 68, 61, -86, 68, 62, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 62, -110, 68, 62, -86, 84, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 62, -86, 84, 62, -86, 84, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 61, -86, 68, 61, -110, 84, 61, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 61, -110, 84, 61, -110, 84, 61, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 62, -86, 68, 61, -86, 84, 62, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [68, 61, -86, 84, 61, -86, 84, 62, -86],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [84, 62, -110, 84, 61, -110, 68, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3A",
+        "side": 0,
+        "vertices": [84, 61, -110, 68, 61, -110, 68, 62, -110],
+        "sourceMesh": 33
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [84, 62, -62, 84, 61, -62, 84, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [84, 61, -62, 84, 61, -86, 84, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 62, -86, 68, 61, -86, 68, 62, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 61, -86, 68, 61, -62, 68, 62, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 62, -86, 68, 62, -62, 84, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 62, -62, 84, 62, -62, 84, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 61, -62, 68, 61, -86, 84, 61, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 61, -86, 84, 61, -86, 84, 61, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 62, -62, 68, 61, -62, 84, 62, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [68, 61, -62, 84, 61, -62, 84, 62, -62],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [84, 62, -86, 84, 61, -86, 68, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3B",
+        "side": 0,
+        "vertices": [84, 61, -86, 68, 61, -86, 68, 62, -86],
+        "sourceMesh": 34
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [84, 62, -38, 84, 61, -38, 84, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [84, 61, -38, 84, 61, -62, 84, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 62, -62, 68, 61, -62, 68, 62, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 61, -62, 68, 61, -38, 68, 62, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 62, -62, 68, 62, -38, 84, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 62, -38, 84, 62, -38, 84, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 61, -38, 68, 61, -62, 84, 61, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 61, -62, 84, 61, -62, 84, 61, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 62, -38, 68, 61, -38, 84, 62, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [68, 61, -38, 84, 61, -38, 84, 62, -38],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [84, 62, -62, 84, 61, -62, 68, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S3C",
+        "side": 0,
+        "vertices": [84, 61, -62, 68, 61, -62, 68, 62, -62],
+        "sourceMesh": 35
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [84, 44, -86, 84, 43, -86, 84, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [84, 43, -86, 84, 43, -110, 84, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 44, -110, 68, 43, -110, 68, 44, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 43, -110, 68, 43, -86, 68, 44, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 44, -110, 68, 44, -86, 84, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 44, -86, 84, 44, -86, 84, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 43, -86, 68, 43, -110, 84, 43, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 43, -110, 84, 43, -110, 84, 43, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 44, -86, 68, 43, -86, 84, 44, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [68, 43, -86, 84, 43, -86, 84, 44, -86],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [84, 44, -110, 84, 43, -110, 68, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4A",
+        "side": 0,
+        "vertices": [84, 43, -110, 68, 43, -110, 68, 44, -110],
+        "sourceMesh": 36
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [84, 44, -62, 84, 43, -62, 84, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [84, 43, -62, 84, 43, -86, 84, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 44, -86, 68, 43, -86, 68, 44, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 43, -86, 68, 43, -62, 68, 44, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 44, -86, 68, 44, -62, 84, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 44, -62, 84, 44, -62, 84, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 43, -62, 68, 43, -86, 84, 43, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 43, -86, 84, 43, -86, 84, 43, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 44, -62, 68, 43, -62, 84, 44, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [68, 43, -62, 84, 43, -62, 84, 44, -62],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [84, 44, -86, 84, 43, -86, 68, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4B",
+        "side": 0,
+        "vertices": [84, 43, -86, 68, 43, -86, 68, 44, -86],
+        "sourceMesh": 37
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [84, 44, -38, 84, 43, -38, 84, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [84, 43, -38, 84, 43, -62, 84, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 44, -62, 68, 43, -62, 68, 44, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 43, -62, 68, 43, -38, 68, 44, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 44, -62, 68, 44, -38, 84, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 44, -38, 84, 44, -38, 84, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 43, -38, 68, 43, -62, 84, 43, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 43, -62, 84, 43, -62, 84, 43, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 44, -38, 68, 43, -38, 84, 44, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [68, 43, -38, 84, 43, -38, 84, 44, -38],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [84, 44, -62, 84, 43, -62, 68, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-S4C",
+        "side": 0,
+        "vertices": [84, 43, -62, 68, 43, -62, 68, 44, -62],
+        "sourceMesh": 38
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [84, 41, -86, 84, 38, -86, 84, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [84, 38, -86, 84, 38, -110, 84, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 41, -110, 68, 38, -110, 68, 41, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 38, -110, 68, 38, -86, 68, 41, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 41, -110, 68, 41, -86, 84, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 41, -86, 84, 41, -86, 84, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 38, -86, 68, 38, -110, 84, 38, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 38, -110, 84, 38, -110, 84, 38, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 41, -86, 68, 38, -86, 84, 41, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [68, 38, -86, 84, 38, -86, 84, 41, -86],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [84, 41, -110, 84, 38, -110, 68, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [84, 38, -110, 68, 38, -110, 68, 41, -110],
+        "sourceMesh": 39
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -94.40000009536743,
+          68.00000001192093, 39.19999998807907, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -94.40000009536743,
+          68.00000001192093, 39.19999998807907, -101.59999990463257,
+          68.00000001192093, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -101.59999990463257,
+          67.39999998807907, 39.19999998807907, -101.59999990463257,
+          67.39999998807907, 39.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -101.59999990463257,
+          67.39999998807907, 39.19999998807907, -94.40000009536743,
+          67.39999998807907, 39.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -101.59999990463257,
+          67.39999998807907, 39.80000001192093, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -94.40000009536743,
+          67.39999998807907, 39.19999998807907, -101.59999990463257,
+          68.00000001192093, 39.19999998807907, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -101.59999990463257,
+          68.00000001192093, 39.19999998807907, -101.59999990463257,
+          68.00000001192093, 39.19999998807907, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -94.40000009536743,
+          67.39999998807907, 39.19999998807907, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -94.40000009536743,
+          68.00000001192093, 39.19999998807907, -94.40000009536743,
+          68.00000001192093, 39.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -101.59999990463257,
+          68.00000001192093, 39.19999998807907, -101.59999990463257,
+          67.39999998807907, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D07",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -101.59999990463257,
+          67.39999998807907, 39.19999998807907, -101.59999990463257,
+          67.39999998807907, 39.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 40
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [84, 41, -62, 84, 38, -62, 84, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [84, 38, -62, 84, 38, -86, 84, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 41, -86, 68, 38, -86, 68, 41, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 38, -86, 68, 38, -62, 68, 41, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 41, -86, 68, 41, -62, 84, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 41, -62, 84, 41, -62, 84, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 38, -62, 68, 38, -86, 84, 38, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 38, -86, 84, 38, -86, 84, 38, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 41, -62, 68, 38, -62, 84, 41, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [68, 38, -62, 84, 38, -62, 84, 41, -62],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [84, 41, -86, 84, 38, -86, 68, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [84, 38, -86, 68, 38, -86, 68, 41, -86],
+        "sourceMesh": 41
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -70.40000009536743,
+          68.00000001192093, 39.19999998807907, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -70.40000009536743,
+          68.00000001192093, 39.19999998807907, -77.59999990463257,
+          68.00000001192093, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -77.59999990463257,
+          67.39999998807907, 39.19999998807907, -77.59999990463257,
+          67.39999998807907, 39.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -77.59999990463257,
+          67.39999998807907, 39.19999998807907, -70.40000009536743,
+          67.39999998807907, 39.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -77.59999990463257,
+          67.39999998807907, 39.80000001192093, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -70.40000009536743,
+          67.39999998807907, 39.19999998807907, -77.59999990463257,
+          68.00000001192093, 39.19999998807907, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -77.59999990463257,
+          68.00000001192093, 39.19999998807907, -77.59999990463257,
+          68.00000001192093, 39.19999998807907, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -70.40000009536743,
+          67.39999998807907, 39.19999998807907, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -70.40000009536743,
+          68.00000001192093, 39.19999998807907, -70.40000009536743,
+          68.00000001192093, 39.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -77.59999990463257,
+          68.00000001192093, 39.19999998807907, -77.59999990463257,
+          67.39999998807907, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D08",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -77.59999990463257,
+          67.39999998807907, 39.19999998807907, -77.59999990463257,
+          67.39999998807907, 39.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 42
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [84, 41, -38, 84, 38, -38, 84, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [84, 38, -38, 84, 38, -62, 84, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 41, -62, 68, 38, -62, 68, 41, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 38, -62, 68, 38, -38, 68, 41, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 41, -62, 68, 41, -38, 84, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 41, -38, 84, 41, -38, 84, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 38, -38, 68, 38, -62, 84, 38, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 38, -62, 84, 38, -62, 84, 38, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 41, -38, 68, 38, -38, 84, 41, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [68, 38, -38, 84, 38, -38, 84, 41, -38],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [84, 41, -62, 84, 38, -62, 68, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [84, 38, -62, 68, 38, -62, 68, 41, -62],
+        "sourceMesh": 43
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -46.40000009536743,
+          68.00000001192093, 39.19999998807907, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -46.40000009536743,
+          68.00000001192093, 39.19999998807907, -53.59999990463257,
+          68.00000001192093, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -53.59999990463257,
+          67.39999998807907, 39.19999998807907, -53.59999990463257,
+          67.39999998807907, 39.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -53.59999990463257,
+          67.39999998807907, 39.19999998807907, -46.40000009536743,
+          67.39999998807907, 39.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -53.59999990463257,
+          67.39999998807907, 39.80000001192093, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -46.40000009536743,
+          67.39999998807907, 39.19999998807907, -53.59999990463257,
+          68.00000001192093, 39.19999998807907, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -53.59999990463257,
+          68.00000001192093, 39.19999998807907, -53.59999990463257,
+          68.00000001192093, 39.19999998807907, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.80000001192093, -46.40000009536743,
+          67.39999998807907, 39.19999998807907, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 39.19999998807907, -46.40000009536743,
+          68.00000001192093, 39.19999998807907, -46.40000009536743,
+          68.00000001192093, 39.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.80000001192093, -53.59999990463257,
+          68.00000001192093, 39.19999998807907, -53.59999990463257,
+          67.39999998807907, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D09",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 39.19999998807907, -53.59999990463257,
+          67.39999998807907, 39.19999998807907, -53.59999990463257,
+          67.39999998807907, 39.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 44
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [84, 37, -86, 84, 30, -86, 84, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [84, 30, -86, 84, 30, -110, 84, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 37, -110, 68, 30, -110, 68, 37, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 30, -110, 68, 30, -86, 68, 37, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 37, -110, 68, 37, -86, 84, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 37, -86, 84, 37, -86, 84, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 30, -86, 68, 30, -110, 84, 30, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 30, -110, 84, 30, -110, 84, 30, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 37, -86, 68, 30, -86, 84, 37, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [68, 30, -86, 84, 30, -86, 84, 37, -86],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [84, 37, -110, 84, 30, -110, 68, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [84, 30, -110, 68, 30, -110, 68, 37, -110],
+        "sourceMesh": 45
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -94.40000009536743,
+          68.00000001192093, 33.19999998807907, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -94.40000009536743,
+          68.00000001192093, 33.19999998807907, -101.59999990463257,
+          68.00000001192093, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -101.59999990463257,
+          67.39999998807907, 33.19999998807907, -101.59999990463257,
+          67.39999998807907, 33.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -101.59999990463257,
+          67.39999998807907, 33.19999998807907, -94.40000009536743,
+          67.39999998807907, 33.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -101.59999990463257,
+          67.39999998807907, 33.80000001192093, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -94.40000009536743,
+          67.39999998807907, 33.19999998807907, -101.59999990463257,
+          68.00000001192093, 33.19999998807907, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -101.59999990463257,
+          68.00000001192093, 33.19999998807907, -101.59999990463257,
+          68.00000001192093, 33.19999998807907, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -94.40000009536743,
+          67.39999998807907, 33.19999998807907, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -94.40000009536743,
+          68.00000001192093, 33.19999998807907, -94.40000009536743,
+          68.00000001192093, 33.80000001192093, -94.40000009536743
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -101.59999990463257,
+          68.00000001192093, 33.19999998807907, -101.59999990463257,
+          67.39999998807907, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D10",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -101.59999990463257,
+          67.39999998807907, 33.19999998807907, -101.59999990463257,
+          67.39999998807907, 33.80000001192093, -101.59999990463257
+        ],
+        "sourceMesh": 46
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [84, 37, -62, 84, 30, -62, 84, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [84, 30, -62, 84, 30, -86, 84, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 37, -86, 68, 30, -86, 68, 37, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 30, -86, 68, 30, -62, 68, 37, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 37, -86, 68, 37, -62, 84, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 37, -62, 84, 37, -62, 84, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 30, -62, 68, 30, -86, 84, 30, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 30, -86, 84, 30, -86, 84, 30, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 37, -62, 68, 30, -62, 84, 37, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [68, 30, -62, 84, 30, -62, 84, 37, -62],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [84, 37, -86, 84, 30, -86, 68, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [84, 30, -86, 68, 30, -86, 68, 37, -86],
+        "sourceMesh": 47
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -70.40000009536743,
+          68.00000001192093, 33.19999998807907, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -70.40000009536743,
+          68.00000001192093, 33.19999998807907, -77.59999990463257,
+          68.00000001192093, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -77.59999990463257,
+          67.39999998807907, 33.19999998807907, -77.59999990463257,
+          67.39999998807907, 33.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -77.59999990463257,
+          67.39999998807907, 33.19999998807907, -70.40000009536743,
+          67.39999998807907, 33.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -77.59999990463257,
+          67.39999998807907, 33.80000001192093, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -70.40000009536743,
+          67.39999998807907, 33.19999998807907, -77.59999990463257,
+          68.00000001192093, 33.19999998807907, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -77.59999990463257,
+          68.00000001192093, 33.19999998807907, -77.59999990463257,
+          68.00000001192093, 33.19999998807907, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -70.40000009536743,
+          67.39999998807907, 33.19999998807907, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -70.40000009536743,
+          68.00000001192093, 33.19999998807907, -70.40000009536743,
+          68.00000001192093, 33.80000001192093, -70.40000009536743
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -77.59999990463257,
+          68.00000001192093, 33.19999998807907, -77.59999990463257,
+          67.39999998807907, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D11",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -77.59999990463257,
+          67.39999998807907, 33.19999998807907, -77.59999990463257,
+          67.39999998807907, 33.80000001192093, -77.59999990463257
+        ],
+        "sourceMesh": 48
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [84, 37, -38, 84, 30, -38, 84, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [84, 30, -38, 84, 30, -62, 84, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 37, -62, 68, 30, -62, 68, 37, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 30, -62, 68, 30, -38, 68, 37, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 37, -62, 68, 37, -38, 84, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 37, -38, 84, 37, -38, 84, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 30, -38, 68, 30, -62, 84, 30, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 30, -62, 84, 30, -62, 84, 30, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 37, -38, 68, 30, -38, 84, 37, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [68, 30, -38, 84, 30, -38, 84, 37, -38],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [84, 37, -62, 84, 30, -62, 68, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [84, 30, -62, 68, 30, -62, 68, 37, -62],
+        "sourceMesh": 49
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -46.40000009536743,
+          68.00000001192093, 33.19999998807907, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -46.40000009536743,
+          68.00000001192093, 33.19999998807907, -53.59999990463257,
+          68.00000001192093, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -53.59999990463257,
+          67.39999998807907, 33.19999998807907, -53.59999990463257,
+          67.39999998807907, 33.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -53.59999990463257,
+          67.39999998807907, 33.19999998807907, -46.40000009536743,
+          67.39999998807907, 33.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -53.59999990463257,
+          67.39999998807907, 33.80000001192093, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -46.40000009536743,
+          67.39999998807907, 33.19999998807907, -53.59999990463257,
+          68.00000001192093, 33.19999998807907, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -53.59999990463257,
+          68.00000001192093, 33.19999998807907, -53.59999990463257,
+          68.00000001192093, 33.19999998807907, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.80000001192093, -46.40000009536743,
+          67.39999998807907, 33.19999998807907, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          67.39999998807907, 33.19999998807907, -46.40000009536743,
+          68.00000001192093, 33.19999998807907, -46.40000009536743,
+          68.00000001192093, 33.80000001192093, -46.40000009536743
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.80000001192093, -53.59999990463257,
+          68.00000001192093, 33.19999998807907, -53.59999990463257,
+          67.39999998807907, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": "ITC-D12",
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 33.19999998807907, -53.59999990463257,
+          67.39999998807907, 33.19999998807907, -53.59999990463257,
+          67.39999998807907, 33.80000001192093, -53.59999990463257
+        ],
+        "sourceMesh": 50
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 62, -38.00000001192093, 69.39999998807907, 0,
+          -38.00000001192093, 69.39999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 0, -38.00000001192093, 69.39999998807907, 0,
+          -39.399999988079074, 69.39999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -39.399999988079074, 68.00000001192093, 0,
+          -39.399999988079074, 68.00000001192093, 62, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -39.399999988079074, 68.00000001192093, 0,
+          -38.00000001192093, 68.00000001192093, 62, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -39.399999988079074, 68.00000001192093, 62,
+          -38.00000001192093, 69.39999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -38.00000001192093, 69.39999998807907, 62,
+          -38.00000001192093, 69.39999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -38.00000001192093, 68.00000001192093, 0,
+          -39.399999988079074, 69.39999998807907, 0, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -39.399999988079074, 69.39999998807907, 0,
+          -39.399999988079074, 69.39999998807907, 0, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -38.00000001192093, 68.00000001192093, 0,
+          -38.00000001192093, 69.39999998807907, 62, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -38.00000001192093, 69.39999998807907, 0,
+          -38.00000001192093, 69.39999998807907, 62, -38.00000001192093
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 62, -39.399999988079074, 69.39999998807907, 0,
+          -39.399999988079074, 68.00000001192093, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 0, -39.399999988079074, 68.00000001192093, 0,
+          -39.399999988079074, 68.00000001192093, 62, -39.399999988079074
+        ],
+        "sourceMesh": 51
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 62, -108.60000001192093, 69.39999998807907, 0,
+          -108.60000001192093, 69.39999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 0, -108.60000001192093, 69.39999998807907, 0,
+          -109.99999998807907, 69.39999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -109.99999998807907, 68.00000001192093, 0,
+          -109.99999998807907, 68.00000001192093, 62, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -109.99999998807907, 68.00000001192093, 0,
+          -108.60000001192093, 68.00000001192093, 62, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -109.99999998807907, 68.00000001192093, 62,
+          -108.60000001192093, 69.39999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -108.60000001192093, 69.39999998807907, 62,
+          -108.60000001192093, 69.39999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -108.60000001192093, 68.00000001192093, 0,
+          -109.99999998807907, 69.39999998807907, 0, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -109.99999998807907, 69.39999998807907, 0,
+          -109.99999998807907, 69.39999998807907, 0, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 62, -108.60000001192093, 68.00000001192093, 0,
+          -108.60000001192093, 69.39999998807907, 62, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          68.00000001192093, 0, -108.60000001192093, 69.39999998807907, 0,
+          -108.60000001192093, 69.39999998807907, 62, -108.60000001192093
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 62, -109.99999998807907, 69.39999998807907, 0,
+          -109.99999998807907, 68.00000001192093, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          69.39999998807907, 0, -109.99999998807907, 68.00000001192093, 0,
+          -109.99999998807907, 68.00000001192093, 62, -109.99999998807907
+        ],
+        "sourceMesh": 52
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 62, -38.00000001192093, 83.99999998807907, 0,
+          -38.00000001192093, 83.99999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 0, -38.00000001192093, 83.99999998807907, 0,
+          -39.399999988079074, 83.99999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -39.399999988079074, 82.60000001192093, 0,
+          -39.399999988079074, 82.60000001192093, 62, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -39.399999988079074, 82.60000001192093, 0,
+          -38.00000001192093, 82.60000001192093, 62, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -39.399999988079074, 82.60000001192093, 62,
+          -38.00000001192093, 83.99999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -38.00000001192093, 83.99999998807907, 62,
+          -38.00000001192093, 83.99999998807907, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -38.00000001192093, 82.60000001192093, 0,
+          -39.399999988079074, 83.99999998807907, 0, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -39.399999988079074, 83.99999998807907, 0,
+          -39.399999988079074, 83.99999998807907, 0, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -38.00000001192093, 82.60000001192093, 0,
+          -38.00000001192093, 83.99999998807907, 62, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -38.00000001192093, 83.99999998807907, 0,
+          -38.00000001192093, 83.99999998807907, 62, -38.00000001192093
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 62, -39.399999988079074, 83.99999998807907, 0,
+          -39.399999988079074, 82.60000001192093, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 0, -39.399999988079074, 82.60000001192093, 0,
+          -39.399999988079074, 82.60000001192093, 62, -39.399999988079074
+        ],
+        "sourceMesh": 53
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 62, -108.60000001192093, 83.99999998807907, 0,
+          -108.60000001192093, 83.99999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 0, -108.60000001192093, 83.99999998807907, 0,
+          -109.99999998807907, 83.99999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -109.99999998807907, 82.60000001192093, 0,
+          -109.99999998807907, 82.60000001192093, 62, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -109.99999998807907, 82.60000001192093, 0,
+          -108.60000001192093, 82.60000001192093, 62, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -109.99999998807907, 82.60000001192093, 62,
+          -108.60000001192093, 83.99999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -108.60000001192093, 83.99999998807907, 62,
+          -108.60000001192093, 83.99999998807907, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -108.60000001192093, 82.60000001192093, 0,
+          -109.99999998807907, 83.99999998807907, 0, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -109.99999998807907, 83.99999998807907, 0,
+          -109.99999998807907, 83.99999998807907, 0, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 62, -108.60000001192093, 82.60000001192093, 0,
+          -108.60000001192093, 83.99999998807907, 62, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          82.60000001192093, 0, -108.60000001192093, 83.99999998807907, 0,
+          -108.60000001192093, 83.99999998807907, 62, -108.60000001192093
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 62, -109.99999998807907, 83.99999998807907, 0,
+          -109.99999998807907, 82.60000001192093, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": null,
+        "side": 0,
+        "vertices": [
+          83.99999998807907, 0, -109.99999998807907, 82.60000001192093, 0,
+          -109.99999998807907, 82.60000001192093, 62, -109.99999998807907
+        ],
+        "sourceMesh": 54
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [41, 81, -84, 41, 0, -84, 41, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [41, 0, -84, 41, 0, -108, 41, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 81, -108, 19, 0, -108, 19, 81, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 0, -108, 19, 0, -84, 19, 81, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 81, -108, 19, 81, -84, 41, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 81, -84, 41, 81, -84, 41, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 0, -84, 19, 0, -108, 41, 0, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 0, -108, 41, 0, -108, 41, 0, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 81, -84, 19, 0, -84, 41, 81, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [19, 0, -84, 41, 0, -84, 41, 81, -84],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [41, 81, -108, 41, 0, -108, 19, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [41, 0, -108, 19, 0, -108, 19, 81, -108],
+        "sourceMesh": 55
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          39.5, 79, -83.69999999403953, 39.5, 2, -83.69999999403953, 39.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          39.5, 2, -83.69999999403953, 39.5, 2, -84.00000000596046, 39.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 79, -84.00000000596046, 20.5, 2, -84.00000000596046, 20.5, 79,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 2, -84.00000000596046, 20.5, 2, -83.69999999403953, 20.5, 79,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 79, -84.00000000596046, 20.5, 79, -83.69999999403953, 39.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 79, -83.69999999403953, 39.5, 79, -83.69999999403953, 39.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 2, -83.69999999403953, 20.5, 2, -84.00000000596046, 39.5, 2,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 2, -84.00000000596046, 39.5, 2, -84.00000000596046, 39.5, 2,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 79, -83.69999999403953, 20.5, 2, -83.69999999403953, 39.5, 79,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          20.5, 2, -83.69999999403953, 39.5, 2, -83.69999999403953, 39.5, 79,
+          -83.69999999403953
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          39.5, 79, -84.00000000596046, 39.5, 2, -84.00000000596046, 20.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [
+          39.5, 2, -84.00000000596046, 20.5, 2, -84.00000000596046, 20.5, 79,
+          -84.00000000596046
+        ],
+        "sourceMesh": 56
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 74.5, -83.4, 39.5, 71.5, -83.4, 39.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 71.5, -83.4, 39.5, 71.5, -83.9, 39.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 74.5, -83.9, 20.5, 71.5, -83.9, 20.5, 74.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 71.5, -83.9, 20.5, 71.5, -83.4, 20.5, 74.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 74.5, -83.9, 20.5, 74.5, -83.4, 39.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 74.5, -83.4, 39.5, 74.5, -83.4, 39.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 71.5, -83.4, 20.5, 71.5, -83.9, 39.5, 71.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 71.5, -83.9, 39.5, 71.5, -83.9, 39.5, 71.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 74.5, -83.4, 20.5, 71.5, -83.4, 39.5, 74.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 71.5, -83.4, 39.5, 71.5, -83.4, 39.5, 74.5, -83.4],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 74.5, -83.9, 39.5, 71.5, -83.9, 20.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 71.5, -83.9, 20.5, 71.5, -83.9, 20.5, 74.5, -83.9],
+        "sourceMesh": 57
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 66, -83.4, 39.5, 64, -83.4, 39.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 64, -83.4, 39.5, 64, -83.9, 39.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 66, -83.9, 20.5, 64, -83.9, 20.5, 66, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 64, -83.9, 20.5, 64, -83.4, 20.5, 66, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 66, -83.9, 20.5, 66, -83.4, 39.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 66, -83.4, 39.5, 66, -83.4, 39.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 64, -83.4, 20.5, 64, -83.9, 39.5, 64, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 64, -83.9, 39.5, 64, -83.9, 39.5, 64, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 66, -83.4, 20.5, 64, -83.4, 39.5, 66, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 64, -83.4, 39.5, 64, -83.4, 39.5, 66, -83.4],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 66, -83.9, 39.5, 64, -83.9, 20.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 64, -83.9, 20.5, 64, -83.9, 20.5, 66, -83.9],
+        "sourceMesh": 58
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 58, -83.4, 39.5, 56, -83.4, 39.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 56, -83.4, 39.5, 56, -83.9, 39.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 58, -83.9, 20.5, 56, -83.9, 20.5, 58, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 56, -83.9, 20.5, 56, -83.4, 20.5, 58, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 58, -83.9, 20.5, 58, -83.4, 39.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 58, -83.4, 39.5, 58, -83.4, 39.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 56, -83.4, 20.5, 56, -83.9, 39.5, 56, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 56, -83.9, 39.5, 56, -83.9, 39.5, 56, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 58, -83.4, 20.5, 56, -83.4, 39.5, 58, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [20.5, 56, -83.4, 39.5, 56, -83.4, 39.5, 58, -83.4],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 58, -83.9, 39.5, 56, -83.9, 20.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [39.5, 56, -83.9, 20.5, 56, -83.9, 20.5, 58, -83.9],
+        "sourceMesh": 59
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 8.5, -83.4, 38, 7.5, -83.4, 38, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 7.5, -83.4, 38, 7.5, -83.9, 38, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 8.5, -83.9, 22, 7.5, -83.9, 22, 8.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 7.5, -83.9, 22, 7.5, -83.4, 22, 8.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 8.5, -83.9, 22, 8.5, -83.4, 38, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 8.5, -83.4, 38, 8.5, -83.4, 38, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 7.5, -83.4, 22, 7.5, -83.9, 38, 7.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 7.5, -83.9, 38, 7.5, -83.9, 38, 7.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 8.5, -83.4, 22, 7.5, -83.4, 38, 8.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 7.5, -83.4, 38, 7.5, -83.4, 38, 8.5, -83.4],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 8.5, -83.9, 38, 7.5, -83.9, 22, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 7.5, -83.9, 22, 7.5, -83.9, 22, 8.5, -83.9],
+        "sourceMesh": 60
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 12.5, -83.4, 38, 11.5, -83.4, 38, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 11.5, -83.4, 38, 11.5, -83.9, 38, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 12.5, -83.9, 22, 11.5, -83.9, 22, 12.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 11.5, -83.9, 22, 11.5, -83.4, 22, 12.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 12.5, -83.9, 22, 12.5, -83.4, 38, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 12.5, -83.4, 38, 12.5, -83.4, 38, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 11.5, -83.4, 22, 11.5, -83.9, 38, 11.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 11.5, -83.9, 38, 11.5, -83.9, 38, 11.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 12.5, -83.4, 22, 11.5, -83.4, 38, 12.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 11.5, -83.4, 38, 11.5, -83.4, 38, 12.5, -83.4],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 12.5, -83.9, 38, 11.5, -83.9, 22, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 11.5, -83.9, 22, 11.5, -83.9, 22, 12.5, -83.9],
+        "sourceMesh": 61
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 16.5, -83.4, 38, 15.5, -83.4, 38, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 15.5, -83.4, 38, 15.5, -83.9, 38, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 16.5, -83.9, 22, 15.5, -83.9, 22, 16.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 15.5, -83.9, 22, 15.5, -83.4, 22, 16.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 16.5, -83.9, 22, 16.5, -83.4, 38, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 16.5, -83.4, 38, 16.5, -83.4, 38, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 15.5, -83.4, 22, 15.5, -83.9, 38, 15.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 15.5, -83.9, 38, 15.5, -83.9, 38, 15.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 16.5, -83.4, 22, 15.5, -83.4, 38, 16.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 15.5, -83.4, 38, 15.5, -83.4, 38, 16.5, -83.4],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 16.5, -83.9, 38, 15.5, -83.9, 22, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 15.5, -83.9, 22, 15.5, -83.9, 22, 16.5, -83.9],
+        "sourceMesh": 62
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 20.5, -83.4, 38, 19.5, -83.4, 38, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 19.5, -83.4, 38, 19.5, -83.9, 38, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 20.5, -83.9, 22, 19.5, -83.9, 22, 20.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 19.5, -83.9, 22, 19.5, -83.4, 22, 20.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 20.5, -83.9, 22, 20.5, -83.4, 38, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 20.5, -83.4, 38, 20.5, -83.4, 38, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 19.5, -83.4, 22, 19.5, -83.9, 38, 19.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 19.5, -83.9, 38, 19.5, -83.9, 38, 19.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 20.5, -83.4, 22, 19.5, -83.4, 38, 20.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 19.5, -83.4, 38, 19.5, -83.4, 38, 20.5, -83.4],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 20.5, -83.9, 38, 19.5, -83.9, 22, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 19.5, -83.9, 22, 19.5, -83.9, 22, 20.5, -83.9],
+        "sourceMesh": 63
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 24.5, -83.4, 38, 23.5, -83.4, 38, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 23.5, -83.4, 38, 23.5, -83.9, 38, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 24.5, -83.9, 22, 23.5, -83.9, 22, 24.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 23.5, -83.9, 22, 23.5, -83.4, 22, 24.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 24.5, -83.9, 22, 24.5, -83.4, 38, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 24.5, -83.4, 38, 24.5, -83.4, 38, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 23.5, -83.4, 22, 23.5, -83.9, 38, 23.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 23.5, -83.9, 38, 23.5, -83.9, 38, 23.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 24.5, -83.4, 22, 23.5, -83.4, 38, 24.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 23.5, -83.4, 38, 23.5, -83.4, 38, 24.5, -83.4],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 24.5, -83.9, 38, 23.5, -83.9, 22, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 23.5, -83.9, 22, 23.5, -83.9, 22, 24.5, -83.9],
+        "sourceMesh": 64
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 28.5, -83.4, 38, 27.5, -83.4, 38, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 27.5, -83.4, 38, 27.5, -83.9, 38, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 28.5, -83.9, 22, 27.5, -83.9, 22, 28.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 27.5, -83.9, 22, 27.5, -83.4, 22, 28.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 28.5, -83.9, 22, 28.5, -83.4, 38, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 28.5, -83.4, 38, 28.5, -83.4, 38, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 27.5, -83.4, 22, 27.5, -83.9, 38, 27.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 27.5, -83.9, 38, 27.5, -83.9, 38, 27.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 28.5, -83.4, 22, 27.5, -83.4, 38, 28.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [22, 27.5, -83.4, 38, 27.5, -83.4, 38, 28.5, -83.4],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 28.5, -83.9, 38, 27.5, -83.9, 22, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RACK",
+        "side": 0,
+        "vertices": [38, 27.5, -83.9, 22, 27.5, -83.9, 22, 28.5, -83.9],
+        "sourceMesh": 65
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [19, 12, -12, 19, 0, -12, 19, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [19, 0, -12, 19, 0, -36, 19, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 12, -36, 0, 0, -36, 0, 12, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 0, -36, 0, 0, -12, 0, 12, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 12, -36, 0, 12, -12, 19, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 12, -12, 19, 12, -12, 19, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 0, -12, 0, 0, -36, 19, 0, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 0, -36, 19, 0, -36, 19, 0, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 12, -12, 0, 0, -12, 19, 12, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [0, 0, -12, 19, 0, -12, 19, 12, -12],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [19, 12, -36, 19, 0, -36, 0, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [19, 0, -36, 0, 0, -36, 0, 12, -36],
+        "sourceMesh": 66
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          19, 12.000000005960464, -12, 19, 11.199999994039535, -12, 19,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          19, 11.199999994039535, -12, 19, 11.199999994039535, -36, 19,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 12.000000005960464, -36, 0, 11.199999994039535, -36, 0,
+          12.000000005960464, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 11.199999994039535, -36, 0, 11.199999994039535, -12, 0,
+          12.000000005960464, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 12.000000005960464, -36, 0, 12.000000005960464, -12, 19,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 12.000000005960464, -12, 19, 12.000000005960464, -12, 19,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 11.199999994039535, -12, 0, 11.199999994039535, -36, 19,
+          11.199999994039535, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 11.199999994039535, -36, 19, 11.199999994039535, -36, 19,
+          11.199999994039535, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 12.000000005960464, -12, 0, 11.199999994039535, -12, 19,
+          12.000000005960464, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          0, 11.199999994039535, -12, 19, 11.199999994039535, -12, 19,
+          12.000000005960464, -12
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          19, 12.000000005960464, -36, 19, 11.199999994039535, -36, 0,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-RED",
+        "side": 0,
+        "vertices": [
+          19, 11.199999994039535, -36, 0, 11.199999994039535, -36, 0,
+          12.000000005960464, -36
+        ],
+        "sourceMesh": 67
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [84, 14, -96, 84, 0, -96, 84, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [84, 0, -96, 84, 0, -126, 84, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 14, -126, 64, 0, -126, 64, 14, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 0, -126, 64, 0, -96, 64, 14, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 14, -126, 64, 14, -96, 84, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 14, -96, 84, 14, -96, 84, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 0, -96, 64, 0, -126, 84, 0, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 0, -126, 84, 0, -126, 84, 0, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 14, -96, 64, 0, -96, 84, 14, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [64, 0, -96, 84, 0, -96, 84, 14, -96],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [84, 14, -126, 84, 0, -126, 64, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [84, 0, -126, 64, 0, -126, 64, 14, -126],
+        "sourceMesh": 68
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          84, 14.000000005960464, -96, 84, 13.199999994039535, -96, 84,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          84, 13.199999994039535, -96, 84, 13.199999994039535, -126, 84,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 14.000000005960464, -126, 64, 13.199999994039535, -126, 64,
+          14.000000005960464, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 13.199999994039535, -126, 64, 13.199999994039535, -96, 64,
+          14.000000005960464, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 14.000000005960464, -126, 64, 14.000000005960464, -96, 84,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 14.000000005960464, -96, 84, 14.000000005960464, -96, 84,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 13.199999994039535, -96, 64, 13.199999994039535, -126, 84,
+          13.199999994039535, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 13.199999994039535, -126, 84, 13.199999994039535, -126, 84,
+          13.199999994039535, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 14.000000005960464, -96, 64, 13.199999994039535, -96, 84,
+          14.000000005960464, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          64, 13.199999994039535, -96, 84, 13.199999994039535, -96, 84,
+          14.000000005960464, -96
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          84, 14.000000005960464, -126, 84, 13.199999994039535, -126, 64,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-BLACK",
+        "side": 0,
+        "vertices": [
+          84, 13.199999994039535, -126, 64, 13.199999994039535, -126, 64,
+          14.000000005960464, -126
+        ],
+        "sourceMesh": 69
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [84, 12, -40, 84, 0, -40, 84, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [84, 0, -40, 84, 0, -65, 84, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 12, -65, 66, 0, -65, 66, 12, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 0, -65, 66, 0, -40, 66, 12, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 12, -65, 66, 12, -40, 84, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 12, -40, 84, 12, -40, 84, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 0, -40, 66, 0, -65, 84, 0, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 0, -65, 84, 0, -65, 84, 0, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 12, -40, 66, 0, -40, 84, 12, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [66, 0, -40, 84, 0, -40, 84, 12, -40],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [84, 12, -65, 84, 0, -65, 66, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [84, 0, -65, 66, 0, -65, 66, 12, -65],
+        "sourceMesh": 70
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          84, 12.000000005960464, -40, 84, 11.199999994039535, -40, 84,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          84, 11.199999994039535, -40, 84, 11.199999994039535, -65, 84,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 12.000000005960464, -65, 66, 11.199999994039535, -65, 66,
+          12.000000005960464, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 11.199999994039535, -65, 66, 11.199999994039535, -40, 66,
+          12.000000005960464, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 12.000000005960464, -65, 66, 12.000000005960464, -40, 84,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 12.000000005960464, -40, 84, 12.000000005960464, -40, 84,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 11.199999994039535, -40, 66, 11.199999994039535, -65, 84,
+          11.199999994039535, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 11.199999994039535, -65, 84, 11.199999994039535, -65, 84,
+          11.199999994039535, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 12.000000005960464, -40, 66, 11.199999994039535, -40, 84,
+          12.000000005960464, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          66, 11.199999994039535, -40, 84, 11.199999994039535, -40, 84,
+          12.000000005960464, -40
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          84, 12.000000005960464, -65, 84, 11.199999994039535, -65, 66,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      },
+      {
+        "code": "ITC-CLEAR",
+        "side": 0,
+        "vertices": [
+          84, 11.199999994039535, -65, 66, 11.199999994039535, -65, 66,
+          12.000000005960464, -65
+        ],
+        "sourceMesh": 71
+      }
+    ]
+  }
+}

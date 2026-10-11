@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { ChoiceDefaultEditor, OptionTreeEditor } from './option-tree-editor';
 import type { Field } from './designer-model';
+import * as designerModel from './designer-model';
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base: Field = {
@@ -18,11 +19,21 @@ const base: Field = {
     { id: id(4), label: 'Ethernet', active: true },
   ],
 };
-function Editor({ initial = base }: { initial?: Field }) {
+function Editor({
+  initial = base,
+  publishedOptions,
+}: {
+  initial?: Field;
+  publishedOptions?: Field['options'];
+}) {
   const [field, setField] = useState(initial);
   return (
     <>
-      <OptionTreeEditor field={field} change={setField} />
+      <OptionTreeEditor
+        field={field}
+        change={setField}
+        publishedOptions={publishedOptions}
+      />
       <output data-testid="field">{JSON.stringify(field)}</output>
     </>
   );
@@ -39,6 +50,41 @@ const tools = (name: string) => {
 const current = () =>
   JSON.parse(screen.getByTestId('field').textContent!) as Field;
 describe('choice editor', () => {
+  it('keeps unchanged published ambiguity editable but flags a spelling change and cross-parent new choice', () => {
+    const initial: Field = {
+      ...base,
+      options: [
+        ...base.options,
+        { id: id(5), label: 'usb-c', active: true, parent_id: id(4) },
+      ],
+    };
+    render(
+      <Editor
+        initial={initial}
+        publishedOptions={structuredClone(initial.options)}
+      />,
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: ' USB-C ' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: USB-C' }),
+      { target: { value: 'USB-C' } },
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Option name: New option' }),
+      { target: { value: 'usb-c' } },
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(3);
+    expect(current().options.find((option) => option.id === id(3))?.label).toBe(
+      'USB-C',
+    );
+  });
   it('discards an accidentally added blank leaf without altering other answers', () => {
     render(<Editor initial={{ ...base, default: id(3) }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
@@ -215,6 +261,25 @@ describe('choice editor', () => {
     expect(screen.getByLabelText('Option name: New option')).toHaveFocus();
     expect(current().options.at(-1)?.parent_id).toBe(id(1098));
     expect(screen.getByRole('button', { name: 'Add option' })).toBeDisabled();
+  });
+  it('validates move destinations only while the move controls are open', () => {
+    const validate = vi.spyOn(designerModel, 'canReparent');
+    try {
+      render(<Editor />);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add child option to USB' }),
+      );
+      expect(screen.getByLabelText('Option name: New option')).toHaveFocus();
+      expect(validate).not.toHaveBeenCalled();
+      tools('USB');
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).toHaveBeenCalled();
+      validate.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'Move to… USB' }));
+      expect(validate).not.toHaveBeenCalled();
+    } finally {
+      validate.mockRestore();
+    }
   });
   it('preserves 64-level choices and disallows adding a 65th level', () => {
     const options = Array.from({ length: 64 }, (_, n) => ({

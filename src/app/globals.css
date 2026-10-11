@@ -620,30 +620,65 @@ a {
   z-index: 50;
   left: 16px;
   top: -100px;
+  /* A preceding cleanup panel can move this positioned shell down the page. */
+  clip-path: inset(50%);
   background: var(--surface);
   color: var(--foreground);
   padding: 12px;
 }
 .experience-skip-link:focus {
   top: 8px;
+  clip-path: none;
 }
 .experience-motion-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   min-height: 44px;
-  padding: 0 14px;
+  max-width: 100%;
+  padding: 8px 14px;
   border: 1px solid var(--workspace-motion-toggle-border);
-  border-radius: 999px;
+  border-radius: 12px;
   background: var(--workspace-motion-toggle-background);
   color: var(--workspace-motion-toggle-text);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
   text-align: left;
   transition:
     border-color var(--motion-feedback),
     transform var(--motion-feedback);
 }
-.experience-motion-toggle span,
-.experience-motion-toggle small {
+.experience-motion-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.experience-motion-state {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.experience-motion-track {
   display: block;
+  width: 36px;
+  padding: 3px;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+}
+.experience-motion-track > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track {
+  border-color: var(--accent);
+}
+.experience-motion-toggle[aria-checked='true'] .experience-motion-track > span {
+  margin-left: auto;
+  background: var(--accent);
 }
 .experience-motion-toggle small {
   margin-top: 2px;
@@ -1160,7 +1195,7 @@ html[data-motion='full'] .experience-auth-panel {
   }
 }
 @media (max-width: 640px) {
-  .experience-header:has(.experience-account > details[open]) {
+  .experience-header:has(.experience-account details[open]) {
     position: relative;
     z-index: 10;
   }
@@ -1189,7 +1224,7 @@ html[data-motion='full'] .experience-auth-panel {
     flex-shrink: 0;
     max-width: none;
   }
-  .experience-account > details {
+  .experience-account details {
     position: static;
   }
   .experience-account-name {

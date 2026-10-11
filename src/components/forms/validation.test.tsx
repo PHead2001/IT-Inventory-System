@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { useFormValidation, ValidationSummary } from './validation';
@@ -52,6 +52,14 @@ it('retains native constraints, orders actionable errors, links focus and preser
   await user.type(screen.getByLabelText('Units'), '1.5');
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(saved).not.toHaveBeenCalled();
+  const entries = within(screen.getByRole('alert')).getAllByRole('listitem');
+  expect(entries).toHaveLength(2);
+  expect(
+    within(entries[0]).getByRole('link', { name: 'Name' }),
+  ).toHaveAttribute('href', '#name');
+  expect(
+    within(entries[1]).getByRole('link', { name: 'Units' }),
+  ).toHaveAttribute('href', '#units');
   expect(screen.getByLabelText('Name')).toHaveFocus();
   expect(screen.getByLabelText('Name')).toHaveAccessibleDescription(
     /Use a readable name.*Enter a value/,

@@ -53,7 +53,9 @@ export async function auditCategory(page: Page) {
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(name);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText('Category added.');
+  await expect(page.getByRole('status')).toContainText(
+    `Category added: ${name}.`,
+  );
   await page.goto('/settings/forms');
   await page.getByRole('link', { name, exact: true }).click();
   await expect(

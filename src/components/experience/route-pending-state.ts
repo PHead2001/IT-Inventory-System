@@ -2,6 +2,7 @@
 export function createRoutePendingState() {
   let epoch = 0;
   let open = true;
+  let suspended = false;
   let delayed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const registrations = new Set<symbol>();
@@ -24,13 +25,18 @@ export function createRoutePendingState() {
       };
     },
     register: (generation = epoch) => {
-      if (!open || generation !== epoch) return () => {};
+      if (!open || suspended || generation !== epoch) return () => {};
       const token = Symbol();
       registrations.add(token);
       if (registrations.size === 1) {
         timer = setTimeout(() => {
           timer = undefined;
-          if (open && generation === epoch && registrations.size) {
+          if (
+            open &&
+            !suspended &&
+            generation === epoch &&
+            registrations.size
+          ) {
             delayed = true;
             notify();
           }
@@ -55,6 +61,21 @@ export function createRoutePendingState() {
       if (notifyListeners) notify();
       else snapshot = { epoch, pending: false, delayed: false };
     },
-    current: (generation: number) => open && generation === epoch,
+    suspend: () => {
+      if (suspended) return;
+      suspended = true;
+      epoch += 1;
+      registrations.clear();
+      delayed = false;
+      clearTimer();
+      notify();
+    },
+    resume: () => {
+      if (!open || !suspended) return;
+      suspended = false;
+      epoch += 1;
+      notify();
+    },
+    current: (generation: number) => open && !suspended && generation === epoch,
   };
 }
