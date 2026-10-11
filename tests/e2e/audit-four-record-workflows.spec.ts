@@ -104,16 +104,55 @@ for (const kind of ['quantity', 'asset'] as const) {
       const name =
         'Cat6 Ethernet patch cable, snagless RJ45 connectors, blue jacket, certified network installation, office replacement stock, extra flexible shielded copper ' +
         crypto.randomUUID().slice(0, 16);
-      await auditCreateRecord(page, kind, category.name, name);
+      const identifier =
+        `TEST-PR52-${kind === 'asset' ? 'ASSET' : 'SKU'}-` +
+        crypto.randomUUID().slice(0, 8);
+      await auditCreateRecord(page, kind, category.name, name, identifier);
       await expect(page).toHaveTitle(name + ' · IT Inventory');
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        window.scrollTo(0, 0);
+      });
       const heading = page.getByRole('heading', { name, exact: true });
+      const header = page
+        .getByRole('main')
+        .locator('section')
+        .filter({ has: heading });
+      await expect(header).toHaveCount(1);
+      const facts = header.locator('dl');
+      await expect(facts.getByText(identifier, { exact: true })).toBeVisible();
+      if (kind === 'asset') {
+        await expect(
+          facts.getByRole('link', {
+            name: 'IT Closet / Red Container (ITC-RED)',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          facts.getByRole('link', {
+            name: 'Show ITC-RED in room',
+            exact: true,
+          }),
+        ).toBeVisible();
+      }
       const collapsed = await heading.evaluate((element) => ({
         height: element.getBoundingClientRect().height,
         line: Number.parseFloat(getComputedStyle(element).lineHeight),
       }));
       expect(collapsed.height).toBeLessThanOrEqual(collapsed.line * 3 + 1);
       const tasks = page.getByRole('heading', { name: 'Tasks', exact: true });
-      expect((await tasks.boundingBox())!.y).toBeLessThanOrEqual(812);
+      await expect
+        .poll(() =>
+          tasks.evaluate(
+            (element) => element.getBoundingClientRect().top + window.scrollY,
+          ),
+        )
+        .toBeLessThanOrEqual(812);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
       await expect(
         page.getByRole('region', { name: 'Record tasks' }),
       ).toContainText('This item');

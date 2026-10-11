@@ -71,6 +71,17 @@ mount, navigation masking/reverification and private-to-ordinary transitions.
 Server metadata regressions verify
 that failures and missing records cannot stream private names into the head.
 
+## U407 phone record header
+
+U407's phone record regressions include a populated asset tag or quantity SKU,
+and the asset's complete storage breadcrumb and Show in room link. The Tasks
+heading is measured from the document top at 375 × 812 after fonts are ready,
+so retained browser scroll cannot conceal an off-screen heading. An odd final
+header fact spans both phone columns, keeping custody and identifier content
+readable without narrowing the three-line name or removing its keyboard
+disclosure. Browser geometry acceptance still requires running the real E2E
+suite against the final candidate.
+
 ## U403 choice identity proof
 
 The forward choice-identity migration keeps the public RPC signatures and pinned
