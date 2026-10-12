@@ -20,6 +20,11 @@ an authorized empty snapshot: saved pans restore exactly, while an empty snapsho
 uses canonical framing. A selected-location return focuses only after applying
 that saved baseline. A same-session recheck preserves an already initialized camera;
 the snapshot provider continues to deny writes and retire stale owners as before.
+Initialization belongs to the committed room, camera and controls resource tuple.
+Replacing either graphics resource waits for the same authorized saved-view grant
+and reapplies that baseline before explicit selection focus. Outgoing resource
+cleanup and frames cannot publish through replacement resources, and consumed
+camera commands do not replay when the saved pose already contains their result.
 
 The strict Zod room contract is validated without a database at build/test/load time. Binding-to-seeded-location validation stays in the local Supabase integration gate. The production build needs no live Supabase.
 

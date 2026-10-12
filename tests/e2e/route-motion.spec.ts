@@ -1615,111 +1615,165 @@ for (const width of [1280, 390]) {
     }
   });
 
-  test(`stable Fiber real WebGL remount and native Back preserve camera and exclude all canvas ancestors at ${width}px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await observeMotion(page);
-    await auditLogin(page);
-    await (await navigationLink(page, 'Spaces & maps')).click();
-    const canvas = page.locator('canvas');
-    const expectCanvasExcluded = async () => {
-      await expect(canvas).toBeVisible();
-      const ancestorNames = await canvas.evaluate((element) => {
-        const names: string[] = [];
-        for (
-          let ancestor: Element | null = element;
-          ancestor;
-          ancestor = ancestor.parentElement
-        )
-          names.push(getComputedStyle(ancestor).viewTransitionName);
-        return names;
+  for (const motion of ['full', 'reduced'] as const) {
+    test(`stable Fiber real WebGL remount and native Back preserve camera and exclude all canvas ancestors at ${width}px in ${motion} motion`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({
+        reducedMotion: motion === 'reduced' ? 'reduce' : 'no-preference',
       });
-      // A nonempty live chain proves exclusion even when this ordinary route
-      // reveals synchronously through privacy verification without a snapshot.
-      expect(ancestorNames.length).toBeGreaterThan(1);
-      expect(ancestorNames.every((name) => name === 'none')).toBe(true);
-    };
-    await expect(canvas).toBeVisible();
-    const first = await canvas.elementHandle();
-    expect(first).not.toBeNull();
-    expect(
-      await canvas.evaluate((element) => {
-        const gl = (element as HTMLCanvasElement).getContext('webgl2');
-        return Boolean(
-          gl &&
-          !gl.isContextLost() &&
-          gl.drawingBufferWidth > 0 &&
-          gl.drawingBufferHeight > 0,
-        );
-      }),
-    ).toBe(true);
-    const viewer = page.getByTestId('room-viewer');
-    await expect
-      .poll(() => viewer.getAttribute('data-camera-view'))
-      .not.toBe('null');
-    const initial = JSON.parse(
-      (await viewer.getAttribute('data-camera-view'))!,
-    ) as { zoom: number };
-    await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
-    await expect
-      .poll(
-        async () =>
-          JSON.parse((await viewer.getAttribute('data-camera-view'))!)
-            .zoom as number,
-      )
-      .toBeGreaterThan(initial.zoom);
-    const before = await viewer.getAttribute('data-camera-view');
-    expect(before).toBeTruthy();
-    await page.getByRole('button', { name: 'Hide room', exact: true }).click();
-    await expect(canvas).toHaveCount(0);
-    expect(await first!.evaluate((element) => element.isConnected)).toBe(false);
-    await page.getByRole('button', { name: 'Show room', exact: true }).click();
-    await expect(canvas).toBeVisible();
-    expect(
-      await first!.evaluate(
-        (element) => element === document.querySelector('canvas'),
-      ),
-    ).toBe(false);
-    await expect(viewer).toHaveAttribute('data-camera-view', before!);
-    await settled(page);
-    await expectCanvasExcluded();
-    await resetProof(page);
-    const documents: string[] = [];
-    page.on('request', (request) => {
-      if (
-        request.isNavigationRequest() &&
-        request.resourceType() === 'document'
-      )
-        documents.push(new URL(request.url()).pathname);
-    });
-    await (await navigationLink(page, 'Inventory')).click();
-    await expect(
-      page.getByRole('heading', { name: 'Inventory', exact: true }),
-    ).toBeVisible();
-    await page.goBack();
-    await expect(page).toHaveURL(/\/room$/);
-    await expect(canvas).toBeVisible();
-    await expect(viewer).toHaveAttribute('data-camera-view', before!);
-    await expect(routeProgress(page)).toHaveAttribute('data-visible', 'false');
-    await settled(page);
-    await expectCanvasExcluded();
-    expect(documents).toEqual([]);
-    const captured = (await proof(page)).transitions.flatMap((entry) => [
-      ...entry.old,
-      ...entry.next,
-    ]);
-    // PageArrival deliberately excludes room source/destination ancestors;
-    // CanvasFreeRouteContent may capture only its separate header. A positive
-    // capture count belongs to eligible paired-title tests, not this roundtrip.
-    expect(captured.every((entry) => !entry.canvas && !entry.shell)).toBe(true);
-    expect(
+      await observeMotion(page);
+      await auditLogin(page);
+      await (await navigationLink(page, 'Spaces & maps')).click();
+      const canvas = page.locator('canvas');
+      const expectCanvasExcluded = async () => {
+        await expect(canvas).toBeVisible();
+        const ancestorNames = await canvas.evaluate((element) => {
+          const names: string[] = [];
+          for (
+            let ancestor: Element | null = element;
+            ancestor;
+            ancestor = ancestor.parentElement
+          )
+            names.push(getComputedStyle(ancestor).viewTransitionName);
+          return names;
+        });
+        // A nonempty live chain proves exclusion even when this ordinary route
+        // reveals synchronously through privacy verification without a snapshot.
+        expect(ancestorNames.length).toBeGreaterThan(1);
+        expect(ancestorNames.every((name) => name === 'none')).toBe(true);
+      };
+      await expect(canvas).toBeVisible();
+      const first = await canvas.elementHandle();
+      expect(first).not.toBeNull();
+      expect(
+        await canvas.evaluate((element) => {
+          const gl = (element as HTMLCanvasElement).getContext('webgl2');
+          return Boolean(
+            gl &&
+            !gl.isContextLost() &&
+            gl.drawingBufferWidth > 0 &&
+            gl.drawingBufferHeight > 0,
+          );
+        }),
+      ).toBe(true);
+      const viewer = page.getByTestId('room-viewer');
+      await expect
+        .poll(() => viewer.getAttribute('data-camera-view'))
+        .not.toBe('null');
+      const initial = JSON.parse(
+        (await viewer.getAttribute('data-camera-view'))!,
+      ) as { zoom: number };
+      await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+      await expect
+        .poll(
+          async () =>
+            JSON.parse((await viewer.getAttribute('data-camera-view'))!)
+              .zoom as number,
+        )
+        .toBeGreaterThan(initial.zoom);
+      const before = await viewer.getAttribute('data-camera-view');
+      expect(before).toBeTruthy();
+      // Exercise the hosted regression before Hide/Show can recreate the renderer:
+      // a settled Free Orbit pan must survive the ordinary room content link.
       await page
-        .locator('html')
-        .evaluate((element) => getComputedStyle(element).viewTransitionName),
-    ).toBe('none');
-  });
+        .getByRole('button', { name: 'More map controls', exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: 'Free Orbit', exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: 'Pan right', exact: true })
+        .click();
+      await page
+        .getByRole('button', { name: 'Close controls', exact: true })
+        .click();
+      await settled(page);
+      await expect
+        .poll(
+          async () =>
+            JSON.parse((await viewer.getAttribute('data-camera-view'))!).target,
+        )
+        .not.toEqual(JSON.parse(before!).target);
+      const panned = await viewer.getAttribute('data-camera-view');
+      expect(JSON.parse(panned!).target).not.toEqual(
+        JSON.parse(before!).target,
+      );
+      expect(JSON.parse(panned!).mode).toBe('free');
+      const documents: string[] = [];
+      page.on('request', (request) => {
+        if (
+          request.isNavigationRequest() &&
+          request.resourceType() === 'document'
+        )
+          documents.push(new URL(request.url()).pathname);
+      });
+      await page
+        .getByRole('link', { name: 'Search inventory', exact: true })
+        .click();
+      await expect(
+        page.getByRole('heading', { name: 'Inventory', exact: true }),
+      ).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(/\/room$/);
+      await expect(canvas).toBeVisible();
+      await settled(page);
+      await expect(viewer).toHaveAttribute('data-camera-view', panned!);
+      // Compare the live renderer as well as the saved-store diagnostic.
+      await expect(canvas).toHaveAttribute('data-camera-view', panned!);
+      await page
+        .getByRole('button', { name: 'Hide room', exact: true })
+        .click();
+      await expect(canvas).toHaveCount(0);
+      expect(await first!.evaluate((element) => element.isConnected)).toBe(
+        false,
+      );
+      await page
+        .getByRole('button', { name: 'Show room', exact: true })
+        .click();
+      await expect(canvas).toBeVisible();
+      expect(
+        await first!.evaluate(
+          (element) => element === document.querySelector('canvas'),
+        ),
+      ).toBe(false);
+      await expect(viewer).toHaveAttribute('data-camera-view', panned!);
+      await settled(page);
+      await expectCanvasExcluded();
+      await resetProof(page);
+      await (await navigationLink(page, 'Inventory')).click();
+      await expect(
+        page.getByRole('heading', { name: 'Inventory', exact: true }),
+      ).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(/\/room$/);
+      await expect(canvas).toBeVisible();
+      await expect(viewer).toHaveAttribute('data-camera-view', panned!);
+      await expect(routeProgress(page)).toHaveAttribute(
+        'data-visible',
+        'false',
+      );
+      await settled(page);
+      await expectCanvasExcluded();
+      expect(documents).toEqual([]);
+      const captured = (await proof(page)).transitions.flatMap((entry) => [
+        ...entry.old,
+        ...entry.next,
+      ]);
+      // PageArrival deliberately excludes room source/destination ancestors;
+      // CanvasFreeRouteContent may capture only its separate header. A positive
+      // capture count belongs to eligible paired-title tests, not this roundtrip.
+      expect(captured.every((entry) => !entry.canvas && !entry.shell)).toBe(
+        true,
+      );
+      expect(
+        await page
+          .locator('html')
+          .evaluate((element) => getComputedStyle(element).viewTransitionName),
+      ).toBe('none');
+    });
+  }
 }
 
 for (const width of [1280, 390]) {
