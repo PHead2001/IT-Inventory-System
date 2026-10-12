@@ -84,7 +84,7 @@ it('handles the actual configure rejection locally without rendering or claiming
   const onFailure = vi.fn();
   render(<SafeCanvas onFailure={onFailure}>scene</SafeCanvas>);
   await waitFor(() => expect(onFailure).toHaveBeenCalledOnce());
-  expect(driver.render).toHaveBeenCalledWith(null);
+  expect(driver.render).not.toHaveBeenCalled();
   expect(driver.teardown).toHaveBeenCalledOnce();
 });
 it('ignores late initialization after unmount and disposes the graphics root', async () => {

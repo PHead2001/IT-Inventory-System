@@ -116,16 +116,18 @@ dialog and embedded-count owner even without a global invalidation event. Return
 to the original identity cannot revive its scene or staged confirmation. An ordinary
 same-owner readiness recheck can resume after verification succeeds.
 
-Fiber 9.8.1 has a failed-construction compatibility edge: its public teardown
-calls `dispose(null)` if configure rejects before setting `scene`, and its store
-publication subscriber dereferences null `gl.xr`. Only that known rejected
-configure path obtains the public store via `render(null)` while configure's
-pending promise cannot commit. It fills the missing terminal snapshot scene with
-an empty `THREE.Scene` without publishing, then invokes public teardown. That root
-is never rendered/configured again. Successful configuration followed by another
-error uses ordinary public teardown. A real installed-Fiber regression verifies
-the failure callback and subsequent slot grant; mock-clock delay is library
-completion evidence, not WebGL/browser acceptance.
+Fiber 9.8.1's public `unmountComponentAtNode(canvas, complete)` handles failed
+and pending configuration, missing scenes and factory-owned async renderer
+disposal. The failed-configure adapter invokes that API without rendering the
+rejected root or changing its store. The original lease remains occupied until
+Fiber reports teardown completion. Successful configuration followed by another
+error uses ordinary public teardown. Installed-Fiber regressions cover rejection
+before renderer acquisition, later configuration failure with deferred disposal,
+and pending factories that reject or return a renderer after teardown begins.
+They prove disposal, context-loss request, completion and next-grant ordering;
+they do not create WebGL or prove GPU release. Disposal APIs that throw and
+allocations hidden inside a rejecting factory do not establish actual GPU release
+even when Fiber reports completion, and remain browser/resource acceptance limits.
 
 Whole-page `PageArrival` capture excludes `/room`, asset/quantity record details
 and location details before their lazy previews load, including the preceding
