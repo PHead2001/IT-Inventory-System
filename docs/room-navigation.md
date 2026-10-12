@@ -222,6 +222,19 @@ capture spikes separately, viewport/DPR, exposure/output and actual renderer/run
 Software rendering can prove behavior but cannot establish GPU performance or a
 claim of no measurable frame-time regression.
 
+The effects provider owns each committed room store. Real unmount or room-object
+replacement retires that store in a microtask; only immediate React StrictMode
+effect replay cancels its pending retirement. Disposal is irreversible and clears
+visual/light registrations, motion/activity ownership and subscriptions. Retained
+callbacks cannot register resources or sample quality after disposal. Component
+effects remain responsible for releasing their WebGL capture/composer allocations.
+When React Activity reconnects after retirement, committed layout setup replaces
+the disposed store with a fresh generation and context registrations reconnect.
+It never revives the old store or replaces a newer room/store from stale setup.
+This cleanup grace is not an authorization or original-session revocation boundary.
+The older W15/W16 draft still requires integration with P09's original-session
+fence before revoked-session lazy work and captures can be certified.
+
 The populated 375px browser harness explicitly opts into read-only label-layout
 diagnostics before application loading. Ordinary sessions expose no snapshot.
 Only the latest placement transaction is retained, with at most four exact packing

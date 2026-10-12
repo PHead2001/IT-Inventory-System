@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  BoxGeometry,
+  DirectionalLight,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+} from 'three';
 import {
   contactCacheKey,
   createEffectsQualityMonitor,
@@ -11,6 +17,52 @@ function body() {
   return new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
 }
 describe('scene effects ownership', () => {
+  it('irreversibly releases registrations and ignores retained callbacks after disposal', () => {
+    const store = createSceneEffectsStore('room:retired');
+    const root = new Group();
+    root.add(body());
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const unregister = store.registerVisual('drawer', 'ITC-D01', root);
+    store.setLight('key', new DirectionalLight());
+    const finishMotion = store.beginCasterMotion('motion', 'drawer');
+    const finishActivity = store.beginActivity('camera');
+    store.dispose();
+    store.dispose();
+    const snapshot = store.getSnapshot();
+    const evidence = store.quality.evidence();
+    listener.mockClear();
+
+    const lateListener = vi.fn();
+    store.subscribe(lateListener);
+    unregister();
+    finishMotion();
+    finishActivity();
+    store.registerVisual('drawer', 'ITC-D01', root)();
+    store.setLight('key', new DirectionalLight());
+    store.beginCasterMotion('motion', 'drawer')();
+    store.beginActivity('camera')();
+    store.reconcileHover('ITC-D01', true);
+    store.clearHover();
+    store.invalidateHover();
+    store.failBloom('late-import');
+    store.setBloomReady(true);
+    store.recordCapture(12);
+    for (let frame = 0; frame < 200; frame++) {
+      store.recordFrame(30, true);
+      store.quality.sample(30, true);
+    }
+    store.quality.restartWarmup();
+    store.quality.resetWindow();
+
+    expect(store.getCasters()).toEqual([]);
+    expect(store.getLights()).toEqual([]);
+    expect(store.selectedMeshes('ITC-D01', new Set())).toEqual([]);
+    expect(store.getSnapshot()).toBe(snapshot);
+    expect(store.quality.evidence()).toEqual(evidence);
+    expect(listener).not.toHaveBeenCalled();
+    expect(lateListener).not.toHaveBeenCalled();
+  });
   it('registers only actual visual meshes and keeps scene generations and logical codes distinct', () => {
     const store = createSceneEffectsStore('room:1');
     const root = new Group(),

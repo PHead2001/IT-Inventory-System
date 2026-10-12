@@ -44,8 +44,10 @@ export function createEffectsQualityMonitor() {
   let disabled = false;
   let windows = 0;
   let lastP95: number | null = null;
+  let disposed = false;
   return {
     sample(ms: number, eligible: boolean) {
+      if (disposed) return disabled;
       if (disabled || !eligible || !Number.isFinite(ms) || ms <= 0)
         return disabled;
       if (warmup > 0) {
@@ -64,10 +66,16 @@ export function createEffectsQualityMonitor() {
       return disabled;
     },
     resetWindow() {
+      if (disposed) return;
       samples = [];
     },
     restartWarmup() {
+      if (disposed) return;
       warmup = SCENE_EFFECTS.startupActiveFrames;
+      samples = [];
+    },
+    dispose() {
+      disposed = true;
       samples = [];
     },
     evidence: () => ({
@@ -138,8 +146,10 @@ export function createSceneEffectsStore(sceneGeneration: string) {
   return {
     sceneGeneration,
     quality,
+    isDisposed: () => disposed,
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
+      if (disposed) return () => {};
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
@@ -150,6 +160,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       locationCode: string | null,
       root: Object3D,
     ) {
+      if (disposed) return () => {};
       const entries: EffectMesh[] = [];
       root.traverse((object) => {
         if (actualVisualMesh(object))
@@ -177,6 +188,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       };
     },
     setLight(key: string, light: Light | null) {
+      if (disposed) return;
       if (lights.get(key) === light || (!light && !lights.has(key))) return;
       if (light) lights.set(key, light);
       else lights.delete(key);
@@ -212,6 +224,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       publish({ hoverEpoch: snapshot.hoverEpoch + 1 });
     },
     beginCasterMotion(key: string, nodeId: string, hover = false) {
+      if (disposed) return () => {};
       const identity = { nodeId, hover };
       motions.set(key, identity);
       const otherGeometry = !hover || ownerCode(nodeId) !== snapshot.hoverCode;
@@ -230,6 +243,7 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       };
     },
     beginActivity(key: string) {
+      if (disposed) return () => {};
       activities.add(key);
       publish({ activities: activities.size });
       return () => {
@@ -244,13 +258,16 @@ export function createSceneEffectsStore(sceneGeneration: string) {
       if (snapshot.bloomReady !== ready) publish({ bloomReady: ready });
     },
     recordFrame(ms: number, eligible: boolean) {
+      if (disposed) return;
       if (quality.sample(ms, eligible)) this.failBloom('sustained-frame-time');
     },
     recordCapture(ms: number) {
       publish({ captures: snapshot.captures + 1, captureMs: ms });
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
+      quality.dispose();
       meshes.clear();
       lights.clear();
       motions.clear();
