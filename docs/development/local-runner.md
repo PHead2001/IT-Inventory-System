@@ -393,6 +393,26 @@ The watchdog checks every recorded guardian process identity even when guardian 
 
 Failed liveness and cleanup decisions retain a bounded, nonsecret observation of the checks already evaluated. An exception's `runnerFailureObservation` contains only fixed reason/phase enums, Boolean checks, UTC time and numeric deadline/progress values. The protected `failure-cleanup.json` keeps the first decision and the latest secondary observation for a validated session/owner-start identity within 4096 UTF-8 bytes. Schema 3 permits an unrecorded VM ID only when the state has no GUID property and its phase is initial (phase not recorded) or creating; this is not proof that no VM exists. Owned/sealed-off state requires a nonempty valid GUID. Schema 2 remains readable; the next valid write uses schema 3. Unrecorded-to-known promotion for the same session/owner preserves the first observation. A known GUID cannot be downgraded, and a different known GUID or owner rotates the record. It contains no credentials, raw state, exception messages, command arguments or paths. Unavailable capture is explicit and cannot prevent canonical cleanup. Malformed historical evidence remains retained rather than being silently replaced. Diagnostic evidence never authorizes cleanup. Reviewed preparation helpers capture this evidence before updating and after the attempt, distinguishing prior records from the current attempt by time and identity; readers must understand schema 3 before installing this update. A propagated deadline/Stop exception is not proof of the initiating cause; live preparation failures remain unexplained until the retained checks establish it. Healthy liveness performs no diagnostic writes.
 
+Recovery observations distinguish an unset failure (`failureSet=false`, empty
+`recoveryFailure`) from an unknown set failure. Their optional bounded
+`recoveryDiagnostic` projection records allowlisted operation, initial episode
+trigger, latest phase transition and refusal, generation, episode/operation age
+and signed episode time remaining. Per-episode counters record unavailable
+observation attempts, changes between valid observed fingerprints, stale
+admission refusals and apply intents. Repeated identical fingerprints do not
+count as changes; a new episode resets the counters and stage timings. The
+observation, preflight and apply timings retain the greatest completed elapsed
+duration in that episode, capped at one day; counters cap at one million.
+An in-progress native call has operation age but no completed duration yet.
+The failed reducer retains its initiating operation even after clearing the
+dispatch field. Older journals without these counters project zeroes. Invalid
+numeric evidence yields an unavailable capture, and unknown enums become
+`other`. The projection excludes fingerprints, addresses, routes, SSIDs,
+provider output and exception text. These fields share existing state/failure
+writes and add no provider probes. The 120-second episode, hard deadline,
+two-second observation admission, isolation and mutex behavior remain the
+same; the evidence does not identify or fix a timeout cause by itself.
+
 Ordinary session exceptions also retain a separate protected
 `C:\ProgramData\ITInventoryLocalRunner\session-failures.json`. Schema 1 contains at
 most eight validated session GUIDs, each with the first failure and latest secondary

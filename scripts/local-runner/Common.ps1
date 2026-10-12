@@ -28,6 +28,68 @@ function Write-RunnerFailure([string] $Stage, [ValidateSet('STAGE_FAILED', 'NETW
 
 # Failure-only projection. Never serialize a state, exception, message or path.
 # Every observation consumes the already evaluated guard result, not a reread.
+function Get-RunnerRecoveryDiagnosticNumber($Value, [long] $Maximum = 86400000, [switch] $Signed) {
+    if ($Value -isnot [ValueType] -or $Value -is [bool] -or [double]::IsNaN([double]$Value) -or [double]::IsInfinity([double]$Value) -or
+        $Value -ne [Math]::Truncate([double]$Value) -or $Value -gt $Maximum -or $Value -lt $(if ($Signed) { -$Maximum } else { 0 })) { throw 'Invalid recovery diagnostic number.' }
+    return [long]$Value
+}
+
+function Assert-RunnerRecoveryDiagnostic($Diagnostic) {
+    $enums = @{
+        operation = @('', 'quarantine', 'apply', 'connect', 'resume', 'probe', 'other')
+        trigger = @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost', 'other')
+        lastTransition = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation', 'other')
+        refusal = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired', 'other')
+    }
+    $numbers = @('generation', 'episodeAgeMs', 'episodeRemainingMs', 'operationAgeMs', 'observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')
+    if ($Diagnostic -isnot [pscustomobject] -or (@($Diagnostic.PSObject.Properties.Name | Sort-Object) -join ',') -cne (@(@($enums.Keys) + $numbers | Sort-Object) -join ',')) { throw 'Invalid recovery diagnostic fields.' }
+    foreach ($name in $enums.Keys) {
+        if ($Diagnostic.$name -isnot [string] -or $Diagnostic.$name -cnotin $enums[$name]) { throw 'Invalid recovery diagnostic enum.' }
+    }
+    foreach ($name in $numbers) {
+        $max = if ($name -ceq 'generation') { 2147483647 } elseif ($name -clike '*Count') { 1000000 } else { 86400000 }
+        [void](Get-RunnerRecoveryDiagnosticNumber $Diagnostic.$name $max -Signed:($name -ceq 'episodeRemainingMs'))
+    }
+}
+
+function New-RunnerRecoveryDiagnostic($Recovery, [DateTime] $NowUtc) {
+    $phases = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation')
+    $value = [ordered]@{
+        operation = ''; trigger = ''; lastTransition = 'other'; refusal = ''
+        generation = if ($Recovery.PSObject.Properties.Name -contains 'generation') { Get-RunnerRecoveryDiagnosticNumber $Recovery.generation 2147483647 } else { 0 }
+        episodeAgeMs = 0; episodeRemainingMs = 0; operationAgeMs = 0
+        observationUnavailableCount = 0; fingerprintChangeCount = 0; staleAdmissionCount = 0; applyCount = 0
+        observationElapsedMs = 0; preflightElapsedMs = 0; applyElapsedMs = 0
+    }
+    if ($Recovery.PSObject.Properties.Name -contains 'operation') { $value.operation = if ($Recovery.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $Recovery.operation } else { 'other' } }
+    if ($Recovery.PSObject.Properties.Name -contains 'diagnostics') {
+        $d = $Recovery.diagnostics
+        foreach ($name in @('observationUnavailableCount', 'fingerprintChangeCount', 'staleAdmissionCount', 'applyCount', 'observationElapsedMs', 'preflightElapsedMs', 'applyElapsedMs')) {
+            $value[$name] = Get-RunnerRecoveryDiagnosticNumber $d.$name $(if ($name -clike '*Count') { 1000000 } else { 86400000 })
+        }
+        $value.trigger = if ($d.trigger -cin @('', 'observation-unavailable', 'fingerprint-change', 'connectivity-lost')) { $d.trigger } else { 'other' }
+        $value.lastTransition = if ($d.lastTransition -cin $phases) { $d.lastTransition } else { 'other' }
+        $refusals = @('', 'stale-observation', 'dispatch-deadline', 'provider-uncertain', 'operation-uncertain', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'watchdog-expired')
+        $value.refusal = if ($d.refusal -cin $refusals) { $d.refusal } else { 'other' }
+        if ($Recovery.phase -ceq 'failed' -and -not $Recovery.operation) {
+            $value.operation = if ($d.operation -cin @('', 'quarantine', 'apply', 'connect', 'resume', 'probe')) { $d.operation } else { 'other' }
+        }
+    }
+    foreach ($pair in @(@('episodeStartedUtc', 'episodeAgeMs'), @('operationStartedUtc', 'operationAgeMs'), @('episodeDeadlineUtc', 'episodeRemainingMs'))) {
+        $stamp = if ($Recovery.PSObject.Properties.Name -contains $pair[0]) { $Recovery.($pair[0]) } else { '' }
+        if ($pair[0] -ceq 'operationStartedUtc' -and $Recovery.phase -ceq 'failed' -and -not $stamp -and $Recovery.PSObject.Properties.Name -contains 'diagnostics') { $stamp = $Recovery.diagnostics.operationStartedUtc }
+        if ($pair[0] -ceq 'operationStartedUtc' -and -not $value.operation) { $stamp = '' }
+        if ($stamp) {
+            $elapsed = ($NowUtc - [DateTime]::Parse($stamp).ToUniversalTime()).TotalMilliseconds
+            if ($pair[1] -ceq 'episodeRemainingMs') { $elapsed = -$elapsed } else { $elapsed = [Math]::Max(0, $elapsed) }
+            $value[$pair[1]] = [long][Math]::Truncate([Math]::Max(-86400000, [Math]::Min(86400000, $elapsed)))
+        }
+    }
+    $result = [pscustomobject]$value
+    Assert-RunnerRecoveryDiagnostic $result
+    return $result
+}
+
 function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State, [DateTime] $NowUtc,
     [string] $StopReason = '', [string] $Expiry = '', [hashtable] $Checks = @{}) {
     $record = [ordered]@{ schema = 1; capture = 'complete' }
@@ -59,9 +121,12 @@ function New-RunnerFailureObservation([string] $Origin, [string] $Reason, $State
                 $r = $State.networkRecovery
                 $record.recoveryPhase = if ($r.phase -cin @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation')) { $r.phase } else { 'other' }
                 $record.progressAgeMs = ($NowUtc - [DateTime]::Parse($r.progressUtc).ToUniversalTime()).TotalMilliseconds
+                $record.failureSet = $false; $record.recoveryFailure = ''
                 if ($r.PSObject.Properties.Name -contains 'failure') {
-                    $record.recoveryFailure = if ($r.failure -cin @('stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired')) { $r.failure } else { 'other' }
+                    $record.failureSet = -not [string]::IsNullOrEmpty([string]$r.failure)
+                    $record.recoveryFailure = if ($r.failure -cin @('', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'operation-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired')) { $r.failure } else { 'other' }
                 }
+                $record.recoveryDiagnostic = New-RunnerRecoveryDiagnostic $r $NowUtc
             }
         }
         if ([Text.Encoding]::UTF8.GetByteCount((ConvertTo-Json -InputObject $record -Depth 4 -Compress)) -gt 2048) { throw 'Diagnostic bound.' }
@@ -88,7 +153,7 @@ function Assert-RunnerFailureRecord($Record) {
         purpose = @('job', 'prepare', 'verify-image', 'other')
         phase = @('initial', 'creating', 'owned', 'sealed-off', 'other')
         recoveryPhase = @('healthy', 'quarantining', 'isolated', 'applying', 'verified', 'connecting', 'resuming', 'probing', 'failed', 'sealed-preparation', 'other')
-        recoveryFailure = @('stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired', 'other')
+        recoveryFailure = @('', 'stop', 'owner-dead', 'identity-changed', 'hard-deadline', 'outage-deadline', 'guardian-progress-expired', 'clock-regressed', 'vm-state-uncertain', 'connectivity-state-uncertain', 'operation-uncertain', 'dispatch-deadline', 'provider-uncertain', 'watchdog-expired', 'other')
         errorSource = @('Runner.ps1', 'Common.ps1', 'Network.Recovery.ps1', 'Network.Recovery.Probe.ps1', 'other')
     }
     if ($Record -isnot [pscustomobject] -or $Record.schema -isnot [int] -or $Record.schema -ne 1 -or $Record.capture -cnotin $enums.capture -or
@@ -107,6 +172,8 @@ function Assert-RunnerFailureRecord($Record) {
             'schema' { if ($value -ne 1) { throw 'Invalid diagnostic schema.' } }
             'atUtc' { }
             'statePresent' { if ($value -isnot [bool]) { throw 'Invalid diagnostic flag.' } }
+            'failureSet' { if ($value -isnot [bool]) { throw 'Invalid diagnostic flag.' } }
+            'recoveryDiagnostic' { Assert-RunnerRecoveryDiagnostic $value }
             'checks' {
                 if ($value -isnot [pscustomobject]) { throw 'Invalid diagnostic checks.' }
                 foreach ($flag in $value.PSObject.Properties) {
@@ -120,6 +187,8 @@ function Assert-RunnerFailureRecord($Record) {
             default { throw 'Unknown diagnostic field.' }
         }
     }
+    if ($Record.PSObject.Properties.Name -contains 'failureSet' -and
+        ($Record.PSObject.Properties.Name -notcontains 'recoveryFailure' -or $Record.failureSet -ne (-not [string]::IsNullOrEmpty($Record.recoveryFailure)))) { throw 'Inconsistent recovery failure evidence.' }
 }
 
 function Assert-RunnerCleanupJournal($Journal) {

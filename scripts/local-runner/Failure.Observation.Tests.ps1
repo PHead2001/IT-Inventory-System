@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($file in @('Common.ps1', 'Runner.ps1', 'Network.Recovery.ps1')) {
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$null)
     foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
-        if ($definition.Name -cin @('New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
+        if ($definition.Name -cin @('Get-RunnerRecoveryDiagnosticNumber', 'Assert-RunnerRecoveryDiagnostic', 'New-RunnerRecoveryDiagnostic', 'New-RunnerFailureObservation', 'New-RunnerObservedFailure', 'Write-RunnerCleanupObservation', 'Write-RunnerSessionFailureObservation', 'Assert-RunnerFailureRecord', 'Assert-RunnerCleanupJournal',
             'Test-RunnerSessionStopRequested', 'Assert-SessionAlive', 'Get-RunnerRecoveryExpiry', 'Invoke-Watchdog')) {
             Invoke-Expression $definition.Extent.Text
         }
@@ -131,6 +131,59 @@ Check 'projection excludes secret sentinels, raw state, paths and unknown enum v
     $json = ConvertTo-Json -InputObject $data -Depth 4 -Compress
     Require ($json -cnotmatch 'SECRET|synthetic-runner|11111111|credential|token' -and $data.capture -ceq 'complete')
     Require ([Text.Encoding]::UTF8.GetByteCount($json) -le 2048)
+}
+Check 'unset failure remains explicit and recovery diagnostics reject untrusted fields and numbers' {
+    Reset-Fixture
+    $data = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    Require ($data.capture -ceq 'complete' -and $data.failureSet -eq $false -and $data.recoveryFailure -ceq '')
+    $script:state.networkRecovery.failure = 'SECRET unknown failure'
+    $data = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    Require ($data.failureSet -eq $true -and $data.recoveryFailure -ceq 'other')
+    $script:state.networkRecovery | Add-Member diagnostics ([pscustomobject]@{
+        trigger = 'SECRET address route SSID'; lastTransition = 'SECRET'; refusal = 'SECRET'
+        observationUnavailableCount = 2; fingerprintChangeCount = 3; staleAdmissionCount = 4; applyCount = 1
+        observationElapsedMs = 500; preflightElapsedMs = 3000; applyElapsedMs = 90000
+        rawOutput = 'SECRET credential'; lastFingerprint = 'SECRET'
+    })
+    $data = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+    $json = ConvertTo-Json -InputObject $data -Depth 4 -Compress
+    Require ($data.capture -ceq 'complete' -and $json -cnotmatch 'SECRET|SSID|credential|rawOutput|lastFingerprint')
+    Assert-RunnerFailureRecord ($json | ConvertFrom-Json)
+    foreach ($bad in @('SECRET', $true, -1, 1000001, 1.5, [double]::NaN, [double]::PositiveInfinity)) {
+        $script:state.networkRecovery.diagnostics.applyCount = $bad
+        $data = New-RunnerFailureObservation 'session-guardian' 'recovery-expiry' $script:state $script:now
+        Require ($data.capture -ceq 'unavailable')
+    }
+    $record = $json | ConvertFrom-Json
+    $record.recoveryDiagnostic | Add-Member rawOutput 'SECRET'
+    $refused = $false; try { Assert-RunnerFailureRecord $record } catch { $refused = $true }
+    Require $refused
+    $record = $json | ConvertFrom-Json; $record.failureSet = $false
+    $refused = $false; try { Assert-RunnerFailureRecord $record } catch { $refused = $true }
+    Require $refused
+}
+Check 'rich first and latest recovery evidence fits the unchanged journal bound and older unset records remain readable' {
+    Reset-Fixture
+    $r = $script:state.networkRecovery
+    $r.phase = 'applying'; $r.failure = ''
+    $r | Add-Member operation 'apply'; $r | Add-Member operationStartedUtc $script:now.AddSeconds(-100).ToString('o')
+    $r | Add-Member episodeStartedUtc $script:now.AddSeconds(-119).ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(1).ToString('o')
+    $r | Add-Member diagnostics ([pscustomobject]@{
+        trigger = 'fingerprint-change'; lastTransition = 'applying'; refusal = 'stale-observation'
+        observationUnavailableCount = 1000000; fingerprintChangeCount = 1000000; staleAdmissionCount = 1000000; applyCount = 1000000
+        observationElapsedMs = 86400000; preflightElapsedMs = 86400000; applyElapsedMs = 86400000
+    })
+    Write-RunnerCleanupObservation 'session-guardian' 'recovery-expiry' $script:state $script:now '' 'outage-deadline'
+    $first = $script:journal.first | ConvertTo-Json -Depth 4 -Compress
+    Require ($script:journal.first.capture -ceq 'complete' -and $script:journal.first.recoveryDiagnostic.operationAgeMs -eq 100000)
+    $r.phase = 'failed'; $r.failure = 'outage-deadline'
+    Write-RunnerCleanupObservation 'recovery-plan' 'recovery-cleanup' $script:state $script:now.AddSeconds(2)
+    Require (($script:journal.first | ConvertTo-Json -Depth 4 -Compress) -ceq $first -and $script:writes -eq 2)
+    Require ($script:journal.latest.failureSet -and $script:journal.latest.recoveryDiagnostic.episodeRemainingMs -eq -1000)
+    Require ([Text.Encoding]::UTF8.GetByteCount(($script:journal | ConvertTo-Json -Depth 6 -Compress)) -le 4096)
+    $legacy = $script:journal.first | ConvertTo-Json -Depth 4 -Compress | ConvertFrom-Json
+    $legacy.PSObject.Properties.Remove('failureSet'); $legacy.PSObject.Properties.Remove('recoveryDiagnostic'); $legacy.recoveryFailure = 'other'
+    Assert-RunnerFailureRecord $legacy
 }
 Check 'fixed versioned precleanup record overwrites within bound and IO failure cannot stop cleanup' {
     Reset-Fixture

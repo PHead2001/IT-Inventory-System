@@ -44,7 +44,16 @@ Exit-RunnerLock $fixtureOuter
 if ($script:locked -or $script:fixtureStateDepth -ne 0) { throw 'State fixture did not balance.' }
 function Test-RunnerProcessIdentity { return $script:alive }
 function Get-RunnerRecoveryNow { return $script:clock }
-function Get-VM { return $script:vm }
+function Get-VM {
+    $script:vmQueries++
+    if ($script:fail -ceq 'timing-stages') {
+        # Tick preflight, effect preflight, then final adapter readback. These
+        # deliberately differ from the ACL installation's per-rule duration.
+        $delaySeconds = switch ($script:vmQueries) { 1 { 3 }; 2 { 5 }; 3 { 7 }; default { 0 } }
+        $script:clock = $script:clock.AddSeconds($delaySeconds)
+    }
+    return $script:vm
+}
 function Get-VMSwitch { return $script:switch }
 function Get-VMNetworkAdapter { return $script:adapter }
 function Assert-FixtureTarget($Target, [string] $Kind) {
@@ -82,6 +91,8 @@ function Add-VMNetworkAdapterExtendedAcl {
         $RemoteIPAddress = '', $LocalIPAddress = '', $LocalPort = '', $RemotePort = '', $Protocol = '', $Stateful = $false, [switch] $Passthru
     )
     Assert-FixtureTarget $VMNetworkAdapter 'adapter'; $script:addCount++; $script:effects += 'add-acl'
+    if ($script:fail -ceq 'slow-apply') { $script:clock = $script:clock.AddSeconds(6) }
+    if ($script:fail -ceq 'timing-stages') { $script:clock = $script:clock.AddMilliseconds(100) }
     if ($script:fail -ceq 'partial-acl' -and $script:addCount -eq 3) { throw 'partial ACL failure' }
     $rule = [pscustomobject]@{ Action = $Action; Direction = $Direction; Weight = $Weight; LocalIPAddress = $LocalIPAddress; RemoteIPAddress = $RemoteIPAddress; LocalPort = $LocalPort; RemotePort = $RemotePort; Protocol = $Protocol; Stateful = $Stateful }
     $script:rules += $rule
@@ -95,7 +106,7 @@ function Get-VMNetworkAdapterExtendedAcl($VMNetworkAdapter) {
     $script:queriedRules = @($script:rules)
     return $script:rules
 }
-function Remove-RunnerInstance($State) { $script:effects += 'cleanup'; $script:cleanups++; if ($script:fail -ceq 'cleanup') { throw 'cleanup refused' }; $script:state = $null }
+function Remove-RunnerInstance($State) { $script:effects += 'cleanup'; $script:cleanups++; $script:lastCleanupState = Copy-Fixture $State; if ($script:fail -ceq 'cleanup') { throw 'cleanup refused' }; $script:state = $null }
 function New-RunnerProbeProcess($Executable, $Arguments) {
     if ($script:locked) { throw 'Probe dispatch held state mutex.' }
     if ($Arguments -notmatch 'Network.Recovery.Probe.ps1') { throw 'Probe dispatched arbitrary command.' }
@@ -109,6 +120,8 @@ function Get-RunnerNetworkObservation { if ($script:locked) { throw 'Network obs
 function New-Fixture {
     if ($script:fixtureStateDepth -ne 0) { throw 'Previous fixture leaked state recursion.' }
     $script:now = [DateTime]::UtcNow
+    $script:lastCleanupState = $null
+    $script:vmQueries = 0
     $script:clock = $script:now; $script:RunnerRecoveryProbe = $null
     $script:locked = $false; $script:alive = $true; $script:fail = ''; $script:effects = @(); $script:cleanups = 0; $script:addCount = 0; $script:removeCount = 0; $script:aclQueries = 0; $script:rules = @(); $script:queriedRules = @()
     $script:captures = @(New-Capture); $script:readIndex = -1
@@ -147,6 +160,110 @@ function Set-FixtureVerifiedRules {
     $script:state.networkRecovery.verifiedRules = $script:rules
 }
 try {
+    Check 'episode diagnostics distinguish churn from repeated identical observations and reset only on a new episode' {
+        New-Fixture; Isolate
+        $deadline = $script:recovery.episodeDeadlineUtc; $hard = $script:recovery.hardDeadlineUtc
+        $script:recovery = (Plan 2 $null).recovery
+        $script:recovery = (Plan 3 $null).recovery
+        $script:recovery = (Plan 4).recovery
+        $script:recovery = (Plan 5).recovery
+        $changed = [pscustomobject]@{ fingerprint = ('c' * 64); rules = $script:observation.rules }
+        $script:recovery = (Plan 6 $changed).recovery
+        Assert-Equal $script:recovery.diagnostics.observationUnavailableCount 2 'Unavailable observations lost.'
+        Assert-Equal $script:recovery.diagnostics.fingerprintChangeCount 2 'Repeated same fingerprint counted as churn.'
+        Assert-Equal $script:recovery.diagnostics.trigger 'fingerprint-change' 'Episode trigger overwritten.'
+        Assert-Equal $script:recovery.episodeDeadlineUtc $deadline 'Diagnostic churn changed episode deadline.'
+        Assert-Equal $script:recovery.hardDeadlineUtc $hard 'Diagnostic churn changed hard deadline.'
+        $script:recovery.phase = 'healthy'; $script:recovery.operation = ''; $script:recovery.fingerprint = 'c' * 64
+        $script:recovery.episodeStartedUtc = ''; $script:recovery.episodeDeadlineUtc = ''
+        $script:recovery = (Plan 7 $null).recovery
+        Assert-Equal $script:recovery.diagnostics.observationUnavailableCount 1 'New episode did not reset counters.'
+        Assert-Equal $script:recovery.diagnostics.fingerprintChangeCount 0 'New episode retained old churn.'
+        Assert-Equal $script:recovery.diagnostics.trigger 'observation-unavailable' 'New outage trigger missing.'
+    }
+    Check 'diagnostic counters and timings saturate and corrupt evidence cannot change admission' {
+        New-Fixture; $d = $script:recovery.diagnostics
+        $d.staleAdmissionCount = 1000000; Set-RunnerRecoveryDiagnostic $script:recovery 'staleAdmissionCount' 1
+        Set-RunnerRecoveryDiagnostic $script:recovery 'applyElapsedMs' 999999999
+        Assert-Equal $d.staleAdmissionCount 1000000 'Counter exceeded bound.'
+        Assert-Equal $d.applyElapsedMs 86400000 'Timing exceeded bound.'
+        $script:recovery.diagnostics = 'SECRET malformed evidence'
+        $p = Plan
+        Assert-Equal $p.action 'quarantine' 'Malformed diagnostics affected quarantine admission.'
+        Assert-Equal $p.recovery.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Malformed diagnostics changed deadline.'
+    }
+    Check 'missing and malformed existing episode diagnostics cannot change connect or drift quarantine effects' {
+        foreach ($case in @('missing', 'null', 'scalar', 'missing-fields', 'nonnumeric', 'boolean', 'negative', 'oversized', 'nan')) {
+            foreach ($drift in @($false, $true)) {
+                New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+                $r = $script:state.networkRecovery; $r.phase = 'verified'; $r.operation = ''
+                $r.episodeStartedUtc = $script:now.AddSeconds(-10).ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(110).ToString('o')
+                $r.candidateFingerprint = (Get-RunnerNetworkObservation).fingerprint
+                $r.stableObservations = 2; $r.lastStableUtc = $script:now.AddSeconds(-2).ToString('o')
+                $script:readIndex = -1
+                if ($drift) {
+                    $base = New-Capture; $changed = New-Capture '192.168.9.12' '192.168.9.0/24'
+                    $script:captures = @($base, $base, $changed, $changed)
+                }
+                switch ($case) {
+                    'missing' { $r.PSObject.Properties.Remove('diagnostics') }
+                    'null' { $r.diagnostics = $null }
+                    'scalar' { $r.diagnostics = 'SECRET malformed evidence' }
+                    'missing-fields' { $r.diagnostics = [pscustomobject]@{} }
+                    default {
+                        $r.diagnostics.preflightElapsedMs = switch ($case) { 'nonnumeric' { 'SECRET' }; 'boolean' { $true }; 'negative' { -1 }; 'oversized' { 86400001 }; 'nan' { [double]::NaN } }
+                        $r.diagnostics.lastFingerprint = [pscustomobject]@{ secret = 'SECRET' }
+                    }
+                }
+                $hard = $r.hardDeadlineUtc; $deadline = $r.episodeDeadlineUtc
+                Set-FixtureVerifiedRules
+                $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+                Assert-Equal $p.continue $true "Malformed $case evidence stopped reconnect."
+                Assert-Equal $p.outcome.operation $(if ($drift) { 'quarantine' } else { 'connect' }) "Malformed $case evidence changed action."
+                Assert-Equal $script:effects $(if ($drift) { @('disconnect') } else { @('connect') }) "Malformed $case evidence changed provider effects."
+                Assert-Equal $script:state.networkRecovery.episodeDeadlineUtc $deadline 'Malformed diagnostics extended existing episode.'
+                Assert-Equal $script:state.networkRecovery.hardDeadlineUtc $hard 'Malformed diagnostics extended hard deadline.'
+            }
+        }
+    }
+    Check 'ACL installation timing excludes slow identity preflight and final adapter readback' {
+        New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        $observation = Get-RunnerNetworkObservation; $r = $script:state.networkRecovery
+        $r.phase = 'isolated'; $r.episodeStartedUtc = $script:now.ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(120).ToString('o')
+        $r.candidateFingerprint = $observation.fingerprint; $r.candidateRules = $observation.rules; $r.stableObservations = 2; $r.lastStableUtc = $script:now.AddSeconds(-2).ToString('o')
+        $script:fail = 'timing-stages'
+        $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        $r = $script:state.networkRecovery
+        Assert-Equal $p.outcome.operation 'apply' 'Timing fixture failed to reach ACL installation.'
+        Assert-Equal $script:vmQueries 3 'Timing fixture did not exercise both preflights and final readback.'
+        Assert-Equal $r.diagnostics.preflightElapsedMs 5000 'Longest preflight timing was lost.'
+        Assert-Equal $r.diagnostics.applyElapsedMs ($script:addCount * 100) 'Apply timing included identity preflight or final adapter readback.'
+        Assert-Equal ($script:clock - $script:now).TotalMilliseconds (15000 + $script:addCount * 100) 'Timing fixture did not separate stages.'
+        Assert-Equal $r.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Stage timing changed episode deadline.'
+        Assert-Equal $r.diagnostics.applyCount 1 'Stage timing duplicated the apply intent.'
+        if ($script:effects -contains 'connect' -or $script:effects -contains 'resume' -or $script:effects -contains 'cleanup') { throw 'Stage timing changed provider actions.' }
+    }
+    Check 'long synchronous apply records elapsed duration and original operation before unchanged deadline cleanup' {
+        New-Fixture; $script:vm.State = 'Paused'; $script:adapter.SwitchName = ''; $script:adapter.SwitchId = [guid]::Empty
+        $observation = Get-RunnerNetworkObservation; $r = $script:state.networkRecovery
+        $r.phase = 'isolated'; $r.episodeStartedUtc = $script:now.ToString('o'); $r.episodeDeadlineUtc = $script:now.AddSeconds(120).ToString('o')
+        $r.candidateFingerprint = $observation.fingerprint; $r.candidateRules = $observation.rules; $r.stableObservations = 2; $r.lastStableUtc = $script:now.AddSeconds(-2).ToString('o')
+        $script:fail = 'slow-apply'; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{})
+        $r = $script:state.networkRecovery
+        Assert-Equal $r.diagnostics.applyCount 1 'Apply intent was not counted.'
+        Assert-Equal $r.diagnostics.applyElapsedMs ($script:addCount * 6000) 'Apply timing lost synchronous work.'
+        Assert-Equal $r.episodeDeadlineUtc $script:now.AddSeconds(120).ToString('o') 'Slow apply extended deadline.'
+        if ($script:clock -le $script:now.AddSeconds(120)) { throw 'Long apply fixture did not cross outage deadline.' }
+        $script:fail = ''; $p = Invoke-RunnerNetworkRecoveryTick $script:state.vmName ([pscustomobject]@{}) $p.outcome
+        Assert-Equal $p.continue $false 'Expired long apply continued.'
+        $data = New-RunnerRecoveryDiagnostic $script:lastCleanupState.networkRecovery $script:clock
+        Assert-Equal $data.operation 'apply' 'Cleanup erased initiating operation.'
+        Assert-Equal $data.refusal 'outage-deadline' 'Cleanup lost exact expiry refusal.'
+        Assert-Equal $data.operationAgeMs ($script:addCount * 6000) 'Cleanup erased operation age.'
+        Assert-Equal $data.episodeRemainingMs (120000 - $script:addCount * 6000) 'Episode remaining time was not signed.'
+        Assert-Equal $script:cleanups 1 'Long apply changed cleanup behavior.'
+        if ($script:effects -contains 'connect' -or $script:effects -contains 'resume') { throw 'Long apply resumed despite expiry.' }
+    }
     Check 'final deny capacity includes defaults after actual group deduplication' {
         foreach ($total in @(4095, 4096, 4097, 4098)) {
             New-Fixture; $capture = New-Capture
@@ -507,6 +624,9 @@ try {
         Assert-Refused { Invoke-RunnerRecoveryAdapterEffect $script:state $r 'resume' } 'Stale inspection resumed.'
         Assert-Equal $script:vm.State 'Paused' 'Stale inspection resumed VM.'; Assert-Equal $script:adapter.SwitchName '' 'Stale inspection left connection live.'
         Assert-Equal $script:effects @('disconnect') 'Stale inspection dispatched resume.'
+        Assert-Equal $r.diagnostics.staleAdmissionCount 1 'Stale lease refusal was not counted once.'
+        Assert-Equal $r.diagnostics.refusal 'stale-observation' 'Stale lease refusal missing.'
+        Assert-Equal $r.diagnostics.preflightElapsedMs 3000 'Slow ACL preflight duration missing.'
     }
     Check 'slow network inspection retains oldest capture timestamp' {
         New-Fixture; $script:fail = 'slow-network'; $observation = Get-RunnerNetworkObservation
