@@ -19,20 +19,24 @@ beforeEach(() => {
   request.path = '';
   membership.mockReset().mockResolvedValue(undefined);
 });
-it('makes root-only missing-page recovery discoverable through one main landmark', async () => {
-  render(await NotFound());
-  const main = screen.getByRole('main');
-  expect(
-    within(main).getByRole('heading', { name: 'Page not found' }),
-  ).toBeVisible();
-  expect(
-    within(main).getByRole('link', { name: 'Search inventory' }),
-  ).toHaveAttribute('href', '/inventory');
-  expect(await generateMetadata()).toEqual({
-    title: { absolute: 'Page not found · IT Inventory' },
-  });
-  expect(membership).not.toHaveBeenCalled();
-});
+it.each(['', '/missing.jpg', '/missing.svg', '/_next/static/missing.js'])(
+  'keeps generic root recovery public with one main for %s',
+  async (path) => {
+    request.path = path;
+    render(await NotFound());
+    const main = screen.getByRole('main');
+    expect(
+      within(main).getByRole('heading', { name: 'Page not found' }),
+    ).toBeVisible();
+    expect(
+      within(main).getByRole('link', { name: 'Search inventory' }),
+    ).toHaveAttribute('href', '/inventory');
+    expect(await generateMetadata()).toEqual({
+      title: { absolute: 'Page not found · IT Inventory' },
+    });
+    expect(membership).not.toHaveBeenCalled();
+  },
+);
 it.each(['/inventory/quantity/opaque.jpg', '/inventory/assets/missing'])(
   'keeps document fallback identity fixed for %s with one main and recovery link',
   async (path) => {

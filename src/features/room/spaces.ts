@@ -84,6 +84,22 @@ export function resolveSpace(
   );
 }
 
+/** Shared by the server entry and retained browser-history restoration. */
+export function roomSelectionNotice(
+  locations: LocationRef[],
+  space: Space,
+  requestedSpace: string | null | undefined,
+  requestedLocation: string | string[] | null | undefined,
+  selectedCode: string | null,
+) {
+  return requestedSpace &&
+    !availableSpaces(locations).some((entry) => entry.id === requestedSpace)
+    ? 'The requested space is unavailable. Showing ' + space.name + ' instead.'
+    : requestedLocation && !selectedCode
+      ? 'The requested location is unavailable in this space. Choose a location below.'
+      : null;
+}
+
 export function spaceLocations(locations: LocationRef[], space: Space) {
   return locations.filter(
     (location) => containingSpace(locations, location.code)?.id === space.id,

@@ -1478,6 +1478,27 @@ interfaceTest(
     expect(malformedResponse.status()).toBe(404);
     const anonymous = await browser.newContext();
     try {
+      for (const requester of [page.request, anonymous.request]) {
+        for (const publicPath of ['/missing.jpg', '/missing.svg']) {
+          const publicMissing = await requester.get(
+            new URL(publicPath, page.url()).href,
+            {
+              headers: {
+                'user-agent': '',
+                'x-inventory-document-path': '/inventory/quantity/' + missingId,
+                'x-inventory-return': '/inventory/assets/' + missingId,
+              },
+              maxRedirects: 0,
+            },
+          );
+          expect(publicMissing.status()).toBe(404);
+          expect(publicMissing.headers().location).toBeUndefined();
+          const body = await publicMissing.text();
+          expect(body).toContain('Page not found');
+          expect(body).not.toContain('Inventory record unavailable');
+          expect(body).not.toContain(missingId);
+        }
+      }
       for (const anonymousPath of [
         malformed,
         '/inventory/assets/missing.jpg',

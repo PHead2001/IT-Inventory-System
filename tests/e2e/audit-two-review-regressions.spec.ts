@@ -4,6 +4,7 @@ import { auditLogin, auditReadback } from './audit-two-controls';
 import { chooseLocation } from './location-picker';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { openRecordTask } from './record-task-controls';
+import { installFormHandoffDiagnostics } from './form-handoff-diagnostics';
 
 type StaffClient = Awaited<ReturnType<typeof auditReadback>>;
 type OwnedSite = { code: string; name: string };
@@ -131,6 +132,15 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
   await auditLogin(page);
   const client = await auditReadback();
   const site = ownedSite();
+  const reportInputFailure = await installFormHandoffDiagnostics(page, {
+    pathname: '/settings/sites',
+    expected: {
+      name: site.name,
+      code: site.code,
+      notes: 'Original dirty draft retained after pristine visits',
+    },
+    captureDraft: true,
+  });
   try {
     await page.goto('/settings');
     const drafts = new Set<string>();
@@ -226,6 +236,9 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
     await expect(
       page.getByRole('button', { name: 'Save site', exact: true }),
     ).toHaveCount(0);
+  } catch (error) {
+    await reportInputFailure();
+    throw error;
   } finally {
     try {
       await cleanup(client, site);
