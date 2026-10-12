@@ -41,10 +41,17 @@ Canvas, map-dialog and embedded-count regressions also cover committed
 actor/backend/generation A/B/A retirement without global invalidation, ordinary
 same-owner readiness recovery and pending initialization that finishes after
 retirement. `fiber-teardown.test.ts` executes the installed public
-Fiber root/configure/unmount contract in jsdom, proving that a rejected renderer
-construction releases the next lease only after actual teardown completion. It
-does not create WebGL or prove graphics appearance. Successful-configure errors
-use ordinary teardown and never enter the failed-configure adapter.
+Fiber 9.8.1 root/configure/unmount contract in jsdom. Four regressions cover
+factory rejection before renderer acquisition, acquired-renderer configuration
+failure with deferred disposal, pending-factory rejection and a pending factory
+returning its renderer after teardown begins. The next lease is granted only
+after Fiber completion; acquired renderers additionally require disposal to settle
+and a context-loss request before completion. The adapter uses public unmount
+without rendering a rejected root or mutating its store. These tests do not create
+WebGL or prove graphics appearance or GPU release. Throwing disposal APIs and
+allocations hidden inside a rejecting factory remain unproven resource-release
+boundaries. Successful-configure errors use ordinary teardown and never enter the
+failed-configure adapter.
 Additional authored regressions cover actual modal opening after initial
 verification, permanent cancel retirement, an unmodeled child within IT Closet,
 captured camera publication and actual RoomScene selections through the original

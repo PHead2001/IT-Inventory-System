@@ -116,14 +116,19 @@ dialog and embedded-count owner even without a global invalidation event. Return
 to the original identity cannot revive its scene or staged confirmation. An ordinary
 same-owner readiness recheck can resume after verification succeeds.
 
-Fiber 9.8.1's public unmount handles rejected or pending configuration and a
-missing scene, drains reconciler cleanup, and awaits factory-owned asynchronous
-renderer disposal before completing the lease. Never render a rejected root to
-obtain its store. The failed-initialization adapter delegates to that public
-teardown path. Actual-Fiber regressions hold the slot through rejected/pending
-factories and through delayed renderer disposal after a later configuration
-failure. A disposal error still triggers Fiber's best-effort context loss; its
-callback alone does not prove GPU resources were released after that error.
+Fiber 9.8.1's public `unmountComponentAtNode(canvas, complete)` handles failed
+and pending configuration, missing scenes and factory-owned async renderer
+disposal, awaiting acquired-renderer disposal before completion. The
+failed-configure adapter invokes that API without rendering the
+rejected root or changing its store. The original lease remains occupied until
+Fiber reports teardown completion. Successful configuration followed by another
+error uses ordinary public teardown. Installed-Fiber regressions cover rejection
+before renderer acquisition, later configuration failure with deferred disposal,
+and pending factories that reject or return a renderer after teardown begins.
+They prove disposal, context-loss request, completion and next-grant ordering;
+they do not create WebGL or prove GPU release. Disposal APIs that throw and
+allocations hidden inside a rejecting factory do not establish actual GPU release
+even when Fiber reports completion, and remain browser/resource acceptance limits.
 A factory that allocates resources and rejects without returning them must clean
 up those allocations itself.
 
