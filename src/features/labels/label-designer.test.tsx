@@ -142,6 +142,176 @@ const props = {
 const printButton = () =>
   screen.getByRole('button', { name: /Print selected labels/ });
 
+it.each(['101', '0', '-1', '1.5', ''])(
+  'retains invalid Copies draft %j beside its last valid count and blocks output until correction',
+  async (raw) => {
+    render(<LabelDesigner {...props} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const input = screen.getAllByRole('spinbutton', { name: 'Copies' })[0];
+    fireEvent.change(input, { target: { value: '3' } });
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    const reads = mocks.getQueueRecords.mock.calls.length;
+    fireEvent.change(input, { target: { value: raw } });
+    expect(input).toHaveValue(raw === '' ? null : Number(raw));
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(
+      `${raw === '' ? 'Empty value' : `“${raw}”`} is invalid. Use whole numbers from 1–100 copies per record and at most 500 labels total. Last valid count: 3 copies. Printing is paused until corrected or reverted.`,
+    );
+    expect(printButton()).toBeDisabled();
+    expect(screen.queryByLabelText('Print preview')).toBeNull();
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+    expect(mocks.getQueueRecords).toHaveBeenCalledTimes(reads);
+    fireEvent.change(input, { target: { value: '2' } });
+    expect(input).not.toHaveAttribute('aria-invalid', 'true');
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    expect(document.querySelectorAll('.label-card')).toHaveLength(3);
+    fireEvent.click(printButton());
+    await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  },
+);
+
+it('keeps a 501-label draft unresolved across other edits and reload, with explicit revert', async () => {
+  const rows = Array.from({ length: 6 }, (_, index) => ({
+    ...quantity,
+    key: `7b84a7cf-197b-45b1-8016-${index.toString(16).padStart(12, '0')}`,
+    name: `Adapters ${index}`,
+  }));
+  mocks.getQueueRecords.mockResolvedValue(rows);
+  const view = render(<LabelDesigner {...props} initial={rows} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const controls = screen.getAllByRole('spinbutton', { name: 'Copies' });
+  for (let index = 0; index < 5; index++)
+    fireEvent.change(controls[index], {
+      target: { value: index === 4 ? '99' : '100' },
+    });
+  fireEvent.change(controls[5], { target: { value: '2' } });
+  expect(controls[5]).toHaveAttribute('aria-invalid', 'true');
+  expect(controls[5]).toHaveAccessibleDescription(/Last valid count: 1 copy/);
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '500 labels',
+  );
+  fireEvent.change(controls[0], { target: { value: '99' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Paper size' }), {
+    target: { value: 'A4' },
+  });
+  expect(controls[5]).toHaveValue(2);
+  expect(printButton()).toBeDisabled();
+  view.unmount();
+  render(<LabelDesigner {...props} initial={[]} />);
+  const restored = await screen.findAllByRole('spinbutton', { name: 'Copies' });
+  expect(restored[5]).toHaveValue(2);
+  expect(restored[5]).toHaveAttribute('aria-invalid', 'true');
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Revert Copies' }));
+  expect(restored[5]).toHaveValue(1);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(document.querySelectorAll('.label-card')).toHaveLength(499);
+});
+
+it('cleans up only removed copy drafts and Clear removes every unresolved edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const inputs = screen.getAllByRole('spinbutton', { name: 'Copies' });
+  fireEvent.change(inputs[0], { target: { value: '101' } });
+  fireEvent.change(inputs[1], { target: { value: '' } });
+  const queue = screen.getByRole('region', { name: 'Label queue' });
+  fireEvent.click(within(queue).getAllByRole('button', { name: 'Remove' })[0]);
+  expect(screen.getAllByRole('button', { name: 'Revert Copies' })).toHaveLength(
+    1,
+  );
+  expect(screen.getByRole('spinbutton', { name: 'Copies' })).toHaveValue(null);
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear queue' }));
+  expect(screen.queryByRole('button', { name: 'Revert Copies' })).toBeNull();
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).copyDrafts,
+  ).toEqual({});
+});
+
+it('cancels a pending final read even when an invalid Copies draft is corrected before the read resolves', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let finish!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(printButton());
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '101' },
+  });
+  // Programmatic events exercise the synchronous guard even during busy work.
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '1' },
+  });
+  await act(async () => {
+    finish([quantity, asset]);
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+});
+
+it('cancels pending image readiness after an invalid Copies edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const image = document.createElement('img');
+  Object.defineProperties(image, {
+    complete: { value: true },
+    naturalWidth: { value: 320 },
+  });
+  let finish!: () => void;
+  image.decode = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  document.querySelector('.label-card')!.append(image);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(image.decode).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+    target: { value: '' },
+  });
+  await act(async () => {
+    finish();
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  expect(printButton()).toBeDisabled();
+  expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+});
+
+it('synchronously revokes an armed native beforeprint grant on invalid Copies edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const sheet = document.querySelector<HTMLElement>('.label-print-root')!;
+  let authorization: string | undefined;
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      fireEvent.change(
+        screen.getAllByRole('spinbutton', { name: 'Copies' })[0],
+        { target: { value: '101' } },
+      );
+      window.dispatchEvent(new Event('beforeprint'));
+      authorization = sheet.dataset.printAuthorized;
+    }),
+  );
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(authorization).toBeUndefined();
+  expect(printButton()).toBeDisabled();
+  expect(screen.getAllByRole('spinbutton', { name: 'Copies' })[0]).toHaveValue(
+    101,
+  );
+});
+
 async function reviewAndAcknowledge(name = 'Laptop') {
   const notice = await screen.findByRole('alert', {
     name: 'Label item decisions',
@@ -317,6 +487,332 @@ it.each(['missing', 'failure'] as const)(
     }
   },
 );
+
+it('retains a queue with invalid cached geometry and blocks its preview until explicit reset', async () => {
+  mocks.getQueueRecords.mockResolvedValue([quantity]);
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [
+        {
+          kind: quantity.kind,
+          key: quantity.key,
+          copies: 3,
+          baselineTag: null,
+          baselineState: 'active',
+          lifecycleAcknowledged: true,
+        },
+      ],
+      filters: defaultFilters,
+      job: {
+        ...defaultJob,
+        layout: {
+          version: 1,
+          mode: 'single',
+          labelWidth: null,
+          labelHeight: 350,
+        },
+      },
+    }),
+  );
+  render(<LabelDesigner {...props} initial={[]} />);
+  expect(
+    await screen.findByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  expect(screen.getByRole('region', { name: 'Label queue' })).toHaveTextContent(
+    '3 labels',
+  );
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.job.layout.labelWidth).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(
+    JSON.parse(
+      sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+    ).entries[0].copies,
+  ).toBe(3);
+});
+
+it('invalid raw geometry revokes print authorization without another inventory fetch', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const calls = mocks.getQueueRecords.mock.calls.length;
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'sheet' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const before = document
+    .querySelector('.label-print-root')
+    ?.getAttribute('data-sheet-generation');
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.' },
+  });
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls);
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.1' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  expect(
+    document
+      .querySelector('.label-print-root')
+      ?.getAttribute('data-sheet-generation'),
+  ).not.toBe(before);
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls);
+});
+
+it('changing barcode type preserves an invalid raw media draft and blocks preview', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'sheet' },
+  });
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.' },
+  });
+  expect(printButton()).toBeDisabled();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'code128',
+  );
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('90.');
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(printButton()).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '90.1' },
+  });
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+});
+
+it.each(['90.', ''])(
+  'retains raw media draft %j and queue copies across reload until correction',
+  async (raw) => {
+    const view = render(<LabelDesigner {...props} />);
+    await waitFor(() => expect(printButton()).toBeEnabled());
+    fireEvent.change(screen.getAllByRole('spinbutton', { name: 'Copies' })[0], {
+      target: { value: '3' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+      target: { value: 'sheet' },
+    });
+    fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+      target: { value: raw },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+      target: { value: 'code128' },
+    });
+    const key = queueStorageKey(props.origin, props.memberId);
+    await waitFor(() =>
+      expect(
+        JSON.parse(sessionStorage.getItem(key)!).mediaDraft?.labelWidth,
+      ).toBe(raw),
+    );
+    view.unmount();
+    render(<LabelDesigner {...props} initial={[]} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Label width (mm)')).toHaveValue(raw),
+    );
+    expect(screen.getByRole('combobox', { name: 'Output' })).toHaveValue(
+      'sheet',
+    );
+    expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+      'code128',
+    );
+    expect(
+      screen.getAllByRole('spinbutton', { name: 'Copies' })[0],
+    ).toHaveValue(3);
+    expect(printButton()).toBeDisabled();
+    expect(screen.queryByLabelText('Print preview')).toBeNull();
+    window.dispatchEvent(new Event('beforeprint'));
+    expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+      target: { value: '90.1' },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Print preview')).toBeVisible(),
+    );
+    expect(JSON.parse(sessionStorage.getItem(key)!).job.layout.labelWidth).toBe(
+      901,
+    );
+  },
+);
+
+it('blocks a forged raw draft for different valid geometry before native printing and requires explicit reset', async () => {
+  const key = queueStorageKey(props.origin, props.memberId);
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: {
+        ...defaultJob,
+        layout: {
+          version: 1,
+          mode: 'single',
+          labelWidth: 700,
+          labelHeight: 350,
+        },
+      },
+      mediaDraft: { mode: 'single', labelWidth: '80', labelHeight: '35' },
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  window.dispatchEvent(new Event('beforeprint'));
+  expect(document.querySelector('[data-print-authorized="true"]')).toBeNull();
+  await screen.findByText(/The saved print dimensions are invalid/);
+  expect(printButton()).toBeDisabled();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('80');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(printButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+  expect(JSON.parse(sessionStorage.getItem(key)!).mediaDraft).toBeUndefined();
+});
+
+it('changing barcode type preserves invalid cached media until explicit reset', async () => {
+  const badLayout = {
+    version: 1,
+    mode: 'single',
+    labelWidth: null,
+    labelHeight: 350,
+  };
+  sessionStorage.setItem(
+    queueStorageKey(props.origin, props.memberId),
+    JSON.stringify({
+      entries: [],
+      filters: defaultFilters,
+      job: { ...defaultJob, layout: badLayout },
+    }),
+  );
+  render(<LabelDesigner {...props} />);
+  expect(
+    await screen.findByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'code128',
+  );
+  expect(
+    screen.getByText(/The saved print dimensions are invalid/),
+  ).toBeVisible();
+  expect(screen.queryByLabelText('Print preview')).toBeNull();
+  expect(printButton()).toBeDisabled();
+  const saved = JSON.parse(
+    sessionStorage.getItem(queueStorageKey(props.origin, props.memberId))!,
+  );
+  expect(saved.job.layout).toEqual(badLayout);
+  expect(saved.job.format).toBe('code128');
+  fireEvent.click(screen.getByRole('button', { name: 'Reset print media' }));
+  await waitFor(() =>
+    expect(screen.getByLabelText('Print preview')).toBeVisible(),
+  );
+});
+
+it('cancels a final authorized read when media changes, then revalidates the new print', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let resolve!: (rows: LiveLabel[]) => void;
+  mocks.getQueueRecords.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(printButton());
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '80' },
+  });
+  await act(async () => {
+    resolve([quantity, asset]);
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const calls = mocks.getQueueRecords.mock.calls.length;
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(mocks.getQueueRecords).toHaveBeenCalledTimes(calls + 1);
+});
+
+it('cancels readiness while an image decode is outstanding after a media edit', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  const image = document.createElement('img');
+  image.src = 'data:image/png;base64,decode';
+  Object.defineProperties(image, {
+    complete: { value: true },
+    naturalWidth: { value: 320 },
+  });
+  let finish!: () => void;
+  image.decode = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  document.querySelector('.label-card')!.append(image);
+  fireEvent.click(printButton());
+  await waitFor(() => expect(image.decode).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByLabelText('Label height (mm)'), {
+    target: { value: '40' },
+  });
+  await act(async () => {
+    finish();
+  });
+  expect(window.print).not.toHaveBeenCalled();
+  expect(document.querySelector('.label-print-root')).not.toHaveAttribute(
+    'data-print-authorized',
+  );
+});
+
+it('synchronously revokes the one-lifecycle grant before a media edit can reuse beforeprint', async () => {
+  render(<LabelDesigner {...props} />);
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  await waitFor(() => expect(printButton()).toBeEnabled());
+  let authorization: string | undefined;
+  vi.stubGlobal(
+    'print',
+    vi.fn(() => {
+      fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+        target: { value: '90.' },
+      });
+      window.dispatchEvent(new Event('beforeprint'));
+      authorization =
+        document.querySelector<HTMLElement>('.label-print-root')?.dataset
+          .printAuthorized;
+    }),
+  );
+  fireEvent.click(printButton());
+  await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
+  expect(authorization).toBeUndefined();
+  expect(printButton()).toBeDisabled();
+});
 
 it('omits empty search paging without changing the existing label queue', async () => {
   render(<LabelDesigner {...props} />);
@@ -2694,7 +3190,9 @@ it.each(['retry', 'first attempt'] as const)(
           },
         ],
         filters: defaultFilters,
-        job: defaultJob,
+        job: { ...defaultJob, layout: { version: 999 } },
+        mediaDraft: { mode: 'single', labelWidth: '90.', labelHeight: '50' },
+        copyDrafts: { [`asset:${assetId}`]: '101' },
       }),
     );
     mocks.readLogoutPrivacyGeneration.mockResolvedValue({
@@ -2722,6 +3220,8 @@ it.each(['retry', 'first attempt'] as const)(
       </ProtectedPrivacyBoundary>,
     );
     await screen.findByText('1 distinct record · 4 labels');
+    expect(screen.getByRole('spinbutton', { name: 'Copies' })).toHaveValue(101);
+    expect(printButton()).toBeDisabled();
     const remove = Storage.prototype.removeItem;
     const denied = vi
       .spyOn(Storage.prototype, 'removeItem')
@@ -2767,7 +3267,13 @@ it.each(['retry', 'first attempt'] as const)(
       expect(JSON.parse(sessionStorage.getItem(key)!).entries).toEqual([]),
     );
     for (const [target, value] of persist.mock.calls)
-      if (target === key) expect(JSON.parse(value).entries).toEqual([]);
+      if (target === key) {
+        const stored = JSON.parse(value);
+        expect(stored.entries).toEqual([]);
+        expect(stored.copyDrafts).toEqual({});
+        expect(stored.mediaDraft).toBeUndefined();
+        expect(stored.job).toEqual(defaultJob);
+      }
     expect(sessionStorage.getItem(logoutAcknowledgementKey)).toBe(generation);
     expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBeNull();
   },

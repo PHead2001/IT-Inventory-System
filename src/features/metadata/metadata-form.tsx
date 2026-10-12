@@ -43,6 +43,7 @@ import type {
   CategoryRef,
   LocationRef,
   QuantityItem,
+  DuplicateSerial,
 } from '@/features/inventory/contracts-ui';
 import {
   field as fieldClass,
@@ -326,7 +327,7 @@ export function MetadataForm({
   const [receipt, setReceipt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [duplicates, setDuplicates] = useState<string[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateSerial[]>([]);
   const recoveryEnabled = creating && !preview;
   const editRecoveryEnabled = !creating && !preview;
   const editRecovery = useRef<EditEnvelope | null>(null);
@@ -1273,6 +1274,11 @@ export function MetadataForm({
         </label>
         <Input
           id={scopeId + '-metadata-' + name}
+          className={
+            ['item_code', 'asset_tag', 'serial_number'].includes(name)
+              ? 'experience-code'
+              : undefined
+          }
           aria-label={labels[name] ?? name}
           {...validation.props(
             scopeId + '-metadata-' + name,
@@ -1485,6 +1491,7 @@ export function MetadataForm({
     pending: pending && !state?.ok,
     uncertain,
     completed: state?.ok === true,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
   const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
@@ -1899,11 +1906,7 @@ export function MetadataForm({
               core.serial_number,
               asset?.id,
             );
-            setDuplicates(
-              matches.map(
-                (match) => `${match.name} (${match.assetTag ?? 'untagged'})`,
-              ),
-            );
+            setDuplicates(matches ?? []);
           } catch {
             setDuplicates([]);
           }
@@ -2941,7 +2944,15 @@ export function MetadataForm({
                             {row.label}
                           </dt>
                           <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            {row.value}
+                            <span
+                              className={
+                                row.presentation === 'code'
+                                  ? 'experience-code'
+                                  : undefined
+                              }
+                            >
+                              {row.value}
+                            </span>
                           </dd>
                         </div>
                       ))}
@@ -2961,7 +2972,15 @@ export function MetadataForm({
                               {row.source ? ` · ${row.source}` : ''}
                             </dt>
                             <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                              {row.value}
+                              <span
+                                className={
+                                  row.presentation === 'code'
+                                    ? 'experience-code'
+                                    : undefined
+                                }
+                              >
+                                {row.value}
+                              </span>
                             </dd>
                           </div>
                         ))}
@@ -2994,9 +3013,25 @@ export function MetadataForm({
                               {row.label}
                             </dt>
                             <dd className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                              <span>{row.before}</span>
+                              <span
+                                className={
+                                  row.codeValues?.before
+                                    ? 'experience-code'
+                                    : undefined
+                                }
+                              >
+                                {row.before}
+                              </span>
                               <span aria-label=" changes to "> → </span>
-                              <span>{row.after}</span>
+                              <span
+                                className={
+                                  row.codeValues?.after
+                                    ? 'experience-code'
+                                    : undefined
+                                }
+                              >
+                                {row.after}
+                              </span>
                             </dd>
                           </div>
                         ))}
@@ -3029,8 +3064,20 @@ export function MetadataForm({
             )}
             {duplicates.length > 0 && (
               <p className="text-amber-200">
-                Serial also recorded on: {duplicates.join('; ')}. Duplicate
-                serials are allowed.
+                Serial also recorded on:{' '}
+                {duplicates.map((match, index) => (
+                  <span key={match.id}>
+                    {index > 0 && '; '}
+                    {match.name} (
+                    <span
+                      className={match.assetTag ? 'experience-code' : undefined}
+                    >
+                      {match.assetTag ?? 'untagged'}
+                    </span>
+                    )
+                  </span>
+                ))}
+                . Duplicate serials are allowed.
               </p>
             )}
             {!creating && (

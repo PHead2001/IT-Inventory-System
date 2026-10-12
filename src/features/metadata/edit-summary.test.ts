@@ -151,6 +151,7 @@ describe('metadata changed-value summary', () => {
       label: 'Asset tag',
       before: '000Ab/C.02',
       after: '000aB/C.02',
+      codeValues: { before: true, after: true },
     });
   });
   it('shows only normalized changed core and custom values including No, zero and explicit clearing', () => {

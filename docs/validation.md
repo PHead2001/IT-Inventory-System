@@ -42,7 +42,7 @@ coverage ownership, not a measured runtime improvement or browser acceptance.
 | `audit-three-interface` history timezone disclosure (397)        | `scope-accessibility.spec.ts` relative history                                               | Keyboard disclosure, visible UTC/GMT timezone, exact displayed instant, original timestamp precision/`datetime`, clipboard detail and screenshot.                                                                                                                                                  |
 | `audit-three-interface` synthetic missing RSC (429)              | `navigation-workflow.spec.ts` synthetic RSC missing response                                 | Real owned NextLink; scoped non-prefetch request rewrite, RSC response content type/status attachment, unavailable boundary; private IDs/name absent; zero document fallback; ordinary NextLink recovery and title.                                                                                |
 | `audit-three-interface` direct missing resources (526)           | `inventory.spec.ts` direct missing resources; `foundation.spec.ts` anonymous missing asset   | Public/quantity/asset document HTTP 404, one main, unavailable headings, title excludes path identity, screenshots/client recovery; anonymous login redirect/title and no resource disclosure; scan/labels/history route titles and valid image icon.                                              |
-| `audit-three-interface` generic owned route titles (589)         | Merged into populated phone quantity / designer tests above                                  | Exact Quantity item / Category forms titles and absence of **each** owned quantity UUID, category UUID and record name in both titles.                                                                                                                                                             |
+| `audit-three-interface` generic owned route titles (589)         | Merged into populated phone quantity / designer tests above                                  | D304 now requires exact caller-authorized quantity/category-name titles; both exclude owned quantity/category UUIDs and unrelated record/category names. Missing-resource privacy checks remain separate and unchanged.                                                                            |
 
 `inventory-discovery-fixtures.ts` retains its loopback-only API/port guard,
 26 uniquely prefixed owned rows, archive cleanup and local fixture sign-out.
@@ -56,13 +56,33 @@ parallel designer specs may publish required fields on shared categories. Custod
 metadata-designer and foundation retain their existing exclusive ownership. No CI, project gate, runner, concurrency,
 security, race or accounting coverage is relaxed.
 
-D304 still requires caller-scoped authenticated record-name titles in a future
-product change. The generic successful-route title assertions retained here describe
-current behavior; update them with that implementation and its authorization tests.
-Missing-resource titles and synthetic unavailable boundaries must remain private-safe;
-do not weaken their privacy assertions to accommodate successful record-name titles.
-Browser execution, clean database certification and exact-SHA remote acceptance remain
-required separately. Component and discovery checks do not replace those gates.
+D304 keeps all eight server metadata exports generic and read-free. Successful
+caller-scoped page reads register named titles through the mounted Auth privacy
+controller, with explicit server route paths and opaque registration ownership.
+Revocation, failed verification and route/binding drift synchronously restore
+`IT Inventory`; retained forms and unknown-outcome commands stay mounted. Focused
+privacy regressions cover benign checks, same-owner recovery, stale registrations,
+denied owners and delayed safe head updates. Verified ordinary routes restore only
+a repository-authored static title for their current navigation; recognized private
+route shapes have non-sensitive generic fallbacks. Unknown/malformed paths remain
+`IT Inventory`, and no title is learned from previous document metadata or query
+values. Controller and Auth integration regressions cover metadata present before
+mount, navigation masking/reverification and private-to-ordinary transitions.
+Server metadata regressions verify
+that failures and missing records cannot stream private names into the head.
+
+## U407 phone record header
+
+U407's phone record regressions include a populated asset tag or quantity SKU,
+and the asset's complete storage breadcrumb and Show in room link. The Tasks
+heading's bottom is measured from the document top at 375 × 812 after fonts
+are ready, including the retired asset's Last recorded custody state, so retained
+browser scroll cannot conceal a partially or fully off-screen heading. An odd final
+header fact spans both phone columns, keeping custody and identifier content
+readable without narrowing the three-line name or removing its keyboard
+disclosure. Phone hero padding and header/fact gaps are reduced without changing
+text sizes or 44 px controls. Browser geometry acceptance still requires running the real E2E
+suite against the final candidate.
 
 ## U403 choice identity proof
 
@@ -228,6 +248,8 @@ Real-browser acceptance remains necessary for Back/Forward and internal navigati
 
 Quantity action-state regressions cover source overdraw before review, whole-unit/overflow input, field-associated errors and focus, invalidated review snapshots, acknowledged completion through data refresh and per-tab receipt recovery, exact unknown-response retries, double submission, genuine stale conflicts, and deliberate fresh Move more. Receipt action tests cover exact event/entity filtering, conserved immutable lines, current member/actor checks, and postcommit history/cache failures. These mocked tests establish UI/action behavior; real accounting, independent authenticated writer races and hosted browser acceptance still require the canonical database/E2E gates.
 
+The record-page reload regressions follow U406: explicit Move stock selection opens fresh input after exact authorized receipt and current snapshot verification, with the prior receipt collapsed in timestamped Last move details. The older browser assertions requiring Previous move receipt and Move more after this explicit selection are superseded. Component coverage defers each read independently, preserves the pointer and immutable historical balances despite later stock changes, and confirms the next submission uses a new request identity and the fresh version. Both quantity browser journeys retain exact saved event identity/time, historical balances, unchanged current stock/version and one movement event before the next write. Active completion still exercises Refresh balances and stationary Move more; standalone completion restoration, unknown-response guards, actor/backend isolation and withdrawal coverage remain. Component checks and browser test discovery do not replace execution of the canonical E2E gate.
+
 Location-catalog regressions exercise fresh snapshot adoption through Move more, balance refresh and invalid-reference recovery, and catalog-only prop changes that invalidate confirmation. Deferred label lookups exercise the actual individual pending Remove controls, including failed lookup and partial cancellation without late resurrection. The label browser suite delays an authorized response and removes one unresolved quantity while preserving an unrelated location addition and normalized URL through reload.
 
 Unit/component tests cover strict room parsing, measured/default classifications, coordinate mapping, capability predicates, auth validation, explicit confirmation, and cookie refresh behavior.
@@ -338,6 +360,12 @@ Focused tests check the Vercel-only explicit opt-in, exact route and URL allowli
 
 ## Configuration acceptance
 
+The print media migration was assigned version `20261011060256` because the original version had not been applied to production or staging, while both hosted histories already contained later migrations. The SQL bytes were preserved exactly.
+
+A307 adds the shared `tests/fixtures/print-media.json` boundary corpus. Vitest validates it; `tests/integration/print-media-configuration.ts`, invoked by the existing configuration integration suite, compares each case against the SQL validator using a real local database. It also checks historical four-field receipts after later custom updates, omitted-versus-null retry conflicts, omitted-layout preservation, no-op/version/event behavior, concurrent duplicate requests, an independent singleton-lock race and membership revocation before replay. `supabase/tests/print_media.test.sql` checks scalar/null/huge-input failure, RLS view and direct-write denial. These database tests require the complete clean local Supabase gate; static review is not a database pass. Generated types must be regenerated and checked against the applied migration before certification.
+
+Focused components cover valid/old/invalid cached media, raw draft retention, explicit recovery, no extra inventory fetch for geometry edits and cancellation of an outstanding final print read. `node --import tsx tests/integration/print-media-pdf.ts` is a bounded standalone Chromium proof using the real LabelSheet and repository Tailwind compilation, with both standard sizes/papers, custom asymmetric margins/gaps, exact single-label pages, row order, complete QR pixel decoding and PDF page counts/dimensions. It does not run Next routing, authenticated authorization, a database or the real printer. Its output lives under ignored `test-results/print-media`. Existing authenticated label E2E and full database gates remain mandatory; actual paper at 100% needs a separate ruler and printed QR/Code 128 decoding check. Future hardware acceptance waits for the owner's real printer/media selection.
+
 `npm run validate:db` now runs `tests/integration/configuration.ts` after pgTAP and the existing integration suites. The configuration suite uses real authenticated Data API clients and independent PostgreSQL connections to test maintainer-only writes, member reads, direct-write denial and no self-escalation; normalized receipts and decimal-string versions; current category labels in exports; archived/retired reassignment; historical-only inventory references requiring a replacement and retained tombstone; hard deletion of truly unused categories, including the last active category; exact impact staleness after a new reference or version change; no partial update after a later-row failure; shared/exclusive catalog races; and fresh isolation rejection with completed replay. It checks that category reassignment adds metadata events without stock lines. Browser acceptance covers phone-width Settings forms, impact review/cancel/confirm, empty-catalog guidance, viewer controls and shared defaults on Print labels. A delayed Data API call must establish that PostgREST hoists the five-second RPC timeout before execution; checking only `pg_proc.proconfig` is insufficient.
 
 ## Audit 2 implementation checkpoint
@@ -423,7 +451,9 @@ flows through the authorized application.
 
 ## Private-safe titles and missing-resource proof
 
-F307 checks branded route-kind titles without private record names or UUIDs.
+F307's missing-resource checks require branded fallback titles without private
+record names or UUIDs. Authorized successful D304 routes have named titles as
+described above; their missing-resource branches retain these privacy checks.
 Keep real direct missing-resource document requests (including their HTTP 404
 status), anonymous access checks, and client navigation evidence distinct.
 The navigation-workflow E2E uses a clearly synthetic navigation-boundary fixture: a real
@@ -662,6 +692,22 @@ and PR44/main `43351451aff5c3d4441ff211060ae680574a3f77` remain historical.
 This mapping documents source retention; it does not establish a new combined-tree
 pass or actual Docker/email/browser acceptance. Report fresh focused checks separately.
 
+A304 retirement component regressions exercise each editable preset in storage and
+site retirement, manual text/optional-note preservation across refresh, exact
+review/payload parity, note edits invalidating review, blank or overlong combined
+reason rejection and identical unknown-outcome replay. A309 checks visible launcher
+help and accessible descriptions before selecting quantity storage/site and asset
+location/site corrections. These checks do not replace browser or persisted-history
+acceptance on the final candidate.
+
+### PR52 combined print-media local verification
+
+The combined source retains existing privacy cleanup and private document-title ownership. New Copies drafts and media state reset with the established authoritative queue cleanup; final-read/readiness epochs are cancelled on cleanup and unmount. The focused print batch passes 187 tests in seven files; six affected privacy/assignment/configuration/rendering siblings pass another 80 tests. Both batches use one worker and a 768 MiB heap. Scoped zero-warning lint and formatting pass. The actual Next browser regression in `logout-privacy.spec.ts` is authored but unexecuted here: it exercises real privacy-action failure, cross-tab server logout, same-owner recovery and unchanged mounted edit draft/record version. Its late safe-head mutation is synthetic and does not certify Next streaming-head timing. Generated-type additions remain provisional. No local database, PDF browser, full E2E, build or complete certification gate was executed for this integration.
+
+The owned label-defaults fixture forwards only known privacy-read argument shapes before validating mutation intent. A later capture error still settles an earlier validated Save with its original request identity and restores its exact owned version through CAS before reporting the error; an invalid initial command never writes, and concurrent state changes block restoration. Custody and CP3 lifecycle journeys explicitly choose job-local 90 × 50 mm, Letter, QR media. Shared-default inheritance, measured overflow, Code 128 fallback acknowledgement and final print-readiness coverage remain separate and retained. The focused fixture/label batch passes 217 tests in seven suites with one worker and a 768 MiB heap; affected E2E files pass discovery only.
+
+Hosted inspection of preview HEAD `979f174e2ba1e7680dd2e6966753d7cb0d0d7863` found an owned representative asset ready to print at 90 × 50 mm/QR, actual text overflow at 70 × 35 mm, and a ready 90 × 50 mm/Code 128 label whose QR fallback still required acknowledgement. These observations qualify the media diagnosis; they do not prove the amended E2E journeys or establish the exact cause of historical CI failures. Full CI and final-candidate browser/database certification remain pending.
+
 ## PR48 integration with PR47 main
 
 The local merge of `e84cbff7` keeps the main feature-spec consolidation. PR48's
@@ -673,3 +719,15 @@ Audit 3 files remain removed. `navigation-workflow.spec.ts` retains both PR48's
 motion hydration/viewport journeys and main's synthetic private-safe RSC boundary
 journey. Focused tests and discovery are iteration evidence; browser, database,
 complete committed-SHA gates and fresh remote review remain separate acceptance.
+
+### PR52 integration of merged PR48
+
+The combined candidate retains PR48's location action toolbar, selected-ancestor
+settings tree and motion/designer controls together with PR52's generic server
+metadata, caller-scoped cached page reads and mounted private-title ownership.
+Conflict resolution preserves the full 76-row acceptance matrix, named D304
+browser-title assertions, both PRs' feature-spec consolidation and the retirement
+and print-media regression mapping. Focused location/tree, inventory presentation,
+metadata/title/privacy and working-control checks provide local integration
+evidence only. Earlier PR48 CI/review remains bound to `d2c6222`; the new combined
+commit requires its own canonical CI, fresh review and hosted acceptance.

@@ -73,6 +73,7 @@ export async function auditCreateRecord(
   kind: 'quantity' | 'asset',
   category: string,
   name: string,
+  identifier?: string,
 ) {
   await page.goto(`/inventory/${kind === 'asset' ? 'assets' : 'quantity'}/new`);
   const form = page.getByRole('form', {
@@ -84,6 +85,12 @@ export async function auditCreateRecord(
     .getByLabel('Category', { exact: true })
     .selectOption({ label: category });
   await form.getByLabel('Manufacturer', { exact: true }).fill('Original maker');
+  if (identifier)
+    await form
+      .getByLabel(kind === 'asset' ? 'Asset tag' : 'Item code (SKU)', {
+        exact: true,
+      })
+      .fill(identifier);
   if (kind === 'asset')
     await chooseLocation(form, 'Current location', 'ITC-RED');
   await metadataReviewButton(form).click();

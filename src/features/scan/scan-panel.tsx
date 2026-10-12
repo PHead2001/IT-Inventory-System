@@ -1,4 +1,5 @@
 'use client';
+import { ScanMatchLabel } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
@@ -344,7 +345,7 @@ export function ScanPanel() {
               setInput(event.target.value);
             }}
             maxLength={1024}
-            className={styles.input}
+            className={styles.input + ' experience-code'}
           />
           <p className={styles.hint}>
             {mode === 'item_code'
@@ -391,7 +392,7 @@ export function ScanPanel() {
                 onClick={stop}
                 className="underline"
               >
-                {match.label}
+                <ScanMatchLabel match={match} />
               </Link>
               <span className={styles.state}>
                 <RecordStatus status={match.state} />

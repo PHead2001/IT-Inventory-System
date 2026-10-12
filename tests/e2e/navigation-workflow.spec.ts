@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import type { Route } from '@playwright/test';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
@@ -965,9 +966,7 @@ interfaceTest(
         missingId,
         interfaceRecord.name,
       ]) {
-        await expect(page.locator('head title')).not.toContainText(
-          privateValue,
-        );
+        await expectPrivateTitleExcluded(page, privateValue);
         await expect(page.locator('main')).not.toContainText(privateValue);
       }
       expect(

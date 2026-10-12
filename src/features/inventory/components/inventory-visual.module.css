@@ -249,6 +249,42 @@
     position: static;
   }
 }
+@media (max-width: 480px) {
+  .detailHero {
+    padding: 8px 16px;
+  }
+  .detailHero .detailHead {
+    gap: 4px;
+    margin-top: 0;
+  }
+  .detailTitle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    width: 100%;
+  }
+  .detailTitle > :first-child,
+  .detailTitle > div {
+    grid-column: 1 / -1;
+  }
+  /* Keep status and the 44px technical disclosure on one phone row. The
+     record name still uses the full width, including when expanded. */
+  .detailTitle > p:not(:first-child),
+  .detailTitle > details {
+    margin-top: 0;
+  }
+  .facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .facts > .fact:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .fact {
+    padding: 8px 10px;
+  }
+}
 @container (max-width: 680px) {
   .rowGrid {
     grid-template-columns: minmax(0, 1fr) minmax(105px, 0.4fr);

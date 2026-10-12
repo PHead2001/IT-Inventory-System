@@ -1,3 +1,10 @@
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
+import { RecordName } from '@/components/record-name';
+import { readAssetPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export function generateMetadata() {
+  return recordTitle('Individual asset');
+}
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { RecordStatus } from '@/components/record-status';
 import Link from 'next/link';
@@ -5,7 +12,6 @@ import { inventoryReturnPath } from '@/features/inventory/create-return';
 import { notFound } from 'next/navigation';
 import { requireMember } from '@/lib/auth/session.server';
 import {
-  getAssetDetail,
   getCategories,
   getLocations,
 } from '@/features/inventory/queries.server';
@@ -34,7 +40,7 @@ export default async function AssetPage({
   const { id } = await params;
   const query = await searchParams;
   const returnTo = inventoryReturnPath(query?.returnTo);
-  const detail = await getAssetDetail(id);
+  const detail = await readAssetPage(id);
   if (!detail) notFound();
   const { asset, location, site, history, duplicateSerialMatches } = detail;
   const [categories, locations, sites, forms, returnSuggestion] =
@@ -51,6 +57,10 @@ export default async function AssetPage({
     ]);
   return (
     <ProtectedPrivacyContent>
+      <PrivateDocumentTitle
+        routePath={`/inventory/assets/${encodeURIComponent(id)}`}
+        title={recordTitle(detail.asset.name).title.absolute}
+      />
       <>
         <section className={`experience-surface-bright ${styles.detailHero}`}>
           <Link href={returnTo} className="text-sm text-cyan-200 underline">
@@ -64,7 +74,7 @@ export default async function AssetPage({
               <p className="experience-eyebrow">
                 {asset.categoryName} · Individual asset
               </p>
-              <h1 className="experience-heading mt-2">{asset.name}</h1>
+              <RecordName name={asset.name} />
               <p className="experience-muted mt-2 text-sm capitalize">
                 <RecordStatus status={asset.status} />
               </p>
@@ -178,8 +188,15 @@ export default async function AssetPage({
                         className="underline"
                         href={'/inventory/assets/' + match.id}
                       >
-                        {match.name} ({match.assetTag || 'untagged'},{' '}
-                        <RecordStatus status={match.status} />)
+                        {match.name} (
+                        <span
+                          className={
+                            match.assetTag ? 'experience-code' : undefined
+                          }
+                        >
+                          {match.assetTag || 'untagged'}
+                        </span>
+                        , <RecordStatus status={match.status} />)
                       </Link>
                     </li>
                   ))}

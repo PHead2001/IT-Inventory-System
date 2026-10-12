@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type {
   AssetItem,
   CategoryRef,
@@ -33,6 +34,7 @@ export function DetailTasks(props: {
   returnSuggestion?: AssetReturnSuggestion;
   returnSuggestionError?: boolean;
 }) {
+  const router = useRouter();
   const [lastArchiveReview, setLastArchiveReview] = useState(
     props.archiveReview,
   );
@@ -58,11 +60,21 @@ export function DetailTasks(props: {
         add('quantity_move', 'Move stock');
         add('custody:issue', 'Issue stock to a site');
       }
-      add('quantity_adjust', 'Correct physical count', 'secondary');
+      add(
+        'quantity_adjust',
+        'Correct physical count',
+        'secondary',
+        'Correct the recorded storage quantity to the count you observed, without moving stock between locations.',
+      );
       if (siteHoldings.length) {
         add('custody:return', 'Return to storage');
         add('custody:transfer', 'Transfer between sites');
-        add('custody:correct', 'Correct recorded site holding', 'secondary');
+        add(
+          'custody:correct',
+          'Correct recorded site holding',
+          'secondary',
+          'Correct the recorded quantity already at a site, without issuing, returning or transferring stock.',
+        );
         add('custody:write_off', 'Write off at site', 'consequential');
       }
       add(
@@ -84,7 +96,12 @@ export function DetailTasks(props: {
   else if (props.currentSite) {
     add('custody:return', 'Return to storage');
     add('custody:transfer', 'Transfer between sites');
-    add('custody:correct', 'Correct recorded site custody', 'secondary');
+    add(
+      'custody:correct',
+      'Correct recorded site custody',
+      'secondary',
+      'Correct which site is recorded for this asset, without physically transferring equipment.',
+    );
     add(
       'custody:write_off',
       'Write off at site',
@@ -116,10 +133,12 @@ export function DetailTasks(props: {
   return (
     <TaskWorkspace
       choices={choices}
+      recordVersion={entity.version}
+      onRefresh={() => router.refresh()}
       context={
         <div className="text-sm">
           <p className="font-semibold break-words">
-            {entity.name} · {quantity ? 'Quantity item' : 'Individual asset'}
+            This item · {quantity ? 'Quantity item' : 'Individual asset'}
           </p>
           {item ? (
             <p>
@@ -174,6 +193,7 @@ export function DetailTasks(props: {
         if (selected.startsWith('custody:'))
           return (
             <CustodyChangeForm
+              onRecordPage
               actorId={props.actorId}
               kind={quantity ? 'quantity' : 'asset'}
               action={
@@ -197,6 +217,7 @@ export function DetailTasks(props: {
           );
         return (
           <MutationForm
+            onRecordPage
             actorId={props.actorId}
             backendScope={props.backendScope}
             operation={

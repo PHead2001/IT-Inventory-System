@@ -1,3 +1,9 @@
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
+import { readSitePage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
+export function generateMetadata() {
+  return recordTitle('Site details');
+}
 import { custodyEventLabel } from '@/features/custody/vocabulary';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
@@ -6,7 +12,6 @@ import { requireMember } from '@/lib/auth/session.server';
 import { countLabel } from '@/lib/count';
 import { siteCountCorrectionSummary } from '@/features/inventory/history-summary';
 import {
-  getSite,
   getSiteDetail,
   getSiteArchiveReview,
 } from '@/features/custody/queries.server';
@@ -35,7 +40,7 @@ export default async function SitePage({
 }) {
   const { member } = await requireMember();
   const { code } = await params;
-  const site = await getSite(code);
+  const site = await readSitePage(code);
   if (!site) notFound();
   const filters = await searchParams;
   const [detail, archiveReview] = await Promise.all([
@@ -46,6 +51,10 @@ export default async function SitePage({
   ]);
   return (
     <ProtectedPrivacyContent>
+      <PrivateDocumentTitle
+        routePath={`/sites/${encodeURIComponent(code)}`}
+        title={recordTitle(site.name, 'Sites').title.absolute}
+      />
       <>
         <Link
           href="/sites"
@@ -256,8 +265,21 @@ export default async function SitePage({
                   </p>
                   {row.inventory_kind === 'asset' && (
                     <p className="mt-1 break-all text-sm text-slate-300">
-                      {row.asset_tag || 'Untagged'} ·{' '}
-                      {row.serial_number || 'No serial'}
+                      <span
+                        className={
+                          row.asset_tag ? 'experience-code' : undefined
+                        }
+                      >
+                        {row.asset_tag || 'Untagged'}
+                      </span>{' '}
+                      ·{' '}
+                      <span
+                        className={
+                          row.serial_number ? 'experience-code' : undefined
+                        }
+                      >
+                        {row.serial_number || 'No serial'}
+                      </span>
                     </p>
                   )}
                 </li>

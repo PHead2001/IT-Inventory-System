@@ -37,7 +37,12 @@ export function normalizeCreationIntent(
     if (Object.hasOwn(intent, key) && intent[key] === '') intent[key] = null;
   return intent;
 }
-export type SummaryRow = { label: string; value: string; source?: string };
+export type SummaryRow = {
+  label: string;
+  value: string;
+  source?: string;
+  presentation?: 'code';
+};
 export function creationSummary(input: {
   kind: Kind;
   intent: Record<string, unknown>;
@@ -63,7 +68,11 @@ export function creationSummary(input: {
   ];
   if (kind === 'quantity') {
     if (intent.item_code != null)
-      rows.push({ label: 'Item code', value: String(intent.item_code) });
+      rows.push({
+        label: 'Item code',
+        value: String(intent.item_code),
+        presentation: 'code',
+      });
     const count = Number(
       openingSite ? intent.quantity : intent.initial_quantity,
     );
@@ -87,7 +96,8 @@ export function creationSummary(input: {
       ['asset_tag', 'Asset tag'],
       ['serial_number', 'Serial number'],
     ])
-      if (intent[key] != null) rows.push({ label, value: String(intent[key]) });
+      if (intent[key] != null)
+        rows.push({ label, value: String(intent[key]), presentation: 'code' });
     if (!openingSite)
       rows.push({
         label: 'Current storage',

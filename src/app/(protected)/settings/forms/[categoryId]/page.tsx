@@ -1,10 +1,16 @@
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getConfigurationCategories } from '@/features/configuration/queries.server';
+import { readCategoryFormPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import { getPublishedForms } from '@/features/metadata/queries.server';
 import { MetadataSettings } from '@/features/metadata/metadata-settings';
 import { designerInstanceKey } from '@/features/metadata/designer-recovery';
+
+export function generateMetadata() {
+  return recordTitle('Category forms');
+}
 
 export default async function CategoryFormPage({
   params,
@@ -12,14 +18,15 @@ export default async function CategoryFormPage({
   params: Promise<{ categoryId: string }>;
 }) {
   const { categoryId } = await params;
-  const { categories, canManage, memberId } =
-    await getConfigurationCategories();
-  const category = categories.find(
-    (entry) => entry.id === categoryId && entry.active && !entry.removed_at,
-  );
-  if (!category) notFound();
+  const configuration = await readCategoryFormPage(categoryId);
+  if (!configuration) notFound();
+  const { categories, canManage, memberId, category } = configuration;
   return (
     <ProtectedPrivacyContent>
+      <PrivateDocumentTitle
+        routePath={`/settings/forms/${encodeURIComponent(categoryId)}`}
+        title={recordTitle(`${category.name} form`, 'Settings').title.absolute}
+      />
       <div className="space-y-3">
         <Link href="/settings/forms" className="text-cyan-300 underline">
           All category forms

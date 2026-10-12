@@ -197,11 +197,288 @@ it('saves shared label defaults using the existing version and payload keys', as
           size: '70x35',
           page: 'A4',
           format: 'code128',
+          layout: null,
         },
       }),
     ),
   );
 });
+
+it('keeps refreshed shared defaults separate from the draft version until explicitly loaded', async () => {
+  mocks.submit.mockResolvedValue({
+    ok: false,
+    code: 'P1002',
+    message: 'Settings changed. Review the latest defaults.',
+  });
+  const view = render(
+    <SettingsPanel mode="labels" labelDefaults={defaults} canManage />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Barcode type' }), {
+    target: { value: 'code128' },
+  });
+  const latest = {
+    ...defaults,
+    version: '2',
+    layout: {
+      version: 1 as const,
+      mode: 'single' as const,
+      labelWidth: 700,
+      labelHeight: 350,
+    },
+  };
+  view.rerender(
+    <SettingsPanel mode="labels" labelDefaults={latest} canManage />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(mocks.submit.mock.calls[0][0].payload).toMatchObject({
+    expected_version: '1',
+    layout: null,
+    format: 'code128',
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeEnabled(),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Load latest shared defaults' }),
+  );
+  expect(screen.getByRole('combobox', { name: 'Barcode type' })).toHaveValue(
+    'qr',
+  );
+  expect(screen.getByLabelText('Label width (mm)')).toHaveValue('70');
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0].payload).toMatchObject({
+    expected_version: '2',
+    layout: latest.layout,
+  });
+});
+
+it('retains an uncertain label save through an unrelated category save and retries its exact identity once', async () => {
+  mocks.submit.mockRejectedValueOnce(new Error('response lost'));
+  const view = render(
+    <SettingsPanel categories={[source]} labelDefaults={defaults} canManage />,
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: 'Output' }), {
+    target: { value: 'single' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  const retry = await screen.findByRole('button', {
+    name: 'Retry same label settings save',
+  });
+  await waitFor(() => expect(retry).toBeEnabled());
+  const original = mocks.submit.mock.calls[0][0];
+  view.rerender(
+    <SettingsPanel
+      categories={[source]}
+      labelDefaults={{ ...defaults, version: '2' }}
+      canManage
+    />,
+  );
+  expect(
+    screen.getByRole('button', { name: 'Load latest shared defaults' }),
+  ).toBeDisabled();
+  expect(screen.getByLabelText('Label width (mm)')).toBeDisabled();
+  mocks.submit.mockResolvedValueOnce({
+    ok: true,
+    result: { changed: true, version: '2' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Rename Source' }));
+  fireEvent.change(screen.getByLabelText('New category name'), {
+    target: { value: 'Other name' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  await waitFor(() => expect(retry).toBeEnabled());
+  expect(mocks.submit.mock.calls[1][0].operation).toBe('category_rename');
+  let resolve!: (value: unknown) => void;
+  mocks.submit.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  expect(mocks.submit).toHaveBeenCalledTimes(3);
+  expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  expect(
+    screen.getByRole('button', { name: 'Retry same label settings save' }),
+  ).toBeDisabled();
+  await act(async () =>
+    resolve({ ok: true, result: { changed: true, version: '2' } }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    ).toBeEnabled(),
+  );
+  mocks.submit.mockResolvedValueOnce({
+    ok: true,
+    result: { changed: true, version: '3' },
+  });
+  fireEvent.change(screen.getByLabelText('Label width (mm)'), {
+    target: { value: '80' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save shared defaults' }));
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(4));
+  expect(mocks.submit.mock.calls[3][0].payload.expected_version).toBe('2');
+  expect(mocks.submit.mock.calls[3][0].requestId).not.toBe(original.requestId);
+});
+
+it.each([
+  {
+    actorId: 'b1000000-0000-4000-8000-000000000009',
+    backend: 'https://isolated.supabase.co',
+    code: 'actor_changed',
+  },
+  {
+    actorId: 'b1000000-0000-4000-8000-000000000001',
+    backend: 'https://other.supabase.co',
+    code: 'backend_changed',
+  },
+])(
+  'blocks changed label owner props and preserves the original bound unknown command ($code)',
+  async (changed) => {
+    const binding = {
+      actorId: 'b1000000-0000-4000-8000-000000000001',
+      backend: 'https://isolated.supabase.co',
+    };
+    mocks.submit
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: changed.code,
+        message: 'Restore the original workspace.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { changed: true, version: '2' },
+      });
+    const view = render(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={defaults}
+        labelBinding={binding}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    const original = mocks.submit.mock.calls[0][0];
+    expect(original).toMatchObject({
+      expectedActorId: binding.actorId,
+      expectedBackend: binding.backend,
+      payload: { expected_version: '1', layout: null },
+    });
+    const latest = { ...defaults, version: '2' };
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={latest}
+        labelBinding={{ actorId: changed.actorId, backend: changed.backend }}
+        canManage
+      />,
+    );
+    const blocked = screen.getByRole('button', {
+      name: 'Retry same label settings save',
+    });
+    expect(blocked).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    fireEvent.click(blocked);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={latest}
+        labelBinding={binding}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
+    expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+    expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  },
+);
+
+it.each(['55P03', '57014', 'P1001', 'P1009', 'P1012', 'P1016'])(
+  'retains unknown label identity when retry returns %s before confirming its outcome',
+  async (code) => {
+    mocks.submit
+      .mockRejectedValueOnce(new Error('lost response'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code,
+        message: 'Retry could not confirm the original save.',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: { changed: true, version: '2' },
+      });
+    const view = render(
+      <SettingsPanel mode="labels" labelDefaults={defaults} canManage />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save shared defaults' }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    const original = mocks.submit.mock.calls[0][0];
+    view.rerender(
+      <SettingsPanel
+        mode="labels"
+        labelDefaults={{ ...defaults, version: '2' }}
+        canManage
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Retry same label settings save' }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Load latest shared defaults' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Label size' })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Retry same label settings save' }),
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(3));
+    expect(mocks.submit.mock.calls[1][0]).toEqual(original);
+    expect(mocks.submit.mock.calls[2][0]).toEqual(original);
+  },
+);
 
 it('retains an invalid rename draft with a durable associated error and input focus', () => {
   render(<SettingsPanel mode="categories" categories={[source]} canManage />);

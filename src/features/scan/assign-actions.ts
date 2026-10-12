@@ -71,6 +71,8 @@ export async function findAssignmentRecords(
           kind: row.kind,
           path,
           label: `${row.name}${row.assetTag || row.itemCode ? ` (${row.assetTag ?? row.itemCode})` : ''}`,
+          name: row.name,
+          identifier: row.assetTag ?? row.itemCode,
           state:
             row.status === 'retired'
               ? 'retired'
