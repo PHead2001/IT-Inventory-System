@@ -12,6 +12,7 @@ const actions = vi.hoisted(() => ({
   signOutSession: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+vi.mock('@/lib/auth/logout-transport', () => actions);
 const routing = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),

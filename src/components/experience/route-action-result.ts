@@ -1,9 +1,15 @@
 'use client';
 
+import type { PresentationDenialTicket } from './route-presentation-lifetime';
+
 type PresentationScope = {
   invalidate: () => void;
   track?: (action: PromiseLike<unknown>) => void;
   capture?: () => () => boolean;
+  captureDenial?: (
+    ownerCurrent: () => boolean,
+    source: symbol,
+  ) => PresentationDenialTicket | undefined;
 };
 let currentScope: PresentationScope | undefined;
 
@@ -12,8 +18,9 @@ export function bindRouteActionResults(
   invalidate: () => void,
   track?: PresentationScope['track'],
   capture?: PresentationScope['capture'],
+  captureDenial?: PresentationScope['captureDenial'],
 ) {
-  const scope = { invalidate, track, capture };
+  const scope = { invalidate, track, capture, captureDenial };
   currentScope = scope;
   return () => {
     if (currentScope === scope) currentScope = undefined;
@@ -39,24 +46,40 @@ function deniesActorOrAccess(result: unknown) {
 export async function observeRouteActionResult<T>(
   action: PromiseLike<T>,
   ownerCurrent?: () => boolean,
+  source?: symbol,
 ) {
   const scope = currentScope;
   let current: (() => boolean) | undefined;
+  let denial: PresentationDenialTicket | undefined;
   try {
     current = scope?.capture?.();
+    if (source && ownerCurrent)
+      denial = scope?.captureDenial?.(ownerCurrent, source);
     scope?.track?.(action);
   } catch {
     /* Presentation never changes requests/results. */
   }
-  const result = await action;
-  if (scope && currentScope === scope && deniesActorOrAccess(result)) {
+  try {
+    const result = await action;
+    if (scope && currentScope === scope && deniesActorOrAccess(result)) {
+      try {
+        if (
+          denial
+            ? denial.current()
+            : current?.() !== false && ownerCurrent?.() !== false
+        )
+          scope.invalidate();
+      } catch {
+        // Presentation failure must not turn an authoritative denial into a
+        // transport failure or alter the caller's recovery/retry semantics.
+      }
+    }
+    return result;
+  } finally {
     try {
-      if (current?.() !== false && ownerCurrent?.() !== false)
-        scope.invalidate();
+      denial?.release();
     } catch {
-      // Presentation failure must not turn an authoritative denial into a
-      // transport failure or alter the caller's recovery/retry semantics.
+      /* Exact business outcome is unchanged. */
     }
   }
-  return result;
 }

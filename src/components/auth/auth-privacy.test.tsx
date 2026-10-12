@@ -50,6 +50,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routing,
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+vi.mock('@/lib/auth/logout-transport', () => actions);
 const generation = '00000000-0000-4000-8000-000000000001';
 const receipt = { logoutGeneration: generation };
 const batch = 'inventory-assign-batch-v1:private';

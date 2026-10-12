@@ -141,6 +141,14 @@ independent review remain required before accepting the route subset of D303.2.
 Panels/receipts/disclosures remain pending U406 integration. W09 source and
 journeys are being implemented, with readiness/overlap acceptance still pending.
 
+The running local-reduction case uses a second signed-in Settings page in the
+same browser context. Its real motion switch is focused before the first page's
+History transition; Space changes the stored preference at native readiness and
+the browser delivers the cross-tab storage event. The first page must remain
+visible, cancel while the snapshot is active, and keep later routes instant.
+The helper page closes in cleanup. This exercises an actual cross-tab preference,
+without injecting animation state or extending the native animation.
+
 The W08 route-loading tests in `src/app/(protected)/loading.test.tsx`
 mount actual Suspense fallbacks for Inventory/records, History/events, Labels, new
 inventory records and category-form routes. They prove one loading status alongside delayed top
@@ -631,12 +639,29 @@ backend-specific build during canonical `npm run test:e2e` and focused build-inf
 It uses the current Node executable, a bounded subprocess deadline/output limit and
 sanitized status/TAP assertions; nonzero exit or missing regression execution fails
 the browser suite. No additional build, package script or workflow is introduced.
-The same command can also run directly after `npm run build` without a database.
-It loads the actual compiled Settings page and compares its read-helper result with
-the saved build configuration, then changes runtime environment and repeats calls
-in two fresh processes. This proves literal immutability without a database; it does
-not render an authenticated HTTP request. Boundary tests separately exercise delayed
-worker reload, strict bridge rejection, typegen/import fallback and fresh build lifetimes.
+The probe requires the canonical disposable loopback backend and fictional viewer.
+It authenticates once with caller credentials, passes the session only over private
+IPC, and serves the existing production build on an ephemeral loopback port in two
+sequential processes (512 MiB heap and 30 seconds each). Each process checks two real
+authorized Settings Flight responses against the saved allowlisted snapshot, with forged
+runtime environment before startup and again between requests. Requests to any
+other backend are rejected before transport. Both servers close before reporting;
+the parent revokes only its own viewer session in cleanup. No second build or
+public probe route is introduced. The request uses `RSC: 1` and
+`Accept: text/x-component`; status/content type and a 512 KiB raw-stream cap are
+checked before parsing only bounded JSON data records. A narrow recognizer finds
+the exact static BuildInfo host section and checks its literal rendered children
+and time property. It ignores import/debug rows and unrelated provenance props,
+and fails closed on references inside that section rather than implementing a
+general Flight decoder. Unsupported length-framed text/binary/typed-array records
+fail closed before any line scanning, so their raw payload cannot manufacture
+apparent JSON data records. Privacy withholding on SSR HTML remains intact. This
+proves compiled server-rendered Flight values; the separate signed-in Settings
+browser test remains the hydrated DOM/visual proof. Focused helper tests reject stale fields and
+hosted transports; source tests retain the frozen-object contract. The real compiled
+HTTP check remains part of canonical browser CI, not a database-free unit claim.
+Boundary tests separately exercise delayed worker reload, strict bridge rejection,
+typegen/import fallback and fresh build lifetimes.
 
 PR51's integration with main `48b3ca79208d6813bc6dc43c5483194796af28bf`
 keeps the Settings build card inside the protected page content gate alongside
@@ -886,3 +911,27 @@ and print-media regression mapping. Focused location/tree, inventory presentatio
 metadata/title/privacy and working-control checks provide local integration
 evidence only. Earlier PR48 CI/review remains bound to `d2c6222`; the new combined
 commit requires its own canonical CI, fresh review and hosted acceptance.
+
+### Independent logout transport local verification
+
+Ordinary logout and cleanup-generation comparison use the dedicated same-origin
+POST transport so a held navigation cannot queue either acknowledgement. The
+focused auth/proxy batch passes 202 tests in eight files; affected auth, password,
+layout, scan, designer and label component siblings pass another 370 tests in
+nine files. Both use one worker and a 768 MiB heap. Scoped zero-warning lint and
+formatting pass. Route regressions cover mandatory exact request-origin admission,
+missing/null/multiple/path/forged origins, fetch metadata, strict JSON shapes,
+actual chunked UTF-8 byte limits, non-POST denial, retained caller-cookie receipts,
+sanitized failure/uncertainty and read-only cookie comparison. Proxy tests prove
+that these exact endpoints perform no pre-admission claims refresh/cookie writes,
+while neighboring routes retain refresh. Client and recovery tests cover bounded
+timeout/response validation, UNKNOWN recovery retention, verified designer cleanup
+after the original owner is gone, blocked erasure/readback and cleanup-only retry.
+
+The held-History logout browser regression now requires both independent HTTP
+acknowledgements, with the same verified generation, to complete before History
+Flight is released; its late delivery must leave login in place. This authored
+browser assertion remains unexecuted locally. These focused working-tree results
+do not certify real browser cookie delivery, local/hosted request-origin routing,
+database behavior, the full production build/E2E gate, or final committed-SHA
+remote checks and fresh review. Root integration owns those remaining boundaries.

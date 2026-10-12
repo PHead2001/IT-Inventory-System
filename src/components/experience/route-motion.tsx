@@ -35,6 +35,8 @@ import {
   supportsPairedRouteLoading,
 } from './paired-route-loading';
 import { routeKey } from './route-key';
+import { createRoutePresentationLifetime } from './route-presentation-lifetime';
+import { RoutePresentationLifetimeContext } from './route-presentation-source';
 import {
   RoutePendingContext,
   RouteProgress,
@@ -139,6 +141,7 @@ export function RouteMotionProvider({
     value.suspend();
     return value;
   });
+  const [presentation] = useState(createRoutePresentationLifetime);
   const [owners] = useState(createRoutePendingOwners);
   const mountedOwners = useSyncExternalStore(
     owners.subscribe,
@@ -172,6 +175,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        presentation.navigation();
         const interruptedPair = loading.snapshot() !== null;
         loading.cancel();
         readiness.cancel();
@@ -211,6 +215,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        presentation.invalidate();
         // Generic route failure retires presentation, not verified actor eligibility.
         // An already-invalid access scope is never re-enabled here.
         cancelRouteSnapshots();
@@ -220,7 +225,16 @@ export function RouteMotionProvider({
         readiness.cancel();
       },
     }),
-    [pending, state, readiness, loading, owners, lifecycleRef, providerToken],
+    [
+      pending,
+      state,
+      readiness,
+      loading,
+      owners,
+      lifecycleRef,
+      providerToken,
+      presentation,
+    ],
   );
   const pendingSnapshot = useSyncExternalStore(
     pending.subscribe,
@@ -244,6 +258,7 @@ export function RouteMotionProvider({
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
+      presentation.invalidate();
       // Invalidate the store generation before cancellation can invoke apply.
       state.suspend();
       loading.cancel();
@@ -264,6 +279,7 @@ export function RouteMotionProvider({
         document.documentElement.dataset.routeMotionPrivate = 'false';
         suspended.current = true;
         acceptedGrant.current = null;
+        presentation.invalidate();
         loading.cancel();
         pending.cancel(true);
         readiness.close();
@@ -274,12 +290,31 @@ export function RouteMotionProvider({
         const epoch = pending.snapshot().epoch;
         return () => pending.current(epoch);
       },
+      (ownerCurrent, source) => {
+        const grant = acceptedGrant.current;
+        const privacyGeneration = latestPrivacy.current.generation;
+        if (!grant) return undefined;
+        return presentation.capture(
+          source,
+          ownerCurrent,
+          () =>
+            lifecycleRef.current &&
+            currentRouteProvider === providerToken &&
+            !suspended.current &&
+            state.valid() &&
+            acceptedGrant.current?.revision === grant.revision &&
+            acceptedGrant.current?.epoch === grant.epoch &&
+            latestPrivacy.current.generation === privacyGeneration &&
+            retainedPresentationGrantCurrent(latestPrivacy.current, grant),
+        );
+      },
     );
     return () => {
       unbindPrivacy();
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      presentation.invalidate();
       if (ownsDocument) {
         acceptedGrant.current = null;
       }
@@ -301,6 +336,7 @@ export function RouteMotionProvider({
     owners,
     lifecycleRef,
     providerToken,
+    presentation,
   ]);
   useLayoutEffect(() => {
     latestPrivacy.current = privacy;
@@ -329,6 +365,7 @@ export function RouteMotionProvider({
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
+      presentation.invalidate();
       state.suspend();
       loading.cancel();
       pending.suspend();
@@ -344,6 +381,7 @@ export function RouteMotionProvider({
     readiness,
     loading,
     providerToken,
+    presentation,
   ]);
   useEffect(() => {
     let listening = true;
@@ -357,6 +395,7 @@ export function RouteMotionProvider({
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
+      presentation.invalidate();
       loading.cancel();
       pending.cancel(true);
       readiness.close();
@@ -370,6 +409,7 @@ export function RouteMotionProvider({
       },
     );
     const pop = () => {
+      presentation.navigation();
       loading.cancel();
       pending.cancel();
       readiness.cancel();
@@ -406,6 +446,7 @@ export function RouteMotionProvider({
     loading,
     lifecycleRef,
     providerToken,
+    presentation,
   ]);
   useEffect(() => {
     // Next may redirect through its own router, without an accepted Link event.
@@ -425,11 +466,12 @@ export function RouteMotionProvider({
       lifecycleRef.current &&
       currentRouteProvider === providerToken
     ) {
+      presentation.invalidate();
       loading.cancel();
       state.finish();
       cancelRouteSnapshots();
     }
-  }, [state, loading, reduced, lifecycleRef, providerToken]);
+  }, [state, loading, reduced, lifecycleRef, providerToken, presentation]);
   return (
     <RouteMotionContext.Provider
       value={{
@@ -445,42 +487,46 @@ export function RouteMotionProvider({
           document.documentElement.dataset.routeMotionPrivate = 'false';
           suspended.current = true;
           acceptedGrant.current = null;
+          presentation.invalidate();
         },
       }}
     >
       <RoutePendingContext.Provider value={scope}>
-        {mountedOwners.map((owner) => (
-          <RouteTransitionRunner
-            key={`${owner.id}:${pendingSnapshot.epoch}`}
-            scope={scope}
-            epoch={pendingSnapshot.epoch}
-            owner={owner}
-          />
-        ))}
-        <RouteProgress />
-        <RouteReadyContext.Provider value={readiness}>
-          <PairedRouteLoadingContext.Provider
-            value={{
-              store: loading,
-              valid: (owner) =>
-                lifecycleRef.current &&
-                currentRouteProvider === providerToken &&
-                loading.snapshot() === owner &&
-                pending.current(owner.epoch) &&
-                state.valid() &&
-                mountedActor.current === actorId &&
-                !suspended.current &&
-                retainedPresentationGrantCurrent(
-                  privacy,
-                  acceptedGrant.current,
-                ) &&
-                state.snapshot()?.name === owner.name &&
-                document.documentElement.dataset.routeMotionPrivate === 'true',
-            }}
-          >
-            {children}
-          </PairedRouteLoadingContext.Provider>
-        </RouteReadyContext.Provider>
+        <RoutePresentationLifetimeContext value={presentation}>
+          {mountedOwners.map((owner) => (
+            <RouteTransitionRunner
+              key={`${owner.id}:${pendingSnapshot.epoch}`}
+              scope={scope}
+              epoch={pendingSnapshot.epoch}
+              owner={owner}
+            />
+          ))}
+          <RouteProgress />
+          <RouteReadyContext.Provider value={readiness}>
+            <PairedRouteLoadingContext.Provider
+              value={{
+                store: loading,
+                valid: (owner) =>
+                  lifecycleRef.current &&
+                  currentRouteProvider === providerToken &&
+                  loading.snapshot() === owner &&
+                  pending.current(owner.epoch) &&
+                  state.valid() &&
+                  mountedActor.current === actorId &&
+                  !suspended.current &&
+                  retainedPresentationGrantCurrent(
+                    privacy,
+                    acceptedGrant.current,
+                  ) &&
+                  state.snapshot()?.name === owner.name &&
+                  document.documentElement.dataset.routeMotionPrivate ===
+                    'true',
+              }}
+            >
+              {children}
+            </PairedRouteLoadingContext.Provider>
+          </RouteReadyContext.Provider>
+        </RoutePresentationLifetimeContext>
       </RoutePendingContext.Provider>
     </RouteMotionContext.Provider>
   );

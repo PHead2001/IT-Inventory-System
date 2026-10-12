@@ -17,6 +17,15 @@ vi.mock('@/lib/auth/actions', () => ({
   readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
   acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
 }));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  login: vi.fn(),
+  recover: vi.fn(),
+  confirmAuth: vi.fn(),
+  setPassword: vi.fn(),
+  signOutSession: vi.fn(),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/test',

@@ -1,3 +1,5 @@
+import { routeKey } from './route-key';
+
 export type RecordIdentity = { kind: 'asset' | 'quantity'; id: string };
 export type HoldingIdentity =
   { domain: 'storage' | 'site'; id: string } | { domain: 'unplaced' };
@@ -64,7 +66,7 @@ export function titleTarget(
   return {
     ...record,
     holding,
-    listHref: url.pathname + url.search,
+    listHref: routeKey(url.pathname, url.searchParams),
     anchor: url.hash.slice(1),
     detailPath: recordPath(record),
   };
@@ -157,10 +159,19 @@ export function createRouteMotionState() {
       if (!valid || suspended) return;
       // History can reuse an origin, but never authorize a future Link gesture.
       navigation = null;
+      if (!origin || from !== origin.detailPath) return;
+      let destination: URL;
+      try {
+        destination = new URL(to, 'https://inventory.invalid');
+      } catch {
+        return;
+      }
+      const list = new URL(origin.listHref, 'https://inventory.invalid');
       if (
-        !origin ||
-        from !== origin.detailPath ||
-        (to !== origin.listHref && to !== `${origin.listHref}#${origin.anchor}`)
+        destination.origin !== list.origin ||
+        routeKey(destination.pathname, destination.searchParams) !==
+          routeKey(list.pathname, list.searchParams) ||
+        (destination.hash !== '' && destination.hash !== `#${origin.anchor}`)
       )
         return;
       // The first native Back returns to the departing list URL, which usually

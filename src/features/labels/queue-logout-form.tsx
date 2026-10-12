@@ -1,5 +1,5 @@
 'use client';
-import { signOutSession } from '@/lib/auth/actions';
+import { signOutSession } from '@/lib/auth/logout-transport';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useInvalidateRouteMotion } from '@/components/experience/route-motion';
@@ -8,10 +8,7 @@ import { invalidateAssignmentCallbacks } from '@/features/scan/assign-batch';
 import { PasswordLogoutCompletion } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import type { LogoutPrivacyReceipt } from '@/lib/auth/privacy-barrier';
-import {
-  clearAllDesignerRecovery,
-  hasUnresolvedDesignerRecovery,
-} from '@/features/metadata/designer-recovery';
+import { hasUnresolvedDesignerRecovery } from '@/features/metadata/designer-recovery';
 export function QueueLogoutForm() {
   const invalidateRouteMotion = useInvalidateRouteMotion();
   const submitting = useRef(false);
@@ -67,7 +64,6 @@ export function QueueLogoutForm() {
           }
           invalidateRouteMotion();
           clearLabelQueueSession();
-          clearAllDesignerRecovery();
         }}
       >
         <Button variant="outline" disabled={busy}>

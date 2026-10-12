@@ -172,14 +172,32 @@ test('35 pristine site visits through Settings do not exhaust recovery before a 
       /^[0-9a-f-]{36}$/i.test(url.searchParams.get('siteDraft') ?? ''),
     );
     const originalDraft = page.url();
+    const draftIdentity = new URL(originalDraft).searchParams.get('siteDraft')!;
+    const retainedDraft = () =>
+      page.evaluate((draft) => {
+        for (let index = 0; index < sessionStorage.length; index++) {
+          const key = sessionStorage.key(index);
+          if (!key?.startsWith('inventory-site-task-v1:')) continue;
+          const envelope = JSON.parse(sessionStorage.getItem(key)!);
+          if (envelope.scope?.draft === draft)
+            return { status: envelope.status, values: envelope.values };
+        }
+        return null;
+      }, draftIdentity);
     const notes = 'Original dirty draft retained after pristine visits';
     await form.getByLabel('Name', { exact: true }).fill(site.name);
     await form.getByLabel('Permanent code', { exact: true }).fill(site.code);
     await form
       .getByRole('textbox', { name: 'Notes (optional)', exact: true })
       .fill(notes);
+    const expectedDraft = {
+      status: 'editing',
+      values: { name: site.name, code: site.code, notes },
+    };
+    await expect.poll(retainedDraft).toEqual(expectedDraft);
     await page.reload();
     await expect(page).toHaveURL(originalDraft);
+    expect(await retainedDraft()).toEqual(expectedDraft);
     await expect(form.getByLabel('Name', { exact: true })).toHaveValue(
       site.name,
     );

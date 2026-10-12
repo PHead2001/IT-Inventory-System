@@ -19,6 +19,11 @@ vi.mock('@/lib/auth/actions', () => ({
   acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
   readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
 }));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  signOutSession: mocks.signOut,
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/test',

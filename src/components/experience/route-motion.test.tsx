@@ -22,7 +22,9 @@ import {
   RoutePendingTerminal,
   RoutePendingContext,
   useRouteTask,
+  useRouteActionResult,
 } from './route-pending';
+import { PageArrival } from './page-arrival';
 import RouteLink from './route-link';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
@@ -59,6 +61,11 @@ const runtime = vi.hoisted(() => ({
     name?: string;
     share?: string;
     onShare?: (instance: { name: string }) => void;
+    onUpdate?: (
+      instance: { name: string },
+      types: string[],
+    ) => void | (() => void);
+    update?: string;
   }>,
   unsubscribe: vi.fn(),
   logout: vi.fn(),
@@ -67,6 +74,14 @@ const runtime = vi.hoisted(() => ({
   actionPrivacy: '',
 }));
 vi.mock('@/lib/auth/actions', () => ({
+  signOutSession: () => {
+    runtime.actionPrivacy =
+      document.documentElement.dataset.routeMotionPrivate ?? '';
+    runtime.logout();
+    return Promise.resolve({ ok: false, message: 'Sign-out unavailable.' });
+  },
+}));
+vi.mock('@/lib/auth/logout-transport', () => ({
   signOutSession: () => {
     runtime.actionPrivacy =
       document.documentElement.dataset.routeMotionPrivate ?? '';
@@ -85,7 +100,7 @@ vi.mock('@/features/labels/queue-model', () => ({
 }));
 vi.mock('@/features/metadata/designer-recovery', () => ({
   hasUnresolvedDesignerRecovery: () => true,
-  clearAllDesignerRecovery: vi.fn(),
+  clearAllDesignerRecovery: vi.fn(() => true),
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: runtime.refresh }),
@@ -253,12 +268,16 @@ function HeldTask({ work }: { work: Promise<void> }) {
     </button>
   );
 }
-const view = (children: ReactNode, actorId = 'staff') => (
+const view = (
+  children: ReactNode,
+  actorId = 'staff',
+  generation = 'route-fixture',
+) => (
   <PrivacyReadinessContext
     value={{
       ready: true,
       visible: true,
-      generation: 'route-fixture',
+      generation,
       revocationRevision: readPrivacyRevocationRevision(),
       verifiedEpoch: assignmentEpoch(),
     }}
@@ -975,6 +994,113 @@ it('same-actor action denial cancels active snapshots, clears intent and blocks 
     Reflect.deleteProperty(document, 'getAnimations');
   }
 });
+
+it.each([
+  'live',
+  'finished',
+  'later navigation',
+  'no handoff',
+  'actor replacement',
+  'privacy generation',
+  'logout',
+] as const)(
+  'an unmounted action can deny only its exact outgoing native presentation (%s)',
+  async (lifetime) => {
+    let settle!: (result: { ok: false; code: string }) => void;
+    const action = new Promise<{ ok: false; code: string }>((resolve) => {
+      settle = resolve;
+    });
+    let observed: Promise<{ ok: false; code: string }> | undefined;
+    function SourceAction() {
+      const observe = useRouteActionResult();
+      return (
+        <button
+          onClick={() => {
+            observed = observe(action);
+          }}
+        >
+          Start observed action
+        </button>
+      );
+    }
+    const skipTransition = vi.fn();
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: { skipTransition },
+    });
+    try {
+      const fixture = (contents: ReactNode, actor = 'staff') =>
+        view(
+          <PageArrival pathname={runtime.pathname}>{contents}</PageArrival>,
+          actor,
+        );
+      const page = render(
+        fixture(
+          <>
+            <SourceAction />
+            <RouteLink href="/history">Go history</RouteLink>
+          </>,
+        ),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Start observed action' }),
+      );
+      fireEvent.click(screen.getByRole('link', { name: 'Go history' }));
+      runtime.pathname = '/history';
+      page.rerender(
+        fixture(<RouteLink href="/settings">Go settings</RouteLink>),
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Start observed action' }),
+      ).not.toBeInTheDocument();
+      const callback = runtime.boundaries.findLast(
+        (boundary) => boundary.update === 'route-content',
+      )?.onUpdate;
+      expect(callback).toBeDefined();
+      let finish: (() => void) | undefined;
+      if (lifetime !== 'no handoff')
+        act(() => {
+          finish =
+            callback!({ name: 'exact-outgoing-source' }, []) || undefined;
+        });
+      if (lifetime !== 'no handoff') expect(finish).toBeTypeOf('function');
+      if (lifetime === 'finished') act(() => finish!());
+      if (lifetime === 'later navigation')
+        fireEvent.click(screen.getByRole('link', { name: 'Go settings' }));
+      if (lifetime === 'actor replacement')
+        page.rerender(fixture(<p>New actor content</p>, 'replacement'));
+      if (lifetime === 'privacy generation')
+        page.rerender(
+          view(
+            <PageArrival pathname={runtime.pathname}>
+              <p>Reverified generation</p>
+            </PageArrival>,
+            'staff',
+            'new-generation',
+          ),
+        );
+      if (lifetime === 'logout')
+        act(() => runtime.callbacks.at(-1)!('SIGNED_OUT', null));
+      const priorSkips = skipTransition.mock.calls.length;
+      const denied = { ok: false as const, code: 'forbidden' };
+      await act(async () => {
+        settle(denied);
+        expect(await observed).toBe(denied);
+      });
+      expect(skipTransition.mock.calls.length).toBe(
+        lifetime === 'live' ? priorSkips + 1 : priorSkips,
+      );
+      if (lifetime === 'live')
+        expect(document.documentElement.dataset.routeMotionPrivate).toBe(
+          'false',
+        );
+      // Native callback cleanup is exact and harmless even after provider retirement.
+      act(() => finish?.());
+    } finally {
+      Reflect.deleteProperty(document, 'activeViewTransition');
+    }
+  },
+);
 
 it('local reduction cancels in-flight pseudo-element animations and disables later gestures', () => {
   const cancel = vi.fn();

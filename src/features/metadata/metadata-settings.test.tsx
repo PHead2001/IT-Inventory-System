@@ -36,6 +36,7 @@ const privacyActions = vi.hoisted(() => ({
   readProtectedPrivacyIdentity: vi.fn(),
 }));
 vi.mock('@/lib/auth/actions', () => privacyActions);
+vi.mock('@/lib/auth/logout-transport', () => privacyActions);
 vi.mock('next/navigation', () => ({
   useRouter: () => router,
   usePathname: () => '/settings/metadata',

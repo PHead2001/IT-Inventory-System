@@ -7,6 +7,9 @@ export function UnavailablePage({
 }: {
   inventory?: boolean;
 }) {
+  // Public recovery starts a new request so Auth derives its destination from
+  // that URL, independently of any prefetched anonymous route state.
+  const RecoveryLink = inventory ? Link : 'a';
   return (
     <section
       className="experience-surface mx-auto my-10 max-w-xl p-6"
@@ -26,18 +29,18 @@ export function UnavailablePage({
           : 'This address does not lead to a page. Open Overview or search inventory to continue.'}
       </p>
       <nav aria-label="Recovery options" className="mt-5 flex flex-wrap gap-3">
-        <Link
+        <RecoveryLink
           href="/inventory"
           className="inline-flex min-h-11 items-center rounded border border-[var(--accent)] px-4 text-[var(--accent)]"
         >
           Search inventory
-        </Link>
-        <Link
+        </RecoveryLink>
+        <RecoveryLink
           href="/dashboard"
           className="inline-flex min-h-11 items-center px-4 text-[var(--accent)] underline"
         >
           Open Overview
-        </Link>
+        </RecoveryLink>
       </nav>
     </section>
   );

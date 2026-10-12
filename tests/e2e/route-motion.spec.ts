@@ -11,6 +11,10 @@ import {
   auditOpenMetadataTask,
 } from './audit-two-controls';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
+import {
+  buildFullQuantityFlightProbe,
+  readFallbackMarker,
+} from './quantity-flight-probe';
 
 type Capture = { name: string; tag: string; canvas: boolean; shell: boolean };
 type Proof = {
@@ -174,37 +178,46 @@ async function resetProof(page: Page) {
   });
 }
 
-/** An independent authenticated Flight reader proves early fallback bytes while
- * the actual browser request streams normally and its database read is held.
- * Headers/body stay in memory and are never attached or logged. */
+/** A separate full-route Flight reader proves fallback bytes while the actual
+ * browser navigation streams normally and its database read is held. Cookie
+ * and body stay in memory and are never attached or logged. */
 async function earlyQuantityFallback(request: Request) {
-  const target = new URL(request.url());
-  expect(['localhost', '127.0.0.1']).toContain(target.hostname);
-  expect(target.port).toBe('3000');
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 1500);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let stage = 'request-headers';
+  let status: number | undefined;
+  let bytes = 0;
   try {
-    const response = await fetch(target, {
-      headers: await request.allHeaders(),
+    const browserHeaders = await request.allHeaders();
+    const probe = buildFullQuantityFlightProbe(
+      request.url(),
+      browserHeaders.cookie ?? '',
+    );
+    stage = 'response-headers';
+    const response = await fetch(probe.url, {
+      headers: probe.headers,
       signal: controller.signal,
     });
-    expect(response.ok).toBe(true);
-    expect(response.headers.get('content-type')).toContain('text/x-component');
-    reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let text = '',
-      bytes = 0;
-    while (!text.includes('Loading quantity record')) {
-      const next = await reader.read();
-      if (next.done)
-        throw new Error('Primary stream ended before a fallback was observed.');
-      bytes += next.value.byteLength;
-      if (bytes > 512 * 1024)
-        throw new Error('Fallback probe exceeded its bounded byte limit.');
-      text += decoder.decode(next.value, { stream: true });
+    status = response.status;
+    if (response.body) reader = response.body.getReader();
+    if (
+      !response.ok ||
+      !response.headers.get('content-type')?.includes('text/x-component') ||
+      !reader
+    ) {
+      throw new Error('Invalid full Flight response.');
     }
-    return { fallbackBeforePrimaryRelease: true, streamedBytes: bytes };
+    stage = 'body';
+    const streamedBytes = await readFallbackMarker(reader, (readBytes) => {
+      bytes = readBytes;
+      if (bytes > 0) stage = 'markerwait';
+    });
+    return { fallbackBeforePrimaryRelease: true, streamedBytes };
+  } catch {
+    throw new Error(
+      `Quantity Flight probe failed: stage=${stage}; bytes=${bytes}; status=${status ?? 'none'}.`,
+    );
   } finally {
     clearTimeout(deadline);
     controller.abort();
@@ -642,48 +655,78 @@ for (const width of [1280, 390]) {
       await observeMotion(page);
       await auditLogin(page);
       await expect(page.locator('html')).toHaveAttribute('data-motion', 'full');
-      await resetProof(page);
-      const { completed } = await atNextNativeReady(page, async () => {
-        if (mode === 'system') {
-          await page.emulateMedia({ reducedMotion: 'reduce' });
-        } else {
-          // Operate the real stationary preference control, never set app
-          // animation state or dispatch its private change signal in this test.
-          await page
-            .getByRole('button', { name: 'Reduce motion locally', exact: true })
-            .click();
+      const preferences =
+        mode === 'local' ? await page.context().newPage() : null;
+      try {
+        if (preferences) {
+          await preferences.emulateMedia({ reducedMotion: 'no-preference' });
+          await preferences.goto('/settings');
+          const toggle = preferences.getByRole('switch', {
+            name: 'Reduce motion in this browser',
+            exact: true,
+          });
+          await expect(toggle).toBeEnabled();
+          await expect(toggle).toHaveAttribute('aria-checked', 'false');
+          await toggle.focus();
+          await expect(toggle).toBeFocused();
+          await page.bringToFront();
+          await expect
+            .poll(() => page.evaluate(() => document.visibilityState))
+            .toBe('visible');
         }
-        await expect(page.locator('html')).toHaveAttribute(
-          'data-motion',
-          'reduced',
+        await resetProof(page);
+        const { completed } = await atNextNativeReady(page, async () => {
+          if (mode === 'system') {
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+          } else {
+            // Real keyboard input on the stationary Settings control creates the
+            // browser's cross-tab storage event while the first route animates.
+            await preferences!.keyboard.press('Space');
+            // Keep this attribution about preference changes, not tab hiding.
+            expect(await page.evaluate(() => document.visibilityState)).toBe(
+              'visible',
+            );
+          }
+          await expect(page.locator('html')).toHaveAttribute(
+            'data-motion',
+            'reduced',
+          );
+        });
+        await (await navigationLink(page, 'History')).click();
+        await completed;
+        await expect(
+          page.getByRole('heading', { name: 'Inventory history', exact: true }),
+        ).toBeVisible();
+        await assertNoNativeSnapshots(page);
+        const cancelled = await proof(page);
+        expect(cancelled.cancellations.some((entry) => entry.whileActive)).toBe(
+          true,
         );
-      });
-      await (await navigationLink(page, 'History')).click();
-      await completed;
-      await expect(
-        page.getByRole('heading', { name: 'Inventory history', exact: true }),
-      ).toBeVisible();
-      await assertNoNativeSnapshots(page);
-      const cancelled = await proof(page);
-      expect(cancelled.cancellations.some((entry) => entry.whileActive)).toBe(
-        true,
-      );
-      await info.attach('in-flight-effective-reduction', {
-        body: JSON.stringify(cancelled),
-        contentType: 'application/json',
-      });
-      await resetProof(page);
-      await (await navigationLink(page, 'Inventory')).focus();
-      await page.keyboard.press('Enter');
-      await expect(
-        page.getByRole('heading', { name: 'Inventory', exact: true }),
-      ).toBeVisible();
-      await settled(page);
-      expect((await proof(page)).transitions).toHaveLength(0);
-      await expect(page.locator('html')).toHaveAttribute(
-        'data-route-motion-private',
-        'true',
-      );
+        await info.attach('in-flight-effective-reduction', {
+          body: JSON.stringify({
+            ...cancelled,
+            contract:
+              mode === 'local'
+                ? 'Real cross-tab Settings switch and browser storage event during native navigation'
+                : 'System reduced-motion change during native navigation',
+          }),
+          contentType: 'application/json',
+        });
+        await resetProof(page);
+        await (await navigationLink(page, 'Inventory')).focus();
+        await page.keyboard.press('Enter');
+        await expect(
+          page.getByRole('heading', { name: 'Inventory', exact: true }),
+        ).toBeVisible();
+        await settled(page);
+        expect((await proof(page)).transitions).toHaveLength(0);
+        await expect(page.locator('html')).toHaveAttribute(
+          'data-route-motion-private',
+          'true',
+        );
+      } finally {
+        await preferences?.close();
+      }
     });
   }
 }
@@ -759,11 +802,12 @@ for (const width of [1280, 390]) {
       );
       try {
         await page.keyboard.press('Enter');
-        const fallback = earlyQuantityFallback(await requested);
-        void fallback.catch(() => {});
+        const browserRequest = await requested;
         await expect
           .poll(held.blockedReads, { timeout: 1000, intervals: [25, 50, 100] })
           .toBeGreaterThan(0);
+        const fallback = earlyQuantityFallback(browserRequest);
+        void fallback.catch(() => {});
         const streamed = await fallback;
         await expect(routeProgress(page)).toHaveAttribute(
           'data-visible',
@@ -1487,7 +1531,32 @@ for (const width of [1280, 390]) {
       await (await navigationLink(page, 'History')).click();
       await slow.arrival;
       await expect(routeProgress(page)).toHaveAttribute('data-visible', 'true');
+      const signout = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/auth/logout' &&
+          response.request().method() === 'POST',
+      );
+      const cleanup = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/auth/privacy-confirm' &&
+          response.request().method() === 'POST',
+      );
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+      // Both HTTP acknowledgements must finish while History Flight stays held.
+      // This fails if either path is dispatched through the App Router action queue.
+      const signedOut = await signout;
+      expect(signedOut.status()).toBe(200);
+      const receipt = await signedOut.json();
+      expect(receipt).toEqual({
+        ok: true,
+        logoutGeneration: expect.any(String),
+      });
+      const cleaned = await cleanup;
+      expect(cleaned.status()).toBe(200);
+      expect(cleaned.request().postDataJSON()).toEqual({
+        generation: receipt.logoutGeneration,
+      });
+      expect(await cleaned.json()).toEqual({ status: 'match' });
       await expect(page).toHaveURL(/\/login$/);
       await expect(routeProgress(page)).toHaveCount(0);
       slow.release();

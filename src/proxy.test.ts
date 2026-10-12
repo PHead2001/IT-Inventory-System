@@ -3,18 +3,60 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { CookieMethodsServer } from '@supabase/ssr';
 vi.mock('server-only', () => ({}));
-const sdk = vi.hoisted(() => ({ createServerClient: vi.fn() }));
-vi.mock('@supabase/ssr', () => sdk);
-vi.mock('./lib/supabase/config', () => ({
-  supabaseConfig: () => ({
+const sdk = vi.hoisted(() => ({
+  createServerClient: vi.fn(),
+  config: vi.fn(() => ({
     url: 'http://localhost:54321',
     key: 'public-test-key',
-  }),
+  })),
+}));
+vi.mock('@supabase/ssr', () => sdk);
+vi.mock('./lib/supabase/config', () => ({
+  supabaseConfig: sdk.config,
 }));
 import { proxy } from './proxy';
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+it.each(['/api/auth/logout', '/api/auth/privacy-confirm'])(
+  'defers every %s cookie/provider operation to admitted handler requests',
+  async (path) => {
+    for (const method of ['GET', 'POST']) {
+      const request = new NextRequest(
+        `https://actual-preview.example${path}?ignored=1`,
+        {
+          method,
+          headers: {
+            cookie: 'session.0=original',
+            origin: 'https://evil.example',
+            'sec-fetch-site': 'cross-site',
+          },
+        },
+      );
+      const read = vi.spyOn(request.cookies, 'getAll');
+      const response = await proxy(request);
+      expect(sdk.config).not.toHaveBeenCalled();
+      expect(sdk.createServerClient).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(response.headers.has('set-cookie')).toBe(false);
+      expect(request.headers.get('cookie')).toBe('session.0=original');
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+  },
+);
+it.each([
+  '/api/auth/logout/extra',
+  '/api/auth/privacy-confirmation',
+  '/auth/confirm',
+  '/api/room/contents',
+])('retains claims refresh for other routes including %s', async (path) => {
+  const claims = vi.fn().mockResolvedValue({ data: null, error: null });
+  sdk.createServerClient.mockReturnValue({ auth: { getClaims: claims } });
+  await proxy(new NextRequest(`https://actual-preview.example${path}`));
+  expect(sdk.config).toHaveBeenCalledOnce();
+  expect(sdk.createServerClient).toHaveBeenCalledOnce();
+  expect(claims).toHaveBeenCalledOnce();
 });
 it('preserves refreshed cookie chunks and cache headers across writes', async () => {
   sdk.createServerClient.mockImplementation(

@@ -85,6 +85,11 @@ vi.mock('@/lib/auth/actions', () => ({
   acknowledgeLogoutPrivacyGeneration: runtime.compare,
   readProtectedPrivacyIdentity: runtime.identity,
 }));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  readLogoutPrivacyGeneration: runtime.read,
+  acknowledgeLogoutPrivacyGeneration: runtime.compare,
+  readProtectedPrivacyIdentity: runtime.identity,
+}));
 vi.mock('next/navigation', () => ({
   usePathname: () => runtime.route().pathname,
   useSearchParams: () => new URLSearchParams(runtime.route().query),

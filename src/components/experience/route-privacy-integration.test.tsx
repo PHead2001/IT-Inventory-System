@@ -56,6 +56,12 @@ vi.mock('@/lib/auth/actions', () => ({
   readProtectedPrivacyIdentity: runtime.identity,
   signOutSession: runtime.signOut,
 }));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  readLogoutPrivacyGeneration: runtime.read,
+  acknowledgeLogoutPrivacyGeneration: runtime.compare,
+  readProtectedPrivacyIdentity: runtime.identity,
+  signOutSession: runtime.signOut,
+}));
 vi.mock('next/navigation', () => ({
   usePathname: () => runtime.pathname,
   useSearchParams: () => new URLSearchParams(runtime.query),
@@ -73,7 +79,7 @@ vi.mock('@/lib/supabase/browser', () => ({
 }));
 vi.mock('@/features/metadata/designer-recovery', () => ({
   hasUnresolvedDesignerRecovery: () => true,
-  clearAllDesignerRecovery: vi.fn(),
+  clearAllDesignerRecovery: vi.fn(() => true),
 }));
 
 function deferred<T>() {

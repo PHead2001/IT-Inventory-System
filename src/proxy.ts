@@ -15,6 +15,14 @@ export async function proxy(request: NextRequest) {
   );
   let response = NextResponse.next({ request: { headers: request.headers } });
   response.headers.set('Cache-Control', 'private, no-store');
+  // These handlers own transport admission and caller-scoped logout/cookie reads.
+  // Refreshing here would write cookies even before a rejected request, and turn
+  // the read-only generation comparison into a session refresh.
+  if (
+    request.nextUrl.pathname === '/api/auth/logout' ||
+    request.nextUrl.pathname === '/api/auth/privacy-confirm'
+  )
+    return response;
   const { url, key } = supabaseConfig();
   const supabase = createServerClient(url, key, {
     cookies: {

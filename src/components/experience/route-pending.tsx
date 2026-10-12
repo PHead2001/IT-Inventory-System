@@ -24,6 +24,7 @@ import {
   type PendingOwner,
 } from './route-pending-owners';
 import { observeRouteActionResult } from './route-action-result';
+import { RoutePresentationSourceContext } from './route-presentation-source';
 import {
   LoadingSkeleton,
   type LoadingShape,
@@ -322,18 +323,20 @@ export function useRouteRouter() {
 
 /** Observe an already-started promise; request, result and rejection are unchanged. */
 export function useRouteActionResult() {
-  const { track } = useOwnedTasks();
+  const { track, capture } = useOwnedTasks();
+  const source = useContext(RoutePresentationSourceContext);
   return useCallback(
     <T,>(action: PromiseLike<T>) => {
       let current = () => false;
       try {
-        current = track(action);
+        current = capture();
+        track(action);
       } catch {
         /* Preserve the original result/rejection. */
       }
-      return observeRouteActionResult(action, current);
+      return observeRouteActionResult(action, current, source);
     },
-    [track],
+    [track, capture, source],
   );
 }
 

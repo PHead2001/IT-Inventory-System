@@ -3,6 +3,7 @@ const actions = vi.hoisted(() => ({
   acknowledgeLogoutPrivacyGeneration: vi.fn(),
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+vi.mock('@/lib/auth/logout-transport', () => actions);
 import { verifyTabPrivacy } from './privacy-cleanup';
 import { logoutAcknowledgementKey } from '@/lib/auth/privacy-barrier';
 import {
@@ -14,11 +15,13 @@ const second = '00000000-0000-4000-8000-000000000002';
 const batch = 'inventory-assign-batch-v1:private';
 const command = 'inventory-assign-v1:private';
 const labels = 'it-inventory-label-queue:v1:private';
+const designer = 'it-inventory:form-designer:v1:retired-owner';
 const current = { status: 'valid', generation: first } as const;
 function seed() {
   sessionStorage.setItem(batch, 'private ticket');
   sessionStorage.setItem(command, 'exact uncertain command');
   sessionStorage.setItem(labels, 'private label');
+  sessionStorage.setItem(designer, 'exact uncertain designer request');
 }
 beforeEach(() => {
   sessionStorage.clear();
@@ -44,7 +47,8 @@ it('recovers after the first storage read throws before any tombstone can be wri
     ready: true,
     generation: first,
   });
-  for (const key of [batch, command, labels])
+  // Cleanup remains authoritative after the original form owner was destroyed.
+  for (const key of [batch, command, labels, designer])
     expect(sessionStorage.getItem(key)).toBeNull();
   expect(sessionStorage.getItem(logoutAcknowledgementKey)).toBe(first);
 });
@@ -154,6 +158,9 @@ it.each(['invalid', 'unavailable'] as const)(
     seed();
     expect((await verifyTabPrivacy({ status }, () => true)).ready).toBe(false);
     expect(sessionStorage.getItem(command)).toBe('exact uncertain command');
+    expect(sessionStorage.getItem(designer)).toBe(
+      'exact uncertain designer request',
+    );
     expect(actions.acknowledgeLogoutPrivacyGeneration).not.toHaveBeenCalled();
   },
 );
@@ -166,6 +173,9 @@ it('absence, a forged query and a private marker do not authorize uncertain reco
     generation: 'absent',
   });
   expect(sessionStorage.getItem(command)).toBe('exact uncertain command');
+  expect(sessionStorage.getItem(designer)).toBe(
+    'exact uncertain designer request',
+  );
 });
 it.each(['ack', 'marker'] as const)(
   'fails closed for invalid %s storage without deleting private data',

@@ -3,6 +3,7 @@ import {
   bindRouteActionResults,
   observeRouteActionResult,
 } from './route-action-result';
+import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 
 it.each(['forbidden', 'actor_changed', 'P1001', '42501'])(
   'signals explicit %s denial before the caller receives the unchanged result',
@@ -188,3 +189,63 @@ it('a throwing owner liveness check cannot change an authoritative denial', asyn
     retire();
   }
 });
+
+it.each(['forbidden', 'UNKNOWN', 'success', 'transport'])(
+  'a separate native presentation ticket preserves the exact %s outcome and releases once',
+  async (outcome) => {
+    const lifetime = createRoutePresentationLifetime();
+    const source = Symbol();
+    const unmount = lifetime.mount(source);
+    const exit = lifetime.exitCallback(source);
+    let owner = true;
+    let settle!: (value: unknown) => void;
+    let reject!: (reason: unknown) => void;
+    const action = new Promise<unknown>((resolve, fail) => {
+      settle = resolve;
+      reject = fail;
+    });
+    const invalidate = vi.fn();
+    const release = vi.fn();
+    const unbind = bindRouteActionResults(
+      invalidate,
+      undefined,
+      () => () => false,
+      (current, token) => {
+        const ticket = lifetime.capture(token, current, () => true)!;
+        return Object.freeze({
+          current: ticket.current,
+          release: () => {
+            release();
+            ticket.release();
+          },
+        });
+      },
+    );
+    try {
+      const result = observeRouteActionResult(action, () => owner, source);
+      lifetime.navigation();
+      owner = false;
+      unmount();
+      lifetime.mount(Symbol());
+      const finish = exit()!;
+      const value =
+        outcome === 'success'
+          ? { ok: true, receipt: 'unchanged' }
+          : { ok: false, code: outcome };
+      if (outcome === 'transport') {
+        const error = new Error('Original rejection');
+        reject(error);
+        await expect(result).rejects.toBe(error);
+      } else {
+        settle(value);
+        expect(await result).toBe(value);
+      }
+      expect(invalidate).toHaveBeenCalledTimes(outcome === 'forbidden' ? 1 : 0);
+      expect(release).toHaveBeenCalledOnce();
+      expect(exit()).toBeUndefined();
+      finish();
+    } finally {
+      unbind();
+    }
+  },
+);

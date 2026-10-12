@@ -217,6 +217,33 @@ observer cleanup. That confirmed cleanup clears hydrated label queues and their
 late persistence without remounting unrelated action owners. A matching generation
 cannot revive a cleared queue. Unchanged checks and attempted logout do not
 advance this revision.
+Ordinary Sign out and the read-only logout-generation comparison use independent
+same-origin JSON POST Route Handlers (`/api/auth/logout` and
+`/api/auth/privacy-confirm`). They do not enter Next's Server Action queue behind
+a pending route navigation. Existing Server Action wrappers delegate to the same
+cookie-scoped logic for compatibility; other authentication actions retain their
+existing transport. The endpoints admit only a mandatory exact serialized Origin
+matching `request.nextUrl.origin`, with `Sec-Fetch-Site: same-origin` when present.
+They do not trust forwarded headers or the configured branch/canonical APP_ORIGIN
+for this transport check. Input is strictly shaped and bounded to 256 actual UTF-8
+stream bytes; all methods except POST are rejected and every result is private,
+no-store without CORS. Sign-out uses the caller's writable Supabase cookies and
+local session scope, without a membership gate that would strand revoked users.
+The proxy skips Supabase session refresh for precisely these two endpoint paths,
+so their rejected requests and read-only comparison cannot write refresh cookies
+before handler admission. All other routes retain the existing proxy behavior.
+The browser bounds the request and strict response parsing; failure, timeout or
+abort never proves server cancellation or grants recovery-erasure authority.
+Unknown designer saves retain their original command through an unconfirmed
+logout. Confirmed all-cleanup verifies designer recovery deletion alongside scan
+and label namespaces under the existing durable cleanup marker. Deletion or
+readback failure blocks login navigation and retries cleanup only.
+This shares server-only mutation logic as described by
+[Next's data-security guide](https://nextjs.org/docs/app/guides/data-security).
+The installed Next 16.3.6 `app-call-server` dispatches Server Actions through the
+router queue; `app-router-instance` gives navigation/restore priority while other
+actions wait. The independent transport preserves the existing
+[Supabase local-session signout scope](https://supabase.com/docs/reference/javascript/auth-signout).
 Label hydration and persistence also compare their mounted revision with the live
 authoritative cleanup revision immediately before storage access. This prevents
 an old queued effect or late refresh from restoring cleared entries while React

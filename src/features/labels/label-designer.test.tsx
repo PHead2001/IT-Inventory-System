@@ -37,6 +37,11 @@ vi.mock('@/lib/auth/actions', () => ({
   acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
   readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
 }));
+vi.mock('@/lib/auth/logout-transport', () => ({
+  readLogoutPrivacyGeneration: mocks.readLogoutPrivacyGeneration,
+  acknowledgeLogoutPrivacyGeneration: mocks.acknowledgeLogoutPrivacyGeneration,
+  readProtectedPrivacyIdentity: mocks.readProtectedPrivacyIdentity,
+}));
 vi.mock('next/navigation', () => {
   const router = { replace: mocks.replace };
   return {

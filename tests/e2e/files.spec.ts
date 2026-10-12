@@ -295,7 +295,17 @@ test('quantity recognition photo uploads, previews for viewers, replaces and rem
     await files.getByRole('button', { name: 'Upload and review' }).click();
     await firstRequest;
     await expect(files.getByRole('button', { name: 'Working…' })).toBeVisible();
-    await expect(files.getByText('File request in progress…')).toBeVisible();
+    const pendingFileAnnouncement = page
+      .getByRole('status')
+      .filter({ hasText: /^File request in progress…$/ });
+    await expect(pendingFileAnnouncement).toHaveCount(1);
+    await expect(pendingFileAnnouncement).toBeVisible();
+    expect(
+      await pendingFileAnnouncement.evaluate(
+        (node) => node.closest('[aria-busy="true"]') === null,
+      ),
+    ).toBe(true);
+    await expect(files).toHaveAttribute('aria-busy', 'true');
     await expect(files.getByText('No photo yet.', { exact: true })).toHaveCount(
       0,
     );
