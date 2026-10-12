@@ -213,7 +213,13 @@ it.each(['found', 'ambiguous'] as const)(
       ok: true,
       status,
       truncated: true,
-      matches: [{ ...match, context: 'Manufacturer: Dell · Closet / Red' }],
+      matches: [
+        {
+          ...match,
+          serialNumber: 'Serial-Mixed',
+          context: 'Manufacturer: Dell · Closet / Red',
+        },
+      ],
     });
     render(<AssignmentWorkspace {...props} />);
     fireEvent.change(
@@ -224,7 +230,9 @@ it.each(['found', 'ambiguous'] as const)(
     );
     fireEvent.submit(screen.getByRole('form', { name: 'Inspect equipment' }));
     expect(
-      await screen.findByText(/Lookup reached the 20-record limit/),
+      await screen.findByText(
+        /Additional matches exist.*up to 20 records.*asset tag or record QR/,
+      ),
     ).toBeVisible();
     expect(
       screen.getByRole('list', { name: 'Choose inventory record' }),
@@ -241,6 +249,13 @@ it.each(['found', 'ambiguous'] as const)(
         name: 'Adapters · Quantity item · Active',
       }),
     ).toBeVisible();
+    expect(
+      within(chooser).getByRole('button', {
+        name: 'Adapters · Quantity item · Active',
+      }),
+    ).toHaveAccessibleDescription(
+      'Serial: Serial-Mixed · Manufacturer: Dell · Closet / Red',
+    );
     expect(mocks.inspect).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   },
@@ -1462,12 +1477,12 @@ it('masks the previous actor batch and discards late pending results on account 
 });
 
 it('inspects with a capitalized shared status and mono identifier, hiding the record version', async () => {
-  const { container } = render(<AssignmentWorkspace {...props} />);
+  render(<AssignmentWorkspace {...props} />);
   await inspect();
   const review = screen.getByRole('region', { name: 'Review assignment' });
   expect(review).toHaveTextContent('Active');
   expect(review).not.toHaveTextContent('Version');
-  expect(container.querySelector('.experience-code')).toHaveTextContent(
+  expect(review.querySelector('.experience-code')).toHaveTextContent(
     candidate.identifier,
   );
   expect(mocks.submit).not.toHaveBeenCalled();

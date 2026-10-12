@@ -1,8 +1,9 @@
+import { PrivateDocumentTitle } from '@/components/auth/private-document-title';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireMember } from '@/lib/auth/session.server';
-import { getSite } from '@/features/custody/queries.server';
+import { readSiteOpeningPage } from './read.server';
+import { recordTitle } from '@/app/(protected)/record-title';
 import {
   getCategories,
   getLocations,
@@ -17,13 +18,13 @@ export async function generateMetadata({
   params: Promise<{ code: string; kind: string }>;
 }) {
   const { kind } = await params;
-  const title =
+  return recordTitle(
     kind === 'quantity'
       ? 'Record existing quantity item'
       : kind === 'asset'
         ? 'Record existing individual asset'
-        : 'Record existing equipment';
-  return { title: { absolute: `${title} · IT Inventory` } };
+        : 'Record existing equipment',
+  );
 }
 
 export default async function SiteOpeningPage({
@@ -36,9 +37,9 @@ export default async function SiteOpeningPage({
   const query = await searchParams;
   const draft = typeof query?.draft === 'string' ? query.draft : undefined;
   const instance = draft ?? crypto.randomUUID();
-  const { member } = await requireMember();
   const { code, kind } = await params;
-  const site = await getSite(code);
+  if (kind !== 'quantity' && kind !== 'asset') notFound();
+  const { member, site } = await readSiteOpeningPage(code);
   if (!site || (kind !== 'quantity' && kind !== 'asset')) notFound();
   if (member.role !== 'staff')
     return (
@@ -67,6 +68,14 @@ export default async function SiteOpeningPage({
     : {};
   return (
     <ProtectedPrivacyContent>
+      <PrivateDocumentTitle
+        routePath={`/sites/${encodeURIComponent(code)}/open/${kind}`}
+        title={
+          recordTitle(
+            `Record existing ${kind === 'asset' ? 'individual asset' : 'quantity item'} at ${site.name}`,
+          ).title.absolute
+        }
+      />
       <>
         <Link
           className="inline-flex min-h-11 items-center text-cyan-300 underline"

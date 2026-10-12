@@ -1,0 +1,16 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select has_column('public','label_defaults','layout','nullable media is stored with shared defaults');
+select ok(private.valid_print_layout(null) is true,'SQL null preserves standard defaults');
+select ok(private.valid_print_layout('null'::jsonb) is false,'JSON scalar null is not a layout object');
+select ok(private.valid_print_layout('{"version":null,"mode":"single","labelWidth":380,"labelHeight":320}'::jsonb) is false,'null version cannot pass a boolean check loophole');
+select ok(private.valid_print_layout('{"version":1,"mode":"single","labelWidth":null,"labelHeight":320}'::jsonb) is false,'null dimensions fail closed');
+select ok(private.valid_print_layout('{"version":1,"mode":"single","labelWidth":1e50,"labelHeight":320}'::jsonb) is false,'huge numeric is bounded before integer casts');
+select ok(private.valid_print_layout('{"version":1,"mode":"single","labelWidth":380,"labelHeight":320}'::jsonb) is true,'minimum single label is valid');
+select ok(not has_table_privilege('authenticated','public.label_defaults','UPDATE'),'caller cannot bypass the RPC for custom media');
+select ok((select reloptions @> array['security_invoker=true'] from pg_class where oid='public.configuration_label_defaults'::regclass),'extended read view preserves caller RLS');
+select ok(not has_function_privilege('anon','public.label_defaults_update(uuid,jsonb)','EXECUTE'),'anonymous cannot update defaults');
+select * from finish();
+rollback;

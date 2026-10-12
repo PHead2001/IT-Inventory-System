@@ -466,7 +466,27 @@ export function HistoryList({
                       {change.field.replaceAll('_', ' ')}
                     </dt>
                     <dd className="whitespace-pre-wrap break-words text-slate-400">
-                      {change.before || 'Not set'} → {change.after || 'Not set'}
+                      {change.presentation === 'code' ? (
+                        <>
+                          <span
+                            className={
+                              change.before ? 'experience-code' : undefined
+                            }
+                          >
+                            {change.before || 'Not set'}
+                          </span>{' '}
+                          →{' '}
+                          <span
+                            className={
+                              change.after ? 'experience-code' : undefined
+                            }
+                          >
+                            {change.after || 'Not set'}
+                          </span>
+                        </>
+                      ) : (
+                        `${change.before || 'Not set'} → ${change.after || 'Not set'}`
+                      )}
                     </dd>
                   </div>
                 ))}

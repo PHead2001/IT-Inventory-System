@@ -975,9 +975,9 @@ it('automatically warns about duplicate serials before saving without blocking c
   await user.click(
     screen.getByRole('button', { name: 'Review add individual asset' }),
   );
-  expect(
-    await screen.findByText(/Other switch \(SW-2, retired\)/),
-  ).toBeVisible();
+  expect(await screen.findByText(/Other switch \(/)).toHaveTextContent(
+    'Other switch (SW-2, retired)',
+  );
   expect(mocks.submit).not.toHaveBeenCalled();
   await user.click(
     await screen.findByRole('button', {
@@ -1018,4 +1018,110 @@ it('an unopened operation panel captures the latest version when first opened', 
   );
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   expect(mocks.submit.mock.calls[0][0].payload.expected_version).toBe(3);
+});
+
+const retirementAsset = {
+  ...item,
+  status: 'active' as const,
+  assetTag: null,
+  serialNumber: null,
+};
+const retirementProps = {
+  ...defaults,
+  item: undefined,
+  asset: retirementAsset,
+  currentLocation: location,
+  operation: 'asset_retire' as const,
+};
+it.each(['E-waste', 'Lost', 'Stolen', 'RMA', 'Sold', 'Transferred'])(
+  'prefills editable retirement reason %s and submits the exact reviewed free text',
+  async (preset) => {
+    mocks.submit.mockResolvedValue({
+      ok: true,
+      entityId: item.id,
+      version: '3',
+      changed: true,
+    });
+    render(<MutationForm {...retirementProps} />);
+    fireEvent.click(screen.getByRole('button', { name: preset }));
+    expect(screen.getByLabelText('Reason (required)')).toHaveValue(preset);
+    const form = screen.getByRole('form', { name: 'Retire asset' });
+    fireEvent.submit(form);
+    expect(screen.getByText('Reason: ' + preset)).toBeVisible();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    fireEvent.submit(form);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    expect(mocks.submit.mock.calls[0][0].payload).toEqual({
+      asset_id: item.id,
+      expected_version: 2,
+      reason: preset,
+    });
+  },
+);
+it('retains edited retirement reason and optional note through rerender, review invalidation and uncertain retry without duplicating the note', async () => {
+  mocks.submit
+    .mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({
+      ok: true,
+      entityId: item.id,
+      version: '3',
+      changed: true,
+    });
+  const view = render(<MutationForm {...retirementProps} />);
+  fireEvent.click(screen.getByRole('button', { name: 'RMA' }));
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: 'RMA approved by vendor' },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: '  Ticket 123  ' },
+  });
+  view.rerender(
+    <MutationForm {...retirementProps} categories={[...defaults.categories]} />,
+  );
+  expect(screen.getByLabelText('Reason (required)')).toHaveValue(
+    'RMA approved by vendor',
+  );
+  const form = screen.getByRole('form', { name: 'Retire asset' });
+  fireEvent.submit(form);
+  expect(
+    screen.getByText('Reason: RMA approved by vendor — Ticket 123'),
+  ).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: 'Ticket 124' },
+  });
+  expect(
+    screen.queryByText('Reason: RMA approved by vendor — Ticket 123'),
+  ).toBeNull();
+  fireEvent.submit(form);
+  expect(
+    screen.getByText('Reason: RMA approved by vendor — Ticket 124'),
+  ).toBeVisible();
+  fireEvent.submit(form);
+  await screen.findByRole('alert');
+  const command = mocks.submit.mock.calls[0][0];
+  expect(command.payload.reason).toBe('RMA approved by vendor — Ticket 124');
+  expect(screen.getByLabelText('Retirement note (optional)')).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retry same transaction' }),
+  );
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(2));
+  expect(mocks.submit.mock.calls[1][0]).toEqual(command);
+});
+it.each([
+  ['', 'note cannot replace reason'],
+  ['  ', 'note cannot replace reason'],
+  ['E-waste', 'x'.repeat(2000)],
+])('blocks blank or overlong final retirement reason %s', (reason, note) => {
+  render(<MutationForm {...retirementProps} />);
+  fireEvent.change(screen.getByLabelText('Reason (required)'), {
+    target: { value: reason },
+  });
+  fireEvent.change(screen.getByLabelText('Retirement note (optional)'), {
+    target: { value: note },
+  });
+  fireEvent.submit(screen.getByRole('form', { name: 'Retire asset' }));
+  expect(
+    screen.queryByRole('button', { name: 'Confirm retire asset' }),
+  ).toBeNull();
+  expect(mocks.submit).not.toHaveBeenCalled();
 });

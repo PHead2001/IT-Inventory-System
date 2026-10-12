@@ -1,4 +1,5 @@
 'use client';
+import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
   useCallback,
@@ -126,7 +127,7 @@ export function ScanPanel() {
             : 'input';
           if (resolution.truncated)
             setMessage(
-              'Lookup reached the 20-record limit. More matches may exist. Choose a shown record or search inventory.',
+              'Additional matches exist. Showing up to 20 records; use an asset tag or record QR to identify the intended equipment.',
             );
           else if (resolution.status === 'invalid')
             setMessage(
@@ -349,7 +350,7 @@ export function ScanPanel() {
               setInput(event.target.value);
             }}
             maxLength={1024}
-            className={styles.input}
+            className={styles.input + ' experience-code'}
           />
           <p className={styles.hint}>
             {mode === 'item_code'
@@ -399,13 +400,18 @@ export function ScanPanel() {
                 <Link
                   ref={index === 0 ? firstMatch : undefined}
                   href={match.path}
+                  aria-describedby={
+                    match.context ? `scan-match-context-${index}` : undefined
+                  }
                   onClick={stop}
                   className="underline"
                 >
-                  {match.label}
+                  <ScanMatchLabel match={match} />
                 </Link>
                 {match.context && (
-                  <p className={styles.hint}>{match.context}</p>
+                  <p id={`scan-match-context-${index}`} className={styles.hint}>
+                    <ScanMatchContext match={match} />
+                  </p>
                 )}
               </div>
               <span className={styles.state}>

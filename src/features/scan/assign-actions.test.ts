@@ -186,6 +186,28 @@ it('uses bounded record-level search and canonical typed identities with explici
       'quantity',
       'asset',
     ]);
+  if (result.ok)
+    expect(
+      result.matches.map((match) => ({
+        path: match.path,
+        label: match.label,
+        name: match.name,
+        identifier: match.identifier,
+      })),
+    ).toEqual([
+      {
+        path: '/inventory/quantity/' + id(3),
+        label: 'Adapters (0001)',
+        name: 'Adapters',
+        identifier: '0001',
+      },
+      {
+        path: '/inventory/assets/' + id(3),
+        label: 'Adapters (0001)',
+        name: 'Adapters',
+        identifier: '0001',
+      },
+    ]);
   expect(mocks.search).toHaveBeenCalledWith({
     q: 'Adapter',
     type: 'all',

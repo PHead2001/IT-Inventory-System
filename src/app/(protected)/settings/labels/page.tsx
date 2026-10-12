@@ -3,7 +3,7 @@ import { getLabelSettings } from '@/features/configuration/queries.server';
 import { SettingsPanel } from '@/features/configuration/settings-panel';
 
 export default async function LabelSettingsPage() {
-  const { labelDefaults, canManage } = await getLabelSettings();
+  const { labelDefaults, canManage, labelBinding } = await getLabelSettings();
   return (
     <ProtectedPrivacyContent>
       <>
@@ -14,6 +14,7 @@ export default async function LabelSettingsPage() {
         <SettingsPanel
           mode="labels"
           labelDefaults={labelDefaults}
+          labelBinding={labelBinding}
           canManage={canManage}
         />
       </>

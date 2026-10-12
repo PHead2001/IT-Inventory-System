@@ -1,5 +1,41 @@
 # Application architecture
 
+Record and relevant settings/form routes stream only generic server metadata.
+Caller-authorized cached page readers remain the only source of private names.
+Successful page slots register those names with explicit server route paths in the
+mounted Auth privacy controller; its accepted owner/navigation and privacy epochs
+control client-only document titles. Failed verification or revocation clears the
+title synchronously without replacing retained forms or recovery commands. Every
+retained head title node receives the current safe or authorized title; secondary
+Next-owned nodes remain in place, and delayed title insertions/replacements are
+reconciled without rewriting already-correct text.
+
+Retirement presets fill the existing editable free-text reason on both storage
+and site retirement forms. An optional note remains a separate draft field and
+joins the trimmed reason once, with an em dash, for both review and the existing
+command payload. A note cannot replace a required reason; the combined text uses
+the existing 2,000-character bound. Preset or note edits invalidate review and
+remain subject to the existing version, pending and unknown-outcome retry guards.
+Correction task descriptions explain record repair versus physical movement before
+selection; no lifecycle statuses, history structures or RPCs change.
+
+Explicit task selection after a known completion creates a new form instance.
+Its initial page snapshot must reach the acknowledged result version; until then
+the workspace offers a read-refresh retry rather than an older ready form. This
+version floor never rebases a mounted dirty, pending or uncertain draft. Record-page
+moves also verify current stock and the caller-authorized historical receipt;
+prior receipts remain collapsed, timestamped and immutable while the new intent
+uses a fresh coherent stock/version snapshot.
+
+When a refreshed record withdraws the selected task, the workspace retains its
+mounted draft but hides and disables fresh input/submission. Close or switch
+still requires explicit draft discard. Reintroducing a launcher does not silently
+revive that draft; explicit reentry starts a new instance. Pending and uncertain
+commands retain their exact retry instance, and committed receipts retain Done
+and read recovery. Move more rejects new intent after withdrawal, including
+withdrawal while its fresh snapshot is loading. Actor and record workspace keys
+continue to isolate identities, and server authorization remains authoritative.
+
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 
 Operational timestamp rendering and the appended CSV display-zone metadata follow [shared time](shared-time.md). The protected layout supplies one browser-resolved zone after matching UTC server/initial hydration; canonical instants and datetime entry semantics remain unchanged.
@@ -402,9 +438,9 @@ An acknowledged quantity move enters completion. Its receipt reads the exact com
 
 The verified move snapshot retains its location catalog alongside the item and balances. Pickers, destination eligibility, location names and review identity use that catalog after Move more, balance refresh or invalid-reference recovery, even before route data refreshes. A newly observed route catalog can replace it and invalidates an affected review; reverting route props cannot revive that confirmation.
 
-A bounded per-tab completion pointer stores only event/entity IDs, scoped by browser origin, backend URL, authenticated actor, item and operation. A hard reload verifies that exact history receipt before showing completion or permitting another move; it never reconstructs balances from saved input. Move more clears the pointer only after its fresh read succeeds. Unavailable/quota-exhausted storage retains in-memory success but explicitly limits reload recovery. Cleared browser data and closed-tab recovery are not guaranteed. This pointer does not persist pending or uncertain stock commands across page destruction.
+A bounded per-tab completion pointer stores only event/entity IDs, scoped by browser origin, backend URL, authenticated actor, item and operation. After a hard reload, explicitly choosing Move stock on a record page verifies that exact history receipt and a fresh authorized stock snapshot before opening a fresh form. The prior receipt remains collapsed in timestamped Last move details; opening or expanding it changes neither stock nor history. U406 supersedes the older requirement to restore mandatory completion and dismiss it through Move more after explicit record-page selection. Standalone forms still restore verified completion. Recovery never reconstructs balances from saved input. Move more on an active completion requires a successful fresh read; record-page new intent retains the historical pointer, while standalone Move more clears its matching pointer. Unavailable/quota-exhausted storage retains in-memory success but explicitly limits reload recovery. Cleared browser data and closed-tab recovery are not guaranteed. This pointer does not persist pending or uncertain stock commands across page destruction.
 
-After an acknowledged move, Done and task switching attempt to remove only the matching completion pointer. Browser read/removal failures cannot veto closing that committed task or starting Move more after its successful fresh read. An inline warning survives task closure and explains that the completed receipt may reappear after reload. Newer, different-item and malformed pointers are left untouched. Pending and uncertain commands retain their switching barriers.
+After an acknowledged move, Done and explicit task closure attempt to remove only the matching completion pointer. Selecting another record-page task directly from completion retains the historical pointer for later verified disclosure. Browser read/removal failures cannot veto closing that committed task or starting Move more after its successful fresh read. An inline warning survives task closure and explains that the completed receipt may reappear after reload. Newer, different-item and malformed pointers are left untouched. Pending and uncertain commands retain their switching barriers.
 
 Malformed completion references may be explicitly discarded after a fresh authorized balance read; this discards a browser reference to an acknowledged move and never undoes its history. Valid references whose history cannot currently be verified retain their read-retry barrier. After a lost response, authorization, actor or idempotency rejection before replay does not prove the command failed: the unresolved command stays frozen for the same identity to be retried.
 
@@ -450,7 +486,7 @@ Category UUID and code are permanent. Active names are unique after case folding
 
 Inventory create, metadata update and restore RPCs take a shared advisory catalog lock after authorized receipt replay and before category/entity reads. Category lifecycle RPCs take its exclusive form. Stock-only mutations keep their entity row locks without a catalog lock. These functions reject fresh Repeatable Read and Serializable transactions; successful completed receipt replay remains available under those modes. Lock wait is bounded to two seconds. The new category RPCs declare a five-second `statement_timeout` for PostgREST to hoist before the main RPC statement; runtime certification verifies this with a delayed Data API call. The 10,000-record cap is a maximum, not a guarantee of completion before the time budget.
 
-Shared label defaults cover the current 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices. The print page starts from these defaults, while each print session can choose differently. The future custom-fields engine, designer and file schema are separate work. This slice preserves inventory rows and their extension point but creates no custom-field tables or forms.
+Shared label defaults cover 90×50/70×35 mm size, US Letter/A4 page and QR/Code 128 format choices, plus nullable validated version-1 print geometry for custom sheets or one label per page. Geometry uses integer tenths of a millimetre and is independent of inventory identity. Null keeps the standard sizes. The print page starts from shared defaults, while each local print job can choose differently. The existing maintainer RPC preserves historical receipts when geometry is omitted, applies effective geometry only after the singleton/version lock, and records atomic effective before/after events. See [labels and stock](labels-and-stock.md#configurable-print-media-a307) for the exact layout schema, bounds and printing limits.
 
 ## Working controls
 

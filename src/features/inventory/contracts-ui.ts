@@ -122,6 +122,7 @@ export type HistoryEvent = {
   toLocation: LocationRef | null;
   metadataChanges: {
     field: string;
+    presentation?: 'code';
     before: string | null;
     after: string | null;
   }[];

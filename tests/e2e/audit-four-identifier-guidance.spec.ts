@@ -110,6 +110,7 @@ for (const width of [1280, 390])
           matches.getByRole('link', { name: new RegExp(twoName) }),
         ).toBeVisible();
         await expect(matches).toContainText('Manufacturer: Dell');
+        await expect(matches).toContainText('Serial: ' + serial);
         await expect(matches).toContainText('Red Container');
         await expect(matches).toContainText('Manufacturer: Lenovo');
         await expect(matches).toContainText(site.code);
@@ -237,7 +238,7 @@ test('a serial at the lookup bound shows twenty choices and ordinary search guid
     await acceptanceLogin(page);
     await lookup(page, serial);
     await expect(page.getByRole('status')).toContainText(
-      'Lookup reached the 20-record limit. More matches may exist.',
+      'Additional matches exist. Showing up to 20 records; use an asset tag or record QR',
     );
     await expect(
       page.getByRole('list', { name: 'Matching records' }).getByRole('link'),

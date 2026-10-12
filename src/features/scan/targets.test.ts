@@ -130,3 +130,15 @@ describe('label destinations', () => {
     expect(validReturnPath(value)).toBeNull();
   });
 });
+
+it('accepts 200 supplementary bare serial characters while keeping AST and return destinations unchanged', () => {
+  const serial = '😀'.repeat(200);
+  expect(
+    parseScan(' \t' + serial + '\n ', 'https://inventory.example.test'),
+  ).toEqual({ kind: 'bare', identifier: serial });
+  expect(parseScan(serial + '😀', 'https://inventory.example.test')).toBeNull();
+  expect(
+    parseScan('AST:' + serial, 'https://inventory.example.test'),
+  ).toBeNull();
+  expect(validReturnPath(serial)).toBeNull();
+});

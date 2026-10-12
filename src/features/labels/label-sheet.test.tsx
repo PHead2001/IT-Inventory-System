@@ -579,7 +579,9 @@ it('shows the quantity Item code as human identity while retaining stable QR nav
       generation="test"
     />,
   );
-  expect(screen.getByText('Item code: SKU-0042')).toBeInTheDocument();
+  expect(screen.getByText('SKU-0042').parentElement).toHaveTextContent(
+    'Item code: SKU-0042',
+  );
   expect(screen.getByText('Adapters')).toBeInTheDocument();
   expect(
     screen.queryByText('Right Storage / Shelf 3A'),

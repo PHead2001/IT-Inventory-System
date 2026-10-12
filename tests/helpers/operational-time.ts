@@ -18,6 +18,9 @@ export async function expectRecordedInstantCopy(
 }
 
 export async function exactOperationalTime(time: Locator) {
+  // Client navigation can update the URL before its history rows mount.
+  // Resolve the rendered time before deciding which disclosure it uses.
+  await expect(time).toBeVisible();
   const summary = time.locator('xpath=parent::summary');
   if (await summary.count()) {
     const disclosure = summary.locator('xpath=parent::details');

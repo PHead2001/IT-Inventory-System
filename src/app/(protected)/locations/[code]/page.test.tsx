@@ -68,3 +68,4 @@ it('shows selected normalized scope and matching CSV, retaining filters and rese
     screen.getByRole('link', { name: /IT Office \/ General Storage/ }),
   ).not.toHaveTextContent('IT Office /');
 });
+vi.mock('server-only', () => ({}));

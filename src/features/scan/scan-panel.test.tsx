@@ -83,6 +83,7 @@ it.each(['manual', 'camera'])(
           kind: 'asset',
           path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
           label: 'Laptop (Tag-1)',
+          serialNumber: 'Serial-Mixed',
           state: 'active',
           context: 'Manufacturer: Dell · IT Closet / Red Container',
         },
@@ -117,6 +118,11 @@ it.each(['manual', 'camera'])(
       screen.getByRole('list', { name: 'Matching records' }),
     ).toHaveTextContent('Retired');
     expect(screen.getByRole('link', { name: 'Laptop (Tag-1)' })).toHaveFocus();
+    expect(
+      screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toHaveAccessibleDescription(
+      'Serial: Serial-Mixed · Manufacturer: Dell · IT Closet / Red Container',
+    );
     expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith('Serial-Mixed');
     expect(mocks.push).not.toHaveBeenCalled();
   },
@@ -140,7 +146,9 @@ it('a saturated result never claims a unique match and offers ordinary inventory
   });
   fireEvent.click(screen.getByRole('button', { name: 'Open' }));
   expect(
-    await screen.findByText(/Lookup reached the 20-record limit/),
+    await screen.findByText(
+      /Additional matches exist.*up to 20 records.*asset tag or record QR/,
+    ),
   ).toBeVisible();
   expect(
     screen.getByRole('link', { name: 'Search inventory' }),

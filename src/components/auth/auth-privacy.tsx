@@ -24,6 +24,8 @@ import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
   revokePrivatePresentation,
+  subscribePrivacyRevocation,
+  subscribeAssignmentInvalidation,
 } from '@/features/scan/assign-batch';
 import type {
   LogoutPrivacyGeneration,
@@ -41,6 +43,10 @@ import {
   useAssignmentInvalidationRevision,
 } from './privacy-readiness';
 import { AcceptedPrivacyContent } from './privacy-content';
+import {
+  createPrivateDocumentTitleController,
+  PrivateDocumentTitleContext,
+} from './private-document-title';
 
 export function CleanupStatus({
   issue,
@@ -119,6 +125,18 @@ function PrivacyController({
   const cleanupRevision = useAuthoritativeCleanupRevision();
   const revocationRevision = usePrivacyRevocationRevision();
   const callbackRevision = useAssignmentInvalidationRevision();
+  const [titles] = useState(createPrivateDocumentTitleController);
+  useLayoutEffect(() => {
+    if (!protectedRoute) return;
+    const retire = titles.mount();
+    const revoke = subscribePrivacyRevocation(titles.clear);
+    const invalidate = subscribeAssignmentInvalidation(titles.clear);
+    return () => {
+      revoke();
+      invalidate();
+      retire();
+    };
+  }, [titles, protectedRoute]);
   const [ownerBinding] = useState(binding);
   const [ownerAuthority] = useState(() => ({
     epoch: readPrivacyRevocationRevision(),
@@ -316,6 +334,7 @@ function PrivacyController({
           issue:
             'This workspace’s original account access could not be verified. Retry when that account’s access is restored.',
         };
+      if (!result.ready) titles.clear();
       setState((previous) =>
         result.ready
           ? {
@@ -341,6 +360,7 @@ function PrivacyController({
       );
     } catch {
       if (active()) {
+        titles.clear();
         setState((previous) => ({
           ...previous,
           ready: false,
@@ -361,6 +381,7 @@ function PrivacyController({
     bindingMatches,
     serverRevision,
     serverUncertain,
+    titles,
   ]);
   useEffect(() => {
     mounted.current = true;
@@ -427,6 +448,32 @@ function PrivacyController({
     state.acceptedCallbackRevision === callbackRevision &&
     (!protectedRoute || acceptedVisible);
   const visible = protectedRoute ? acceptedVisible : ready;
+  useLayoutEffect(() => {
+    titles.accept(
+      protectedRoute &&
+        visible &&
+        state.key === key &&
+        state.acceptedRevocation !== null &&
+        bindingMatches
+        ? {
+            navigation: key.navigation,
+            binding: bindingRevision,
+            revocation: state.acceptedRevocation,
+            callbacks: state.acceptedCallbackRevision,
+          }
+        : null,
+    );
+  }, [
+    titles,
+    protectedRoute,
+    visible,
+    state.key,
+    key,
+    bindingMatches,
+    bindingRevision,
+    state.acceptedRevocation,
+    state.acceptedCallbackRevision,
+  ]);
   const privacy = useMemo(
     () => ({
       ready,
@@ -455,17 +502,19 @@ function PrivacyController({
     />
   );
   return (
-    <PrivacyReadinessContext value={privacy}>
-      {protectedRoute && cleanup}
-      {protectedRoute ? (
-        (children as ReactNode)
-      ) : (
-        <AcceptedPrivacyContent ready={ready} generation={state.generation}>
-          {children}
-        </AcceptedPrivacyContent>
-      )}
-      {!protectedRoute && cleanup}
-    </PrivacyReadinessContext>
+    <PrivateDocumentTitleContext value={titles}>
+      <PrivacyReadinessContext value={privacy}>
+        {protectedRoute && cleanup}
+        {protectedRoute ? (
+          (children as ReactNode)
+        ) : (
+          <AcceptedPrivacyContent ready={ready} generation={state.generation}>
+            {children}
+          </AcceptedPrivacyContent>
+        )}
+        {!protectedRoute && cleanup}
+      </PrivacyReadinessContext>
+    </PrivateDocumentTitleContext>
   );
 }
 

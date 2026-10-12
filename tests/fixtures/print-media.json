@@ -1,0 +1,371 @@
+[
+  {
+    "name": "single minimum",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "single maximum",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 5000,
+      "labelHeight": 5000
+    }
+  },
+  {
+    "name": "single typical",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 700,
+      "labelHeight": 350
+    }
+  },
+  {
+    "name": "width too small",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 379,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "height too small",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 319
+    }
+  },
+  {
+    "name": "width too big",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 5001,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "height too big",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 5001
+    }
+  },
+  {
+    "name": "fraction",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 380.1,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "numeric string",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": "380",
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "null dimension",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": null,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "null version",
+    "valid": false,
+    "layout": {
+      "version": null,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "string version",
+    "valid": false,
+    "layout": {
+      "version": "1",
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "missing dimension",
+    "valid": false,
+    "layout": { "version": 1, "mode": "single", "labelWidth": 380 }
+  },
+  {
+    "name": "future version",
+    "valid": false,
+    "layout": {
+      "version": 2,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "extra single field",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "single",
+      "labelWidth": 380,
+      "labelHeight": 320,
+      "gapX": 0
+    }
+  },
+  {
+    "name": "unknown mode",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "roll",
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  {
+    "name": "missing mode",
+    "valid": false,
+    "layout": { "version": 1, "labelWidth": 380, "labelHeight": 320 }
+  },
+  {
+    "name": "null mode",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": null,
+      "labelWidth": 380,
+      "labelHeight": 320
+    }
+  },
+  { "name": "array", "valid": false, "layout": [] },
+  {
+    "name": "exact sheet fit",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 380,
+      "labelHeight": 320,
+      "sheetWidth": 380,
+      "sheetHeight": 320,
+      "marginTop": 0,
+      "marginRight": 0,
+      "marginBottom": 0,
+      "marginLeft": 0,
+      "gapX": 250,
+      "gapY": 250
+    }
+  },
+  {
+    "name": "letter",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "maximum margins",
+    "valid": true,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 4000,
+      "labelHeight": 4000,
+      "sheetWidth": 5000,
+      "sheetHeight": 5000,
+      "marginTop": 500,
+      "marginRight": 500,
+      "marginBottom": 500,
+      "marginLeft": 500,
+      "gapX": 250,
+      "gapY": 250
+    }
+  },
+  {
+    "name": "horizontal nonfit",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 1059,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "vertical nonfit",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 659,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "null gap",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": null,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "missing gap",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "negative margin",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": -1,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "margin too big",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 501,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "gap too big",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 900,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 251,
+      "gapY": 30
+    }
+  },
+  {
+    "name": "huge before cast",
+    "valid": false,
+    "layout": {
+      "version": 1,
+      "mode": "sheet",
+      "labelWidth": 1e50,
+      "labelHeight": 500,
+      "sheetWidth": 2159,
+      "sheetHeight": 2794,
+      "marginTop": 80,
+      "marginRight": 80,
+      "marginBottom": 80,
+      "marginLeft": 80,
+      "gapX": 30,
+      "gapY": 30
+    }
+  }
+]

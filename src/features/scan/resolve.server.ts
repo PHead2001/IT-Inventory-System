@@ -2,19 +2,26 @@
 import { z } from 'zod';
 import { requireMember } from '@/lib/auth/session.server';
 import { getLabelOrigin } from '@/features/labels/origin.server';
-import { getQueueRecords } from '@/features/labels/queue.server';
 import {
   itemCodeValid,
   normalizeItemCode,
 } from '@/features/inventory/contracts';
-import { ASSET_UUID, QUANTITY_UUID, parseScan } from './targets';
+import {
+  ASSET_UUID,
+  QUANTITY_UUID,
+  parseScan,
+  validIdentifier,
+} from './targets';
 
 export type ScanMatch = {
   kind: 'location' | 'asset' | 'quantity';
   path: string;
   label: string;
+  name?: string;
+  identifier?: string | null;
   state: 'active' | 'inactive' | 'retired' | 'archived';
   context?: string;
+  serialNumber?: string;
 };
 export type ScanResolution =
   | { status: 'invalid' | 'unknown'; matches: []; truncated?: true }
@@ -31,6 +38,14 @@ const assetTagRow = z.object({
   name: z.string(),
   status: z.enum(['active', 'retired']),
   asset_tag: z.string().nullable(),
+});
+const serialRow = assetTagRow.extend({
+  serial_number: z.string(),
+  manufacturer: z.string().nullable(),
+  location_name: z.string().nullable(),
+  location_code: z.string().nullable(),
+  site_name: z.string().nullable(),
+  site_code: z.string().nullable(),
 });
 
 async function lookupItemCode(value: string): Promise<ScanResolution> {
@@ -52,6 +67,8 @@ async function lookupItemCode(value: string): Promise<ScanResolution> {
         kind: 'quantity',
         path: '/inventory/quantity/' + item.id,
         label: quantityLabel(item),
+        name: item.name,
+        identifier: item.item_code,
         state: item.archived ? 'archived' : 'active',
       },
     ],
@@ -95,6 +112,8 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
         kind: 'location',
         path: '/locations/' + data.code,
         label: `${data.name} (${data.code})`,
+        name: String(data.name),
+        identifier: String(data.code),
         state: data.active ? 'active' : 'inactive',
       });
   }
@@ -127,20 +146,22 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
         kind: 'quantity',
         path: '/inventory/quantity/' + data.id,
         label: quantityLabel(data),
+        name: data.name,
+        identifier: data.item_code,
         state: data.archived ? 'archived' : 'active',
       });
   }
-  if (target.kind === 'tag' || target.kind === 'bare') {
+  if (
+    target.kind === 'tag' ||
+    (target.kind === 'bare' && validIdentifier(target.identifier))
+  ) {
     const tag = target.kind === 'tag' ? target.tag : target.identifier;
     // Preserve parsed spelling until PostgreSQL applies its own lower rule.
     const { data: raw, error } = await supabase.rpc(
       'inventory_asset_tag_lookup',
       { p_tag: tag },
     );
-    // A valid serial can exceed the tag limit. Only a bare candidate may miss
-    // this namespace; typed AST input retains the explicit tag contract.
-    if (error && !(target.kind === 'bare' && error.code === 'P1012'))
-      throw new Error('Asset tag lookup failed.');
+    if (error) throw new Error('Asset tag lookup failed.');
     const data = assetTagRow.nullable().parse(raw);
     if (
       data &&
@@ -155,41 +176,29 @@ export async function resolveScan(value: string): Promise<ScanResolution> {
       !matches.some((match) => match.path === itemResult.matches[0].path)
     )
       matches.push(itemResult.matches[0]);
-    const { data, error } = await supabase.rpc('inventory_serial_matches', {
+    const { data, error } = await supabase.rpc('inventory_serial_lookup_v1', {
       p_serial: target.identifier,
     });
     if (error) throw new Error('Serial lookup failed.');
-    const serials = z.array(assetTagRow).max(20).parse(data);
-    truncated = serials.length === 20;
-    if (serials.length) {
-      // Matching is PostgreSQL's exact case-insensitive rule. This second,
-      // bounded caller-scoped read adds current context, never new candidates.
-      const requested = new Set(serials.map((row) => row.id));
-      const context = await getQueueRecords(
-        [...requested].map((key) => ({ kind: 'asset', key })),
-      );
-      const available = new Map(
-        context
-          .filter((row) => row.kind === 'asset' && requested.has(row.key))
-          .map((row) => [row.key, row]),
-      );
-      for (const row of serials) {
-        const live = available.get(row.id);
-        if (!live) continue;
-        const match = assetMatch(row);
-        match.context = [
-          live.manufacturer ? `Manufacturer: ${live.manufacturer}` : null,
-          live.holdingContext,
-        ]
-          .filter(Boolean)
-          .join(' · ');
-        const existing = matches.findIndex(
-          (value) => value.path === match.path,
-        );
-        if (existing >= 0)
-          matches[existing] = { ...matches[existing], context: match.context };
-        else matches.push(match);
-      }
+    // One PostgreSQL snapshot supplies exact identity and current context.
+    const serials = z.array(serialRow).max(21).parse(data);
+    truncated = serials.length > 20;
+    for (const row of serials.slice(0, 20)) {
+      const match = assetMatch(row);
+      match.serialNumber = row.serial_number;
+      match.context = [
+        row.manufacturer ? `Manufacturer: ${row.manufacturer}` : null,
+        row.site_name
+          ? `Assigned to ${row.site_name}${row.site_code ? ` (${row.site_code})` : ''}`
+          : row.location_name
+            ? `${row.status === 'retired' ? 'Last recorded storage' : 'At'} ${row.location_name}${row.location_code ? ` (${row.location_code})` : ''}`
+            : 'Location unavailable',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const existing = matches.findIndex((value) => value.path === match.path);
+      if (existing >= 0) matches[existing] = match;
+      else matches.push(match);
     }
   }
   truncated ||= matches.length > 20;
@@ -219,6 +228,8 @@ function assetMatch(data: {
     kind: 'asset',
     path: '/inventory/assets/' + data.id,
     label: `${data.name}${data.asset_tag ? ` (${data.asset_tag})` : ''}`,
+    name: data.name,
+    identifier: data.asset_tag,
     state: data.status === 'retired' ? 'retired' : 'active',
   };
 }

@@ -58,6 +58,7 @@ export function ArchiveQuantityForm({
     pending: pending && !done,
     uncertain,
     completed: done,
+    completedVersion: state?.ok ? state.version : undefined,
   });
   const newerVersion = latestReview.version !== baseline.version;
 
@@ -178,7 +179,8 @@ export function ArchiveQuantityForm({
           <ul className="mt-3 space-y-2 text-sm">
             {baseline.locations.map((location) => (
               <li className="break-words" key={location.location_id}>
-                {location.breadcrumb} ({location.code})
+                {location.breadcrumb} (
+                <span className="experience-code">{location.code}</span>)
                 {!location.active ? ' — inactive location' : ''}:{' '}
                 {location.quantity} → 0 units
               </li>

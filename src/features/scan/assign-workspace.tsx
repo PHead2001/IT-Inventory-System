@@ -1,4 +1,5 @@
 'use client';
+import { ScanMatchLabel, ScanMatchContext } from './scan-match-label';
 import { RecordStatus } from '@/components/record-status';
 import {
   useEffect,
@@ -833,7 +834,7 @@ function AssignmentFields({
           searchPage: resolution.searchPage,
           truncated: resolution.truncated,
           message: resolution.truncated
-            ? 'Lookup reached the 20-record limit. More matches may exist. Choose a shown record or search inventory.'
+            ? 'Additional matches exist. Showing up to 20 records; use an asset tag or record QR to identify the intended equipment.'
             : resolution.status === 'invalid'
               ? 'This is not a supported inventory label or identifier.'
               : resolution.searchPage &&
@@ -1550,6 +1551,7 @@ function AssignmentFields({
           Scan, paste, or search inventory
           <Input
             ref={inputRef}
+            className={mode !== 'search' ? 'experience-code' : undefined}
             aria-label="Scan, paste, or search inventory"
             autoComplete="off"
             maxLength={1024}
@@ -1595,11 +1597,14 @@ function AssignmentFields({
           ref={chooserRef}
           tabIndex={-1}
         >
-          {state.matches.map((match) => (
+          {state.matches.map((match, index) => (
             <li key={match.path}>
               <Button
                 variant="outline"
                 type="button"
+                aria-describedby={
+                  match.context ? `assign-match-context-${index}` : undefined
+                }
                 onClick={() => {
                   if (!alive() || resolving.current || submitting.current)
                     return;
@@ -1614,7 +1619,7 @@ function AssignmentFields({
                   });
                 }}
               >
-                {match.label} ·{' '}
+                <ScanMatchLabel match={match} /> ·{' '}
                 {match.kind === 'quantity'
                   ? 'Quantity item'
                   : match.kind === 'location'
@@ -1623,8 +1628,11 @@ function AssignmentFields({
                 · <RecordStatus status={match.state} />
               </Button>
               {match.context && (
-                <p className="break-words text-sm text-slate-400">
-                  {match.context}
+                <p
+                  id={`assign-match-context-${index}`}
+                  className="break-words text-sm text-slate-400"
+                >
+                  <ScanMatchContext match={match} />
                 </p>
               )}
             </li>
