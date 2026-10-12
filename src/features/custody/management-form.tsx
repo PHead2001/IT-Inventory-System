@@ -3,7 +3,14 @@ import { useRouteRouter as useRouter } from '@/components/experience/route-pendi
 
 import { useRouteActionResult } from '@/components/experience/route-pending';
 import Link from '@/components/experience/route-link';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import { registerNavigationGuard } from '@/lib/navigation/guard';
 import { Button } from '@/components/ui/button';
@@ -32,6 +39,17 @@ type Command = {
   expectedActorId?: string;
   payload: Record<string, unknown>;
 };
+
+const subscribeFormHydration = () => () => {};
+const clientFormReady = () => true;
+const serverFormReady = () => false;
+function useOwningFormReady() {
+  return useSyncExternalStore(
+    subscribeFormHydration,
+    clientFormReady,
+    serverFormReady,
+  );
+}
 
 // Capture the exact operation for uncertain retry and close the synchronous
 // double-click window before React has rendered disabled controls.
@@ -217,6 +235,7 @@ export function SiteManagementForm({
   holdingTotal?: number;
 }) {
   const scope = useId();
+  const consumerReady = useOwningFormReady();
   const validation = useFormValidation();
   const persistence = useRef<SubmissionPersistence | null>(null);
   const {
@@ -246,6 +265,7 @@ export function SiteManagementForm({
   const recovery = useRef<SiteRecoveryEnvelope | null>(null);
   const recoveryStored = useRef(false);
   const hydrated = useRef(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
   const [recoveryError, setRecoveryError] = useState('');
   const backend = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const [mountedIdentity] = useState({
@@ -427,6 +447,7 @@ export function SiteManagementForm({
     recovery.current = active;
     recoveryStored.current = !!previous;
     hydrated.current = true;
+    setRecoveryReady(true);
     if (previous && ['editing', 'submitted'].includes(previous.status)) {
       setBaseline(previous.baseline ?? undefined);
       setValues(previous.values);
@@ -490,7 +511,9 @@ export function SiteManagementForm({
     setBaseline(site);
     setValues({ code: '', name: site.name, notes: site.notes ?? '' });
   }
-  const disabled = pending || uncertain || terminalPending || identityMismatch;
+  const ready = consumerReady && (!recoveryEnabled || recoveryReady);
+  const disabled =
+    !ready || pending || uncertain || terminalPending || identityMismatch;
   const update = (key: keyof typeof values, value: string) => {
     const next = { ...values, [key]: value };
     persist({
@@ -504,6 +527,7 @@ export function SiteManagementForm({
   };
   const save = () => {
     if (
+      !ready ||
       identityMismatch ||
       terminalPending ||
       created ||
@@ -851,7 +875,7 @@ export function SiteManagementForm({
       <ValidationSummary issues={validation.issues} />
       <div className="flex flex-wrap gap-3">
         <Button
-          disabled={pending || actorBlocked || (!uncertain && stale)}
+          disabled={!ready || pending || actorBlocked || (!uncertain && stale)}
           type="submit"
         >
           {pending
@@ -916,6 +940,7 @@ export function LocationManagementForm({
   actorId?: string;
 }) {
   const scope = useId();
+  const ready = useOwningFormReady();
   const validation = useFormValidation();
   const { pending, uncertain, actorBlocked, state, setState, submit } =
     useSubmission(actorId);
@@ -935,6 +960,7 @@ export function LocationManagementForm({
       onSubmit={(event) => {
         event.preventDefault();
         if (
+          !ready ||
           pending ||
           (!uncertain && !validation.validate(event.currentTarget))
         )
@@ -977,7 +1003,7 @@ export function LocationManagementForm({
           value={name}
           required
           maxLength={200}
-          disabled={pending || uncertain}
+          disabled={!ready || pending || uncertain}
           onChange={(e) => {
             setName(e.target.value);
             setState(null);
@@ -1011,7 +1037,7 @@ export function LocationManagementForm({
       <div className="flex flex-wrap gap-3">
         <Button
           type="submit"
-          disabled={actorBlocked || (stale && !uncertain)}
+          disabled={!ready || actorBlocked || (stale && !uncertain)}
           aria-disabled={pending || undefined}
           aria-busy={pending || undefined}
           className="aria-disabled:cursor-wait aria-disabled:opacity-50 aria-disabled:transform-none"
@@ -1026,7 +1052,7 @@ export function LocationManagementForm({
         <Button
           type="button"
           variant="outline"
-          disabled={pending || uncertain}
+          disabled={!ready || pending || uncertain}
           onClick={() => {
             const current = stale ? location : baseline;
             setBaseline(current);

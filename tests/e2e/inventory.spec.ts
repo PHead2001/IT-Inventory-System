@@ -1370,16 +1370,31 @@ interfaceTest(
   'missing resources keep direct transport status and private-safe identity with client recovery',
   async ({ page, browser }, info) => {
     await interfaceLogin(page);
-    for (const [path, heading] of [
-      ['/audit-three-missing-' + randomUUID(), 'Page not found'],
-      ['/inventory/quantity/' + randomUUID(), 'Inventory record unavailable'],
-      ['/inventory/assets/' + randomUUID(), 'Inventory record unavailable'],
-      ['/locations/MISSING-' + randomUUID(), 'Page not found'],
-      ['/sites/MISSING-' + randomUUID(), 'Page not found'],
-      ['/settings/sites/MISSING-' + randomUUID(), 'Page not found'],
-      ['/settings/locations/MISSING-' + randomUUID(), 'Page not found'],
-      ['/settings/forms/' + randomUUID(), 'Page not found'],
-      ['/sites/MISSING-' + randomUUID() + '/open/quantity', 'Page not found'],
+    const missingId = randomUUID();
+    const missingCode = 'MISSING-' + randomUUID();
+    const unknownPath = '/audit-three-missing-' + randomUUID();
+    for (const [path, heading, privateIdentity] of [
+      [unknownPath, 'Page not found', unknownPath.slice(1)],
+      [
+        '/inventory/quantity/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      [
+        '/inventory/assets/' + missingId,
+        'Inventory record unavailable',
+        missingId,
+      ],
+      ['/locations/' + missingCode, 'Page not found', missingCode],
+      ['/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/sites/' + missingCode, 'Page not found', missingCode],
+      ['/settings/locations/' + missingCode, 'Page not found', missingCode],
+      ['/settings/forms/' + missingId, 'Page not found', missingId],
+      [
+        '/sites/' + missingCode + '/open/quantity',
+        'Page not found',
+        missingCode,
+      ],
     ]) {
       const response = await page.goto(path);
       expect(
@@ -1391,7 +1406,7 @@ interfaceTest(
       ).toBeVisible();
       await expect(page.getByRole('main')).toHaveCount(1);
       await expect(page).toHaveTitle(/IT Inventory/);
-      await expectPrivateTitleExcluded(page, path.split('/').at(-1)!);
+      await expectPrivateTitleExcluded(page, privateIdentity);
       await page.screenshot({
         path: info.outputPath(
           `missing-${path.includes('quantity') ? 'quantity' : path.includes('assets') ? 'asset' : 'route'}.png`,
@@ -1408,12 +1423,35 @@ interfaceTest(
       };
       if (heading === 'Inventory record unavailable')
         page.on('request', observeRecovery);
-      await page
-        .getByRole('link', { name: 'Search inventory', exact: true })
-        .click();
-      await expect(page).toHaveURL(/\/inventory$/);
-      await expect(page).toHaveTitle('Inventory · IT Inventory');
-      page.off('request', observeRecovery);
+      try {
+        await page
+          .getByRole('link', { name: 'Search inventory', exact: true })
+          .click();
+        await expect(page).toHaveURL(/\/inventory$/);
+        await expect(page).toHaveTitle('Inventory · IT Inventory');
+        const inventoryPrimary = page.locator('[data-route-ready]').filter({
+          has: page.getByRole('heading', { name: 'Inventory', exact: true }),
+        });
+        await expect(inventoryPrimary).toHaveCount(1);
+        await expect(
+          inventoryPrimary.getByRole('heading', {
+            name: 'Inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(
+          inventoryPrimary.getByRole('textbox', {
+            name: 'Search inventory',
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(page.getByRole('main')).toHaveCount(1);
+        await expect(
+          page.getByRole('heading', { name: heading, exact: true }),
+        ).toHaveCount(0);
+      } finally {
+        page.off('request', observeRecovery);
+      }
       if (heading === 'Inventory record unavailable')
         expect(recoveryDocuments).toHaveLength(0);
     }

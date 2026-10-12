@@ -60,6 +60,7 @@ import {
 import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
 import { SiteManagementForm } from '@/features/custody/management-form';
 import { registerNavigationGuard } from '@/lib/navigation/guard';
+import { DocumentAdmission } from '@/app/(protected)/document-admission';
 const row = {
   kind: 'asset',
   id: 'a3010000-0000-4000-8000-000000000001',
@@ -86,17 +87,19 @@ function Authority({
   fresh?: boolean;
 }) {
   return (
-    <PrivacyReadinessContext
-      value={{
-        ready: fresh,
-        visible: true,
-        generation: 'actor:local-backend',
-        revocationRevision: readPrivacyRevocationRevision(),
-        verifiedEpoch: assignmentEpoch(),
-      }}
-    >
-      <RouteMotionProvider actorId="actor">{children}</RouteMotionProvider>
-    </PrivacyReadinessContext>
+    <DocumentAdmission missing>
+      <PrivacyReadinessContext
+        value={{
+          ready: fresh,
+          visible: true,
+          generation: 'actor:local-backend',
+          revocationRevision: readPrivacyRevocationRevision(),
+          verifiedEpoch: assignmentEpoch(),
+        }}
+      >
+        <RouteMotionProvider actorId="actor">{children}</RouteMotionProvider>
+      </PrivacyReadinessContext>
+    </DocumentAdmission>
   );
 }
 function Workspace({

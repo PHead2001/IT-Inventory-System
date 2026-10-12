@@ -74,7 +74,7 @@ vi.mock('@/lib/supabase/browser', () => ({
   }),
 }));
 beforeEach(() => {
-  documentBoundary.admission.mockReset().mockResolvedValue(undefined);
+  documentBoundary.admission.mockReset().mockResolvedValue(false);
   documentBoundary.member.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://isolated.supabase.co');
   sessionStorage.clear();
@@ -93,8 +93,14 @@ vi.mock('@/features/telemetry/private-speed-insights', () => ({
   PrivateSpeedInsights: () => <span data-testid="private-speed-insights" />,
 }));
 import ApplicationLayout from './layout';
+import { DocumentAdmission } from './document-admission';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+import { RoomCameraSnapshotProvider } from '@/features/room/scene/camera-snapshot-provider';
+import { OperationalTimeProvider } from '@/components/operational-time';
+import { MotionPreference } from '@/components/experience/motion-preference';
+import { RouteMotionProvider } from '@/components/experience/route-motion';
+import { CommandProvider } from '@/features/commands/command-provider';
 
 it('does not admit record existence before membership or return the shell before admission', async () => {
   const denied = new Error('LOGIN_REDIRECT');
@@ -103,11 +109,11 @@ it('does not admit record existence before membership or return the shell before
     ApplicationLayout({ children: <p>Private content</p> }),
   ).rejects.toBe(denied);
   expect(documentBoundary.admission).not.toHaveBeenCalled();
-  const missing = new Error('NOT_FOUND');
-  documentBoundary.admission.mockRejectedValueOnce(missing);
+  const failure = new Error('DATABASE_FAILURE');
+  documentBoundary.admission.mockRejectedValueOnce(failure);
   await expect(
     ApplicationLayout({ children: <p>Private content</p> }),
-  ).rejects.toBe(missing);
+  ).rejects.toBe(failure);
   expect(documentBoundary.member.mock.invocationCallOrder.at(-1)).toBeLessThan(
     documentBoundary.admission.mock.invocationCallOrder[0],
   );
@@ -169,14 +175,65 @@ it('keeps the unique confirmed logout completion retry usable in the actual prot
 
 it('uses the dynamic privacy boundary without a streaming Suspense wrapper', async () => {
   const layout = await ApplicationLayout({ children: <p>Inventory</p> });
-  expect(layout.type).toBe(ProtectedPrivacyBoundary);
-  expect(layout.props.serverGeneration).toEqual({ status: 'absent' });
-  expect(layout.props.binding).toEqual({
+  expect(layout.type).toBe(DocumentAdmission);
+  const privacy = layout.props.children;
+  expect(privacy.type).toBe(ProtectedPrivacyBoundary);
+  expect(privacy.props.serverGeneration).toEqual({ status: 'absent' });
+  expect(privacy.props.binding).toEqual({
     actorId: 'viewer-actor',
     backend: 'https://isolated.supabase.co',
     role: 'viewer',
     canManageConfiguration: false,
   });
+});
+
+it('resolves the shared layout and passes only a generic missing flag to its outer document gate', async () => {
+  documentBoundary.admission.mockResolvedValueOnce(true);
+  const layout = await ApplicationLayout({
+    children: <p>Page-owned result</p>,
+  });
+  expect(layout.type).toBe(DocumentAdmission);
+  expect(layout.props.missing).toBe(true);
+  expect(Object.keys(layout.props).sort()).toEqual(['children', 'missing']);
+  expect(layout.props.children.type).toBe(ProtectedPrivacyBoundary);
+  expect(documentBoundary.member.mock.invocationCallOrder[0]).toBeLessThan(
+    documentBoundary.admission.mock.invocationCallOrder[0],
+  );
+});
+
+it('keeps command privacy and navigation authority inside the unchanged shell provider lifetime beneath document admission', async () => {
+  documentBoundary.admission.mockResolvedValueOnce(true);
+  const layout = await ApplicationLayout({
+    children: <p>Retained task route</p>,
+  });
+  const privacy = layout.props.children;
+  const camera = privacy.props.children;
+  const operational = camera.props.children;
+  const motion = operational.props.children[1];
+  const routes = motion.props.children;
+  const commands = routes.props.children;
+  expect(layout.type).toBe(DocumentAdmission);
+  expect(privacy.type).toBe(ProtectedPrivacyBoundary);
+  expect(camera.type).toBe(RoomCameraSnapshotProvider);
+  expect(operational.type).toBe(OperationalTimeProvider);
+  expect(motion.type).toBe(MotionPreference);
+  expect(routes.type).toBe(RouteMotionProvider);
+  expect(commands.type).toBe(CommandProvider);
+  expect(commands.props).toMatchObject({
+    actorId: privacy.props.binding.actorId,
+    backend: privacy.props.binding.backend,
+    staff: false,
+  });
+  for (const provider of [
+    layout,
+    privacy,
+    camera,
+    operational,
+    motion,
+    routes,
+    commands,
+  ])
+    expect(provider.key).toBeNull();
 });
 
 describe('protected Speed Insights placement', () => {
