@@ -49,6 +49,18 @@ Both camera flows release scanner controls and device tracks immediately when th
 
 ## Labels and stable destinations
 
+**Serial number** lookup in Scan and **Exact serial number** in Scan and assign
+match camera and manual text only against stored manufacturer serials. Use this
+explicit mode for values such as `SN:12345`, `LOC:ITC`, `AST:tag`, or a serial
+beginning with `/`. URL-like values remain serial data; QR URLs are never followed
+in this mode. Serial lookup keeps the 200-character/control-character limits,
+caller membership checks, contextual duplicate chooser and canonical asset UUID
+destinations. Multiple matches require a deliberate choice; scanning never assigns
+equipment. Changing mode cancels the prior lookup and stops camera capture. A
+failed durable assignment reset preserves the previous mode and inspection.
+The default label/identifier mode retains its safe same-origin URL, LOC/AST and
+cross-namespace ambiguity rules. Item code mode retains its existing camera rules.
+
 Settings and the current print job use the same **Label size**, **Paper size**, and **Barcode type** names and physical units. The screen option **QR code** explains that scanning opens the linked inventory record or location; **Code 128 when it fits** is a preference, with the existing explicit QR fallback acknowledgement. These descriptions stay outside the printed label sheet. Stored `size`, `page`, and `format` keys and barcode payloads are unchanged.
 
 Settings saves shared starting defaults through the existing configuration-maintainer permission and version checks. Labels changes only the current job; it does not save shared defaults. Updating defaults does not overwrite the current queue or an already-open job. New jobs retain the existing initialization and queue recovery rules.

@@ -67,7 +67,7 @@ export function AssetTagAdvisory({
     <div
       id={id}
       role="status"
-      className="min-h-6 break-words text-sm text-slate-400"
+      className="min-h-6 break-words text-sm text-[var(--muted)]"
     >
       {result?.status === 'checking' && 'Checking asset tag…'}
       {result?.status === 'clear' &&
@@ -75,7 +75,7 @@ export function AssetTagAdvisory({
       {result?.status === 'failed' &&
         'Asset tag could not be checked. Try leaving the field again; saving still checks for duplicates.'}
       {result?.status === 'conflict' && (
-        <span className="text-amber-200">
+        <span className="text-[var(--warning)]">
           Asset tag already used by{' '}
           <Link
             href={'/inventory/assets/' + result.record.id}

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   search: vi.fn(),
   resolve: vi.fn(),
   itemCode: vi.fn(),
+  serial: vi.fn(),
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/session.server', () => ({ requireMember: mocks.session }));
@@ -25,6 +26,7 @@ vi.mock('@/features/labels/queue.server', () => ({
 vi.mock('./resolve.server', () => ({
   resolveScan: mocks.resolve,
   resolveItemCode: mocks.itemCode,
+  resolveSerial: mocks.serial,
 }));
 const id = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -119,6 +121,44 @@ it.each([
       page: 2,
     }),
   ).toMatchObject({ ok: false });
+  expect(mocks.search).not.toHaveBeenCalled();
+  expect(
+    await findAssignmentRecords({
+      actorId: args.actorId,
+      text: 'SN:12345',
+      mode: 'serial',
+    }),
+  ).toMatchObject({ ok: false });
+  expect(mocks.serial).not.toHaveBeenCalled();
+});
+it('serial mode preserves authorized exact text, ambiguity and truncation without cross-namespace lookup', async () => {
+  mocks.serial.mockResolvedValue({
+    status: 'ambiguous',
+    matches: [
+      {
+        kind: 'asset',
+        path: '/inventory/assets/' + id(3),
+        state: 'retired',
+        context: 'Last recorded storage',
+      },
+    ],
+    truncated: true,
+  });
+  expect(
+    await findAssignmentRecords({
+      actorId: args.actorId,
+      text: 'LOC:ITC',
+      mode: 'serial',
+    }),
+  ).toMatchObject({
+    ok: true,
+    status: 'ambiguous',
+    truncated: true,
+    matches: [{ state: 'retired' }],
+  });
+  expect(mocks.serial).toHaveBeenCalledExactlyOnceWith('LOC:ITC');
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  expect(mocks.itemCode).not.toHaveBeenCalled();
   expect(mocks.search).not.toHaveBeenCalled();
 });
 it('rejects archived destinations and location labels without inventing reassignment', async () => {

@@ -277,4 +277,11 @@ physical prerequisites.
 
 ## A306/A310 integration checkpoint
 
+PR55 readiness is withdrawn after two subsequent P2 review findings on
+`a750648766b6b732180778a95e8dba71d7faec22`, despite that revision's passing CI.
+The repairs add explicit serial lookup for scheme-like values and semantic
+muted/warning advisory colors. Acceptance requires checks and fresh review on
+the repaired final revision, zero actionable unresolved threads and populated
+desktop/phone inspection; earlier CI does not certify these repairs.
+
 The held identifier-guidance implementation is integrated with main `b074ff458e5eff0f0253636d87c0bfaed1f5afdd`. Structured scan names and identifiers, duplicate-warning records, metadata no-op/concurrency and current task/privacy behavior are retained. Exact serial discovery uses a new caller-scoped single-snapshot read with a twenty-first overflow sentinel; the existing duplicate-warning RPC is unchanged. Focused checks are iteration evidence only; canonical database generation/tests, complete final-candidate validation, independent boundary review, exact-SHA CI/review and populated hosted/browser acceptance remain pending.

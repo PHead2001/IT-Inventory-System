@@ -131,9 +131,9 @@ function AssignmentFields({
         .map((location) => location.id),
     [locations],
   );
-  const [mode, setMode] = useState<'identifier' | 'item_code' | 'search'>(
-    'identifier',
-  );
+  const [mode, setMode] = useState<
+    'identifier' | 'item_code' | 'serial' | 'search'
+  >('identifier');
   const resolving = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const focusInput = useRef(false);
@@ -1075,7 +1075,7 @@ function AssignmentFields({
     }
   };
   const next = () => {
-    if (!alive() || submitting.current || unresolved) return;
+    if (!alive() || submitting.current || unresolved) return false;
     const saved = batchRef.current;
     if (
       saved &&
@@ -1093,7 +1093,7 @@ function AssignmentFields({
         ),
       })
     )
-      return;
+      return false;
     entryId.current = null;
     focusInput.current = true;
     resetReceiptRead();
@@ -1103,6 +1103,7 @@ function AssignmentFields({
     setInput('');
     gate.rescan();
     inputRef.current?.focus();
+    return true;
   };
   const candidate = state.candidate;
   const problem = candidate
@@ -1456,7 +1457,7 @@ function AssignmentFields({
       </section>
       {ready && !fatalStorageError && !batch?.finished && (
         <AssignCamera
-          scope={actorId + ':' + backend}
+          scope={actorId + ':' + backend + ':' + mode}
           onDetection={(value) => {
             if (
               gate.observe(
@@ -1466,7 +1467,7 @@ function AssignmentFields({
                   !!stateRef.current.context,
               )
             )
-              void lookup(value!, 'identifier');
+              void lookup(value!, mode === 'serial' ? 'serial' : 'identifier');
           }}
         />
       )}
@@ -1538,15 +1539,22 @@ function AssignmentFields({
             disabled={busy}
             value={mode}
             onChange={(e) => {
-              next();
-              setMode(e.target.value as typeof mode);
+              if (next()) setMode(e.target.value as typeof mode);
             }}
           >
             <option value="identifier">Label or exact identifier</option>
             <option value="item_code">Exact quantity item code (SKU)</option>
+            <option value="serial">Exact serial number</option>
             <option value="search">Search inventory</option>
           </select>
         </label>
+        {mode === 'serial' && (
+          <p className="text-sm text-[var(--muted)]">
+            Camera and manual text match only stored serial numbers, including
+            colons and LOC: or AST: prefixes. QR URLs are treated as serial
+            text; duplicate matches need a choice.
+          </p>
+        )}
         <label className="space-y-2">
           Scan, paste, or search inventory
           <Input

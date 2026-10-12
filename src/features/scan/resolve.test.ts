@@ -50,7 +50,7 @@ vi.mock('@/lib/auth/session.server', () => ({
     };
   },
 }));
-import { resolveItemCode, resolveScan } from './resolve.server';
+import { resolveItemCode, resolveScan, resolveSerial } from './resolve.server';
 beforeEach(() => {
   db.location.mockReset().mockResolvedValue({ data: null, error: null });
   db.asset.mockReset().mockResolvedValue({ data: null, error: null });
@@ -79,6 +79,89 @@ const serialRow = (index: number, status = 'active') => ({
   location_code: 'ITC-RED',
   site_name: null,
   site_code: null,
+});
+it.each([
+  'SN:12345',
+  'LOC:ITC-RED',
+  'AST:tag-001',
+  '/locations/ITC-RED',
+  'https://evil.test/locations/ITC',
+  'javascript:alert(1)',
+])(
+  'explicit serial mode treats %s as authorized identity data only',
+  async (serial) => {
+    db.serial.mockResolvedValue({
+      data: [{ ...serialRow(1), serial_number: serial }],
+      error: null,
+    });
+    expect(await resolveSerial(' \t' + serial + '\n ')).toMatchObject({
+      status: 'found',
+      matches: [
+        { path: '/inventory/assets/' + serialId(1), serialNumber: serial },
+      ],
+    });
+    expect(db.serial).toHaveBeenCalledExactlyOnceWith(serial);
+    expect(db.predicate).not.toHaveBeenCalled();
+    expect(db.itemCode).not.toHaveBeenCalled();
+    expect(db.tagLookup).not.toHaveBeenCalled();
+    expect(db.origin).not.toHaveBeenCalled();
+  },
+);
+it('serial-only mode retains duplicate context, overflow, unknowns and failure boundaries', async () => {
+  expect(await resolveSerial('SN:missing')).toEqual({
+    status: 'unknown',
+    matches: [],
+  });
+  db.serial.mockResolvedValue({
+    data: [serialRow(1), serialRow(2, 'retired')],
+    error: null,
+  });
+  expect(await resolveSerial('SN:12345')).toMatchObject({
+    status: 'ambiguous',
+    matches: [
+      { state: 'active', context: expect.stringContaining('Maker 1') },
+      { state: 'retired' },
+    ],
+  });
+  db.serial.mockResolvedValue({
+    data: Array.from({ length: 21 }, (_, index) => serialRow(index)),
+    error: null,
+  });
+  const overflow = await resolveSerial('SN:12345');
+  expect(overflow).toMatchObject({ status: 'ambiguous', truncated: true });
+  expect(overflow.matches).toHaveLength(20);
+  db.serial.mockResolvedValue({ data: null, error: { message: 'private' } });
+  await expect(resolveSerial('SN:12345')).rejects.toThrow(
+    'Serial lookup failed.',
+  );
+  db.serial.mockClear();
+  db.denied = true;
+  await expect(resolveSerial('SN:12345')).rejects.toThrow(
+    'Active member required.',
+  );
+  expect(db.serial).not.toHaveBeenCalled();
+});
+it('explicit serial bounds count Unicode characters and reject controls before reads', async () => {
+  expect((await resolveSerial('😀'.repeat(200))).status).toBe('unknown');
+  expect(db.serial).toHaveBeenCalledExactlyOnceWith('😀'.repeat(200));
+  db.serial.mockClear();
+  for (const value of [
+    '',
+    ' ',
+    '😀'.repeat(201),
+    'SN:\n123',
+    'SN:\u0085123',
+    'x'.repeat(1025),
+  ])
+    expect(await resolveSerial(value)).toEqual({
+      status: 'invalid',
+      matches: [],
+    });
+  expect(db.serial).not.toHaveBeenCalled();
+  expect(await resolveScan('SN:12345')).toEqual({
+    status: 'invalid',
+    matches: [],
+  });
 });
 it('resolves trimmed serials with PostgreSQL spelling and shows duplicate manufacturer/location/lifecycle context', async () => {
   db.serial.mockResolvedValue({

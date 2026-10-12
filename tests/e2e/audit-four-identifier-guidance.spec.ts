@@ -153,6 +153,22 @@ for (const width of [1280, 390])
         await expect(
           page.getByRole('list', { name: 'Matching records' }),
         ).toHaveCount(0);
+        const colonSerial = `SN:${f.suffix}`;
+        const colonAsset = await asset(
+          f,
+          `Colon serial ${f.suffix}`,
+          `A4-COLON-${f.suffix}`,
+          colonSerial,
+          'Dell',
+        );
+        await page.getByLabel('Serial number', { exact: true }).check();
+        await page
+          .getByLabel('Enter the exact serial number')
+          .fill(colonSerial);
+        await page.getByRole('button', { name: 'Open', exact: true }).click();
+        await expect(page).toHaveURL(
+          new RegExp(`/inventory/assets/${colonAsset.entity_id}$`),
+        );
         await page.goto('/inventory/assets/new');
         const create = page.getByRole('form', { name: 'Add individual asset' });
         await create
