@@ -1,4 +1,5 @@
 import { expectRecordVersion, openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -434,9 +435,7 @@ test('authors all twelve types through the UI and preserves their preview, creat
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(category);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${category}.`,
-  );
+  await expectCategoryAdded(page, category);
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: category, exact: true }).click();
   const designer = page.getByRole('region', { name: 'Forms and fields' });

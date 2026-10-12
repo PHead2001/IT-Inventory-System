@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { expectCategoryAdded } from './configuration-assertions';
 import { expectPrivateTitleExcluded } from '../helpers/private-title';
 import type { Route } from '@playwright/test';
 import { interfaceTest, interfaceLogin } from './interface-fixtures';
@@ -47,9 +48,7 @@ async function createCategories(page: Page, prefix: string) {
     await page.goto('/settings/categories');
     await page.getByLabel('Display name').fill(name);
     await page.getByRole('button', { name: 'Add category' }).click();
-    await expect(page.getByRole('status')).toContainText(
-      `Category added: ${name}.`,
-    );
+    await expectCategoryAdded(page, name);
   }
   await page.goto('/settings/forms');
   const categoryLink = page.getByRole('link', { name: names[0], exact: true });
@@ -424,9 +423,7 @@ test('category routes, pending field recovery and native modal focus remain cons
     await page.goto('/settings/categories');
     await page.getByLabel('Display name').fill(name);
     await page.getByRole('button', { name: 'Add category' }).click();
-    await expect(page.getByRole('status')).toContainText(
-      `Category added: ${name}.`,
-    );
+    await expectCategoryAdded(page, name);
   }
   await page.goto('/settings/forms');
   await page.getByRole('link', { name: names[0], exact: true }).click();

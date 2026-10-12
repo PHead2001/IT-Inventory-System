@@ -2,12 +2,14 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseConfig } from './lib/supabase/config';
 import { validReturnPath } from './features/scan/targets';
+import { documentPathHeader } from './lib/document-route';
 import {
   createAuthDiagnostic,
   observeAuthStage,
 } from './lib/auth/diagnostic.server';
 
 export async function proxy(request: NextRequest) {
+  request.headers.set(documentPathHeader, request.nextUrl.pathname);
   // Replace any caller-supplied header with a value derived from the matched URL.
   request.headers.set(
     'x-inventory-return',
@@ -55,6 +57,13 @@ export async function proxy(request: NextRequest) {
 }
 export const config = {
   matcher: [
+    '/inventory/quantity/:path*',
+    '/inventory/assets/:path*',
+    '/locations/:path*',
+    '/sites/:path*',
+    '/settings/sites/:path*',
+    '/settings/locations/:path*',
+    '/settings/forms/:path*',
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

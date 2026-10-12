@@ -339,6 +339,13 @@ it('replaces the room selection instruction immediately and restores it after cl
   expect(screen.getByText('Loading contents for Shelf 1A…')).toHaveClass(
     'sr-only',
   );
+  const contentsAnnouncement = screen.getByText(
+    'Loading contents for Shelf 1A…',
+  );
+  expect(contentsAnnouncement).toHaveAttribute('role', 'status');
+  expect(
+    screen.getByRole('region', { name: 'Location inventory' }),
+  ).not.toContainElement(contentsAnnouncement);
   expect(
     screen
       .getByText('Loading contents for Shelf 1A…')

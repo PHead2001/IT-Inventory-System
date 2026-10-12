@@ -15,6 +15,7 @@ import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { readLogoutGeneration } from '@/lib/auth/privacy-barrier.server';
 import { RoomCameraSnapshotProvider } from '@/features/room/scene/camera-snapshot-provider';
+import { admitDocumentRecord } from './document-admission.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,7 @@ export default async function ApplicationLayout({
   children: React.ReactNode;
 }) {
   const { member } = await requireMember();
+  await admitDocumentRecord();
   const privacy = await readLogoutGeneration();
   return (
     <ProtectedPrivacyBoundary

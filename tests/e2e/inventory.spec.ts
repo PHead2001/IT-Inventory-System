@@ -1368,12 +1368,18 @@ test('inventory search location picker exposes keyboard paths and stays framed o
 
 interfaceTest(
   'missing resources keep direct transport status and private-safe identity with client recovery',
-  async ({ page }, info) => {
+  async ({ page, browser }, info) => {
     await interfaceLogin(page);
     for (const [path, heading] of [
       ['/audit-three-missing-' + randomUUID(), 'Page not found'],
       ['/inventory/quantity/' + randomUUID(), 'Inventory record unavailable'],
       ['/inventory/assets/' + randomUUID(), 'Inventory record unavailable'],
+      ['/locations/MISSING-' + randomUUID(), 'Page not found'],
+      ['/sites/MISSING-' + randomUUID(), 'Page not found'],
+      ['/settings/sites/MISSING-' + randomUUID(), 'Page not found'],
+      ['/settings/locations/MISSING-' + randomUUID(), 'Page not found'],
+      ['/settings/forms/' + randomUUID(), 'Page not found'],
+      ['/sites/MISSING-' + randomUUID() + '/open/quantity', 'Page not found'],
     ]) {
       const response = await page.goto(path);
       expect(
@@ -1392,11 +1398,51 @@ interfaceTest(
         ),
         fullPage: true,
       });
+      const recoveryDocuments: string[] = [];
+      const observeRecovery = (request: import('@playwright/test').Request) => {
+        if (
+          request.isNavigationRequest() &&
+          request.resourceType() === 'document'
+        )
+          recoveryDocuments.push('document');
+      };
+      if (heading === 'Inventory record unavailable')
+        page.on('request', observeRecovery);
       await page
         .getByRole('link', { name: 'Search inventory', exact: true })
         .click();
       await expect(page).toHaveURL(/\/inventory$/);
       await expect(page).toHaveTitle('Inventory · IT Inventory');
+      page.off('request', observeRecovery);
+      if (heading === 'Inventory record unavailable')
+        expect(recoveryDocuments).toHaveLength(0);
+    }
+    const malformed = '/inventory/quantity/missing.jpg';
+    const malformedResponse = await page.request.get(malformed, {
+      headers: {
+        'user-agent': '',
+        'x-inventory-document-path': '/inventory/quantity/new',
+      },
+      maxRedirects: 0,
+    });
+    expect(malformedResponse.status()).toBe(404);
+    const anonymous = await browser.newContext();
+    try {
+      const denied = await anonymous.request.get(
+        new URL(malformed, page.url()).href,
+        {
+          headers: {
+            'user-agent': '',
+            'x-inventory-document-path': '/inventory/quantity/new',
+          },
+          maxRedirects: 0,
+        },
+      );
+      expect(denied.status()).toBe(307);
+      expect(denied.headers().location).toMatch(/^\/login(?:\?|$)/);
+      expect(await denied.text()).not.toContain('Inventory record unavailable');
+    } finally {
+      await anonymous.close();
     }
     for (const [path, title] of [
       ['/scan', 'Scan'],

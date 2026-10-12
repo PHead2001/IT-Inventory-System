@@ -1,4 +1,5 @@
 import { openRecordTask } from './record-task-controls';
+import { expectCategoryAdded } from './configuration-assertions';
 import { metadataReviewButton, metadataSaveButton } from './metadata-controls';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -30,9 +31,7 @@ async function createCategory(page: Page) {
   await page.goto('/settings/categories');
   await page.getByLabel('Display name').fill(name);
   await page.getByRole('button', { name: 'Add category' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    `Category added: ${name}.`,
-  );
+  await expectCategoryAdded(page, name);
   return name;
 }
 

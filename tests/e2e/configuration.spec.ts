@@ -131,8 +131,14 @@ test('phone Settings reviews referenced removal and shares label defaults with n
       layout: null,
     });
     await page.getByRole('button', { name: 'Save shared defaults' }).click();
-    await expect(page.getByRole('status')).toContainText(savedMessage);
+    await expect(
+      page.getByRole('status').filter({ hasText: savedMessage }),
+    ).toHaveText(savedMessage);
     await defaults.confirmSaved();
+    await expect(page.locator('.experience-route-progress')).toHaveAttribute(
+      'data-visible',
+      'false',
+    );
     await page.goto('/labels');
     await expect(
       page.getByRole('combobox', { name: 'Label size' }),

@@ -8,15 +8,25 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const documentBoundary = vi.hoisted(() => ({
+  admission: vi.fn(),
+  member: vi.fn(),
+}));
+vi.mock('./document-admission.server', () => ({
+  admitDocumentRecord: documentBoundary.admission,
+}));
 vi.mock('@/lib/auth/session.server', () => ({
-  requireMember: async () => ({
-    member: {
-      user_id: 'viewer-actor',
-      display_name: 'Viewer',
-      role: 'viewer',
-      can_manage_configuration: false,
-    },
-  }),
+  requireMember: async () => {
+    await documentBoundary.member();
+    return {
+      member: {
+        user_id: 'viewer-actor',
+        display_name: 'Viewer',
+        role: 'viewer',
+        can_manage_configuration: false,
+      },
+    };
+  },
 }));
 const privacyMocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -64,6 +74,8 @@ vi.mock('@/lib/supabase/browser', () => ({
   }),
 }));
 beforeEach(() => {
+  documentBoundary.admission.mockReset().mockResolvedValue(undefined);
+  documentBoundary.member.mockReset().mockResolvedValue(undefined);
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://isolated.supabase.co');
   sessionStorage.clear();
   privacyMocks.read.mockResolvedValue({ status: 'absent' });
@@ -83,6 +95,23 @@ vi.mock('@/features/telemetry/private-speed-insights', () => ({
 import ApplicationLayout from './layout';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
+
+it('does not admit record existence before membership or return the shell before admission', async () => {
+  const denied = new Error('LOGIN_REDIRECT');
+  documentBoundary.member.mockRejectedValueOnce(denied);
+  await expect(
+    ApplicationLayout({ children: <p>Private content</p> }),
+  ).rejects.toBe(denied);
+  expect(documentBoundary.admission).not.toHaveBeenCalled();
+  const missing = new Error('NOT_FOUND');
+  documentBoundary.admission.mockRejectedValueOnce(missing);
+  await expect(
+    ApplicationLayout({ children: <p>Private content</p> }),
+  ).rejects.toBe(missing);
+  expect(documentBoundary.member.mock.invocationCallOrder.at(-1)).toBeLessThan(
+    documentBoundary.admission.mock.invocationCallOrder[0],
+  );
+});
 
 afterEach(() => {
   cleanup();
