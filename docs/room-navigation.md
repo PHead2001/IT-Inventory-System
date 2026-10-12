@@ -143,13 +143,30 @@ workaround is unexpectedly enabled, bloom fails gracefully without changing that
 global setting. The wrapper owns the composer, effect and bloom texture; the
 overlay owns and disposes only its geometry/material/isolated scene.
 
+W16 uses a custom one-shot depth/blur adapter as a technical substitution for
+Drei `ContactShadows`, rather than mounting that component. The installed Drei
+component renders the shared scene with an override material and restores its
+target to null; the adapter isolates registered casters and restores the prior
+renderer target/state in finally, with explicit resource ownership and failure
+handling. It retains the depth-map and separable-blur approach. This substitution
+still requires the same visual and reference-hardware acceptance as W16.
+
 The contact adapter owns a 512-square floor capture, one intermediate target,
 depth material and separable blur resources. It copies actual caster world matrices
 into an isolated capture scene and shares source geometry without disposing it.
-Capture consists of one depth render and two blur passes. A finally block restores
-the renderer target, viewport, scissor, clear state and XR state after success or
-failure. Failure disposes owned resources and stops retrying. Room replacement and
-unmount dispose the resources as well.
+Capture consists of one depth render and two blur passes. Each bound target must
+report a complete framebuffer through the public WebGL context. A scoped Three
+`debug.onShaderError` callback with shader checking enabled rejects nonthrowing
+link failures during the actual owned material renders; `compile()` alone does
+not prove first-use linkage checks. The depth shader patch also verifies its
+expected source markers, and context loss rejects capture. No GL error queue is
+drained and no private framebuffer/program fields are used. A finally block
+restores the renderer target, viewport, scissor, clear state, XR state and shader
+debug settings after success or failure. Partial construction releases earlier
+allocations. Failure removes the receiver texture, clears cached telemetry,
+disposes owned resources and stops retrying for that effect lifetime. Ordinary
+room rendering and static corner grounding continue. Room replacement and unmount
+dispose the resources as well; a successor owns a fresh capture lifetime.
 
 The contact cache key contains scene generation, geometry registration revision,
 settled caster revision, palette revision and shadow quality. Any caster motion,

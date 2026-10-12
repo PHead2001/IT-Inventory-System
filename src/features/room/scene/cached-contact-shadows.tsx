@@ -33,9 +33,11 @@ export function CachedContactShadows({
   const [width, depth, height] = room.dimensions;
   useEffect(() => {
     const ownedReceiver = receiver.current;
+    const ownedMaterial = material.current;
     failed.current = false;
     cachedKey.current = null;
     readyFrames.current = 0;
+    delete gl.domElement.dataset.contactCacheKey;
     if (quality === 'off') return;
     let owned: ContactCapture | null = null;
     try {
@@ -53,6 +55,12 @@ export function CachedContactShadows({
       invalidate();
     } catch {
       failed.current = true;
+      owned?.dispose();
+      resources.current = null;
+      if (ownedMaterial) {
+        ownedMaterial.map = null;
+        ownedMaterial.needsUpdate = true;
+      }
       gl.domElement.dataset.contactStatus = 'allocation-failed';
     }
     return () => {
@@ -60,9 +68,13 @@ export function CachedContactShadows({
         resources.current = null;
         owned?.dispose();
       }
+      if (ownedMaterial && owned && ownedMaterial.map === owned.texture) {
+        ownedMaterial.map = null;
+        ownedMaterial.needsUpdate = true;
+      }
       if (ownedReceiver) ownedReceiver.visible = false;
     };
-  }, [width, depth, height, quality, gl, invalidate]);
+  }, [width, depth, height, quality, gl, invalidate, effects]);
   useEffect(
     () =>
       effects.subscribe(() => {
@@ -109,6 +121,11 @@ export function CachedContactShadows({
     } catch {
       failed.current = true;
       receiver.current.visible = false;
+      if (material.current) {
+        material.current.map = null;
+        material.current.needsUpdate = true;
+      }
+      delete gl.domElement.dataset.contactCacheKey;
       resources.current.dispose();
       resources.current = null;
       gl.domElement.dataset.contactStatus = 'capture-failed';

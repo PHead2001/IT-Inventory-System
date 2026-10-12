@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
   frame: null as (() => void) | null,
   group: null as Group | null,
   receiver: null as Mesh | null,
+  material: null as MeshBasicMaterial | null,
   fine: true,
   reduced: false,
   paletteRevision: 0,
@@ -42,6 +43,7 @@ const state = vi.hoisted(() => ({
     capture: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
   },
+  allocationFails: false,
 }));
 vi.mock('@react-three/fiber', () => ({
   useThree: () => state.three,
@@ -62,7 +64,10 @@ vi.mock('./scene-palette', () => ({
   useScenePaletteRevision: () => state.paletteRevision,
 }));
 vi.mock('./contact-capture', () => ({
-  createContactCapture: () => state.resource,
+  createContactCapture: () => {
+    if (state.allocationFails) throw new Error('allocation');
+    return state.resource;
+  },
 }));
 
 function GroupProbe({
@@ -103,10 +108,12 @@ function ReceiverProbe({
 }
 function MaterialProbe({
   ref,
-  ...props
 }: MeshBasicMaterialParameters & { ref: Ref<MeshBasicMaterial> }) {
-  const material = useMemo(() => new MeshBasicMaterial(props), [props]);
+  const material = useMemo(() => new MeshBasicMaterial(), []);
   useImperativeHandle(ref, () => material, [material]);
+  useLayoutEffect(() => {
+    state.material = material;
+  }, [material]);
   return null;
 }
 vi.mock('react/jsx-runtime', async () => {
@@ -171,8 +178,10 @@ beforeEach(() => {
   state.fine = true;
   state.reduced = false;
   state.group = state.receiver = null;
+  state.material = null;
   state.frame = null;
   state.paletteRevision = 0;
+  state.allocationFails = false;
   state.palette = {
     background: new Color('#07111f'),
     grid: new Color('#355168'),
@@ -325,12 +334,157 @@ it('latches capture failure, disposes owned resources and never retries on subse
   state.resource.capture.mockImplementation(() => {
     throw new Error('GPU');
   });
-  render(<CachedContactShadows room={room} quality="standard" />);
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
   frame(1);
   frame(2);
   frame(3);
   frame(400);
   expect(state.receiver?.visible).toBe(false);
   expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+  expect(state.store.getSnapshot().captures).toBe(0);
+  expect(canvas.dataset.contactCacheKey).toBeUndefined();
+  expect(canvas.dataset.contactStatus).toBe('failed');
+  state.paletteRevision++;
+  view.rerender(<CachedContactShadows room={room} quality="standard" />);
+  const finish = state.store.beginCasterMotion('hover:red', 'red', true);
+  finish();
+  frame(500);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  view.unmount();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+});
+
+it('removes a previously cached key after a later capture failure and gives a successor a fresh lifetime', () => {
+  registerCaster();
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  const old = state.resource;
+  const oldMaterial = state.material;
+  expect(canvas.dataset.contactStatus).toBe('cached');
+  expect(oldMaterial?.map).toBe(old.texture);
+  old.capture.mockImplementation(() => {
+    throw new Error('incomplete framebuffer');
+  });
+  state.paletteRevision++;
+  view.rerender(<CachedContactShadows room={room} quality="standard" />);
+  frame(3);
+  expect(canvas.dataset.contactStatus).toBe('capture-failed');
+  expect(canvas.dataset.contactCacheKey).toBeUndefined();
+  expect(state.receiver?.visible).toBe(false);
+  expect(state.material?.map).toBeNull();
+  expect(state.store.getSnapshot().captures).toBe(1);
+  view.unmount();
+  expect(oldMaterial?.map).toBeNull();
+  expect(old.dispose).toHaveBeenCalledOnce();
+  state.resource = {
+    texture: new Texture(),
+    capture: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const successor = render(
+    <CachedContactShadows room={room} quality="standard" />,
+  );
+  frame(4);
+  frame(5);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(canvas.dataset.contactStatus).toBe('cached');
+  expect(state.receiver?.visible).toBe(true);
+  expect(state.material?.map).toBe(state.resource.texture);
+  successor.unmount();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+});
+
+it('latches allocation failure without recording success or attempting capture', () => {
+  registerCaster();
+  state.allocationFails = true;
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  expect(canvas.dataset.contactStatus).toBe('allocation-failed');
+  frame(1);
+  frame(2);
+  frame(300);
+  expect(state.receiver?.visible).toBe(false);
+  expect(state.resource.capture).not.toHaveBeenCalled();
+  expect(state.store.getSnapshot().captures).toBe(0);
+  view.unmount();
+});
+
+it('resets a failed capture lifetime when a same-sized room replaces the effects store without unmounting', () => {
+  registerCaster();
+  const failedResource = state.resource;
+  failedResource.capture.mockImplementation(() => {
+    throw new Error('shader failure');
+  });
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  expect(failedResource.dispose).toHaveBeenCalledOnce();
+  expect(state.receiver?.visible).toBe(false);
+  const receiver = state.receiver;
+
+  state.store = createSceneEffectsStore('room:2');
+  registerCaster();
+  state.resource = {
+    texture: new Texture(),
+    capture: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const nextRoom = { ...room, roomId: 'next-room' };
+  view.rerender(<CachedContactShadows room={nextRoom} quality="standard" />);
+  expect(state.receiver).toBe(receiver);
+  frame(3);
+  expect(state.resource.capture).not.toHaveBeenCalled();
+  frame(4);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(state.store.getSnapshot().captures).toBe(1);
+  expect(state.receiver?.visible).toBe(true);
+  expect(canvas.dataset.contactStatus).toBe('cached');
+  expect(canvas.dataset.contactCacheKey).toContain('room:2');
+  expect(failedResource.dispose).toHaveBeenCalledOnce();
+  view.unmount();
+  expect(state.resource.dispose).toHaveBeenCalledOnce();
+});
+
+it('disposes a successful capture lifetime when a same-sized room replaces the effects store without unmounting', () => {
+  registerCaster();
+  const oldStore = state.store;
+  const oldResource = state.resource;
+  const view = render(<CachedContactShadows room={room} quality="standard" />);
+  frame(1);
+  frame(2);
+  const receiver = state.receiver;
+  expect(oldResource.capture).toHaveBeenCalledOnce();
+  expect(state.material?.map).toBe(oldResource.texture);
+
+  state.store = createSceneEffectsStore('room:2');
+  registerCaster();
+  state.resource = {
+    texture: new Texture(),
+    capture: vi.fn(),
+    dispose: vi.fn(),
+  };
+  view.rerender(
+    <CachedContactShadows
+      room={{ ...room, roomId: 'next-room' }}
+      quality="standard"
+    />,
+  );
+  expect(state.receiver).toBe(receiver);
+  expect(oldResource.dispose).toHaveBeenCalledOnce();
+  expect(state.receiver?.visible).toBe(false);
+  expect(state.material?.map).toBe(state.resource.texture);
+  expect(canvas.dataset.contactCacheKey).toBeUndefined();
+  frame(3);
+  expect(state.resource.capture).not.toHaveBeenCalled();
+  frame(4);
+  expect(state.resource.capture).toHaveBeenCalledOnce();
+  expect(state.receiver?.visible).toBe(true);
+  const finishOldMotion = oldStore.beginCasterMotion('hover:old', 'red', true);
+  expect(state.receiver?.visible).toBe(true);
+  finishOldMotion();
+  expect(oldResource.capture).toHaveBeenCalledOnce();
+  view.unmount();
+  expect(oldResource.dispose).toHaveBeenCalledOnce();
   expect(state.resource.dispose).toHaveBeenCalledOnce();
 });
