@@ -334,7 +334,7 @@ it('keeps the clean alias during outgoing work and rearms a repeated accepted ta
   expect(primary()?.routeKey).toBe(runtime.pathname);
   runtime.query = 'task=quantity_move';
   history.replaceState({}, '', runtime.pathname + '?' + runtime.query);
-  view.rerender(<CachedPrimary>{firstChildren}</CachedPrimary>);
+  view.rerender(<CachedPrimary fresh={false}>{firstChildren}</CachedPrimary>);
   expect(primary()).toBeNull();
   expect(boundary.focus(ticket, 'heading')).toBe(false);
   const nextChildren = recordPrimary('Fresh record');
@@ -403,3 +403,74 @@ it.each(['Back', 'Forward'])(
     expect(primary()?.routeKey).toBe(runtime.pathname);
   },
 );
+
+it('rearms the identical cached children without Activity after an accepted matching React router commit', () => {
+  runtime.pathname = '/inventory/quantity/record';
+  runtime.query = 'task=quantity_move';
+  history.replaceState({}, '', runtime.pathname + '?' + runtime.query);
+  const cached = recordPrimary();
+  const view = render(<CachedPrimary>{cached}</CachedPrimary>);
+  act(() =>
+    expect(
+      consume?.(
+        runtime.pathname,
+        'quantity_move',
+        screen.getByText('Cached record'),
+      ),
+    ).toBe(true),
+  );
+  runtime.query = '';
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  const ticket = accept(runtime.pathname + '?task=quantity_move');
+  history.replaceState({}, '', runtime.pathname + '?task=quantity_move');
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  expect(primary()).toBeNull();
+  expect(boundary.focus(ticket, 'heading')).toBe(false);
+  runtime.query = 'task=quantity_move';
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  expect(primary()?.routeKey).toBe(runtime.pathname + '?task=quantity_move');
+  act(() =>
+    expect(
+      consume?.(
+        runtime.pathname,
+        'quantity_move',
+        screen.getByText('Cached record'),
+      ),
+    ).toBe(true),
+  );
+  runtime.query = '';
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  expect(boundary.focus(ticket, 'heading')).toBe(true);
+});
+it('does not rearm from an unrelated accepted navigation followed by a matching raw URL and router key', () => {
+  runtime.pathname = '/inventory/quantity/record';
+  runtime.query = 'task=quantity_move';
+  history.replaceState({}, '', runtime.pathname + '?' + runtime.query);
+  const cached = recordPrimary();
+  const view = render(<CachedPrimary>{cached}</CachedPrimary>);
+  act(() =>
+    expect(
+      consume?.(
+        runtime.pathname,
+        'quantity_move',
+        screen.getByText('Cached record'),
+      ),
+    ).toBe(true),
+  );
+  runtime.query = '';
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  accept('/history');
+  runtime.query = 'task=quantity_move';
+  history.replaceState({}, '', runtime.pathname + '?' + runtime.query);
+  view.rerender(<CachedPrimary>{cached}</CachedPrimary>);
+  expect(primary()).toBeNull();
+  act(() =>
+    expect(
+      consume?.(
+        runtime.pathname,
+        'quantity_move',
+        screen.getByText('Cached record'),
+      ),
+    ).toBe(false),
+  );
+});

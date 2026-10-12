@@ -81,6 +81,17 @@ const supported = () =>
   typeof CSS.supports === 'function' &&
   CSS.supports('selector(::view-transition-group(.route-content))');
 const serverSupported = () => false;
+const commandDestination = (href: string | undefined) => {
+  if (!href) return null;
+  try {
+    const url = new URL(href, location.href);
+    return url.origin === location.origin
+      ? routeKey(url.pathname, url.searchParams)
+      : null;
+  } catch {
+    return null;
+  }
+};
 const emptyIntent = () => null;
 const emptySubscribe = () => () => {};
 
@@ -203,7 +214,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
-        commands.navigation();
+        commands.navigation(commandDestination(href));
         presentation.navigation();
         const interruptedPair = loading.snapshot() !== null;
         loading.cancel();
@@ -490,7 +501,9 @@ export function RouteMotionProvider({
       // page. Preserve the title origin for a later accepted application Back.
       // Never intercept traversal or alter privacy or readiness owners.
       flushSync(() => {
-        commands.history();
+        commands.history(
+          commandDestination((event as NavigateEvent).destination?.url),
+        );
         state.finishArrival();
         state.finish();
       });
@@ -564,7 +577,9 @@ export function RouteMotionProvider({
       // and wait for ordinary authorized readiness without preparing a pair or
       // delaying/intercepting the browser's restore. Keep the approved origin
       // so app Back after native Forward can still use its accepted Link event.
-      commands.history();
+      commands.history(
+        routeKey(location.pathname, new URLSearchParams(location.search)),
+      );
       presentation.navigation();
       latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
@@ -656,7 +671,9 @@ export function RouteMotionProvider({
             />
           ))}
           <RouteProgress />
-          <RouteNavigationIdentityContext value={commands}>
+          <RouteNavigationIdentityContext
+            value={{ state: commands, committedRouteKey }}
+          >
             <RouteReadyContext.Provider value={readiness}>
               <PairedRouteLoadingContext.Provider
                 value={{

@@ -120,4 +120,3 @@ select ok(jsonb_path_exists(pg_temp.palette_plan(kind,field),
  from (values ('asset','name'),('asset','asset_tag'),('asset','serial_number'),('quantity','name'),('quantity','item_code'),('location','name'),('location','code'),('site','name'),('site','code')) fields(kind,field);
 select * from finish();
 rollback;
-

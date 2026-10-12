@@ -57,6 +57,7 @@ import {
   revokePrivatePresentation,
   invalidateAssignmentCallbacks,
 } from '@/features/scan/assign-batch';
+import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
 import { SiteManagementForm } from '@/features/custody/management-form';
 import { registerNavigationGuard } from '@/lib/navigation/guard';
 const row = {
@@ -663,3 +664,64 @@ it.each([401, 403])(
     expect(screen.getByRole('combobox')).toHaveValue('');
   },
 );
+
+function CachedTaskCommandSource() {
+  const path = '/inventory/assets/' + row.id;
+  const task = new URLSearchParams(location.search).get('task') ?? undefined;
+  return (
+    <Authority>
+      <CommandProvider actorId="actor" backend="local-backend" staff>
+        <CommandButtons />
+        <RouteReady
+          actorId="actor"
+          routeKey={path + '?task=asset_move'}
+          contentIdentity={path}
+        >
+          <main>
+            <h1>Asset record</h1>
+            <TaskWorkspace
+              choices={[{ id: 'asset_move', label: 'Move asset' }]}
+              context="Laptop"
+              recordIdentity={'asset:' + row.id}
+              taskIntent={task}
+            >
+              {() => <input aria-label="Move destination" />}
+            </TaskWorkspace>
+          </main>
+        </RouteReady>
+      </CommandProvider>
+    </Authority>
+  );
+}
+it('a real palette Move command reopens a consumed same-record task while the server readiness key remains cached', async () => {
+  const path = '/inventory/assets/' + row.id;
+  navigation.pathname = path;
+  history.replaceState({}, '', path + '?task=asset_move');
+  const view = render(<CachedTaskCommandSource />);
+  await act(async () => {});
+  expect(screen.getByLabelText('Move destination')).toBeVisible();
+  expect(location.search).toBe('');
+  view.rerender(<CachedTaskCommandSource />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  expect(screen.queryByLabelText('Move destination')).toBeNull();
+  open();
+  fireEvent.click(screen.getByRole('option', { name: /Move asset or stock/ }));
+  fireEvent.change(screen.getByRole('combobox'), {
+    target: { value: 'camera' },
+  });
+  await settle();
+  fireEvent.click(screen.getByRole('option', { name: /Camera laptop/ }));
+  await act(async () => {});
+  expect(navigation.push).toHaveBeenLastCalledWith(path + '?task=asset_move');
+  // Publish the real router commit; source-owned native consumption did not
+  // replace or refetch the original server RouteReady key.
+  history.replaceState({}, '', path + '?task=asset_move');
+  view.rerender(<CachedTaskCommandSource />);
+  await act(async () => {});
+  expect(screen.getByLabelText('Move destination')).toBeVisible();
+  expect(location.search).toBe('');
+  view.rerender(<CachedTaskCommandSource />);
+  await act(async () => {});
+  expect(navigation.push).toHaveBeenCalledTimes(1);
+});

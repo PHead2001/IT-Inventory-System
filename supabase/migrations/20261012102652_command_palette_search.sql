@@ -51,7 +51,7 @@ begin
  union all
  (select 'asset'::text kind,r.id,r.name,null::text code,r.asset_tag asset_tag,r.serial_number serial_number,r.status status,'assetTag'::text matched_field,0::real distance,true exact
  from public.serialized_assets r where (p_purpose<>'move' or r.status='active') and (p_scope='all' or (r.status='active'))
- and lower(btrim(coalesce(r.asset_tag,'')))=needle 
+ and lower(btrim(coalesce(r.asset_tag,'')))=needle
  order by r.id limit 21)
  union all
  (select 'asset'::text kind,r.id,r.name,null::text code,r.asset_tag asset_tag,r.serial_number serial_number,r.status status,'assetTag'::text matched_field,lower(btrim(coalesce(r.asset_tag,''))) operator(extensions.<->>) needle distance,false exact
@@ -61,7 +61,7 @@ begin
  union all
  (select 'asset'::text kind,r.id,r.name,null::text code,r.asset_tag asset_tag,r.serial_number serial_number,r.status status,'serialNumber'::text matched_field,0::real distance,true exact
  from public.serialized_assets r where (p_purpose<>'move' or r.status='active') and (p_scope='all' or (r.status='active'))
- and lower(btrim(coalesce(r.serial_number,'')))=needle 
+ and lower(btrim(coalesce(r.serial_number,'')))=needle
  order by r.id limit 21)
  union all
  (select 'asset'::text kind,r.id,r.name,null::text code,r.asset_tag asset_tag,r.serial_number serial_number,r.status status,'serialNumber'::text matched_field,lower(btrim(coalesce(r.serial_number,''))) operator(extensions.<->>) needle distance,false exact
@@ -81,7 +81,7 @@ begin
  union all
  (select 'quantity'::text kind,r.id,r.name,r.item_code code,null::text asset_tag,null::text serial_number,case when r.archived then 'archived' else 'active' end status,'code'::text matched_field,0::real distance,true exact
  from public.quantity_items r where (p_purpose<>'move' or not r.archived) and (p_scope='all' or (not r.archived))
- and lower(btrim(coalesce(r.item_code,'')))=needle 
+ and lower(btrim(coalesce(r.item_code,'')))=needle
  order by r.id limit 21)
  union all
  (select 'quantity'::text kind,r.id,r.name,r.item_code code,null::text asset_tag,null::text serial_number,case when r.archived then 'archived' else 'active' end status,'code'::text matched_field,lower(btrim(coalesce(r.item_code,''))) operator(extensions.<->>) needle distance,false exact
@@ -101,7 +101,7 @@ begin
  union all
  (select 'location'::text kind,r.id,r.name,r.code code,null::text asset_tag,null::text serial_number,case when r.active then 'active' else 'inactive' end status,'code'::text matched_field,0::real distance,true exact
  from public.locations r where p_purpose in ('all','print') and (p_scope='all' or (r.active))
- and lower(btrim(coalesce(r.code,'')))=needle 
+ and lower(btrim(coalesce(r.code,'')))=needle
  order by r.id limit 21)
  union all
  (select 'location'::text kind,r.id,r.name,r.code code,null::text asset_tag,null::text serial_number,case when r.active then 'active' else 'inactive' end status,'code'::text matched_field,lower(btrim(coalesce(r.code,''))) operator(extensions.<->>) needle distance,false exact
@@ -121,7 +121,7 @@ begin
  union all
  (select 'site'::text kind,r.id,r.name,r.code code,null::text asset_tag,null::text serial_number,case when r.active then 'active' else 'inactive' end status,'code'::text matched_field,0::real distance,true exact
  from public.sites r where p_purpose='all' and (p_scope='all' or (r.active))
- and lower(btrim(coalesce(r.code,'')))=needle 
+ and lower(btrim(coalesce(r.code,'')))=needle
  order by r.id limit 21)
  union all
  (select 'site'::text kind,r.id,r.name,r.code code,null::text asset_tag,null::text serial_number,case when r.active then 'active' else 'inactive' end status,'code'::text matched_field,lower(btrim(coalesce(r.code,''))) operator(extensions.<->>) needle distance,false exact
@@ -146,4 +146,3 @@ begin
 end; $$;
 revoke all on function public.command_palette_search_v1(text,text,text) from public,anon,authenticated,service_role;
 grant execute on function public.command_palette_search_v1(text,text,text) to authenticated;
-

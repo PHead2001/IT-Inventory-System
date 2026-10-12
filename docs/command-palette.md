@@ -90,6 +90,15 @@ event, new navigation intent or general query exclusion. A hidden retained
 workspace cannot consume or open the task; the privacy boundary still verifies
 the changed URL through its ordinary contract.
 
+The handoff is scoped to a separate provider-owned navigation identity. Only
+accepted application navigation and native traversal advance it and capture the
+exact destination. A later matching original task URL rearms the same source
+only after the React router commits that full key, the original primary remains
+connected/visible and fresh privacy returns. Identical cached children require
+no remount or forced refresh. A raw URL change or unrelated navigation cannot
+rearm it; outgoing pending work retains its clean alias. Native history can
+restore functional readiness while permanently retiring old command focus.
+
 ## Caller-authorized bounded search
 
 The additive command_palette_search_v1(text,text,text) RPC is SECURITY INVOKER with
@@ -171,9 +180,11 @@ their own delivery requirements.
 Local integration preparation on 2026-10-12 applies held command commit
 cd4a2f8c1b44ce56f484d8b4866a01801d6873e6 onto route/privacy base
 4666d532079609f99cfd36b11f350f440b701e53 in
-assist/audit-four-command-integration. This uncommitted draft has focused
+assist/audit-four-command-integration. The local integration checkpoint has focused
 component/provider regression and canonical typecheck evidence; it is not full
-acceptance. The unshipped additive migration was recreated with the pinned CLI as
+acceptance. The lead subsequently checkpointed it and integrated the PR54
+document-admission/feedback repair; cached-primary followup checks are recorded
+separately in the review evidence. The unshipped additive migration was recreated with the pinned CLI as
 20261012102652_command_palette_search.sql, following existing forward-history
 prefix rules; deployed migrations were not renumbered. Database application,
 type regeneration, actual KNN/Data API deadline proof, browser/preview checks,

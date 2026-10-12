@@ -283,8 +283,10 @@ physical prerequisites.
 ## Command integration preparation, 2026-10-12
 
 A301/W20's held cd4a2f8c1b44ce56f484d8b4866a01801d6873e6 implementation
-is applied without a commit onto 4666d532079609f99cfd36b11f350f440b701e53
-in assist/audit-four-command-integration. The prior command branch remains intact.
+was applied onto 4666d532079609f99cfd36b11f350f440b701e53
+in assist/audit-four-command-integration. The prior command branch remains intact. The lead checkpointed the draft at
+b88db01b and integrated PR54 repair47959a6a at e6a091fe; cached-primary
+rearm followup remains a local working diff until review and final checks.
 The draft integrates fresh privacy grants, shared leave guards, provider-owned
 navigation tickets and exact same-primary consumed-task readiness. Focused local
 regressions and canonical typecheck establish iteration evidence only. The new

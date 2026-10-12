@@ -18,9 +18,10 @@ import { freshPresentationGrant } from './presentation-privacy';
 import { replaceAppHistoryUrl } from '@/lib/navigation/history';
 import type { createRouteCommandState } from './route-command-state';
 import { routeKey as keyOf } from './route-key';
-export const RouteNavigationIdentityContext = createContext<ReturnType<
-  typeof createRouteCommandState
-> | null>(null);
+export const RouteNavigationIdentityContext = createContext<{
+  state: ReturnType<typeof createRouteCommandState>;
+  committedRouteKey: string;
+} | null>(null);
 const noopSubscribe = () => () => {};
 const initialIdentity = () => 0;
 
@@ -56,20 +57,14 @@ export function RouteReady({
   const authority = useRef(privacy);
   const navigation = useContext(RouteNavigationIdentityContext);
   const navigationIdentity = useSyncExternalStore(
-    navigation?.subscribe ?? noopSubscribe,
-    navigation?.navigationIdentity ?? initialIdentity,
+    navigation?.state.subscribe ?? noopSubscribe,
+    navigation?.state.navigationIdentity ?? initialIdentity,
     initialIdentity,
   );
-  const activation = useRef(0);
-  useLayoutEffect(() => {
-    activation.current++;
-  }, []);
   const [consumed, setConsumed] = useState<{
     sourceKey: string;
     destinationKey: string;
     navigationIdentity: number;
-    children: React.ReactNode;
-    activation: number;
   } | null>(null);
   const [sourceKey, setSourceKey] = useState(routeKey);
   if (sourceKey !== routeKey) {
@@ -90,11 +85,16 @@ export function RouteReady({
       !root.current.closest('[hidden], [inert]') &&
       freshPresentationGrant(authority.current) &&
       consumed.navigationIdentity !== navigationIdentity &&
+      navigation?.state.navigationDestination() === consumed.sourceKey &&
+      navigation.committedRouteKey === consumed.sourceKey &&
       routeKey === consumed.sourceKey &&
       keyOf(location.pathname, new URLSearchParams(location.search)) ===
         routeKey &&
-      (children !== consumed.children ||
-        activation.current !== consumed.activation)
+      Array.from(root.current.children).some(
+        (child) =>
+          child.getClientRects().length > 0 &&
+          getComputedStyle(child).visibility !== 'hidden',
+      )
     ) {
       setConsumed(null);
       return true;
@@ -114,8 +114,9 @@ export function RouteReady({
     }),
     [routeKey, effective, pairingHref],
   );
-  // Runs for actual mount/update/Activity reactivation. Presentation generation
-  // changes alone neither rerender this content nor acknowledge readiness.
+  // A committed primary registers its full effective key. Privacy reconciliation
+  // cannot rearm a task alias without its exact new navigation destination and
+  // matching React router commit, including cache reuse without Activity changes.
   useLayoutEffect(() => {
     if (rearmConsumed()) return;
     if (ready && root.current)
@@ -161,8 +162,6 @@ export function RouteReady({
         setConsumed({
           ...handoff,
           navigationIdentity,
-          children,
-          activation: activation.current,
         });
         return true;
       }}
