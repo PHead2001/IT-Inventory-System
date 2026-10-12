@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import type {
   AssetItem,
   CategoryRef,
@@ -33,8 +34,13 @@ export function DetailTasks(props: {
   archiveReview?: QuantityArchiveReview | null;
   returnSuggestion?: AssetReturnSuggestion;
   returnSuggestionError?: boolean;
+  taskIntent?: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const taskIntent = searchParams
+    ? (searchParams.get('task') ?? undefined)
+    : props.taskIntent;
   const [lastArchiveReview, setLastArchiveReview] = useState(
     props.archiveReview,
   );
@@ -135,6 +141,8 @@ export function DetailTasks(props: {
       choices={choices}
       recordVersion={entity.version}
       onRefresh={() => router.refresh()}
+      taskIntent={taskIntent}
+      recordIdentity={(quantity ? 'quantity:' : 'asset:') + entity.id}
       context={
         <div className="text-sm">
           <p className="font-semibold break-words">

@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { registerNavigationGuard } from '@/lib/navigation/guard';
 import { Button } from '@/components/ui/button';
 import { useEffectiveReducedMotion } from '@/components/experience/motion-preference';
 import { motion } from 'motion/react';
@@ -1068,20 +1069,8 @@ export function MetadataSettings({
       event.preventDefault();
       event.returnValue = '';
     };
-    const guardLink = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const anchor = target.closest('a[href]');
-      if (
-        !anchor ||
-        anchor.getAttribute('href')?.startsWith('#') ||
-        event.ctrlKey ||
-        event.metaKey ||
-        anchor.hasAttribute('download') ||
-        anchor.getAttribute('target') === '_blank'
-      )
-        return;
-      if (
+    const removeGuard = registerNavigationGuard(() => {
+      return !(
         busy.current ||
         unresolvedSave ||
         navigationTarget ||
@@ -1090,16 +1079,12 @@ export function MetadataSettings({
             ? 'Recovery is unavailable in this browser. Leave and lose these unsaved edits?'
             : 'Leave this page? Unsaved form edits and field additions will be available to recover when you return.',
         )
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    };
+      );
+    });
     window.addEventListener('beforeunload', warn);
-    document.addEventListener('click', guardLink, true);
     return () => {
       window.removeEventListener('beforeunload', warn);
-      document.removeEventListener('click', guardLink, true);
+      removeGuard();
     };
   }, [
     unsaved,

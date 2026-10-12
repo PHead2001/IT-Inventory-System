@@ -22,6 +22,7 @@ import { TaskWorkspace } from '@/features/inventory/components/task-workspace';
 import { TaskStateContext } from '@/features/inventory/components/task-state';
 import { readCreation, writeCreation } from './creation-recovery';
 import { readEdit } from './edit-recovery';
+import { requestAppNavigation } from '@/lib/navigation/guard';
 
 const { push, refresh, replace } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -4660,7 +4661,14 @@ describe('existing edit recovery and review', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Only in memory');
     expect(screen.getByRole('link', { name: 'Back to results' })).toHaveFocus();
     expect(push).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    act(() => {
+      expect(
+        requestAppNavigation(
+          '/inventory?category=parts',
+          screen.getByRole('link', { name: 'Back to results' }),
+        ),
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(push).toHaveBeenCalledWith('/inventory?category=parts');
     expect(sessionStorage.length).toBe(0);
@@ -4812,6 +4820,16 @@ describe('existing edit recovery and review', () => {
       ).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
       expect(push).not.toHaveBeenCalled();
+      act(() => {
+        expect(requestAppNavigation('/scan', null)).toBe(false);
+      });
+      expect(
+        screen.getByRole('dialog', { name: 'Leave this edit?' }),
+      ).toHaveTextContent('retry the same save');
+      expect(
+        screen.queryByRole('button', { name: 'Discard changes' }),
+      ).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
       expect(
         JSON.parse(sessionStorage.getItem(sessionStorage.key(0)!)!).status,
       ).toBe('submitted');

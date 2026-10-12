@@ -6,6 +6,7 @@ export type ReadyContent = {
   routeKey: string;
   contentIdentity: string;
   root: HTMLElement;
+  consumedTask?: { sourceKey: string; destinationKey: string };
 };
 export function createRouteReadiness(
   actorId: string,
@@ -48,21 +49,55 @@ export function createRouteReadiness(
     if (history && pending.current(history.epoch)) history.finish();
     history = undefined;
   };
+  const primary = () => {
+    for (const content of roots.values()) {
+      if (active(content)) return content;
+    }
+    return null;
+  };
   return {
     // Read-only observation reuses the canonical readiness checks. It never
     // acknowledges a commit or settles another owner's pending registration.
-    currentPrimary: () => {
-      for (const content of roots.values()) {
-        if (active(content)) return content;
-      }
-      return null;
-    },
+    currentPrimary: primary,
     subscribePrimary: (listener: () => void) => {
       if (closed) return () => {};
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
+    },
+    consumeTask(
+      root: HTMLElement,
+      sourceKey: string,
+      recordPath: string,
+      task: string,
+      apply: (href: string) => void,
+    ) {
+      const content = Array.from(roots.values()).find(
+        (value) => value.root === root && value.routeKey === sourceKey,
+      );
+      if (!content || primary() !== content) return null;
+      const url = new URL(location.href);
+      if (
+        url.pathname !== recordPath ||
+        url.searchParams.getAll('task').length !== 1 ||
+        url.searchParams.get('task') !== task
+      )
+        return null;
+      url.searchParams.delete('task');
+      const destinationKey = routeKey(url.pathname, url.searchParams);
+      try {
+        apply(url.pathname + url.search + url.hash);
+      } catch {
+        return null;
+      }
+      if (location.href !== url.href) return null;
+      content.routeKey = destinationKey;
+      content.consumedTask = { sourceKey, destinationKey };
+      // Same mounted primary, explicit query handoff. No new readiness receipt,
+      // history settlement, navigation intent or authorization is fabricated.
+      notify();
+      return content.consumedTask;
     },
     register: (content: ReadyContent) => {
       if (closed) return () => {};

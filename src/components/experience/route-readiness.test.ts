@@ -140,3 +140,120 @@ it('primary observation reuses eligibility without acknowledging a commit or fin
   expect(readiness.currentPrimary()).toBeNull();
   expect(notification).toHaveBeenCalledTimes(2);
 });
+
+it('hands off only the exact consumed task on the same authoritative primary, preserving unrelated query/hash/state without a new receipt', () => {
+  history.replaceState(
+    { next: 'retained' },
+    '',
+    '/inventory/quantity/record?other=a&other=b&task=quantity_move#tasks',
+  );
+  const pending = createRoutePendingState();
+  const committed = vi.fn();
+  const readiness = createRouteReadiness('actor', pending, committed);
+  const element = root();
+  readiness.register({
+    actorId: 'actor',
+    routeKey: routeKey(location.pathname, new URLSearchParams(location.search)),
+    contentIdentity: 'record',
+    root: element,
+  });
+  const prior = readiness.currentPrimary();
+  committed.mockClear();
+  const notify = vi.fn();
+  readiness.subscribePrimary(notify);
+  const pop = vi.fn();
+  window.addEventListener('popstate', pop);
+  try {
+    const handoff = readiness.consumeTask(
+      element,
+      prior!.routeKey,
+      '/inventory/quantity/record',
+      'quantity_move',
+      (href) => history.replaceState(history.state, '', href),
+    );
+    expect(handoff).toEqual({
+      sourceKey:
+        '/inventory/quantity/record?other=a&other=b&task=quantity_move',
+      destinationKey: '/inventory/quantity/record?other=a&other=b',
+    });
+    expect(readiness.currentPrimary()).toBe(prior);
+    expect(location.search).toBe('?other=a&other=b');
+    expect(location.hash).toBe('#tasks');
+    expect(history.state).toEqual({ next: 'retained' });
+    expect(notify).toHaveBeenCalledOnce();
+    expect(committed).not.toHaveBeenCalled();
+    expect(pop).not.toHaveBeenCalled();
+    expect(pending.snapshot().pending).toBe(false);
+    const hidden = document.createElement('div');
+    document.body.append(hidden);
+    hidden.hidden = true;
+    hidden.append(element);
+    expect(readiness.currentPrimary()).toBeNull();
+    hidden.hidden = false;
+    readiness.history();
+    expect(readiness.currentPrimary()).toBe(prior);
+    expect(pending.snapshot().pending).toBe(false);
+  } finally {
+    window.removeEventListener('popstate', pop);
+  }
+});
+it.each([
+  'hidden',
+  'other-primary',
+  'wrong-task',
+  'wrong-record',
+  'duplicate-task',
+  'replace-error',
+  'replace-noop',
+] as const)(
+  'refuses consumed-task handoff for %s and retains the original registration',
+  (reason) => {
+    history.replaceState(
+      {},
+      '',
+      '/inventory/quantity/record?task=quantity_move' +
+        (reason === 'duplicate-task' ? '&task=quantity_move' : ''),
+    );
+    const pending = createRoutePendingState(),
+      readiness = createRouteReadiness('actor', pending, () => {});
+    const element = root();
+    const key = routeKey(
+      location.pathname,
+      new URLSearchParams(location.search),
+    );
+    if (reason === 'other-primary')
+      readiness.register({
+        actorId: 'actor',
+        routeKey: key,
+        contentIdentity: 'first',
+        root: root(),
+      });
+    readiness.register({
+      actorId: 'actor',
+      routeKey: key,
+      contentIdentity: 'record',
+      root: element,
+    });
+    if (reason === 'hidden') element.hidden = true;
+    const apply = vi.fn((href: string) => {
+      if (reason === 'replace-error') throw Error('blocked');
+      if (reason !== 'replace-noop')
+        history.replaceState(history.state, '', href);
+    });
+    expect(
+      readiness.consumeTask(
+        element,
+        key,
+        reason === 'wrong-record'
+          ? '/inventory/quantity/other'
+          : '/inventory/quantity/record',
+        reason === 'wrong-task' ? 'asset_move' : 'quantity_move',
+        apply,
+      ),
+    ).toBeNull();
+    expect(location.search).toContain('task=quantity_move');
+    if (reason !== 'hidden')
+      expect(readiness.currentPrimary()?.routeKey).toBe(key);
+    expect(pending.snapshot().pending).toBe(false);
+  },
+);

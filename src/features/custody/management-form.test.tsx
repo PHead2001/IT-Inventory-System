@@ -10,6 +10,7 @@ import { LocationManagementForm, SiteManagementForm } from './management-form';
 import { submitCustody } from './actions';
 import userEvent from '@testing-library/user-event';
 import { creationRecoveryLimits } from '@/features/metadata/creation-recovery';
+import { requestAppNavigation } from '@/lib/navigation/guard';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('./actions', () => ({ submitCustody: vi.fn() }));
@@ -140,6 +141,10 @@ it('guards a first edit when deferred recovery storage fails and resumes after s
       fireEvent.click(screen.getByRole('link', { name: 'Settings' })),
     ).toBe(false);
     expect(screen.getByRole('alert')).toHaveTextContent('Navigation is paused');
+    act(() => {
+      expect(requestAppNavigation('/scan', null)).toBe(false);
+    });
+    expect(screen.getByLabelText('Name')).toHaveValue('Retain this site');
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
     expect(unload.defaultPrevented).toBe(true);

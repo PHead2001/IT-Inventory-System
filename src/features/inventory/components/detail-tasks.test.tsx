@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { DetailTasks } from './detail-tasks';
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  useSearchParams: () => null,
+}));
 vi.mock('../actions', () => ({
   submitInventory: vi.fn(),
   findDuplicateSerials: vi.fn(),

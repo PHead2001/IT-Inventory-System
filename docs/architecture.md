@@ -35,6 +35,15 @@ commands retain their exact retry instance, and committed receipts retain Done
 and read recovery. Move more rejects new intent after withdrawal, including
 withdrawal while its fresh snapshot is loading. Actor and record workspace keys
 continue to isolate identities, and server authorization remains authoritative.
+The protected shell's command provider sits inside the existing route-motion
+provider and retains child drafts, camera and assignment scope. The palette and
+keyboard registry reuse existing inventory tasks and label intents. Fresh privacy
+grants authorize command presentation; provider-owned navigation serials and
+canonical primary readiness authorize arrival focus. Same-primary task URL
+consumption publishes an explicit readiness handoff. Caller-authorized fuzzy
+search reads bounded base records without multiplying quantity holdings. See
+[Search and commands](command-palette.md) for ownership, ranking, authorization,
+preference, cancellation and task-intent contracts.
 
 Published inventory form revisions, stable custom field identities and bounded custom CSV exports are specified in [published metadata](published-metadata.md).
 

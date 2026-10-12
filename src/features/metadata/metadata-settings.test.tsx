@@ -21,6 +21,7 @@ import { moveControl } from './designer-model';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
 import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import { revokePrivatePresentation } from '@/features/scan/assign-batch';
+import { requestAppNavigation } from '@/lib/navigation/guard';
 import { fetchCategoryForm } from './form-fetch.actions';
 import {
   clearAllDesignerRecovery,
@@ -1882,6 +1883,10 @@ describe('category form designer', () => {
       'Discard unsaved edits and switch category?',
     );
     expect(router.push).not.toHaveBeenCalled();
+    expect(requestAppNavigation('/scan', null)).toBe(false);
+    expect(confirm).toHaveBeenLastCalledWith(
+      'Leave this page? Unsaved form edits and field additions will be available to recover when you return.',
+    );
     await waitFor(() =>
       expect(
         readDesignerRecovery(id(50), id(1)).item?.addition?.field?.label,
@@ -2356,6 +2361,7 @@ describe('category form designer', () => {
       entryLink.remove();
     }
     expect(entryNavigationAllowed).toBe(false);
+    expect(requestAppNavigation('/scan', null)).toBe(false);
     expect(
       screen.getByRole('button', { name: 'Discard recovered edits' }),
     ).toBeDisabled();

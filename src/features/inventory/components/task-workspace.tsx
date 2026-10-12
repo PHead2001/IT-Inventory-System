@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useRef,
   useState,
@@ -17,6 +18,7 @@ import {
   type TaskDiscard,
 } from './task-state';
 import { Button } from '@/components/ui/button';
+import { useConsumeRouteTask } from '@/components/experience/route-ready';
 export type TaskChoice = {
   id: string;
   label: string;
@@ -35,14 +37,19 @@ export function TaskWorkspace({
   context,
   recordVersion,
   onRefresh,
+  taskIntent,
+  recordIdentity,
 }: {
   choices: TaskChoice[];
   children: (id: string) => ReactNode;
   context: ReactNode;
   recordVersion?: string | number;
   onRefresh?: () => void;
+  taskIntent?: string;
+  recordIdentity?: string;
 }) {
   const scope = useId();
+  const workspaceRoot = useRef<HTMLElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [instance, setInstance] = useState(0);
   const [invalidated, setInvalidated] = useState(false);
@@ -153,8 +160,61 @@ export function TaskWorkspace({
       if (id === null) returnFocusRequested.current = true;
     }
   };
+  const consumedIntents = useRef(new Set<string>());
+  const consumeRouteTask = useConsumeRouteTask();
+  const consumeIntent = useEffectEvent(() => {
+    if (!recordIdentity) return;
+    const url = new URL(window.location.href);
+    const [recordKind, recordId] = recordIdentity.split(':');
+    if (!recordId || !['asset', 'quantity'].includes(recordKind)) return;
+    const currentRecordPath =
+      '/inventory/' +
+      (recordKind === 'asset' ? 'assets' : 'quantity') +
+      '/' +
+      encodeURIComponent(recordId);
+    if (url.pathname.toLowerCase() !== currentRecordPath.toLowerCase()) return;
+    if (!taskIntent) {
+      if (!url.searchParams.has('task')) consumedIntents.current.clear();
+      return;
+    }
+    if (url.searchParams.get('task') !== taskIntent) return;
+    const identity = recordIdentity + ':' + taskIntent;
+    if (consumedIntents.current.has(identity)) return;
+    // Consume before opening: refresh/remount must never reopen a task or
+    // bypass its current draft/submission state.
+    if (
+      !workspaceRoot.current ||
+      !consumeRouteTask?.(currentRecordPath, taskIntent, workspaceRoot.current)
+    )
+      return;
+    consumedIntents.current.add(identity);
+    if (
+      !['asset_move', 'quantity_move'].includes(taskIntent) ||
+      !choices.some((choice) => choice.id === taskIntent)
+    ) {
+      setWarning(
+        'This task is unavailable for this item. Choose an available task below.',
+      );
+      return;
+    }
+    if (stateRef.current.pending || stateRef.current.uncertain) {
+      setWarning('Finish the current task before opening another.');
+      return;
+    }
+    change(taskIntent);
+  });
+  useEffect(() => {
+    let live = true;
+    queueMicrotask(() => {
+      if (live) consumeIntent();
+    });
+    return () => {
+      live = false;
+    };
+  }, [taskIntent, recordIdentity, consumeRouteTask]);
   return (
     <section
+      ref={workspaceRoot}
       aria-label="Record tasks"
       className="experience-surface my-5 space-y-4 p-4"
     >

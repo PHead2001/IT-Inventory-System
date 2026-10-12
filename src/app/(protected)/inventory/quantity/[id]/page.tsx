@@ -167,6 +167,9 @@ export default async function QuantityPage({
           </section>
           {member.role === 'staff' && (
             <DetailTasks
+              taskIntent={
+                typeof query?.task === 'string' ? query.task : undefined
+              }
               key={member.user_id + ':' + item.id}
               actorId={member.user_id}
               backendScope={process.env.NEXT_PUBLIC_SUPABASE_URL}

@@ -110,6 +110,18 @@ passes do not certify SQL execution, hosted summaries or actual populated UI.
 Full database/type generation, browser captures, exact-SHA remote checks and
 fresh independent review remain acceptance gates. Generated database types need
 no API signature update for this private-function replacement.
+Command palette regressions live beside the registry/provider, authenticated
+POST route and TaskWorkspace. Real-provider tests distinguish same-binding
+privacy pause/resume from revocation or binding drift, accepted-navigation serial
+supersession, native history/terminal/unmount retirement, authoritative primary
+focus and the explicit consumed-task handoff. Focus/readiness observers must not
+settle another owner's pending work. The additive database search requires the
+full canonical database gate, including pgTAP authorization/lifecycle/ranking
+fixtures, actual authenticated GiST/KNN plans and canonical type regeneration.
+Real Data API deadline/error proof and desktop/390px Full/Reduced staff/viewer
+browser/preview checks remain separate acceptance requirements; a declared SQL
+timeout or component mock is not that proof. See
+[Search and commands](command-palette.md).
 
 Checkpoint scope/accessibility regression coverage includes normalized location status/export links, caller-scoped record identity and unavailable history recovery, page-local versus full-row counts, empty inventory/destination states, page recovery, monitoring coverage, intact location codes and hidden/unmodeled/failed map guidance. Focused Vitest tests prove these contracts and stale-response handling; `scope-accessibility.spec.ts` exercises ordinary controls, real authorized reads and downloaded CSV across page boundaries. Required-input and category-focus interaction coverage lives in `scope-accessibility-forms.spec.ts`. Mocked reads are not integrated runtime or complete assistive-technology proof; use the existing disposable-local and isolated-preview gates for final acceptance.
 

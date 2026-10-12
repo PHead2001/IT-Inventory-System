@@ -219,6 +219,7 @@ export function SearchForm({
             <Input
               id="inventory-query"
               name="q"
+              data-inventory-search="true"
               value={draft.q ?? ''}
               onChange={(event) => change('q', event.target.value, false)}
               onCompositionStart={() => {

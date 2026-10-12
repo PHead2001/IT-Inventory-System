@@ -1,9 +1,189 @@
 import { useState, type FormEvent } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, it, vi } from 'vitest';
+import { expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { TaskWorkspace } from './task-workspace';
+import {
+  RouteReady,
+  RouteReadyContext,
+} from '@/components/experience/route-ready';
+import { createRouteReadiness } from '@/components/experience/route-readiness';
+import { createRoutePendingState } from '@/components/experience/route-pending-state';
+import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+} from '@/features/scan/assign-batch';
 import { useReportTaskState, useTaskReset } from './task-state';
+function IntentWorkspace({
+  intent,
+  fresh = true,
+  hidden = false,
+  hiddenWorkspace = false,
+}: {
+  intent?: string;
+  fresh?: boolean;
+  hidden?: boolean;
+  hiddenWorkspace?: boolean;
+}) {
+  const [readiness] = useState(() =>
+    createRouteReadiness('actor', createRoutePendingState(), () => {}),
+  );
+  return (
+    <PrivacyReadinessContext
+      value={{
+        ready: fresh,
+        visible: true,
+        generation: 'actor',
+        revocationRevision: readPrivacyRevocationRevision(),
+        verifiedEpoch: assignmentEpoch(),
+      }}
+    >
+      <RouteReadyContext value={readiness}>
+        <div hidden={hidden}>
+          <RouteReady
+            actorId="actor"
+            routeKey={location.pathname + location.search}
+            contentIdentity="record"
+          >
+            <h1>Record primary</h1>
+            <div hidden={hiddenWorkspace}>
+              <TaskWorkspace
+                choices={[
+                  { id: 'receive', label: 'Receive stock' },
+                  { id: 'quantity_move', label: 'Move stock' },
+                ]}
+                context="Item"
+                recordIdentity="quantity:record"
+                taskIntent={intent}
+              >
+                {(id) => <Draft id={id} />}
+              </TaskWorkspace>
+            </div>
+          </RouteReady>
+        </div>
+      </RouteReadyContext>
+    </PrivacyReadinessContext>
+  );
+}
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    {},
+  ] as unknown as DOMRectList);
+});
+afterEach(() => vi.restoreAllMocks());
+function intentUrl(intent: string) {
+  window.history.replaceState(
+    { next: 'retained' },
+    '',
+    '/inventory/quantity/record?returnTo=%2Finventory&task=' +
+      intent +
+      '#tasks',
+  );
+}
+it('consumes a move intent once, opens an eligible task, and never reopens on rerender', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/inventory/quantity/record?task=quantity_move',
+  );
+  const view = render(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.getByRole('heading', { name: 'Move stock' })).toHaveFocus();
+  expect(window.location.search).not.toContain('task=');
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+  view.unmount();
+  render(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+});
+it('routes an incoming intent through explicit dirty discard guards', async () => {
+  const view = render(<IntentWorkspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+  fireEvent.change(screen.getByLabelText('receive entry'), {
+    target: { value: 'Retained draft' },
+  });
+  intentUrl('quantity_move');
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  expect(screen.getByLabelText('receive entry')).toHaveValue('Retained draft');
+  expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Stay with this task' }));
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  expect(screen.getByLabelText('receive entry')).toHaveValue('Retained draft');
+  view.rerender(<IntentWorkspace />);
+  await act(async () => {});
+  intentUrl('quantity_move');
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
+  expect(screen.getByLabelText('quantity_move entry')).toHaveValue('');
+});
+it.each(['pending', 'unknown'])(
+  'does not replace a %s task with an incoming intent',
+  async (phase) => {
+    const view = render(<IntentWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+    fireEvent.click(screen.getByRole('button', { name: phase }));
+    intentUrl('quantity_move');
+    view.rerender(<IntentWorkspace intent="quantity_move" />);
+    await act(async () => {});
+    expect(screen.getByLabelText('receive entry')).toBeInTheDocument();
+    expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Finish the current task',
+    );
+  },
+);
+it.each(['unknown_task', 'asset_move'])(
+  'explains unavailable %s without erasing a draft',
+  async (intent) => {
+    const view = render(<IntentWorkspace />);
+    fireEvent.click(screen.getByRole('button', { name: 'Receive stock' }));
+    fireEvent.change(screen.getByLabelText('receive entry'), {
+      target: { value: 'Keep' },
+    });
+    intentUrl(intent);
+    view.rerender(<IntentWorkspace intent={intent} />);
+    await act(async () => {});
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'unavailable for this item',
+    );
+    expect(screen.getByLabelText('receive entry')).toHaveValue('Keep');
+  },
+);
+it('preserves router state, unrelated query/hash, and permits a later deliberate absent-to-present intent', async () => {
+  intentUrl('quantity_move');
+  const view = render(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(window.history.state).toEqual({ next: 'retained' });
+  expect(window.location.search).toBe('?returnTo=%2Finventory');
+  expect(window.location.hash).toBe('#tasks');
+  fireEvent.click(screen.getByRole('button', { name: 'Close task' }));
+  view.rerender(<IntentWorkspace />);
+  await act(async () => {});
+  intentUrl('quantity_move');
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(screen.getByRole('heading', { name: 'Move stock' })).toBeVisible();
+});
+it('does not consume an intent for a newer record while old record props remain', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/inventory/quantity/newer?task=quantity_move',
+  );
+  render(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(window.location.search).toBe('?task=quantity_move');
+  expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+});
 const choices = [
   { id: 'receive', label: 'Receive stock' },
   { id: 'move', label: 'Move stock' },
@@ -392,4 +572,40 @@ it('rejects interaction and submission from a retained withdrawn form', () => {
   fireEvent.submit(form);
   expect(click).not.toHaveBeenCalled();
   expect(submit).not.toHaveBeenCalled();
+});
+
+it.each(['recheck', 'hidden'] as const)(
+  'does not consume or open a task from a %s source until fresh visible primary ownership returns',
+  async (kind) => {
+    intentUrl('quantity_move');
+    const view = render(
+      <IntentWorkspace
+        intent="quantity_move"
+        fresh={kind !== 'recheck'}
+        hidden={kind === 'hidden'}
+      />,
+    );
+    await act(async () => {});
+    expect(location.search).toContain('task=quantity_move');
+    expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+    view.rerender(<IntentWorkspace intent="quantity_move" />);
+    await act(async () => {});
+    expect(location.search).not.toContain('task=');
+    expect(screen.getByLabelText('quantity_move entry')).toBeVisible();
+  },
+);
+
+it('refuses a hidden retained workspace even inside an otherwise visible authoritative primary', async () => {
+  intentUrl('quantity_move');
+  const view = render(
+    <IntentWorkspace intent="quantity_move" hiddenWorkspace />,
+  );
+  await act(async () => {});
+  expect(screen.getByText('Record primary')).toBeVisible();
+  expect(location.search).toContain('task=quantity_move');
+  expect(screen.queryByLabelText('quantity_move entry')).toBeNull();
+  view.rerender(<IntentWorkspace intent="quantity_move" />);
+  await act(async () => {});
+  expect(location.search).not.toContain('task=');
+  expect(screen.getByLabelText('quantity_move entry')).toBeVisible();
 });

@@ -22,6 +22,7 @@ import {
   type RecordMetadata,
 } from './reconciliation';
 
+import { registerNavigationGuard } from '@/lib/navigation/guard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LocationPicker } from '@/features/locations/location-picker';
@@ -1496,7 +1497,7 @@ export function MetadataForm({
     completedVersion: state?.ok ? state.version : undefined,
   });
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null);
-  const navigationAnchor = useRef<HTMLAnchorElement | null>(null);
+  const navigationAnchor = useRef<HTMLElement | null>(null);
   const discardedEdit = useRef<{
     envelope: EditEnvelope;
     stored: EditEnvelope | null;
@@ -1699,47 +1700,24 @@ export function MetadataForm({
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
-    const guard = (event: MouseEvent) => {
-      if (
-        hasDurableTerminal() ||
-        !editRecoveryEnabled ||
-        !recoveryError ||
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
-        return;
-      const anchor =
-        event.target instanceof Element
-          ? event.target.closest<HTMLAnchorElement>('a[href]')
-          : null;
-      if (
-        !anchor ||
-        anchor.hasAttribute('download') ||
-        (anchor.target && anchor.target !== '_self')
-      )
-        return;
-      const target = new URL(anchor.href, window.location.href);
+    const removeGuard = registerNavigationGuard(({ url: target, invoker }) => {
+      if (hasDurableTerminal() || !editRecoveryEnabled || !recoveryError)
+        return true;
       if (
         target.origin !== window.location.origin ||
         !['http:', 'https:'].includes(target.protocol) ||
         (target.pathname === window.location.pathname &&
           target.search === window.location.search)
       )
-        return;
-      event.preventDefault();
-      event.stopPropagation();
-      navigationAnchor.current = anchor;
+        return true;
+      navigationAnchor.current = invoker;
       setNavigationTarget(target.pathname + target.search + target.hash);
       setDiscardOpen(true);
-    };
-    document.addEventListener('click', guard, true);
+      return false;
+    });
     return () => {
       window.removeEventListener('beforeunload', warn);
-      document.removeEventListener('click', guard, true);
+      removeGuard();
     };
   }, [
     dirty,
@@ -1755,7 +1733,7 @@ export function MetadataForm({
   const keepEditing = () => {
     setDiscardOpen(false);
     setNavigationTarget(null);
-    if (navigationAnchor.current) {
+    if (navigationAnchor.current?.isConnected) {
       navigationAnchor.current.focus();
       navigationAnchor.current = null;
     } else cancelRef.current?.focus();
