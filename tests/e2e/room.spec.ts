@@ -2037,9 +2037,10 @@ test('native Back restores the exact room selection and settles contents after c
     if ((await toggle.getAttribute('aria-checked')) !== String(reduced))
       await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', String(reduced));
-    await expect(
-      page.getByText('Opening requested content…', { exact: true }),
-    ).toHaveCount(0);
+    const progress = page.locator('.experience-route-progress');
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.getByRole('status')).toHaveCount(0);
     await page.goBack();
     await expect(page).toHaveURL(roomUrl);
     await selected(page, code);
@@ -2048,9 +2049,9 @@ test('native Back restores the exact room selection and settles contents after c
     if (code === 'ITC-RED')
       await expect(viewer).toHaveAttribute('data-focused-code', code);
     await expect(inventory).toHaveAttribute('aria-busy', 'false');
-    await expect(
-      page.getByText('Opening requested content…', { exact: true }),
-    ).toHaveCount(0);
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.getByRole('status')).toHaveCount(0);
     await expect(
       page.getByText('Inventory could not be loaded.', { exact: true }),
     ).toHaveCount(0);

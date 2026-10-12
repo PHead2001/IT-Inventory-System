@@ -125,11 +125,21 @@ it('tracks the actual async task and releases progress only after completion UI 
       <Action work={work.promise} />
     </Harness>,
   );
+  const idleProgress = progress();
+  expect(idleProgress).toHaveTextContent('Opening requested content…');
+  expect(idleProgress).toHaveAttribute('data-visible', 'false');
+  expect(idleProgress).toHaveAttribute('aria-hidden', 'true');
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button'));
   await screen.findByText('Start work: Working');
   expect(progress()).toHaveAttribute('data-visible', 'false');
   await waitFor(() =>
     expect(progress()).toHaveAttribute('data-visible', 'true'),
+  );
+  expect(progress()).toBe(idleProgress);
+  expect(progress()).toHaveAttribute('aria-hidden', 'false');
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Opening requested content…',
   );
   await act(async () => {
     work.resolve();
@@ -139,6 +149,10 @@ it('tracks the actual async task and releases progress only after completion UI 
   await waitFor(() =>
     expect(progress()).toHaveAttribute('data-visible', 'false'),
   );
+  expect(progress()).toBe(idleProgress);
+  expect(progress()).toHaveTextContent('Opening requested content…');
+  expect(progress()).toHaveAttribute('aria-hidden', 'true');
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
 it('reports real streamed fallback lifetime, including retained loading after Back cancellation', async () => {
