@@ -295,7 +295,12 @@ export function SpacesWorkspace({
         }
       : { code: null, count: 0 };
   useEffect(() => {
+    let listening = true;
     function pop() {
+      // Eager history restoration may happen while this page is hidden or
+      // unmounted. A reactivated cached page must accept the actual URL, and a
+      // departing page must not interpret another route's query as its own.
+      if (!listening || window.location.pathname !== '/room') return;
       const next = selectionFromUrl(locations, {
         space: initialSpace,
         code: initialCode,
@@ -310,7 +315,12 @@ export function SpacesWorkspace({
         setFocusOrigin('restore');
         setFocusEpoch((epoch) => epoch + 1);
       }
-      setSelection(next);
+      if (
+        next.space.id !== selectionRef.current.space.id ||
+        next.code !== selectionRef.current.code ||
+        next.page !== selectionRef.current.page
+      )
+        setSelection(next);
       setAcceptedRouteKey(
         routeKey(
           window.location.pathname,
@@ -319,6 +329,10 @@ export function SpacesWorkspace({
       );
     }
     window.addEventListener('popstate', pop);
+    // Effects are retired by Activity and recreated on return. Catch a restore
+    // that preceded this listener without dispatching synthetic browser events
+    // or rewriting history. Retirement cancels the queued activation read.
+    queueMicrotask(pop);
     let saved: string | null = null;
     try {
       saved = window.localStorage.getItem(
@@ -327,25 +341,44 @@ export function SpacesWorkspace({
     } catch {
       /* Storage may be unavailable; the registry default still works. */
     }
-    if (!window.location.search && saved) {
+    if (
+      window.location.pathname === '/room' &&
+      !window.location.search &&
+      saved
+    ) {
       const space = resolveSpace(locations, saved, null);
       if (space?.id !== saved)
-        queueMicrotask(() =>
+        queueMicrotask(() => {
+          if (
+            !listening ||
+            window.location.pathname !== '/room' ||
+            window.location.search
+          )
+            return;
           setNotice(
             'The saved space is unavailable. Showing ' +
               (space?.name ?? 'the default space') +
               ' instead.',
-          ),
-        );
+          );
+        });
       if (space)
         queueMicrotask(() => {
+          if (
+            !listening ||
+            window.location.pathname !== '/room' ||
+            window.location.search
+          )
+            return;
           setFocusCompletion({ scope: '', request: '', code: null, count: 0 });
           setFocusOnRestore(false);
           setFocusEpoch((epoch) => epoch + 1);
           setSelection({ space, code: null, page: 1 });
         });
     }
-    return () => window.removeEventListener('popstate', pop);
+    return () => {
+      listening = false;
+      window.removeEventListener('popstate', pop);
+    };
   }, [locations, initialSpace, initialCode, initialPage, userId]);
   useEffect(() => {
     try {
