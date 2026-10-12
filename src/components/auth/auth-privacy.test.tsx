@@ -1735,6 +1735,38 @@ it('a positive target wait settles only after coherent verified state is publish
   expect(accepted.ready).toBe(true);
   expect(accepted.verifiedEpoch).toBe(assignmentEpoch());
 });
+it('a committed target ticket cannot suppress verification when history returns to its original source', async () => {
+  const operation = await startTicket();
+  await operation.settle();
+  routing.query = 'search=raw&search=duplicate';
+  operation.view.rerender(ticketTree());
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  const before = actions.readLogoutPrivacyGeneration.mock.calls.length;
+  let settle!: (value: LogoutPrivacyGeneration) => void;
+  const read = new Promise<LogoutPrivacyGeneration>((resolve) => {
+    settle = resolve;
+  });
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(read);
+  routing.query = '';
+  operation.view.rerender(ticketTree());
+  await waitFor(() =>
+    expect(
+      actions.readLogoutPrivacyGeneration.mock.calls.length,
+    ).toBeGreaterThan(before),
+  );
+  expect(ticketPrivacy.ready).toBe(false);
+  expect(ticketPrivacy.navigation!.admission('/inventory').ready).toBe(false);
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).ready,
+  ).toBe(false);
+  await act(async () => {
+    settle({ status: 'absent' });
+    await read;
+  });
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+});
 it('provider cancellation settles a committed target and restarts canonical current-key verification', async () => {
   const operation = await startTicket();
   routing.query = 'search=raw&search=duplicate';

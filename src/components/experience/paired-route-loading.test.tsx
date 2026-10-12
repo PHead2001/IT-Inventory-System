@@ -1262,3 +1262,34 @@ it('native Back prepares before an earlier router listener commits and replaces 
     window.removeEventListener('popstate', restore);
   }
 });
+
+it('a committed pathname update cannot remove the native observer from an in-progress capture dispatch', async () => {
+  const work = deferred();
+  const restore = () => flushSync(() => runtime.restoreSync(location.href));
+  window.addEventListener('popstate', restore, true);
+  try {
+    render(
+      <StrictMode>
+        <Router work={work} privacy={grant()} actualPrivacy opaqueSlot />
+      </StrictMode>,
+    );
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    fireEvent.click(screen.getByRole('link', { name: 'Source cable title' }));
+    await act(work.resolve);
+    await screen.findByRole('heading', { name: 'Authorized detail title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    const before = pending.state.snapshot().epoch;
+    act(() => {
+      history.replaceState(null, '', list);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(pending.state.snapshot().epoch).toBeGreaterThan(before);
+    await screen.findByRole('link', { name: 'Source cable title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    expect(gate.store.snapshot()).toBeNull();
+    expect(pending.state.snapshot().pending).toBe(false);
+  } finally {
+    window.removeEventListener('popstate', restore, true);
+  }
+});

@@ -246,6 +246,12 @@ export function RouteMotionProvider({
     pending.snapshot,
   );
   const pathname = usePathname();
+  // Route commits update the departing identity without tearing down the
+  // native history observer while a browser event may already be dispatching.
+  const committedPathname = useRef(pathname);
+  useLayoutEffect(() => {
+    committedPathname.current = pathname;
+  }, [pathname]);
   const query = useSearchParams();
   const listHref = pathname + (query?.size ? `?${query}` : '');
   const committedRouteKey = routeKey(
@@ -428,7 +434,7 @@ export function RouteMotionProvider({
       flushSync(() => {
         state.finish();
         state.back(
-          pathname ?? '',
+          committedPathname.current ?? '',
           location.pathname + location.search + location.hash,
         );
         const intent = state.snapshot();
@@ -458,7 +464,6 @@ export function RouteMotionProvider({
   }, [
     state,
     actorId,
-    pathname,
     pending,
     readiness,
     loading,

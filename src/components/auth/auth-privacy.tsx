@@ -630,13 +630,18 @@ function PrivacyController({
       document.removeEventListener('visibilitychange', reactivate);
     };
   }, [cancel, tickets, setState]);
+  const committedNavigation = useRef(key.navigation);
   useEffect(() => {
+    const unchangedNavigation = committedNavigation.current === key.navigation;
+    committedNavigation.current = key.navigation;
     const ticket = tickets.snapshot();
     if (
       ticket &&
       ticketCurrent(ticket) &&
       (ticket.capture.destination === key.navigation ||
-        ticket.capture.source === key.navigation)
+        // Source admission only spans a continuous precommit stay. Returning
+        // after another route committed requires canonical verification again.
+        (ticket.capture.source === key.navigation && unchangedNavigation))
     )
       return;
     tickets.retire();
