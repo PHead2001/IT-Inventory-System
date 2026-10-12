@@ -224,6 +224,11 @@ a pending route navigation. Existing Server Action wrappers delegate to the same
 cookie-scoped logic for compatibility; other authentication actions retain their
 existing transport. The endpoints admit only a mandatory exact serialized Origin
 matching `request.nextUrl.origin`, with `Sec-Fetch-Site: same-origin` when present.
+When Next normalizes the request hostname to `localhost`, the direct Host may
+restore exactly `127.0.0.1` or `[::1]` with the request's scheme and effective port.
+Origin must then match that restored authority exclusively; normalized localhost
+is not an additional accepted origin. Malformed, duplicate, alternate loopback
+and mismatched authorities fail closed.
 They do not trust forwarded headers or the configured branch/canonical APP_ORIGIN
 for this transport check. Input is strictly shaped and bounded to 256 actual UTF-8
 stream bytes; all methods except POST are rejected and every result is private,

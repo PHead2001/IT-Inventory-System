@@ -15,6 +15,26 @@ export function rejectAuthMethod() {
   return response;
 }
 
+function transportOrigin(request: NextRequest): string | null {
+  const target = request.nextUrl;
+  if (target.hostname !== 'localhost') return target.origin;
+  const host = request.headers.get('host');
+  if (host === null) return target.origin;
+  // NextURL normalizes loopback addresses to localhost. Restore only these exact
+  // supported authorities from the direct Host, never a forwarded header or an
+  // arbitrary loopback alias. The restored origin replaces, not supplements,
+  // localhost admission for a request made to a literal loopback address.
+  const authority =
+    /^(localhost|127\.0\.0\.1|\[::1\])(?::([1-9][0-9]{0,4}))?$/.exec(host);
+  if (!authority || (authority[2] && Number(authority[2]) > 65535)) return null;
+  try {
+    const actual = new URL(`${target.protocol}//${host}`);
+    return actual.port === target.port ? actual.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Transport admission precedes cookie reads and sign-out. No forwarded-host trust. */
 export async function admitAuthPost<T>(
   request: NextRequest,
@@ -29,7 +49,7 @@ export async function admitAuthPost<T>(
     sameOrigin =
       (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
       parsed.origin === origin &&
-      parsed.origin === request.nextUrl.origin;
+      parsed.origin === transportOrigin(request);
   } catch {
     // Missing, opaque, malformed and multiple origins fail closed.
   }

@@ -40,6 +40,7 @@ import {
   RecordTitle,
 } from './record-transition';
 import { RouteContentIdentityContext } from './route-content-identity';
+import { RouteReady } from './route-ready';
 import { routeKey } from './route-key';
 import { PairedRouteLoadingContext } from './paired-route-loading';
 import {
@@ -391,6 +392,78 @@ it('keeps title scope bound to admitted content through a live destination URL a
   rendered.rerender(content('/inventory?type=asset'));
   expect(screen.getByRole('link', { name: 'Cable row 2' })).toBe(source);
   expect(source).not.toHaveAttribute('data-test-transition-name');
+});
+
+it('binds title pairing to the actual primary when the opaque router slot commits ahead of its outer pathname', () => {
+  const listHref = '/inventory?type=quantity';
+  let loading: React.ContextType<typeof PairedRouteLoadingContext>;
+  function CaptureLoading() {
+    const current = useContext(PairedRouteLoadingContext);
+    useLayoutEffect(() => {
+      loading = current;
+    }, [current]);
+    return null;
+  }
+  const content = (outer: string, primary: string, child: ReactNode) =>
+    view(
+      <>
+        <CaptureLoading />
+        <RouteContentIdentityContext
+          value={{ pathname: outer.split('?')[0], listHref: outer }}
+        >
+          <RouteReady
+            actorId="staff"
+            routeKey={primary}
+            contentIdentity={primary}
+          >
+            {child}
+          </RouteReady>
+        </RouteContentIdentityContext>
+      </>,
+    );
+  runtime.query = 'type=quantity';
+  const page = render(
+    content(listHref, listHref, <List listHref={listHref} />),
+  );
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  const name = screen
+    .getByRole('link', { name: 'Cable row 2' })
+    .getAttribute('data-test-transition-name');
+  expect(name).toMatch(/^inventory-title-/);
+  runtime.pathname = detailPath;
+  runtime.query = '';
+  // Next's live router child replaces its primary before outer privacy admission.
+  page.rerender(
+    content(
+      listHref,
+      detailPath,
+      <Detail returnHref={`${listHref}#inventory-row-2`} />,
+    ),
+  );
+  expect(screen.getByRole('heading')).toHaveAttribute(
+    'data-test-transition-name',
+    name,
+  );
+  act(() => loading!.store.ready(detailPath));
+  fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+  const backName = screen
+    .getByRole('heading')
+    .getAttribute('data-test-transition-name');
+  expect(backName).toMatch(/^inventory-title-/);
+  runtime.pathname = '/inventory';
+  runtime.query = 'type=quantity';
+  page.rerender(content(detailPath, listHref, <List listHref={listHref} />));
+  expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
+    'data-test-transition-name',
+    backName,
+  );
+  // A stale outer match cannot authorize rows from a different actual query.
+  page.rerender(
+    content(listHref, '/inventory?type=asset', <List listHref={listHref} />),
+  );
+  expect(document.querySelectorAll('[data-test-transition-name]')).toHaveLength(
+    0,
+  );
 });
 
 it.each([true, false])(

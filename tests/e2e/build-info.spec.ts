@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { expect, test } from '@playwright/test';
 import fixture from '../fixtures/auth.json' with { type: 'json' };
 import type { BuildProvenance } from '../../src/features/build-info/provenance';
+import { extractProbeFailure } from '../helpers/compiled-probe-diagnostic.mjs';
 
 test('compiled provenance probe preserves the snapshot across runtime changes', () => {
   test.setTimeout(75_000);
@@ -20,7 +21,10 @@ test('compiled provenance probe preserves the snapshot across runtime changes', 
     !result.error,
     'Compiled probe must start and finish before its deadline',
   ).toBe(true);
-  expect(result.status, 'Compiled probe must exit successfully').toBe(0);
+  expect(
+    result.status,
+    `Compiled probe must exit successfully (${extractProbeFailure(result.stdout)})`,
+  ).toBe(0);
   expect(
     result.signal,
     'Compiled probe must finish without termination',

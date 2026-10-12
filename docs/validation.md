@@ -639,6 +639,11 @@ backend-specific build during canonical `npm run test:e2e` and focused build-inf
 It uses the current Node executable, a bounded subprocess deadline/output limit and
 sanitized status/TAP assertions; nonzero exit or missing regression execution fails
 the browser suite. No additional build, package script or workflow is introduced.
+Failure diagnostics expose only allowlisted stage/reason tokens, carried over the
+existing private child IPC and extracted from bounded TAP output. Arbitrary child
+fields, error messages, HTML/Flight bodies, cookies and credentials never enter the
+browser assertion label. This distinguishes input/Auth setup, listener setup,
+response validation, literal-tree checks and cleanup without dumping private data.
 The probe requires the canonical disposable loopback backend and fictional viewer.
 It authenticates once with caller credentials, passes the session only over private
 IPC, and serves the existing production build on an ephemeral loopback port in two
@@ -916,7 +921,7 @@ commit requires its own canonical CI, fresh review and hosted acceptance.
 
 Ordinary logout and cleanup-generation comparison use the dedicated same-origin
 POST transport so a held navigation cannot queue either acknowledgement. The
-focused auth/proxy batch passes 202 tests in eight files; affected auth, password,
+initial auth/proxy batch passed 202 tests in eight files; affected auth, password,
 layout, scan, designer and label component siblings pass another 370 tests in
 nine files. Both use one worker and a 768 MiB heap. Scoped zero-warning lint and
 formatting pass. Route regressions cover mandatory exact request-origin admission,
@@ -927,11 +932,20 @@ that these exact endpoints perform no pre-admission claims refresh/cookie writes
 while neighboring routes retain refresh. Client and recovery tests cover bounded
 timeout/response validation, UNKNOWN recovery retention, verified designer cleanup
 after the original owner is gone, blocked erasure/readback and cleanup-only retry.
+The subsequent loopback-origin and receipt-ordering batch passes 265 tests in
+seven files with one worker and a 768 MiB heap. Real installed NextRequest tests
+prove loopback normalization, exact supported direct-Host restoration and rejection
+of malformed, alternate, cross-host, cross-scheme and cross-port authorities.
+A component regression proves that a privacy alert can precede the logout receipt
+without authorizing cleanup; the reload browser test now awaits the actual receipt
+and matching cookie before its retained recovery assertions.
 
 The held-History logout browser regression now requires both independent HTTP
 acknowledgements, with the same verified generation, to complete before History
 Flight is released; its late delivery must leave login in place. This authored
-browser assertion remains unexecuted locally. These focused working-tree results
+browser assertion has separate candidate-specific evidence. Actual loopback
+invitation/recovery completion and the amended first-read-failure/reload journey
+remain pending browser verification on the new candidate. These focused working-tree results
 do not certify real browser cookie delivery, local/hosted request-origin routing,
 database behavior, the full production build/E2E gate, or final committed-SHA
 remote checks and fresh review. Root integration owns those remaining boundaries.

@@ -23,17 +23,19 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
   try {
     const before = await owned.caller
       .from('locations')
-      .select('id,code,name,parent_id,version')
+      .select('id,code,name,parent_id,version,active')
       .eq('code', 'ITC-RED')
       .single();
     expect(before.error).toBeNull();
+    expect(before.data!.active).toBe(true);
     original = before.data!;
     const sibling = await owned.caller
       .from('locations')
-      .select('name,parent_id')
+      .select('name,parent_id,active')
       .eq('code', 'ITC-BLACK')
       .single();
     expect(sibling.error).toBeNull();
+    expect(sibling.data!.active).toBe(true);
     expect(sibling.data!.parent_id).toBe(before.data!.parent_id);
     const renamed = `Red container acceptance ${owned.suffix}`;
     await acceptanceLogin(page);
@@ -57,8 +59,38 @@ test('local mapped storage rename keeps keyboard focus, corrects sibling collisi
     await page.keyboard.press('Enter');
     const form = page.locator('form');
     const name = form.getByRole('textbox', { name: 'Name', exact: true });
-    await name.fill(` ${sibling.data!.name.toLowerCase()} `);
-    await form.getByRole('button', { name: 'Save name', exact: true }).click();
+    const collisionName = ` ${sibling.data!.name.toLowerCase()} `;
+    await name.fill(collisionName);
+    await expect(name).toHaveValue(collisionName);
+    let submittedNameMatches = false;
+    const submitted = page.waitForRequest((request) => {
+      if (
+        request.method() !== 'POST' ||
+        !request.headers()['next-action'] ||
+        new URL(request.url()).pathname !==
+          `/settings/locations/${before.data!.code}`
+      )
+        return false;
+      const body = request.postData();
+      if (!body || Buffer.byteLength(body, 'utf8') > 4096) return false;
+      try {
+        const args: unknown = JSON.parse(body);
+        if (!Array.isArray(args) || args[0]?.operation !== 'location_rename')
+          return false;
+        submittedNameMatches = args[0].payload?.name === collisionName;
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    await Promise.all([
+      submitted,
+      form.getByRole('button', { name: 'Save name', exact: true }).click(),
+    ]);
+    expect(
+      submittedNameMatches,
+      'The actual rename action must submit the displayed sibling-collision name',
+    ).toBe(true);
     await expect(form.getByRole('status')).toContainText(
       'Another active location with the same parent already uses that name',
     );

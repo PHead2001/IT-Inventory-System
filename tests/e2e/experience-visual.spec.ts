@@ -734,17 +734,21 @@ test('desktop navigation reaches personal motion Settings after long-page scroll
     const toggleBox = await toggle.boundingBox();
     expect(toggleBox).toBeTruthy();
     expect(toggleBox!.y + toggleBox!.height).toBeLessThanOrEqual(height);
-    expect(
-      await toggle.evaluate((button) => {
-        const box = button.getBoundingClientRect();
-        return button.contains(
-          document.elementFromPoint(
-            box.x + box.width / 2,
-            box.y + box.height / 2,
-          ),
-        );
-      }),
-    ).toBe(true);
+    // A native route update can briefly return HTML from hit testing while
+    // snapshots settle. Use the same bounded actionability wait as a real click.
+    await expect
+      .poll(() =>
+        toggle.evaluate((button) => {
+          const box = button.getBoundingClientRect();
+          return button.contains(
+            document.elementFromPoint(
+              box.x + box.width / 2,
+              box.y + box.height / 2,
+            ),
+          );
+        }),
+      )
+      .toBe(true);
     await toggle.focus();
     await expect(toggle).toBeFocused();
   }

@@ -96,12 +96,33 @@ test('real logout survives a first cleanup read failure and a hard reload before
 }) => {
   await signIn(page);
   await seedAndBlockFirstRead(page);
+  const signedOut = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/auth/logout' &&
+      response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  // Callback invalidation can expose a privacy-check alert before logout settles.
+  // Confirm the actual logout receipt before checking its retained cookie.
+  const response = await signedOut;
+  expect(response.status()).toBe(200);
+  const receipt = await response.json();
+  expect(receipt).toEqual({
+    ok: true,
+    logoutGeneration: expect.any(String),
+  });
+  expect(isLogoutGeneration(receipt.logoutGeneration)).toBe(true);
   await expect(
     page.getByRole('alert').filter({
       hasText: /could not clear|cannot be verified/,
     }),
   ).toBeVisible();
+  await expect
+    .poll(async () => {
+      const cookie = await reminder(page);
+      return cookie ? decodeURIComponent(cookie.value) : null;
+    })
+    .toBe(`v1:${receipt.logoutGeneration}`);
   const retained = await reminder(page);
   expect(retained?.httpOnly).toBe(true);
   expect(

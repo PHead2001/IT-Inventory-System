@@ -68,3 +68,35 @@ it('a committed ready marker closes history but cannot release another owner’s
   act(refresh);
   expect(pending.snapshot().pending).toBe(false);
 });
+
+it('primary identity alone cannot acknowledge a pending or mismatched-actor primary', () => {
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    { width: 30, height: 20 },
+  ] as unknown as DOMRectList);
+  history.replaceState(null, '', '/inventory');
+  const pending = createRoutePendingState();
+  const committed = vi.fn();
+  const readiness = createRouteReadiness('actor', pending, committed);
+  readiness.history();
+  const content = (ready: boolean, actorId = 'actor') => (
+    <RouteReadyContext value={readiness}>
+      <RouteReady
+        actorId={actorId}
+        routeKey="/inventory"
+        contentIdentity="primary"
+        ready={ready}
+      >
+        <h1>Inventory</h1>
+      </RouteReady>
+    </RouteReadyContext>
+  );
+  const page = render(content(false));
+  expect(committed).not.toHaveBeenCalled();
+  expect(pending.snapshot().pending).toBe(true);
+  page.rerender(content(true, 'other'));
+  expect(committed).not.toHaveBeenCalled();
+  expect(pending.snapshot().pending).toBe(true);
+  page.rerender(content(true));
+  expect(committed).toHaveBeenCalledTimes(1);
+  expect(pending.snapshot().pending).toBe(false);
+});

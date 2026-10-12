@@ -982,6 +982,57 @@ it('allows the mounted ordinary logout action owner to complete navigation after
   expect(actions.signOutSession).toHaveBeenCalledOnce();
 });
 
+it('a pre-receipt privacy alert does not prove logout or authorize private recovery cleanup', async () => {
+  let complete!: (value: { ok: true; logoutGeneration: string }) => void;
+  actions.signOutSession.mockReturnValue(
+    new Promise((resolve) => {
+      complete = resolve;
+    }),
+  );
+  render(
+    <ProtectedPrivacyBoundary binding={protectedBinding}>
+      <QueueLogoutForm />
+    </ProtectedPrivacyBoundary>,
+  );
+  const button = await screen.findByRole('button', { name: 'Sign out' });
+  seed();
+  const get = Storage.prototype.getItem;
+  const blocked = vi
+    .spyOn(Storage.prototype, 'getItem')
+    .mockImplementation(function (this: Storage, key) {
+      if (
+        key === 'inventory-assign-cleanup-v1' ||
+        key === 'inventory-assign-scope-v1'
+      )
+        throw new Error('blocked');
+      return get.call(this, key);
+    });
+  fireEvent.submit(button.closest('form')!);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'cannot be verified',
+  );
+  expect(actions.signOutSession).toHaveBeenCalledOnce();
+  expect(sessionStorage.getItem(recovery)).toBe(
+    'exact uncertain command and receipt',
+  );
+  expect(routing.replace).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('button', { name: 'Finish signing out' }),
+  ).not.toBeInTheDocument();
+  await act(async () => complete({ ok: true, ...receipt }));
+  expect(
+    await screen.findByRole('button', { name: 'Finish signing out' }),
+  ).toBeVisible();
+  expect(sessionStorage.getItem(recovery)).toBe(
+    'exact uncertain command and receipt',
+  );
+  blocked.mockRestore();
+  fireEvent.click(screen.getByRole('button', { name: 'Finish signing out' }));
+  await waitFor(() => expect(routing.replace).toHaveBeenCalledWith('/login'));
+  expect(sessionStorage.getItem(recovery)).toBeNull();
+  expect(actions.signOutSession).toHaveBeenCalledOnce();
+});
+
 it('keeps confirmed logout cleanup retry accessible outside masked private header content', async () => {
   actions.signOutSession.mockResolvedValue({ ok: true, ...receipt });
   actions.readProtectedPrivacyIdentity.mockResolvedValue({ status: 'denied' });

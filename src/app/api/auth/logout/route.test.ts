@@ -64,6 +64,70 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 for (const endpoint of endpoints) {
+  it.each(['127.0.0.1', '[::1]'])(
+    `${endpoint.path} restores exact literal %s origin after real NextURL normalization`,
+    async (literal) => {
+      for (const protocol of ['http:', 'https:']) {
+        const actualOrigin = `${protocol}//${literal}:3000`;
+        const input = new NextRequest(
+          `${actualOrigin}/api/auth/${endpoint.path}`,
+          {
+            method: 'POST',
+            headers: {
+              origin: actualOrigin,
+              host: `${literal}:3000`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify(endpoint.body),
+          },
+        );
+        expect(input.nextUrl.hostname).toBe('localhost');
+        expect(input.nextUrl.origin).toBe(`${protocol}//localhost:3000`);
+        const response = await endpoint.route.POST(input);
+        expect(response.status).toBe(200);
+        expectPrivate(response);
+      }
+    },
+  );
+  it.each([
+    { host: null, origin: 'http://127.0.0.1:3000' },
+    { host: '127.0.0.1:3000', origin: 'http://localhost:3000' },
+    { host: '[::1]:3000', origin: 'http://localhost:3000' },
+    { host: 'localhost:3000', origin: 'http://127.0.0.1:3000' },
+    { host: '127.0.0.1:3001', origin: 'http://127.0.0.1:3001' },
+    { host: '127.0.0.1', origin: 'http://127.0.0.1' },
+    { host: '127.0.0.1:3000', origin: 'https://127.0.0.1:3000' },
+    { host: '127.0.0.2:3000', origin: 'http://127.0.0.2:3000' },
+    { host: '[0:0:0:0:0:0:0:1]:3000', origin: 'http://[::1]:3000' },
+    { host: 'user@127.0.0.1:3000', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:3000/path', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:3000?query=1', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:3000#fragment', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:3000, localhost:3000', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:03000', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1:65536', origin: 'http://localhost:3000' },
+    { host: '127.0.0.1.evil.example:3000', origin: 'http://localhost:3000' },
+    { host: 'evil.example:3000', origin: 'http://localhost:3000' },
+  ])(
+    `${endpoint.path} rejects loopback authority mismatch $host / $origin`,
+    async ({ host, origin: submitted }) => {
+      const headers = new Headers({
+        origin: submitted,
+        'content-type': 'application/json',
+        'x-forwarded-host': '127.0.0.1:3000',
+      });
+      if (host !== null) headers.set('host', host);
+      const input = new NextRequest(
+        `http://127.0.0.1:3000/api/auth/${endpoint.path}`,
+        { method: 'POST', headers, body: JSON.stringify(endpoint.body) },
+      );
+      const response = await endpoint.route.POST(input);
+      expect(response.status).toBe(403);
+      expectPrivate(response);
+      expect(mocks.client).not.toHaveBeenCalled();
+      expect(mocks.cookies).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     null,
     'null',

@@ -847,6 +847,11 @@ for (const width of [1280, 390]) {
           entry.next.some((next) => next.name === old.name),
       ),
     );
+    // Preserve passive native evidence even when pairing fails before Back.
+    await info.attach('forward-native-route-proof', {
+      body: JSON.stringify(forward),
+      contentType: 'application/json',
+    });
     expect(shared).toHaveLength(1);
     expect(forward.replacements).toHaveLength(1);
     for (const replacement of forward.replacements) {
