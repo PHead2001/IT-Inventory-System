@@ -83,6 +83,8 @@ it.each(['manual', 'camera'])(
           kind: 'asset',
           path: '/inventory/assets/70000000-0000-4000-8000-000000000001',
           label: 'Laptop (Tag-1)',
+          name: 'Laptop',
+          identifier: 'Tag-1',
           serialNumber: 'Serial-Mixed',
           state: 'active',
           context: 'Manufacturer: Dell · IT Closet / Red Container',
@@ -91,6 +93,8 @@ it.each(['manual', 'camera'])(
           kind: 'asset',
           path: '/inventory/assets/70000000-0000-4000-8000-000000000002',
           label: 'Spare laptop (Tag-2)',
+          name: 'Spare laptop',
+          identifier: 'Tag-2',
           state: 'retired',
           context:
             'Manufacturer: Lenovo · Last recorded storage: Black Container',
@@ -111,6 +115,18 @@ it.each(['manual', 'camera'])(
     expect(
       await screen.findByRole('link', { name: 'Laptop (Tag-1)' }),
     ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Laptop (Tag-1)' }),
+    ).toHaveAttribute(
+      'href',
+      '/inventory/assets/70000000-0000-4000-8000-000000000001',
+    );
+    expect(
+      screen.getByRole('link', { name: 'Spare laptop (Tag-2)' }),
+    ).toHaveAttribute(
+      'href',
+      '/inventory/assets/70000000-0000-4000-8000-000000000002',
+    );
     expect(
       screen.getByRole('list', { name: 'Matching records' }),
     ).toHaveTextContent('Dell · IT Closet / Red Container');

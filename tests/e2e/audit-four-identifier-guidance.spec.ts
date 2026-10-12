@@ -50,6 +50,7 @@ for (const width of [1280, 390])
       try {
         const serial = `A4-SERIAL-${f.suffix}`;
         const collision = `A4-COLLISION-${f.suffix}`;
+        const secondTag = `A4-SECOND-${f.suffix}`;
         const retiredTag = `A4-RETIRED-${f.suffix}`;
         const oneName = `Identifier Dell ${f.suffix}`;
         const twoName = `Identifier Lenovo ${f.suffix}`;
@@ -58,7 +59,7 @@ for (const width of [1280, 390])
         const two = await asset(
           f,
           twoName,
-          `A4-SECOND-${f.suffix}`,
+          secondTag,
           serial,
           'Lenovo',
           'ITC-BLACK',
@@ -101,15 +102,23 @@ for (const width of [1280, 390])
         await lookup(page, `  ${serial.toLowerCase()}  `);
         await expect(page).toHaveURL(/\/scan$/);
         const matches = page.getByRole('list', { name: 'Matching records' });
-        await expect(
-          matches.getByRole('link', {
-            name: `${oneName} (${collision})`,
-            exact: true,
-          }),
-        ).toBeVisible();
-        await expect(
-          matches.getByRole('link', { name: new RegExp(twoName) }),
-        ).toBeVisible();
+        // The inline code span can add accessible-name whitespace around the
+        // identifier. Bind each choice to its UUID, then check its full label.
+        for (const [record, name, tag] of [
+          [one, oneName, collision],
+          [two, twoName, secondTag],
+        ] as const) {
+          const choice = matches
+            .getByRole('link')
+            .and(
+              matches.locator(`[href="/inventory/assets/${record.entity_id}"]`),
+            );
+          await expect(choice).toHaveCount(1);
+          await expect(choice).toBeVisible();
+          await expect(choice).toHaveAccessibleName(
+            new RegExp(`^${name} \\(\\s*${tag}\\s*\\)$`),
+          );
+        }
         await expect(matches).toContainText('Manufacturer: Dell');
         await expect(matches).toContainText('Serial: ' + serial);
         await expect(matches).toContainText('Red Container');
