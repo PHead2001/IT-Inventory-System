@@ -1,5 +1,21 @@
 import assert from 'node:assert/strict';
 
+/** APP_ENV is an input token; the compiled snapshot contains its display label. */
+export function assertLocalBuildSnapshot(expected) {
+  assert.deepEqual(Object.keys(expected), [
+    'environment',
+    'version',
+    'commit',
+    'buildStarted',
+  ]);
+  assert.ok(expected.buildStarted, 'requires an actual production build');
+  assert.equal(
+    expected.environment,
+    'Local',
+    'requires the canonical local backend build',
+  );
+}
+
 export function localBackend(value) {
   const backend = new URL(value);
   assert.equal(backend.protocol, 'http:');

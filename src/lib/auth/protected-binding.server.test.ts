@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
+  client: vi.fn(),
   user: vi.fn(),
   member: vi.fn(),
   from: vi.fn(),
   generation: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({
-  createSupabaseServerClient: async () => ({
-    auth: { getUser: mocks.user },
-    from: mocks.from,
-  }),
+  createSupabaseServerClient: mocks.client,
 }));
 vi.mock('./privacy-barrier.server', () => ({
   readLogoutGeneration: mocks.generation,
@@ -31,6 +29,10 @@ const member = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.client.mockResolvedValue({
+    auth: { getUser: mocks.user },
+    from: mocks.from,
+  });
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', binding.backend + '/');
   mocks.user.mockResolvedValue({
     data: { user: { id: binding.actorId } },
@@ -52,6 +54,16 @@ it('verifies the original actor and privileges before returning the current logo
   expect(mocks.from).toHaveBeenCalledWith('app_members');
   expect(mocks.member).toHaveBeenCalledOnce();
   expect(mocks.generation).toHaveBeenCalledOnce();
+  expect(mocks.client).toHaveBeenCalledWith(true);
+});
+it('lets the HTTP privacy reader suppress cookie writes while preserving canonical identity checks', async () => {
+  expect(await verifyProtectedPrivacyBinding(binding, false)).toEqual({
+    status: 'match',
+    generation: { status: 'absent' },
+  });
+  expect(mocks.client).toHaveBeenCalledWith(false);
+  expect(mocks.user).toHaveBeenCalledOnce();
+  expect(mocks.member).toHaveBeenCalledOnce();
 });
 it('rejects another authenticated actor before reading membership or generation', async () => {
   mocks.user.mockResolvedValue({

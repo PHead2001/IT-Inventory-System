@@ -5,7 +5,10 @@ import { fork } from 'node:child_process';
 import { createServerClient } from '@supabase/ssr';
 import fixture from './fixtures/auth.json' with { type: 'json' };
 import { assertLocalUrl } from '../scripts/runtime.mjs';
-import { localBackend } from './helpers/compiled-settings-contract.mjs';
+import {
+  localBackend,
+  assertLocalBuildSnapshot,
+} from './helpers/compiled-settings-contract.mjs';
 import {
   probeFailureMarker,
   extractProbeFailure,
@@ -66,18 +69,7 @@ test('compiled Settings retains the build snapshot across requests and fresh pro
       readFileSync('.next/required-server-files.json', 'utf8'),
     );
     const expected = JSON.parse(manifest.config.env.APP_BUILD_PROVENANCE);
-    assert.deepEqual(Object.keys(expected), [
-      'environment',
-      'version',
-      'commit',
-      'buildStarted',
-    ]);
-    assert.ok(expected.buildStarted, 'requires an actual production build');
-    assert.equal(
-      expected.environment,
-      'local',
-      'requires the canonical local backend build',
-    );
+    assertLocalBuildSnapshot(expected);
     const api = assertLocalUrl(process.env.LOCAL_API_URL, 54321);
     localBackend(api);
     assert.equal(

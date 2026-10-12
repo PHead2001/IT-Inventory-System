@@ -17,12 +17,15 @@ export function RouteReady({
   actorId,
   routeKey,
   contentIdentity,
+  pairingHref,
   children,
   ready = true,
 }: {
   actorId: string;
   routeKey: string;
   contentIdentity: string;
+  /** Canonical result scope for title pairing only; never readiness authority. */
+  pairingHref?: string;
   children: React.ReactNode;
   ready?: boolean;
 }) {
@@ -31,8 +34,12 @@ export function RouteReady({
   // This identity travels with the server primary. Next's opaque layout slot
   // can replace its children before an outer accepted pathname catches up.
   const identity = useMemo(
-    () => ({ pathname: routeKey.split('?')[0], listHref: routeKey }),
-    [routeKey],
+    () => ({
+      pathname: routeKey.split('?')[0],
+      listHref: pairingHref ?? routeKey,
+      rawRouteKey: routeKey,
+    }),
+    [routeKey, pairingHref],
   );
   // Runs for actual mount/update/Activity reactivation. Presentation generation
   // changes alone neither rerender this content nor acknowledge readiness.

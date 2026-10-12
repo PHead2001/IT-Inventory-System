@@ -91,13 +91,14 @@ export default async function InventoryPage({
         ? 'No active inventory. Historical records are available.'
         : 'No inventory in this status scope.';
   const returnParams = new URLSearchParams(exportParams);
-  if (params.page) returnParams.set('page', params.page);
+  if (params.page) returnParams.set('page', String(filters.page));
   const returnTo =
     '/inventory' + (returnParams.size ? '?' + returnParams.toString() : '');
   const createQuery = new URLSearchParams({ returnTo }).toString();
+  const readiness = await routeReadyProps('/inventory', searchParams);
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady {...await routeReadyProps('/inventory', searchParams)}>
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness} pairingHref={returnTo}>
         <>
           <p className="experience-eyebrow">Find equipment and stock</p>
           <h1 className="experience-heading mt-1 sm:mt-2">Inventory</h1>

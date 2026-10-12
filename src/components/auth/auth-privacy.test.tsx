@@ -13,14 +13,26 @@ import {
 } from './auth-privacy';
 import { ProtectedPrivacyContent } from './privacy-content';
 import { AuthForm } from './auth-form';
-import { useEffect, useState, type ComponentProps } from 'react';
-import { PrivateRestorationGate } from './privacy-readiness';
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ComponentProps,
+} from 'react';
+import {
+  PrivateRestorationGate,
+  PrivacyReadinessContext,
+} from './privacy-readiness';
 import { PrivateDocumentTitle } from './private-document-title';
 import {
   revokePrivatePresentation,
   invalidateAssignmentPrivacy,
+  invalidateAssignmentCallbacks,
+  assignmentEpoch,
 } from '@/features/scan/assign-batch';
 import { QueueLogoutForm } from '@/features/labels/queue-logout-form';
+import type { LogoutPrivacyGeneration } from '@/lib/auth/privacy-barrier';
 import { HistoryList } from '@/features/inventory/components/read-ui';
 const protectedBinding = {
   actorId: 'original-actor',
@@ -50,6 +62,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routing,
 }));
 vi.mock('@/lib/auth/actions', () => actions);
+vi.mock('@/lib/auth/privacy-read-transport', () => actions);
 vi.mock('@/lib/auth/logout-transport', () => actions);
 const generation = '00000000-0000-4000-8000-000000000001';
 const receipt = { logoutGeneration: generation };
@@ -1458,4 +1471,328 @@ it('restores preexisting Inventory and Add quantity titles only after current na
   );
   expect(screen.getByLabelText('Ordinary name')).toBe(input);
   expect(input).toHaveValue('unchanged unsaved name');
+});
+
+let ticketPrivacy: React.ContextType<typeof PrivacyReadinessContext>;
+function TicketProbe() {
+  const value = useContext(PrivacyReadinessContext);
+  useLayoutEffect(() => {
+    ticketPrivacy = value;
+  });
+  return null;
+}
+function ticketTree(
+  overrides: Partial<ComponentProps<typeof ProtectedPrivacyBoundary>> = {},
+) {
+  return (
+    <ProtectedPrivacyBoundary
+      binding={protectedBinding}
+      serverGeneration={{ status: 'absent' }}
+      {...overrides}
+    >
+      <TicketProbe />
+      <ProtectedPrivacyContent routeKey="/inventory">
+        <input aria-label="Original ticket draft" />
+      </ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>
+  );
+}
+async function startTicket() {
+  routing.pathname = '/inventory';
+  const view = render(ticketTree());
+  await screen.findByLabelText('Original ticket draft');
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  let settle!: (value: LogoutPrivacyGeneration) => void;
+  const read = new Promise<LogoutPrivacyGeneration>((resolve) => {
+    settle = resolve;
+  });
+  actions.readLogoutPrivacyGeneration.mockReturnValueOnce(read);
+  const provider = Symbol();
+  act(() => ticketPrivacy.navigation!.bind(provider));
+  act(() =>
+    ticketPrivacy.navigation!.prepare(
+      '/inventory?search=raw&search=duplicate',
+      provider,
+    ),
+  );
+  const wait = ticketPrivacy.navigation!.admission(
+    '/inventory?search=raw&search=duplicate',
+  ).wait!;
+  expect(wait).toBeDefined();
+  return {
+    view,
+    provider,
+    wait,
+    read,
+    resolve: settle,
+    settle: async (value: LogoutPrivacyGeneration = { status: 'absent' }) => {
+      await act(async () => {
+        settle(value);
+        await read;
+      });
+    },
+  };
+}
+it('prepares independently of pathname commit and only admits the full raw target with its verified callback epoch', async () => {
+  const operation = await startTicket();
+  expect(routing.query).toBe('');
+  expect(ticketPrivacy.ready).toBe(false);
+  expect(ticketPrivacy.visible).toBe(true);
+  expect(
+    ticketPrivacy.navigation!.admission('/inventory?search=raw').wait,
+  ).toBeUndefined();
+  expect(ticketPrivacy.navigation!.admission('/history').ready).toBe(false);
+  await operation.settle();
+  await operation.wait;
+  const grant = ticketPrivacy.navigation!.admission(
+    '/inventory?search=raw&search=duplicate',
+  );
+  expect(grant.ready).toBe(true);
+  expect(grant.verifiedEpoch).toBe(assignmentEpoch());
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=duplicate&search=raw',
+    ).ready,
+  ).toBe(false);
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenLastCalledWith(
+    protectedBinding,
+  );
+});
+it.each([
+  'actor',
+  'backend',
+  'role',
+  'configuration',
+  'server-generation',
+  'revision',
+  'revocation',
+  'callbacks',
+  'hidden',
+  'cancel',
+  'supersede',
+  'dispose',
+  'provider',
+  'redirect',
+] as const)(
+  'retires and settles a precommit ticket on %s without admitting its late result',
+  async (change) => {
+    const operation = await startTicket();
+    if (change === 'dispose') operation.view.unmount();
+    else
+      act(() => {
+        if (change === 'actor')
+          operation.view.rerender(
+            ticketTree({
+              binding: { ...protectedBinding, actorId: 'replacement' },
+            }),
+          );
+        if (change === 'backend')
+          operation.view.rerender(
+            ticketTree({
+              binding: {
+                ...protectedBinding,
+                backend: 'https://other.example',
+              },
+            }),
+          );
+        if (change === 'role')
+          operation.view.rerender(
+            ticketTree({ binding: { ...protectedBinding, role: 'viewer' } }),
+          );
+        if (change === 'configuration')
+          operation.view.rerender(
+            ticketTree({
+              binding: { ...protectedBinding, canManageConfiguration: false },
+            }),
+          );
+        if (change === 'server-generation')
+          operation.view.rerender(
+            ticketTree({ serverGeneration: { status: 'valid', generation } }),
+          );
+        if (change === 'revision')
+          operation.view.rerender(ticketTree({ revision: 1 }));
+        if (change === 'revocation') revokePrivatePresentation();
+        if (change === 'callbacks') invalidateAssignmentCallbacks();
+        if (change === 'hidden') {
+          vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(
+            'hidden',
+          );
+          document.dispatchEvent(new Event('visibilitychange'));
+        }
+        if (change === 'provider') ticketPrivacy.navigation!.bind(Symbol());
+        if (change === 'cancel')
+          ticketPrivacy.navigation!.retire(operation.provider);
+        if (change === 'supersede')
+          ticketPrivacy.navigation!.prepare('/history', operation.provider);
+        if (change === 'redirect') {
+          routing.pathname = '/history';
+          operation.view.rerender(ticketTree());
+        }
+      });
+    await operation.wait;
+    await operation.settle();
+    if (change === 'dispose') {
+      expect(screen.queryByLabelText('Original ticket draft')).toBeNull();
+      return;
+    }
+    expect(
+      ticketPrivacy.navigation!.admission(
+        '/inventory?search=raw&search=duplicate',
+      ).ready,
+    ).toBe(false);
+    expect(
+      ticketPrivacy.navigation!.admission(
+        '/inventory?search=raw&search=duplicate',
+      ).wait,
+    ).toBeUndefined();
+  },
+);
+it.each(['denied', 'unavailable'] as const)(
+  'settles a failed %s original identity without private bootstrap',
+  async (status) => {
+    const operation = await startTicket();
+    actions.readProtectedPrivacyIdentity.mockResolvedValueOnce({ status });
+    await operation.settle();
+    await operation.wait;
+    expect(
+      ticketPrivacy.navigation!.admission(
+        '/inventory?search=raw&search=duplicate',
+      ).ready,
+    ).toBe(false);
+    expect(actions.readProtectedPrivacyIdentity).toHaveBeenCalledOnce();
+    // Accepted draft ownership survives failure; its presentation is masked.
+    expect(screen.getByLabelText('Original ticket draft')).not.toBeVisible();
+    expect(
+      screen.getByLabelText('Original ticket draft').closest('[hidden][inert]'),
+    ).not.toBeNull();
+  },
+);
+
+it.each(['revision', 'redirect'] as const)(
+  'rejects a completed target ticket in the first %s render before private effects mount',
+  async (change) => {
+    const operation = await startTicket();
+    await operation.settle();
+    await operation.wait;
+    expect(
+      ticketPrivacy.navigation!.admission(
+        '/inventory?search=raw&search=duplicate',
+      ).ready,
+    ).toBe(true);
+    const bootstrap = vi.fn();
+    function PrivateBootstrap() {
+      useEffect(bootstrap, []);
+      return <input aria-label="New target bootstrap" />;
+    }
+    if (change === 'redirect') routing.pathname = '/history';
+    operation.view.rerender(
+      <ProtectedPrivacyBoundary
+        binding={protectedBinding}
+        serverGeneration={{ status: 'absent' }}
+        revision={change === 'revision' ? 1 : 0}
+      >
+        <TicketProbe />
+        <ProtectedPrivacyContent routeKey="/inventory?search=raw&search=duplicate">
+          <PrivateBootstrap />
+        </ProtectedPrivacyContent>
+      </ProtectedPrivacyBoundary>,
+    );
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('New target bootstrap')).toBeNull();
+  },
+);
+
+it('settles a target that discovers new logout evidence and resumes distinct current-route recovery without rebasing it', async () => {
+  const operation = await startTicket();
+  await operation.settle({ status: 'valid', generation });
+  await operation.wait;
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).ready,
+  ).toBe(false);
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).wait,
+  ).toBeUndefined();
+  expect(actions.readProtectedPrivacyIdentity).toHaveBeenLastCalledWith(
+    protectedBinding,
+  );
+});
+
+it('a positive target wait settles only after coherent verified state is published', async () => {
+  const operation = await startTicket();
+  let accepted!: { ready: boolean; verifiedEpoch?: number };
+  const beforePublication = operation.wait.then(() => {
+    accepted = ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    );
+  });
+  await operation.settle();
+  await beforePublication;
+  expect(accepted.ready).toBe(true);
+  expect(accepted.verifiedEpoch).toBe(assignmentEpoch());
+});
+it('provider cancellation settles a committed target and restarts canonical current-key verification', async () => {
+  const operation = await startTicket();
+  routing.query = 'search=raw&search=duplicate';
+  operation.view.rerender(ticketTree());
+  expect(ticketPrivacy.ready).toBe(false);
+  act(() => ticketPrivacy.navigation!.retire(operation.provider));
+  await operation.wait;
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  await operation.settle();
+  expect(ticketPrivacy.ready).toBe(true);
+});
+
+it('a stale provider cannot retire a current ticket through prepare and repeated accepted preparation restores current-route readiness', async () => {
+  const operation = await startTicket();
+  act(() => ticketPrivacy.navigation!.prepare('/history', Symbol()));
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).wait,
+  ).toBe(operation.wait);
+  act(() => ticketPrivacy.navigation!.prepare('/history', operation.provider));
+  await operation.wait;
+  await waitFor(() => expect(ticketPrivacy.ready).toBe(true));
+  await operation.settle();
+  expect(
+    ticketPrivacy.navigation!.admission(
+      '/inventory?search=raw&search=duplicate',
+    ).ready,
+  ).toBe(false);
+});
+it('target readiness supplies its captured epoch to transition admission and nested private restoration', async () => {
+  const operation = await startTicket();
+  await operation.settle();
+  await operation.wait;
+  let nested!: React.ContextType<typeof PrivacyReadinessContext>;
+  function TargetBootstrap() {
+    const privacy = useContext(PrivacyReadinessContext);
+    useLayoutEffect(() => {
+      nested = privacy;
+    });
+    return <input aria-label="Transition target restoration" />;
+  }
+  operation.view.rerender(
+    <ProtectedPrivacyBoundary
+      binding={protectedBinding}
+      serverGeneration={{ status: 'absent' }}
+    >
+      <TicketProbe />
+      <ProtectedPrivacyContent
+        transitionAdmission
+        routeKey="/inventory?search=raw&search=duplicate"
+      >
+        <TargetBootstrap />
+      </ProtectedPrivacyContent>
+    </ProtectedPrivacyBoundary>,
+  );
+  await screen.findByLabelText('Transition target restoration');
+  expect(ticketPrivacy.ready).toBe(false);
+  expect(nested.ready).toBe(true);
+  expect(nested.verifiedEpoch).toBe(assignmentEpoch());
 });

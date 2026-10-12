@@ -39,6 +39,12 @@ vi.mock('@/lib/auth/actions', () => ({
   readLogoutPrivacyGeneration: privacyMocks.read,
   acknowledgeLogoutPrivacyGeneration: privacyMocks.compare,
 }));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
+  signOutSession: privacyMocks.signOut,
+  readProtectedPrivacyIdentity: privacyMocks.identity,
+  readLogoutPrivacyGeneration: privacyMocks.read,
+  acknowledgeLogoutPrivacyGeneration: privacyMocks.compare,
+}));
 vi.mock('@/lib/auth/logout-transport', () => ({
   signOutSession: privacyMocks.signOut,
   readProtectedPrivacyIdentity: privacyMocks.identity,

@@ -51,7 +51,9 @@ export function InventoryRecordLink({
   } = useRouteMotion();
   const contentIdentity = useContext(RouteContentIdentityContext);
   const target =
-    returnTo && pairable ? titleTarget(record, returnTo, holding) : null;
+    returnTo && pairable
+      ? titleTarget(record, returnTo, holding, contentIdentity?.rawRouteKey)
+      : null;
   const targetListKey = target ? listRouteKey(target.listHref) : null;
   const matches =
     intent &&

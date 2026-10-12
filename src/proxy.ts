@@ -20,7 +20,8 @@ export async function proxy(request: NextRequest) {
   // the read-only generation comparison into a session refresh.
   if (
     request.nextUrl.pathname === '/api/auth/logout' ||
-    request.nextUrl.pathname === '/api/auth/privacy-confirm'
+    request.nextUrl.pathname === '/api/auth/privacy-confirm' ||
+    request.nextUrl.pathname === '/api/auth/privacy-read'
   )
     return response;
   const { url, key } = supabaseConfig();

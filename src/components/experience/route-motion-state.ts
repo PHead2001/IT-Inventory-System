@@ -37,6 +37,8 @@ export type TitleIntent = RecordIdentity & {
   holding: HoldingIdentity;
   name: string;
   listHref: string;
+  /** Recorded at the row gesture; never inferred from a later query. */
+  rawSourceRouteKey?: string;
   anchor: string;
   detailPath: string;
 };
@@ -49,6 +51,7 @@ export function titleTarget(
   record: RecordIdentity,
   returnTo: string,
   holding: HoldingIdentity | null,
+  rawSourceRouteKey?: string,
 ): Omit<TitleIntent, 'name'> | null {
   let url: URL;
   try {
@@ -63,13 +66,37 @@ export function titleTarget(
     !/^#inventory-row-[1-9]\d{0,2}$/.test(url.hash)
   )
     return null;
+  if (rawSourceRouteKey !== undefined) {
+    let source: URL;
+    try {
+      source = new URL(rawSourceRouteKey, 'https://inventory.invalid');
+    } catch {
+      return null;
+    }
+    if (
+      source.origin !== 'https://inventory.invalid' ||
+      source.pathname !== '/inventory' ||
+      source.hash !== '' ||
+      rawSourceRouteKey !== routeKey(source.pathname, source.searchParams)
+    )
+      return null;
+  }
   return {
     ...record,
     holding,
     listHref: routeKey(url.pathname, url.searchParams),
     anchor: url.hash.slice(1),
     detailPath: recordPath(record),
+    ...(rawSourceRouteKey === undefined ? {} : { rawSourceRouteKey }),
   };
+}
+
+/** Presentation-only approval, after exact raw readiness/privacy checks. */
+export function matchesTitleListRoute(
+  intent: Pick<TitleIntent, 'listHref' | 'rawSourceRouteKey'>,
+  key: string,
+) {
+  return key === intent.listHref || key === intent.rawSourceRouteKey;
 }
 
 /** Only ephemeral identity/URL metadata; no titles, DOM, credentials or storage. */
@@ -169,8 +196,10 @@ export function createRouteMotionState() {
       const list = new URL(origin.listHref, 'https://inventory.invalid');
       if (
         destination.origin !== list.origin ||
-        routeKey(destination.pathname, destination.searchParams) !==
-          routeKey(list.pathname, list.searchParams) ||
+        !matchesTitleListRoute(
+          origin,
+          routeKey(destination.pathname, destination.searchParams),
+        ) ||
         (destination.hash !== '' && destination.hash !== `#${origin.anchor}`)
       )
         return;

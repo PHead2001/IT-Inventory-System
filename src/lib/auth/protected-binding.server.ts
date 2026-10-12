@@ -7,6 +7,7 @@ import type { ProtectedPrivacyBinding } from './protected-binding';
 /** A readmission check never redirects or replaces the retained action owner. */
 export async function verifyProtectedPrivacyBinding(
   expected: ProtectedPrivacyBinding,
+  cookieWritable = true,
 ): Promise<
   | {
       status: 'match';
@@ -17,7 +18,7 @@ export async function verifyProtectedPrivacyBinding(
   try {
     const backend = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').origin;
     if (expected.backend !== backend) return { status: 'denied' };
-    const supabase = await createSupabaseServerClient(true);
+    const supabase = await createSupabaseServerClient(cookieWritable);
     const { data, error } = await supabase.auth.getUser();
     if (error) {
       const status = error.status;

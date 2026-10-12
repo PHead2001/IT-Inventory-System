@@ -104,6 +104,23 @@ same-page rechecks retain draft/business ownership and existing recovery contrac
 See [interface standards](interface-standards.md) and [validation](validation.md)
 for supported fallback paths and the remaining native/product acceptance.
 
+Eligible paired navigation and native Back start one controller-owned privacy target check
+before Next commits the pathname. The ticket captures the exact full route key,
+provider incarnation, original server binding, generation, server revision,
+explicit revision, callback/revocation epochs and request sequence. Inventory list
+and detail success bodies supply their explicit server route key before their
+privacy gate renders. Only the matching already-running ticket can suspend that
+incoming primary while the outgoing grant remains current. Its wait settles from
+canonical cleanup and original-binding verification, independently of visible
+RouteReady acknowledgement; a fresh matching completion can admit the target
+before pathname commit. Verification publishes the immutable ticket view, target
+key and accepted epochs together through request-ordered React state. The
+controller’s layout effect settles a still-current verified wait after that view
+commits, with another original-binding, provider and sequence check. Server
+authorization and real visible readiness remain required. Supersede, cancellation, redirect, disposal, hide and invalidation
+retire and settle the old ticket. Changed logout evidence starts distinct current-
+route recovery rather than rebasing the captured target proof.
+
 Inventory uses a collapsed Add item disclosure with equally styled quantity-item and individual-asset paths, examples and the existing filtered return context. The protected header exposes the verified member's full name and role through a compact native account disclosure, including at narrow widths; identity is never stored separately in browser storage.
 
 History lists summarize quantities from immutable event deltas or custody snapshots. Quantity history has null top-level endpoints: a conserved, consistent negative/positive ledger pair identifies a move and a single positive line identifies a receipt. Count corrections retain their recorded before/after/delta; zero or ambiguous transfer shapes never become invented moves. Missing or inconsistent movement deltas display Amount not recorded. Custody endpoint names use recorded labels. Older storage events only expose location IDs and current reference labels; technical event details explain this provenance and the current record name without appending it to ordinary summaries. Headings share one event vocabulary; summaries add endpoints, amounts or changed fields instead of repeating the operation.
@@ -217,9 +234,9 @@ observer cleanup. That confirmed cleanup clears hydrated label queues and their
 late persistence without remounting unrelated action owners. A matching generation
 cannot revive a cleared queue. Unchanged checks and attempted logout do not
 advance this revision.
-Ordinary Sign out and the read-only logout-generation comparison use independent
-same-origin JSON POST Route Handlers (`/api/auth/logout` and
-`/api/auth/privacy-confirm`). They do not enter Next's Server Action queue behind
+Ordinary Sign out, logout-generation comparison and privacy generation/original-
+binding reads use independent same-origin JSON POST Route Handlers
+(`/api/auth/logout`, `/api/auth/privacy-confirm` and `/api/auth/privacy-read`). They do not enter Next's Server Action queue behind
 a pending route navigation. Existing Server Action wrappers delegate to the same
 cookie-scoped logic for compatibility; other authentication actions retain their
 existing transport. The endpoints admit only a mandatory exact serialized Origin
@@ -231,11 +248,13 @@ is not an additional accepted origin. Malformed, duplicate, alternate loopback
 and mismatched authorities fail closed.
 They do not trust forwarded headers or the configured branch/canonical APP_ORIGIN
 for this transport check. Input is strictly shaped and bounded to 256 actual UTF-8
-stream bytes; all methods except POST are rejected and every result is private,
+stream bytes for logout/comparison and 512 bytes for privacy reads; all methods except POST are rejected and every result is private,
 no-store without CORS. Sign-out uses the caller's writable Supabase cookies and
 local session scope, without a membership gate that would strand revoked users.
-The proxy skips Supabase session refresh for precisely these two endpoint paths,
-so their rejected requests and read-only comparison cannot write refresh cookies
+The privacy-read handler uses the canonical caller-scoped generation/identity
+service with read-only cookies. The proxy skips Supabase session refresh for
+precisely these three endpoint paths, so their rejected requests and read-only
+verification cannot write refresh cookies
 before handler admission. All other routes retain the existing proxy behavior.
 The browser bounds the request and strict response parsing; failure, timeout or
 abort never proves server cancellation or grants recovery-erasure authority.

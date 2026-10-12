@@ -19,23 +19,49 @@ import {
 export function ProtectedPrivacyContent({
   children,
   transitionAdmission = false,
+  routeKey,
 }: {
   children: ReactNode;
   transitionAdmission?: boolean;
+  routeKey?: string;
 }) {
   const privacy = useContext(PrivacyReadinessContext);
-  return (
+  const admission = routeKey
+    ? privacy.navigation?.admission(routeKey)
+    : undefined;
+  if (admission?.wait) throw admission.wait;
+  const ready = admission?.ready ?? privacy.ready;
+  const verifiedEpoch =
+    ready === privacy.ready ? privacy.verifiedEpoch : admission?.verifiedEpoch;
+  const content = (
     <AcceptedPrivacyContent
-      ready={privacy.ready}
+      ready={ready}
       visible={privacy.visible}
       generation={privacy.generation}
       preserveLayout
       transitionAdmission={transitionAdmission}
       admissionRevision={privacy.revocationRevision}
-      admissionEpoch={privacy.verifiedEpoch}
+      admissionEpoch={verifiedEpoch}
     >
       {children}
     </AcceptedPrivacyContent>
+  );
+  // This authorized server primary may arrive before pathname context commits.
+  // Restoration descendants use the same fresh target decision as their gate.
+  return (
+    <PrivacyReadinessContext
+      value={
+        ready === privacy.ready
+          ? privacy
+          : {
+              ...privacy,
+              ready,
+              verifiedEpoch,
+            }
+      }
+    >
+      {content}
+    </PrivacyReadinessContext>
   );
 }
 

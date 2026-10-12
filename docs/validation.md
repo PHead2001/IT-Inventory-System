@@ -141,6 +141,16 @@ independent review remain required before accepting the route subset of D303.2.
 Panels/receipts/disclosures remain pending U406 integration. W09 source and
 journeys are being implemented, with readiness/overlap acceptance still pending.
 
+Inventory title pairing uses the server's canonical row-return scope separately
+from the full raw query key used by readiness and privacy admission. Default
+type/status, trimmed search text, recovery flags and normalized page numbers do
+not disable pairing for those rendered results. A row gesture records both the
+canonical scope and that exact raw primary key. Native Back may reuse either
+recorded identity with the existing record, holding and anchor checks; it never
+normalizes or approves a different query afterward. Focused RouteReady, inventory
+page, pairing-component and motion-state regressions cover these contracts and
+reject unrecorded aliases. They do not replace real browser/native capture proof.
+
 The running local-reduction case uses a second signed-in Settings page in the
 same browser context. Its real motion switch is focused before the first page's
 History transition; Space changes the stored preference at native readiness and
@@ -212,6 +222,17 @@ effect cancels a mismatched presentation gate without manufacturing readiness.
 These are React/isolated-boundary checks, not a complete Next LayoutRouter or
 streamed Flight test. None of these jsdom tests establishes native snapshot pairing.
 
+The precommit privacy regressions model a stable opaque router slot whose incoming
+server primary finishes before privacy verification, plus native Back preparation
+before pathname commit. Controller/ticket tests cover exact repeated raw query
+values, unrelated targets, original-binding verification, stale actor/backend/
+role/configuration/server-generation/revision/epoch rejection, hidden-page and
+provider retirement, supersede/cancel/redirect settlement, denied/unavailable
+identity and distinct recovery after changed logout evidence. The first changed-
+revision render must reject a completed ticket before private bootstrap effects
+mount. These logical React fixtures do not establish real native snapshots or
+production LayoutRouter timing; browser CI remains required.
+
 The native route-motion browser case now authors a real server-primary delay after
 early Flight fallback bytes, rather than holding a complete HTTP response. The
 `route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling
@@ -251,9 +272,17 @@ regressions also passed. Lint repairs preserve provider incarnation guards and
 derive local busy from committed snapshots of actual task-map events; the latest
 305-test run includes those repairs. These results do not establish native capture
 or streamed browser readiness.
-Real WebGL mount/unmount, cached Activity Back,
-camera preservation and canvas-ancestor exclusion after Fiber upgrade remain
-mandatory unrun browser criteria. Repository runner image inputs were regenerated;
+Real WebGL mount/unmount, native Back, camera preservation and canvas-ancestor
+exclusion after Fiber upgrade remain mandatory browser criteria. The room journey
+checks a nonempty visible canvas-to-root ancestor chain for excluded transition
+names at remount and Back, plus any names observed during actual native captures.
+The whole-page boundary explicitly excludes room source/destination snapshots;
+ordinary privacy verification can reveal its separate header synchronously, so
+this journey does not require a positive snapshot count. Eligible paired-title
+journeys retain their positive native-capture assertions. It also requires an
+exact camera roundtrip and zero document navigation fallback; it does not claim
+Next's Activity cache was used. These corrections still require browser reruns.
+Repository runner image inputs were regenerated;
 Bundle coherence/version requires root-owned integration with the current runner
 baseline before final certification.
 

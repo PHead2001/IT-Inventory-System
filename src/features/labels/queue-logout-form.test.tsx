@@ -21,6 +21,11 @@ vi.mock('@/lib/auth/actions', () => ({
   readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
   acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
 }));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
+  signOutSession: vi.fn(),
+  readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),
+  acknowledgeLogoutPrivacyGeneration: async () => ({ status: 'match' }),
+}));
 vi.mock('@/lib/auth/logout-transport', () => ({
   signOutSession: vi.fn(),
   readLogoutPrivacyGeneration: async () => ({ status: 'absent' }),

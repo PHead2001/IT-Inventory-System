@@ -23,6 +23,7 @@ import { isRedirectError } from 'next/dist/client/components/redirect-error';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { PrivacyReadinessContext } from '@/components/auth/privacy-readiness';
 import { ProtectedPrivacyBoundary } from '@/components/auth/auth-privacy';
+import { ProtectedPrivacyContent } from '@/components/auth/privacy-content';
 import {
   assignmentEpoch,
   readPrivacyRevocationRevision,
@@ -81,6 +82,11 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 vi.mock('@/lib/auth/actions', () => ({
+  readLogoutPrivacyGeneration: runtime.read,
+  acknowledgeLogoutPrivacyGeneration: runtime.compare,
+  readProtectedPrivacyIdentity: runtime.identity,
+}));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
   readLogoutPrivacyGeneration: runtime.read,
   acknowledgeLogoutPrivacyGeneration: runtime.compare,
   readProtectedPrivacyIdentity: runtime.identity,
@@ -287,12 +293,60 @@ function Detail({
     </RouteReady>
   );
 }
+function GatedPrimary({
+  work,
+  routeKey,
+}: {
+  work: ReturnType<typeof deferred>;
+  routeKey: string;
+}) {
+  // Like the server page, finish the primary read before returning its success gate.
+  work.read();
+  return (
+    <ProtectedPrivacyContent routeKey={routeKey}>
+      <Detail work={work} />
+    </ProtectedPrivacyContent>
+  );
+}
+function OpaqueRouterSlot({ work }: { work: ReturnType<typeof deferred> }) {
+  const route = useContext(NavigationContext);
+  const href = route.pathname + (route.query ? `?${route.query}` : '');
+  const isDetail = route.pathname.startsWith('/inventory/quantity/');
+  return (
+    <Boundary key={href}>
+      <Suspense
+        key={href}
+        fallback={isDetail ? <QuantityLoading /> : <InventoryLoading />}
+      >
+        {isDetail ? (
+          <GatedPrimary
+            work={work}
+            routeKey={routeKey(
+              route.pathname,
+              new URLSearchParams(route.query),
+            )}
+          />
+        ) : (
+          <ProtectedPrivacyContent
+            routeKey={routeKey(
+              route.pathname,
+              new URLSearchParams(route.query),
+            )}
+          >
+            <Source />
+          </ProtectedPrivacyContent>
+        )}
+      </Suspense>
+    </Boundary>
+  );
+}
 function Router({
   work,
   back,
   privacy,
   pairedFallback = true,
   actualPrivacy = false,
+  opaqueSlot = false,
   secondWork,
   redirectTo,
   backRedirectTo,
@@ -303,12 +357,14 @@ function Router({
   privacy: ReturnType<typeof grant>;
   pairedFallback?: boolean;
   actualPrivacy?: boolean;
+  opaqueSlot?: boolean;
   secondWork?: ReturnType<typeof deferred>;
   redirectTo?: string;
   backRedirectTo?: string;
   listHref?: string;
 }) {
   const [href, setHref] = useState(listHref);
+  const [stableSlot] = useState(() => <OpaqueRouterSlot work={work} />);
   useLayoutEffect(() => {
     runtime.navigate = (next) => {
       const destination = new URL(next, location.origin);
@@ -344,22 +400,26 @@ function Router({
       <Controls />
       <RedirectBoundary>
         <ProtectedRouteArrival>
-          <Boundary key={href}>
-            <Suspense
-              key={href}
-              fallback={
-                !pairedFallback ? (
-                  <RouteLoading shape="record" />
-                ) : href.startsWith('/inventory/quantity/') ? (
-                  <QuantityLoading />
-                ) : (
-                  <InventoryLoading />
-                )
-              }
-            >
-              {inner}
-            </Suspense>
-          </Boundary>
+          {opaqueSlot ? (
+            stableSlot
+          ) : (
+            <Boundary key={href}>
+              <Suspense
+                key={href}
+                fallback={
+                  !pairedFallback ? (
+                    <RouteLoading shape="record" />
+                  ) : href.startsWith('/inventory/quantity/') ? (
+                    <QuantityLoading />
+                  ) : (
+                    <InventoryLoading />
+                  )
+                }
+              >
+                {inner}
+              </Suspense>
+            </Boundary>
+          )}
         </ProtectedRouteArrival>
       </RedirectBoundary>
     </RouteMotionProvider>
@@ -488,6 +548,49 @@ it('retains the exact mounted source and draft until real primary reveal, with o
   await screen.findByRole('heading', { name: 'Authorized detail title' });
   expect(gate.store.snapshot()).toBeNull();
   expect(pending.state.snapshot().pending).toBe(false);
+});
+
+it('retains the source when a stable opaque router slot resolves its gated primary before privacy verification', async () => {
+  const work = deferred();
+  render(
+    <StrictMode>
+      <Router work={work} privacy={grant()} actualPrivacy opaqueSlot />
+    </StrictMode>,
+  );
+  const source = await screen.findByRole('link', {
+    name: 'Source cable title',
+  });
+  await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  let verify!: (value: { status: 'absent' }) => void;
+  const verification = new Promise<{ status: 'absent' }>((resolve) => {
+    verify = resolve;
+  });
+  runtime.read.mockReturnValueOnce(verification);
+  const initialChecks = runtime.read.mock.calls.length;
+  try {
+    fireEvent.click(source);
+    expect(source.isConnected).toBe(true);
+    expect(document.querySelector('[data-loading-shape]')).toBeNull();
+    // Preparation starts before the primary lets Next commit its pathname.
+    expect(runtime.read.mock.calls.length).toBeGreaterThan(initialChecks);
+    await act(work.resolve);
+    await waitFor(() =>
+      expect(runtime.read.mock.calls.length).toBeGreaterThan(initialChecks),
+    );
+    expect(mountedPrivacy.ready).toBe(false);
+    expect(document.querySelector('[data-loading-shape]')).toBeNull();
+    // Production LayoutRouter can advance internally despite the accepted outer node.
+    expect(source.isConnected).toBe(true);
+    expect(screen.queryByRole('heading')).toBeNull();
+    expect(pending.state.snapshot().pending).toBe(true);
+  } finally {
+    await act(async () => {
+      verify({ status: 'absent' });
+      await verification;
+    });
+  }
+  await screen.findByRole('heading', { name: 'Authorized detail title' });
+  expect(gate.store.snapshot()).toBeNull();
 });
 
 it.each(['verification-first', 'primary-first'] as const)(
@@ -985,4 +1088,44 @@ it('keeps standalone gate ownership exact through cancellation and repeated dest
   state.cancel(true);
   store.arm('retired', list, state.snapshot().epoch);
   expect(store.snapshot()).toBeNull();
+});
+
+it('native Back starts original-binding preparation before a stable opaque list primary commits', async () => {
+  const work = deferred();
+  render(
+    <StrictMode>
+      <Router work={work} privacy={grant()} actualPrivacy opaqueSlot />
+    </StrictMode>,
+  );
+  const source = await screen.findByRole('link', {
+    name: 'Source cable title',
+  });
+  await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  fireEvent.click(source);
+  await act(work.resolve);
+  const title = await screen.findByRole('heading', {
+    name: 'Authorized detail title',
+  });
+  await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+  let settle!: (value: { status: 'absent' }) => void;
+  const verification = new Promise<{ status: 'absent' }>((resolve) => {
+    settle = resolve;
+  });
+  runtime.read.mockReturnValueOnce(verification);
+  const checks = runtime.read.mock.calls.length;
+  act(() => {
+    history.replaceState(null, '', list);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(runtime.read.mock.calls.length).toBeGreaterThan(checks);
+    runtime.navigate(list);
+  });
+  expect(title.isConnected).toBe(true);
+  expect(screen.queryByRole('link', { name: 'Source cable title' })).toBeNull();
+  await act(async () => {
+    settle({ status: 'absent' });
+    await verification;
+  });
+  await screen.findByRole('link', { name: 'Source cable title' });
+  expect(gate.store.snapshot()).toBeNull();
+  expect(pending.state.snapshot().pending).toBe(false);
 });

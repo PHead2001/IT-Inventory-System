@@ -39,6 +39,7 @@ function transportOrigin(request: NextRequest): string | null {
 export async function admitAuthPost<T>(
   request: NextRequest,
   schema: z.ZodType<T>,
+  bodyBytes: 256 | 512 = 256,
 ): Promise<{ data: T } | { response: NextResponse }> {
   if (request.method !== 'POST') return { response: rejectAuthMethod() };
   const origin = request.headers.get('origin');
@@ -62,7 +63,9 @@ export async function admitAuthPost<T>(
   )
     return { response: privateAuthJson({ message: 'Invalid request.' }, 400) };
   try {
-    const parsed = schema.safeParse(await readBoundedJson(request.body, 256));
+    const parsed = schema.safeParse(
+      await readBoundedJson(request.body, bodyBytes),
+    );
     if (parsed.success) return { data: parsed.data };
   } catch {
     // Never return input or parser/provider details.

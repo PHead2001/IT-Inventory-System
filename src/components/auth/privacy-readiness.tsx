@@ -45,6 +45,16 @@ export const PrivacyReadinessContext = createContext<{
   cleanupRevision?: number;
   revocationRevision?: number;
   verifiedEpoch?: number;
+  navigation?: {
+    bind: (provider: symbol) => () => void;
+    prepare: (href: string, provider: symbol) => void;
+    retire: (provider: symbol) => void;
+    admission: (routeKey: string) => {
+      ready: boolean;
+      wait?: Promise<void>;
+      verifiedEpoch?: number;
+    };
+  };
 }>({
   ready: true,
   generation: 'unmanaged',

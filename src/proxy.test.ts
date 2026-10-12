@@ -19,7 +19,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
-it.each(['/api/auth/logout', '/api/auth/privacy-confirm'])(
+it.each([
+  '/api/auth/logout',
+  '/api/auth/privacy-confirm',
+  '/api/auth/privacy-read',
+])(
   'defers every %s cookie/provider operation to admitted handler requests',
   async (path) => {
     for (const method of ['GET', 'POST']) {
@@ -48,6 +52,8 @@ it.each(['/api/auth/logout', '/api/auth/privacy-confirm'])(
 it.each([
   '/api/auth/logout/extra',
   '/api/auth/privacy-confirmation',
+  '/api/auth/privacy-read/extra',
+  '/api/auth/privacy-reader',
   '/auth/confirm',
   '/api/room/contents',
 ])('retains claims refresh for other routes including %s', async (path) => {

@@ -45,6 +45,7 @@ import {
 import {
   cancelRouteSnapshots,
   createRouteMotionState,
+  matchesTitleListRoute,
 } from './route-motion-state';
 
 const RouteMotionContext = createContext<{
@@ -131,10 +132,9 @@ export function RouteMotionProvider({
       const intent = state.snapshot();
       if (!intent) return;
       const destination = new URL(key, location.origin);
-      const list = new URL(intent.listHref, location.origin);
       if (
         destination.pathname !== intent.detailPath &&
-        key !== routeKey(list.pathname, list.searchParams)
+        !matchesTitleListRoute(intent, key)
       )
         state.finish(intent.name);
     });
@@ -207,6 +207,9 @@ export function RouteMotionProvider({
               loading.arm(intent.name, href, pending.snapshot().epoch);
           });
         else state.retire();
+        if (loading.snapshot())
+          latestPrivacy.current.navigation?.prepare(href, providerToken);
+        else latestPrivacy.current.navigation?.retire(providerToken);
       },
       terminal: () => {
         if (
@@ -216,6 +219,7 @@ export function RouteMotionProvider({
         )
           return;
         presentation.invalidate();
+        latestPrivacy.current.navigation?.retire(providerToken);
         // Generic route failure retires presentation, not verified actor eligibility.
         // An already-invalid access scope is never re-enabled here.
         cancelRouteSnapshots();
@@ -252,6 +256,8 @@ export function RouteMotionProvider({
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
+    const unbindNavigation =
+      latestPrivacy.current.navigation?.bind(providerToken);
     const suspendPresentation = () => {
       if (!lifecycleRef.current || currentRouteProvider !== providerToken)
         return;
@@ -259,6 +265,7 @@ export function RouteMotionProvider({
       suspended.current = true;
       acceptedGrant.current = null;
       presentation.invalidate();
+      latestPrivacy.current.navigation?.retire(providerToken);
       // Invalidate the store generation before cancellation can invoke apply.
       state.suspend();
       loading.cancel();
@@ -280,6 +287,7 @@ export function RouteMotionProvider({
         suspended.current = true;
         acceptedGrant.current = null;
         presentation.invalidate();
+        latestPrivacy.current.navigation?.retire(providerToken);
         loading.cancel();
         pending.cancel(true);
         readiness.close();
@@ -311,9 +319,11 @@ export function RouteMotionProvider({
     );
     return () => {
       unbindPrivacy();
+      unbindNavigation?.();
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
       if (ownsDocument) {
         acceptedGrant.current = null;
@@ -366,6 +376,7 @@ export function RouteMotionProvider({
       suspended.current = true;
       acceptedGrant.current = null;
       presentation.invalidate();
+      latestPrivacy.current.navigation?.retire(providerToken);
       state.suspend();
       loading.cancel();
       pending.suspend();
@@ -396,6 +407,7 @@ export function RouteMotionProvider({
       suspended.current = true;
       acceptedGrant.current = null;
       presentation.invalidate();
+      latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
       pending.cancel(true);
       readiness.close();
@@ -430,6 +442,9 @@ export function RouteMotionProvider({
           loading.arm(intent.name, location.href, pending.snapshot().epoch);
       });
       readiness.history();
+      if (loading.snapshot())
+        latestPrivacy.current.navigation?.prepare(location.href, providerToken);
+      else latestPrivacy.current.navigation?.retire(providerToken);
     };
     window.addEventListener('popstate', pop);
     return () => {
@@ -467,6 +482,7 @@ export function RouteMotionProvider({
       currentRouteProvider === providerToken
     ) {
       presentation.invalidate();
+      latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
       state.finish();
       cancelRouteSnapshots();
@@ -484,6 +500,7 @@ export function RouteMotionProvider({
         lifecycleRef,
         providerToken,
         withdrawGrant: () => {
+          latestPrivacy.current.navigation?.retire(providerToken);
           document.documentElement.dataset.routeMotionPrivate = 'false';
           suspended.current = true;
           acceptedGrant.current = null;

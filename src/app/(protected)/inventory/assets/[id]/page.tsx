@@ -58,14 +58,13 @@ export default async function AssetPage({
           )
         : Promise.resolve(undefined),
     ]);
+  const readiness = await routeReadyProps(
+    '/inventory/assets/' + encodeURIComponent(id),
+    searchParams,
+  );
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady
-        {...await routeReadyProps(
-          '/inventory/assets/' + encodeURIComponent(id),
-          searchParams,
-        )}
-      >
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness}>
         <PrivateDocumentTitle
           routePath={`/inventory/assets/${encodeURIComponent(id)}`}
           title={recordTitle(detail.asset.name).title.absolute}

@@ -35,6 +35,10 @@ vi.mock('@/features/inventory/components/search-form', () => ({
 vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
 
 import InventoryPage from './page';
+import { RouteReady } from '@/components/experience/route-ready';
+import { InventoryRows } from '@/features/inventory/components/read-ui';
+import { routeKey, type RouteQuery } from '@/components/experience/route-key';
+import { Children, isValidElement, type ReactNode } from 'react';
 
 const result = { rows: [], total: 0, page: 1, pageSize: 25 };
 beforeEach(() => {
@@ -49,6 +53,56 @@ beforeEach(() => {
   mocks.getSites.mockResolvedValue([]);
   mocks.getFileListSummaries.mockResolvedValue([]);
 });
+
+function findElement(
+  node: ReactNode,
+  type: unknown,
+): React.ReactElement<Record<string, unknown>> | undefined {
+  for (const child of Children.toArray(node)) {
+    if (!isValidElement<Record<string, unknown>>(child)) continue;
+    if (child.type === type) return child;
+    const found = findElement(child.props.children as ReactNode, type);
+    if (found) return found;
+  }
+}
+it.each([
+  [{ type: 'all' }, '/inventory'],
+  [{ status: 'active' }, '/inventory'],
+  [{ q: '  USB  ' }, '/inventory?q=USB'],
+  [{ scopeAdjusted: 'true' }, '/inventory'],
+  [{ page: '0' }, '/inventory?page=1'],
+  [
+    {
+      type: 'all',
+      status: 'active',
+      q: ['  USB  ', 'ignored duplicate'],
+      scopeAdjusted: 'true',
+      page: '2',
+    },
+    '/inventory?q=USB&page=2',
+  ],
+] satisfies Array<[RouteQuery, string]>)(
+  'binds canonical row-return scope separately from raw readiness for %j',
+  async (raw, canonical) => {
+    vi.stubEnv('AUTH_DIAGNOSTICS', '0');
+    mocks.requireMember.mockResolvedValue({
+      member: { user_id: 'actor', role: 'viewer' },
+    });
+    // Page two must be a real current page, so this case does not take recovery.
+    mocks.getInventory.mockResolvedValue({
+      ...result,
+      total: 60,
+      page: 'page' in raw && raw.page === '2' ? 2 : 1,
+    });
+    const page = await InventoryPage({ searchParams: Promise.resolve(raw) });
+    const primary = findElement(page, RouteReady)!;
+    const rows = findElement(page, InventoryRows)!;
+    expect(primary.props.routeKey).toBe(routeKey('/inventory', raw));
+    expect(primary.props.pairingHref).toBe(canonical);
+    expect(rows.props.returnTo).toBe(canonical);
+    expect(page.props.routeKey).toBe(routeKey('/inventory', raw));
+  },
+);
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

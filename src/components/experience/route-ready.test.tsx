@@ -1,13 +1,57 @@
-import { Activity } from 'react';
-import { act, render } from '@testing-library/react';
+import { Activity, useContext } from 'react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RouteReady, RouteReadyContext } from './route-ready';
 import { createRouteReadiness } from './route-readiness';
 import { createRoutePendingState } from './route-pending-state';
+import { RouteContentIdentityContext } from './route-content-identity';
+import { routeKey } from './route-key';
 
 afterEach(() => {
   vi.restoreAllMocks();
   history.replaceState(null, '', '/');
+});
+
+function PresentationIdentity() {
+  const identity = useContext(RouteContentIdentityContext);
+  return <p>{identity?.listHref}</p>;
+}
+it('uses canonical pairing presentation while readiness still requires the exact raw query', () => {
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+    { width: 30, height: 20 },
+  ] as unknown as DOMRectList);
+  const raw = '/inventory?type=all&status=active&q=++USB++&scopeAdjusted=true';
+  const rawURL = new URL(raw, location.origin);
+  const rawKey = routeKey(rawURL.pathname, rawURL.searchParams);
+  history.replaceState(null, '', raw);
+  const pending = createRoutePendingState();
+  const committed = vi.fn();
+  const readiness = createRouteReadiness('actor', pending, committed);
+  const page = () => (
+    <RouteReadyContext value={readiness}>
+      <RouteReady
+        actorId="actor"
+        routeKey={rawKey}
+        contentIdentity="primary"
+        pairingHref="/inventory?q=USB"
+      >
+        <PresentationIdentity />
+      </RouteReady>
+    </RouteReadyContext>
+  );
+  const view = render(page());
+  expect(screen.getByText('/inventory?q=USB')).toBeVisible();
+  expect(committed).toHaveBeenLastCalledWith(rawKey);
+  committed.mockClear();
+  history.replaceState(null, '', '/inventory?q=USB');
+  act(() => readiness.history());
+  view.rerender(page());
+  expect(committed).not.toHaveBeenCalled();
+  expect(pending.snapshot().pending).toBe(true);
+  history.replaceState(null, '', raw);
+  view.rerender(page());
+  expect(committed).toHaveBeenLastCalledWith(rawKey);
+  expect(pending.snapshot().pending).toBe(false);
 });
 it('actual Activity layout reactivation acknowledges matching history without an epoch-derived marker', () => {
   // jsdom geometry only; the real readiness provider/marker are never mocked.

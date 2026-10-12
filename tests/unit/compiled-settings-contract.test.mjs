@@ -1,5 +1,7 @@
 import { expect, it, vi } from 'vitest';
+import { createBuildProvenance } from '../../src/features/build-info/provenance';
 import {
+  assertLocalBuildSnapshot,
   localBackend,
   guardedFetch,
   assertServedBuild,
@@ -8,11 +10,31 @@ import {
 } from '../helpers/compiled-settings-contract.mjs';
 
 const expected = {
-  environment: 'local',
+  environment: 'Local',
   version: '0.1.0',
   commit: 'a'.repeat(40),
   buildStarted: '2026-10-11T12:00:00.000Z',
 };
+it('accepts the canonical local compiled label and rejects input tokens and nonlocal snapshots', () => {
+  const snapshot = createBuildProvenance(
+    { APP_ENV: 'local' },
+    expected.version,
+    true,
+    new Date(expected.buildStarted),
+  );
+  expect(() => assertLocalBuildSnapshot(snapshot)).not.toThrow();
+  for (const environment of ['local', 'Preview', 'Production', 'Development']) {
+    expect(() =>
+      assertLocalBuildSnapshot({ ...snapshot, environment }),
+    ).toThrow('requires the canonical local backend build');
+  }
+  expect(() =>
+    assertLocalBuildSnapshot({ ...snapshot, buildStarted: null }),
+  ).toThrow('requires an actual production build');
+  expect(() =>
+    assertLocalBuildSnapshot({ ...snapshot, extra: 'unsupported' }),
+  ).toThrow();
+});
 const element = (tag, children, props = {}) => [
   '$',
   tag,

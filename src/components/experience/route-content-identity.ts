@@ -6,4 +6,6 @@ import { createContext } from 'react';
 export const RouteContentIdentityContext = createContext<{
   pathname: string | null;
   listHref: string;
+  /** Exact server-primary source key; optional for unmanaged legacy callers. */
+  rawRouteKey?: string;
 } | null>(null);

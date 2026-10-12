@@ -70,14 +70,13 @@ export default async function QuantityPage({
       ? getQuantityArchiveReview(id)
       : Promise.resolve(null),
   ]);
+  const readiness = await routeReadyProps(
+    '/inventory/quantity/' + encodeURIComponent(id),
+    searchParams,
+  );
   return (
-    <ProtectedPrivacyContent>
-      <RouteReady
-        {...await routeReadyProps(
-          '/inventory/quantity/' + encodeURIComponent(id),
-          searchParams,
-        )}
-      >
+    <ProtectedPrivacyContent routeKey={readiness.routeKey}>
+      <RouteReady {...readiness}>
         <PrivateDocumentTitle
           routePath={`/inventory/quantity/${encodeURIComponent(id)}`}
           title={recordTitle(detail.item.name).title.absolute}

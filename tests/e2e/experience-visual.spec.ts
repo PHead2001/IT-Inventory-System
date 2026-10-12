@@ -731,24 +731,32 @@ test('desktop navigation reaches personal motion Settings after long-page scroll
     });
     await expect(toggle).toBeEnabled();
     await toggle.scrollIntoViewIfNeeded();
-    const toggleBox = await toggle.boundingBox();
-    expect(toggleBox).toBeTruthy();
-    expect(toggleBox!.y + toggleBox!.height).toBeLessThanOrEqual(height);
-    // A native route update can briefly return HTML from hit testing while
-    // snapshots settle. Use the same bounded actionability wait as a real click.
+    // Native snapshots can briefly intercept hit testing. Browser document
+    // scrolling also rounds to CSS pixels (CI's bottom was 330.359375 at 330px).
+    // Check containment and pointer ownership together after actionability,
+    // allowing only the repository's one-pixel scroll-rounding tolerance.
     await expect
       .poll(() =>
         toggle.evaluate((button) => {
           const box = button.getBoundingClientRect();
-          return button.contains(
-            document.elementFromPoint(
-              box.x + box.width / 2,
-              box.y + box.height / 2,
+          return {
+            contained:
+              box.width > 0 &&
+              box.height > 0 &&
+              box.top >= -1 &&
+              box.left >= -1 &&
+              box.bottom <= innerHeight + 1 &&
+              box.right <= innerWidth + 1,
+            receivesPointer: button.contains(
+              document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              ),
             ),
-          );
+          };
         }),
       )
-      .toBe(true);
+      .toEqual({ contained: true, receivesPointer: true });
     await toggle.focus();
     await expect(toggle).toBeFocused();
   }

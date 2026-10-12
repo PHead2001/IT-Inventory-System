@@ -56,6 +56,12 @@ vi.mock('@/lib/auth/actions', () => ({
   readProtectedPrivacyIdentity: runtime.identity,
   signOutSession: runtime.signOut,
 }));
+vi.mock('@/lib/auth/privacy-read-transport', () => ({
+  readLogoutPrivacyGeneration: runtime.read,
+  acknowledgeLogoutPrivacyGeneration: runtime.compare,
+  readProtectedPrivacyIdentity: runtime.identity,
+  signOutSession: runtime.signOut,
+}));
 vi.mock('@/lib/auth/logout-transport', () => ({
   readLogoutPrivacyGeneration: runtime.read,
   acknowledgeLogoutPrivacyGeneration: runtime.compare,
