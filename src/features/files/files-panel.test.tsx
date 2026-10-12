@@ -8,6 +8,7 @@ import {
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({
   operation: vi.fn(),
@@ -82,6 +83,7 @@ it.each(['quantity', 'asset'] as const)(
     const originalAnimate = HTMLElement.prototype.animate;
     const originalMedia = window.matchMedia;
     const originalMotion = document.documentElement.dataset.motion;
+    const originalRootStyle = document.documentElement.getAttribute('style');
     const hosts: HTMLElement[] = [];
     const cancel = vi.fn();
     const animate = vi.fn(function (this: HTMLElement) {
@@ -97,6 +99,13 @@ it.each(['quantity', 'asset'] as const)(
     })) as unknown as typeof originalMedia;
     document.documentElement.dataset.motion = 'full';
     try {
+      // jsdom does not load the app stylesheet. Supply its actual shared motion
+      // tokens so the real reveal admission follows the production contract.
+      const globals = readFileSync('src/app/globals.css', 'utf8');
+      for (const [, token, value] of globals.matchAll(
+        /(--(?:motion-feedback|ease-workspace)):\s*([^;]+);/g,
+      ))
+        document.documentElement.style.setProperty(token, value);
       render(
         <FilesPanel
           parentType={parentType}
@@ -121,6 +130,10 @@ it.each(['quantity', 'asset'] as const)(
       const message = screen.getByText(empty);
       expect(message).toBeVisible();
       expect(animate).toHaveBeenCalledOnce();
+      expect(animate).toHaveBeenCalledWith(
+        [{ opacity: 0.65 }, { opacity: 1 }],
+        { duration: 130, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+      );
       expect(hosts[0]).toContainElement(message);
       expect(hosts[0]).toHaveAttribute('aria-busy', 'false');
       expect(fileInput).toBeEnabled();
@@ -138,6 +151,9 @@ it.each(['quantity', 'asset'] as const)(
       if (originalMotion === undefined)
         delete document.documentElement.dataset.motion;
       else document.documentElement.dataset.motion = originalMotion;
+      if (originalRootStyle === null)
+        document.documentElement.removeAttribute('style');
+      else document.documentElement.setAttribute('style', originalRootStyle);
     }
   },
 );
