@@ -15,6 +15,120 @@ const rawAlias = routeKey(
   new URLSearchParams('type=all&status=active&q=++USB++&scopeAdjusted=true'),
 );
 
+it('generic acceptance remains closed until observer registration and clears on observer retirement', () => {
+  const state = createRouteMotionState();
+  const accept = () =>
+    state.acceptArrival(
+      '/history',
+      '/inventory',
+      0,
+      'https://inventory.invalid/inventory',
+    );
+  accept();
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.supportArrival(true);
+  accept();
+  expect(state.arrivalSnapshot()).not.toBeNull();
+  state.supportArrival(false);
+  expect(state.arrivalSnapshot()).toBeNull();
+  accept();
+  expect(state.arrivalSnapshot()).toBeNull();
+});
+
+it('generic arrival requires a fresh accepted navigation and cannot reuse a retired or replaced approval', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history?category=a&category=b',
+    '/inventory?q=cable',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  const first = state.arrivalSnapshot()!;
+  expect(first).toEqual({
+    sourceKey: '/inventory?q=cable',
+    destinationKey: '/history?category=a&category=b',
+    epoch: 4,
+  });
+  state.acceptArrival(
+    '/history?category=a&category=b',
+    '/inventory?q=cable',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  const repeated = state.arrivalSnapshot();
+  expect(repeated).not.toBe(first);
+  state.finishArrival(first);
+  expect(state.arrivalSnapshot()).toBe(repeated);
+  state.finishArrival(repeated!);
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  state.suspend();
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.acceptArrival(
+    '/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  expect(state.arrivalSnapshot()).toBeNull();
+  state.resume();
+  state.acceptArrival(
+    'https://other.invalid/history',
+    '/inventory',
+    4,
+    'https://inventory.invalid/inventory',
+  );
+  expect(state.arrivalSnapshot()).toBeNull();
+});
+
+it('native arrival retirement preserves the approved title origin for a new application Back event', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  const target = titleTarget(record, original, holding)!;
+  state.arm(target);
+  state.acceptArrival(
+    target.detailPath,
+    target.listHref,
+    1,
+    'https://inventory.invalid/inventory',
+  );
+  state.finishArrival();
+  state.finish();
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+  expect(state.backTarget(record, original)).toEqual(target);
+  state.retire();
+  expect(state.backTarget(record, original)).toBeNull();
+});
+
+it('observer retirement withdraws active generic/title approval while preserving the approved origin', () => {
+  const state = createRouteMotionState();
+  state.supportArrival(true);
+  const target = titleTarget(record, original, holding)!;
+  state.arm(target);
+  state.acceptArrival(
+    target.detailPath,
+    target.listHref,
+    1,
+    'https://inventory.invalid/inventory',
+  );
+  state.supportArrival(false);
+  expect(state.arrivalSupportSnapshot()).toBe(false);
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+  expect(state.backTarget(record, original)).toEqual(target);
+  state.supportArrival(true);
+  expect(state.arrivalSnapshot()).toBeNull();
+  expect(state.snapshot()).toBeNull();
+});
+
 it('matches only the canonical or recorded raw results scope for an app pair', () => {
   const target = titleTarget(
     record,

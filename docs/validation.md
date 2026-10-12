@@ -248,6 +248,33 @@ replacement in the browser suite; native Back/Forward requires zero captures and
 correct filters, source row/anchor, scroll and authorized primary restoration.
 Component fixtures do not establish actual browser history, scroll or hosted Auth.
 
+`native-scroll-restoration.test.ts` covers the bounded provider-local history-entry
+checkpoints used when a privacy recheck collapses the destination and clamps scroll.
+It checks exact query/hash and entry identity, repeated URLs with different offsets,
+both admission and popstate-listener orders, already-authorized entries without a
+new readiness effect, plain router filters, exact internal replacement, user
+interruption, rapid traversal, authority invalidation, stale callbacks, the 50-entry
+cap, finite/nonnegative offsets, shorter-page one-shot clamping and unsupported or
+failed observers. `native-scroll-restoration.integration.test.tsx` mounts the real
+route provider and canonical readiness owner to exercise hidden same-authority
+privacy collapse, both admission orders and real revocation notifications. Three
+additional provider regressions reproduced premature restoration when a new
+primary registered in the same commit as a changed privacy generation, a new
+actor with a retained old-actor primary, or ready=false with visible=true. Publishing
+committed privacy/actor references in an insertion effect before child layout
+notifications makes those regressions pass; the same-authority pending checkpoint
+still survives the temporary check and restores once after a later fresh grant.
+`route-readiness.test.ts` also proves that read-only primary observation neither
+acknowledges commits nor settles another owner's pending registration. Focused
+helper/provider/readiness and route-motion sibling checks use one worker and a
+768 MiB heap; canonical typechecking uses 1536 MiB with scoped zero-warning
+lint/format checks. These are local jsdom
+contracts with supplied geometry and scroll behavior. They do not prove actual
+browser document-height collapse, final-candidate native restoration, hosted Auth
+or native animation; authenticated browser proof and independent review remain
+required. Native history must stay instant while application Back remains animated
+under the existing Full-motion requirements.
+
 The native route-motion browser case now authors a real server-primary delay after
 early Flight fallback bytes, rather than holding a complete HTTP response. The
 `route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling

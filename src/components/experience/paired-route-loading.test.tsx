@@ -544,6 +544,9 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ status: 'match', generation: { status: 'absent' } });
   vi.stubGlobal('CSS', { supports: () => true });
+  // These application-pair cases support passive early traversal observation;
+  // native entry/scroll restoration has its own provider/browser regressions.
+  vi.stubGlobal('navigation', new EventTarget());
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
     addEventListener: vi.fn(),

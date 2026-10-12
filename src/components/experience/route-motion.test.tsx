@@ -6,6 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { flushSync } from 'react-dom';
 import {
   useContext,
   useLayoutEffect,
@@ -54,12 +55,15 @@ import {
 } from './route-motion-state';
 
 const runtime = vi.hoisted(() => ({
+  navigation: null as EventTarget | null,
   pathname: '/inventory',
   query: '',
   callbacks: [] as Array<
     (event: string, session: { user: { id: string } } | null) => void
   >,
   boundaries: [] as Array<{
+    enter?: string;
+    exit?: string;
     name?: string;
     share?: string;
     onShare?: (instance: { name: string }) => void | (() => void);
@@ -292,6 +296,11 @@ const view = (
 );
 
 beforeEach(() => {
+  runtime.navigation = new EventTarget();
+  Object.defineProperty(window, 'navigation', {
+    configurable: true,
+    value: runtime.navigation,
+  });
   runtime.pathname = '/inventory';
   runtime.query = '';
   runtime.callbacks = [];
@@ -312,6 +321,7 @@ beforeEach(() => {
   localStorage.removeItem('it-inventory-reduce-motion');
 });
 afterEach(() => {
+  Reflect.deleteProperty(window, 'navigation');
   vi.unstubAllGlobals();
   delete (document as Partial<Document>).startViewTransition;
   localStorage.removeItem('it-inventory-reduce-motion');
@@ -607,6 +617,551 @@ it('native Back clears title motion on an unanchored results entry without chang
   } finally {
     push.mockRestore();
     replace.mockRestore();
+    window.history.replaceState(null, '', originalHref);
+  }
+});
+
+it.each(['router first', 'provider first'] as const)(
+  'native Back/Forward never authorizes generic arrival with %s listeners',
+  (order) => {
+    const originalHref = location.href;
+    const content = () =>
+      view(
+        <PageArrival pathname={runtime.pathname}>
+          <input aria-label="Mounted draft" defaultValue="draft" />
+          <RouteLink href="/history">Open History</RouteLink>
+          <RouteLink href="/settings">Open Settings</RouteLink>
+        </PageArrival>,
+      );
+    let page: ReturnType<typeof render>;
+    const restore = () => {
+      runtime.pathname = location.pathname;
+      runtime.query = location.search.slice(1);
+      // Model a router listener that commits synchronously before/after the
+      // provider's capture listener, without changing Next or browser history.
+      page.rerender(content());
+    };
+    const outer = () =>
+      runtime.boundaries.filter((boundary) => boundary.enter !== undefined);
+    try {
+      window.history.replaceState(null, '', '/inventory?q=cable');
+      runtime.query = 'q=cable';
+      if (order === 'router first')
+        window.addEventListener('popstate', restore, true);
+      page = render(content());
+      if (order === 'provider first')
+        window.addEventListener('popstate', restore, true);
+      const draft = screen.getByRole('textbox', { name: 'Mounted draft' });
+      fireEvent.change(draft, { target: { value: 'keep editable' } });
+      draft.focus();
+      expect(outer().every((boundary) => boundary.enter === 'none')).toBe(true);
+      fireEvent.click(screen.getByRole('link', { name: 'Open History' }));
+      runtime.pathname = '/history';
+      runtime.query = '';
+      window.history.replaceState(null, '', '/history');
+      page.rerender(content());
+      expect(
+        outer().some((boundary) => boundary.update === 'route-content'),
+      ).toBe(true);
+      expect(outer().at(-1)).toMatchObject({
+        enter: 'none',
+        exit: 'none',
+        update: 'none',
+      });
+
+      for (const destination of ['/inventory?q=cable', '/history']) {
+        runtime.boundaries = [];
+        window.history.replaceState(null, '', destination);
+        act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+        expect(outer().length).toBeGreaterThan(0);
+        expect(
+          outer().every(
+            (boundary) =>
+              boundary.enter === 'none' &&
+              boundary.exit === 'none' &&
+              boundary.update === 'none',
+          ),
+        ).toBe(true);
+        expect(screen.getByRole('textbox', { name: 'Mounted draft' })).toBe(
+          draft,
+        );
+        expect(draft).toHaveValue('keep editable');
+        expect(draft).toHaveFocus();
+        expect(screen.getByText('enabled')).toBeVisible();
+      }
+
+      // A new accepted gesture after native Forward can animate again.
+      runtime.boundaries = [];
+      fireEvent.click(screen.getByRole('link', { name: 'Open Settings' }));
+      runtime.pathname = '/settings';
+      window.history.replaceState(null, '', '/settings');
+      page.rerender(content());
+      expect(
+        outer().some((boundary) => boundary.update === 'route-content'),
+      ).toBe(true);
+      runtime.boundaries = [];
+      page.rerender(content());
+      expect(outer().every((boundary) => boundary.update === 'none')).toBe(
+        true,
+      );
+    } finally {
+      window.removeEventListener('popstate', restore, true);
+      window.history.replaceState(null, '', originalHref);
+    }
+  },
+);
+
+it('a fresh accepted repeat of the same URL animates once, while same-path query and refresh commits stay instant', () => {
+  const fixture = () =>
+    view(
+      <PageArrival pathname={runtime.pathname}>
+        <RouteLink href="/history">Open History</RouteLink>
+        <RouteLink href="/inventory">Open Inventory</RouteLink>
+        <RouteLink href="/history?q=cable">Filter History</RouteLink>
+      </PageArrival>,
+    );
+  const page = render(fixture());
+  for (const [label, pathname] of [
+    ['Open History', '/history'],
+    ['Open Inventory', '/inventory'],
+    ['Open History', '/history'],
+  ]) {
+    fireEvent.click(screen.getByRole('link', { name: label }));
+    runtime.boundaries = [];
+    runtime.pathname = pathname;
+    page.rerender(fixture());
+    expect(
+      runtime.boundaries.some(
+        (boundary) => boundary.update === 'route-content',
+      ),
+    ).toBe(true);
+    expect(
+      runtime.boundaries.findLast((boundary) => boundary.enter !== undefined),
+    ).toMatchObject({ enter: 'none', exit: 'none', update: 'none' });
+  }
+  fireEvent.click(screen.getByRole('link', { name: 'Filter History' }));
+  runtime.boundaries = [];
+  runtime.query = 'q=cable';
+  page.rerender(fixture());
+  expect(
+    runtime.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(false);
+  runtime.boundaries = [];
+  page.rerender(fixture());
+  expect(
+    runtime.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(false);
+});
+
+it.each([
+  { direction: 'Forward', lifetime: 'arrival and title' },
+  { direction: 'Back', lifetime: 'arrival and title' },
+  { direction: 'Forward', lifetime: 'title only' },
+  { direction: 'Back', lifetime: 'title only' },
+])(
+  'early traversal retires all router-first native $direction boundaries with $lifetime active',
+  ({ direction, lifetime }) => {
+    const originalHref = location.href;
+    let arrival!: ReturnType<typeof useRouteMotion>;
+    let loading!: React.ContextType<typeof PairedRouteLoadingContext>;
+    function CaptureArrival() {
+      const motion = useRouteMotion();
+      const paired = useContext(PairedRouteLoadingContext);
+      useLayoutEffect(() => {
+        arrival = motion;
+        loading = paired;
+      }, [motion, paired]);
+      return null;
+    }
+    const fixture = () =>
+      view(
+        <>
+          <CaptureArrival />
+          <PageArrival pathname={runtime.pathname}>
+            {runtime.pathname === detailPath ? <Detail /> : <List />}
+          </PageArrival>
+        </>,
+      );
+    let page: ReturnType<typeof render>;
+    let beforeProviderPop: (typeof runtime.boundaries)[number][] = [];
+    const restore = () => {
+      runtime.pathname = location.pathname;
+      runtime.query = location.search.slice(1);
+      // Explicit synchronous commit reproduces the installed router-first
+      // restore; ordinary act batching would mask the pre-provider window.
+      flushSync(() => page.rerender(fixture()));
+      beforeProviderPop = [...runtime.boundaries];
+    };
+    window.addEventListener('popstate', restore, true);
+    try {
+      // History [B, A]: while an accepted A -> B request is still uncommitted,
+      // native Back may restore B without any new application gesture.
+      window.history.replaceState(null, '', '/inventory');
+      page = render(fixture());
+      fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+      const commit = (pathname: string) => {
+        runtime.pathname = pathname;
+        window.history.replaceState(null, '', pathname);
+        page.rerender(fixture());
+        act(() => loading!.store.ready(pathname));
+      };
+      if (direction === 'Back' || lifetime === 'title only') commit(detailPath);
+      if (direction === 'Back' && lifetime === 'arrival and title')
+        fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+      if (direction === 'Forward' && lifetime === 'title only') {
+        fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+        commit('/inventory');
+      }
+      expect(arrival.arrivalEnabled).toBe(lifetime === 'arrival and title');
+      expect(arrival.intent?.name).toMatch(/^inventory-title-/);
+      const oldName = arrival.intent!.name;
+
+      runtime.boundaries = [];
+      const destination = direction === 'Forward' ? detailPath : '/inventory';
+      window.history.replaceState(null, '', destination);
+      const traversal = new Event('navigate');
+      Object.defineProperty(traversal, 'navigationType', { value: 'traverse' });
+      act(() => runtime.navigation!.dispatchEvent(traversal));
+      expect(arrival.intent).toBeNull();
+      expect(arrival.arrival).toBeNull();
+      act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+      expect(beforeProviderPop.length).toBeGreaterThan(0);
+      expect(arrival.arrival).toBeNull();
+      expect(arrival.arrivalEnabled).toBe(false);
+
+      // The later pop cleanup must retain the approved origin independently.
+      runtime.pathname = detailPath;
+      page.rerender(fixture());
+      expect(screen.getByRole('heading')).not.toHaveAttribute(
+        'data-test-transition-name',
+      );
+      fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+      expect(
+        screen.getByRole('heading').getAttribute('data-test-transition-name'),
+      ).toMatch(/^inventory-title-/);
+      expect(
+        screen.getByRole('heading').getAttribute('data-test-transition-name'),
+      ).not.toBe(oldName);
+
+      expect(
+        beforeProviderPop.every(
+          (boundary) =>
+            boundary.name === undefined &&
+            boundary.share !== 'record-title' &&
+            ![boundary.enter, boundary.exit, boundary.update].includes(
+              'route-content',
+            ),
+        ),
+      ).toBe(true);
+      for (const boundary of beforeProviderPop) {
+        if (boundary.share !== undefined)
+          expect(boundary).toMatchObject({ share: 'none', name: undefined });
+        if (boundary.enter !== undefined)
+          expect(boundary).toMatchObject({
+            enter: 'none',
+            exit: 'none',
+            update: 'none',
+          });
+      }
+    } finally {
+      window.removeEventListener('popstate', restore, true);
+      window.history.replaceState(null, '', originalHref);
+    }
+  },
+);
+
+it.each(['missing API', 'registration throws', 'access throws'] as const)(
+  'all route motion stays instant when the early traversal observer has %s, preserving functional app Back',
+  (failure) => {
+    const remove = vi.spyOn(runtime.navigation!, 'removeEventListener');
+    if (failure === 'missing API') Reflect.deleteProperty(window, 'navigation');
+    if (failure === 'registration throws')
+      vi.spyOn(runtime.navigation!, 'addEventListener').mockImplementation(
+        () => {
+          throw new Error('Observer unavailable');
+        },
+      );
+    if (failure === 'access throws')
+      Object.defineProperty(window, 'navigation', {
+        configurable: true,
+        get: () => {
+          throw new Error('Navigation unavailable');
+        },
+      });
+    const fixture = () =>
+      view(
+        <PageArrival pathname={runtime.pathname}>
+          {runtime.pathname === detailPath ? <Detail /> : <List />}
+        </PageArrival>,
+      );
+    const page = render(fixture());
+    runtime.boundaries = [];
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    const name = screen
+      .getByRole('link', { name: 'Cable row 2' })
+      .getAttribute('data-test-transition-name');
+    expect(name).toBeNull();
+    runtime.pathname = detailPath;
+    page.rerender(fixture());
+    expect(screen.getByRole('heading')).not.toHaveAttribute(
+      'data-test-transition-name',
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    expect(
+      screen.getByRole('link', { name: 'Back to results' }),
+    ).toHaveAttribute('href', returnTo);
+    runtime.pathname = '/inventory';
+    page.rerender(fixture());
+    expect(screen.getByRole('link', { name: 'Cable row 2' })).toBeVisible();
+    expect(
+      runtime.boundaries
+        .filter((boundary) => boundary.share !== undefined)
+        .every(
+          (boundary) =>
+            boundary.share === 'none' && boundary.name === undefined,
+        ),
+    ).toBe(true);
+    expect(
+      runtime.boundaries
+        .filter((boundary) => boundary.enter !== undefined)
+        .every(
+          (boundary) =>
+            boundary.enter === 'none' &&
+            boundary.exit === 'none' &&
+            boundary.update === 'none',
+        ),
+    ).toBe(true);
+    expect(screen.getByText('instant')).toBeVisible();
+    if (failure === 'registration throws')
+      expect(remove).toHaveBeenCalledOnce();
+  },
+);
+
+it('the passive early observer ignores application events and withdraws route/title motion on canceled traversal', () => {
+  let motion!: ReturnType<typeof useRouteMotion>;
+  let loading!: React.ContextType<typeof PairedRouteLoadingContext>;
+  let pending!: NonNullable<
+    React.ContextType<typeof RoutePendingContext>
+  >['state'];
+  function CaptureArrival() {
+    const current = useRouteMotion();
+    const paired = useContext(PairedRouteLoadingContext);
+    const state = useContext(RoutePendingContext)!.state;
+    useLayoutEffect(() => {
+      motion = current;
+      loading = paired;
+      pending = state;
+    }, [current, paired, state]);
+    return null;
+  }
+  render(
+    view(
+      <>
+        <CaptureArrival />
+        <PageArrival pathname={runtime.pathname}>
+          <List />
+        </PageArrival>
+      </>,
+    ),
+  );
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  const approved = motion.arrival;
+  const pair = loading!.store.snapshot();
+  const epoch = pending.snapshot().epoch;
+  const name = screen
+    .getByRole('link', { name: 'Cable row 2' })
+    .getAttribute('data-test-transition-name');
+  expect(approved).not.toBeNull();
+  expect(pair).not.toBeNull();
+  for (const type of ['push', 'replace', 'reload', 'traverse']) {
+    const event = new Event('navigate', { cancelable: true });
+    Object.defineProperty(event, 'navigationType', { value: type });
+    const intercept = vi.fn();
+    Object.defineProperty(event, 'intercept', { value: intercept });
+    const prevent = vi.spyOn(event, 'preventDefault');
+    act(() => runtime.navigation!.dispatchEvent(event));
+    expect(intercept).not.toHaveBeenCalled();
+    expect(prevent).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    expect(motion.arrival).toBe(type === 'traverse' ? null : approved);
+    expect(loading!.store.snapshot()).toBe(pair);
+    expect(pending.snapshot().epoch).toBe(epoch);
+    if (type === 'traverse')
+      expect(
+        screen.getByRole('link', { name: 'Cable row 2' }),
+      ).not.toHaveAttribute('data-test-transition-name');
+    else
+      expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
+        'data-test-transition-name',
+        name,
+      );
+    expect(document.documentElement.dataset.routeMotionPrivate).toBe('true');
+  }
+  // A canceled traversal never revives its old approval. A new accepted event
+  // can allocate a fresh generic arrival without changing application routing.
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 1' }));
+  expect(motion.arrival).not.toBeNull();
+  expect(motion.arrival).not.toBe(approved);
+  expect(motion.arrivalEnabled).toBe(true);
+});
+
+it('cleanup removes the early observer and a retired provider callback cannot withdraw replacement arrival', () => {
+  const add = vi.spyOn(runtime.navigation!, 'addEventListener');
+  const remove = vi.spyOn(runtime.navigation!, 'removeEventListener');
+  let motion!: ReturnType<typeof useRouteMotion>;
+  function CaptureArrival() {
+    const current = useRouteMotion();
+    useLayoutEffect(() => {
+      motion = current;
+    }, [current]);
+    return null;
+  }
+  const fixture = (actor: string) =>
+    view(
+      <>
+        <CaptureArrival />
+        <PageArrival pathname={runtime.pathname}>
+          <List />
+        </PageArrival>
+      </>,
+      actor,
+    );
+  const page = render(fixture('staff'));
+  const old = add.mock.calls.find(
+    ([type]) => type === 'navigate',
+  )![1] as EventListener;
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  page.rerender(fixture('replacement'));
+  expect(remove).toHaveBeenCalledWith('navigate', old);
+  fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+  const replacement = motion.arrival;
+  expect(replacement).not.toBeNull();
+  const event = new Event('navigate');
+  Object.defineProperty(event, 'navigationType', { value: 'traverse' });
+  act(() => old(event));
+  expect(motion.arrival).toBe(replacement);
+  expect(motion.arrivalEnabled).toBe(true);
+  act(() => runtime.navigation!.dispatchEvent(event));
+  expect(motion.arrival).toBeNull();
+  const current = add.mock.calls.findLast(
+    ([type]) => type === 'navigate',
+  )![1] as EventListener;
+  page.unmount();
+  expect(remove).toHaveBeenCalledWith('navigate', current);
+  const rendered = runtime.boundaries.length;
+  act(() => current(event));
+  expect(runtime.boundaries).toHaveLength(rendered);
+});
+
+it('native retirement keeps real destination readiness and a fresh app Back title after native Forward', () => {
+  const originalHref = location.href;
+  const rects = vi
+    .spyOn(HTMLElement.prototype, 'getClientRects')
+    .mockReturnValue([{ width: 30, height: 20 }] as unknown as DOMRectList);
+  let pending!: NonNullable<
+    React.ContextType<typeof RoutePendingContext>
+  >['state'];
+  function CapturePending() {
+    const current = useContext(RoutePendingContext)!.state;
+    useLayoutEffect(() => {
+      pending = current;
+    }, [current]);
+    return null;
+  }
+  let primaryReady = true;
+  let primaryKey = '/inventory';
+  const fixture = () =>
+    view(
+      <>
+        <CapturePending />
+        <PageArrival pathname={runtime.pathname}>
+          <RouteReady
+            actorId="staff"
+            routeKey={primaryKey}
+            contentIdentity="real-primary"
+            ready={primaryReady}
+          >
+            {runtime.pathname === detailPath ? <Detail /> : <List />}
+          </RouteReady>
+        </PageArrival>
+      </>,
+    );
+  try {
+    window.history.replaceState(null, '', '/inventory');
+    const page = render(fixture());
+    fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
+    const forwardName = screen
+      .getByRole('link', { name: 'Cable row 2' })
+      .getAttribute('data-test-transition-name');
+    runtime.pathname = detailPath;
+    primaryKey = detailPath;
+    window.history.replaceState(null, '', detailPath);
+    page.rerender(fixture());
+    expect(screen.getByRole('heading')).toHaveAttribute(
+      'data-test-transition-name',
+      forwardName,
+    );
+
+    runtime.boundaries = [];
+    primaryReady = false;
+    window.history.replaceState(null, '', '/inventory?q=cable');
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    runtime.pathname = '/inventory';
+    runtime.query = 'q=cable';
+    primaryKey = '/inventory?q=other';
+    page.rerender(fixture());
+    expect(pending.snapshot().pending).toBe(true);
+    primaryReady = true;
+    page.rerender(fixture());
+    expect(pending.snapshot().pending).toBe(true);
+    primaryKey = '/inventory?q=cable';
+    page.rerender(fixture());
+    expect(pending.snapshot().pending).toBe(false);
+    expect(
+      runtime.boundaries.every(
+        (boundary) => boundary.update !== 'route-content',
+      ),
+    ).toBe(true);
+
+    runtime.boundaries = [];
+    window.history.replaceState(null, '', detailPath);
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    runtime.pathname = detailPath;
+    runtime.query = '';
+    primaryKey = detailPath;
+    page.rerender(fixture());
+    expect(pending.snapshot().pending).toBe(false);
+    expect(screen.getByRole('heading')).not.toHaveAttribute(
+      'data-test-transition-name',
+    );
+    expect(
+      runtime.boundaries.every(
+        (boundary) => boundary.update !== 'route-content',
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
+    const backName = screen
+      .getByRole('heading')
+      .getAttribute('data-test-transition-name');
+    expect(backName).toMatch(/^inventory-title-/);
+    expect(backName).not.toBe(forwardName);
+    runtime.boundaries = [];
+    runtime.pathname = '/inventory';
+    primaryKey = '/inventory';
+    window.history.replaceState(null, '', '/inventory#inventory-row-2');
+    page.rerender(fixture());
+    expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
+      'data-test-transition-name',
+      backName,
+    );
+    expect(
+      runtime.boundaries.some(
+        (boundary) => boundary.update === 'route-content',
+      ),
+    ).toBe(true);
+  } finally {
+    rects.mockRestore();
     window.history.replaceState(null, '', originalHref);
   }
 });

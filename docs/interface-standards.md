@@ -182,6 +182,39 @@ history restore. It restores the actual history URL, filters, row/anchor and scr
 through Next/browser history and the ordinary authorization/privacy gates. Native
 traversal cancels a departing animation or paired wait and tracks real destination
 readiness; it never arms a shared title or a precommit privacy animation ticket.
+
+Privacy checks can temporarily collapse the destination document and clamp the
+browser's restored scroll to zero. A provider-local scroll coordinator retains at
+most 50 finite, nonnegative offset checkpoints, bound to the browser history entry
+key, exact path/query/hash and actor/privacy authority generation. A temporary
+same-authority recheck freezes capture without deleting those checkpoints;
+revocation, actor/generation change, access denial and provider retirement clear
+them. Native traversal may restore once, instantly, only when the current entry
+and exact URL match, the privacy grant is fresh and the canonical primary is
+connected, visible, actor-matched and ready for the complete query. Primary/privacy
+notifications and post-popstate reconciliation cover either admission order and
+already-authorized same-URL or hash-only entries. Consume the pending restore
+before scrolling; a shorter final page clamps naturally without retries. User
+wheel/touch/scroll-key input or a new navigation cancels the pending restore;
+ordinary scroll events cannot cancel it because document collapse also emits them.
+Only Next's exact same-entry/same-URL replacement preserves a pending restore.
+This coordination never intercepts navigation, changes history or scroll restoration
+mode, persists checkpoints, moves focus or grants authorization/readiness. Without
+supported Navigation API entry observation, ordinary browser restoration remains
+in charge.
+
+Generic page and canvas-free route arrivals also require a fresh accepted
+application-navigation intent for the exact source/destination query keys and
+provider pending generation. Generic arrivals also require successful registration
+of a passive Navigation API observer. Its `navigate` event with type `traverse`
+synchronously retires generic and active title intent and commits static boundary
+classes before Next restores history. The approved title origin survives for a
+fresh application Back gesture. It never intercepts navigation or changes privacy
+or readiness owners. Missing/failed observer support keeps all route and shared-title
+motion instant, preserving ordinary navigation and restoration.
+The committed page consumes its intent after React queues capture callbacks;
+the later popstate cleanup remains in place. Motion support or a retained title
+origin alone cannot authorize another arrival snapshot.
 The approved origin can survive traversal for a later application Back link, but
 cannot authorize another Link gesture. No history entry is changed for animation.
 Ordinals locate anchors and do not identify holdings. Reordered holdings can pair

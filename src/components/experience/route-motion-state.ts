@@ -42,6 +42,11 @@ export type TitleIntent = RecordIdentity & {
   anchor: string;
   detailPath: string;
 };
+export type RouteArrivalIntent = {
+  sourceKey: string;
+  destinationKey: string;
+  epoch: number;
+};
 
 export function recordPath(record: RecordIdentity) {
   return `/inventory/${record.kind === 'asset' ? 'assets' : 'quantity'}/${encodeURIComponent(record.id)}`;
@@ -102,6 +107,8 @@ export function matchesTitleListRoute(
 /** Only ephemeral identity/URL metadata; no titles, DOM, credentials or storage. */
 export function createRouteMotionState() {
   let intent: TitleIntent | null = null;
+  let arrival: RouteArrivalIntent | null = null;
+  let arrivalSupported = false;
   let origin: Omit<TitleIntent, 'name'> | null = null;
   let navigation: {
     token: symbol;
@@ -121,10 +128,51 @@ export function createRouteMotionState() {
       };
     },
     snapshot: () => intent,
+    arrivalSnapshot: () => arrival,
+    arrivalSupportSnapshot: () => arrivalSupported,
+    supportArrival(supported: boolean) {
+      arrivalSupported = supported;
+      if (!supported) {
+        arrival = null;
+        intent = null;
+      }
+      notify();
+    },
+    acceptArrival(
+      href: string,
+      sourceKey: string,
+      epoch: number,
+      base: string,
+    ) {
+      arrival = null;
+      if (valid && !suspended && arrivalSupported) {
+        try {
+          const destination = new URL(href, base);
+          if (destination.origin === new URL(base).origin)
+            arrival = {
+              sourceKey,
+              destinationKey: routeKey(
+                destination.pathname,
+                destination.searchParams,
+              ),
+              epoch,
+            };
+        } catch {
+          // Unsupported destinations retain ordinary navigation without capture.
+        }
+      }
+      notify();
+    },
+    finishArrival(expected?: RouteArrivalIntent) {
+      if (expected && arrival !== expected) return;
+      arrival = null;
+      notify();
+    },
     valid: () => valid && !suspended,
     suspend(notifyListeners = true) {
       suspended = true;
       navigation = null;
+      arrival = null;
       intent = null;
       origin = null;
       if (notifyListeners) notify();
@@ -168,6 +216,7 @@ export function createRouteMotionState() {
     },
     retire() {
       navigation = null;
+      arrival = null;
       intent = null;
       origin = null;
       notify();
@@ -184,6 +233,7 @@ export function createRouteMotionState() {
     },
     invalidate(notifyListeners = true) {
       navigation = null;
+      arrival = null;
       valid = false;
       intent = null;
       origin = null;

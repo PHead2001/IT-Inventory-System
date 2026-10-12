@@ -26,6 +26,8 @@ vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 vi.mock('./route-motion', () => ({
   useRouteMotion: () => ({
     enabled: route.enabled,
+    arrivalEnabled: route.enabled,
+    finishArrival: vi.fn(),
     cancelIfInvalid: vi.fn(),
     finishAfterSnapshot: vi.fn(),
   }),

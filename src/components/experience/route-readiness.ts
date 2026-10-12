@@ -13,6 +13,10 @@ export function createRouteReadiness(
   committed: (key: string) => void,
 ) {
   const roots = new Map<symbol, ReadyContent>();
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
   let closed = false;
   let suspended = false;
   let history: { epoch: number; finish: () => void } | undefined;
@@ -45,13 +49,30 @@ export function createRouteReadiness(
     history = undefined;
   };
   return {
+    // Read-only observation reuses the canonical readiness checks. It never
+    // acknowledges a commit or settles another owner's pending registration.
+    currentPrimary: () => {
+      for (const content of roots.values()) {
+        if (active(content)) return content;
+      }
+      return null;
+    },
+    subscribePrimary: (listener: () => void) => {
+      if (closed) return () => {};
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     register: (content: ReadyContent) => {
       if (closed) return () => {};
       const token = Symbol();
       roots.set(token, content);
       acknowledge(content);
+      notify();
       return () => {
         roots.delete(token);
+        notify();
       };
     },
     history: () => {
@@ -73,15 +94,19 @@ export function createRouteReadiness(
       suspended = true;
       history?.finish();
       history = undefined;
+      notify();
     },
     resume: () => {
       if (!closed) suspended = false;
+      notify();
     },
     close: () => {
       closed = true;
       history?.finish();
       history = undefined;
       roots.clear();
+      notify();
+      listeners.clear();
     },
   };
 }

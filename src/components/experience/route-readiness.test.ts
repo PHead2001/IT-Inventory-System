@@ -102,3 +102,41 @@ it('an epoch change does not fabricate a content commit; reactivation must regis
   withdraw();
   expect(pending.snapshot().pending).toBe(false);
 });
+
+it('primary observation reuses eligibility without acknowledging a commit or finishing pending owners', () => {
+  history.replaceState(null, '', '/inventory?q=x');
+  const pending = createRoutePendingState();
+  const committed = vi.fn();
+  const readiness = createRouteReadiness('actor', pending, committed);
+  const element = root();
+  const content = {
+    actorId: 'actor',
+    routeKey: '/inventory?q=x',
+    contentIdentity: 'primary',
+    root: element,
+  };
+  readiness.register(content);
+  committed.mockClear();
+  pending.register();
+  const epoch = pending.snapshot().epoch;
+  const notification = vi.fn(() => readiness.currentPrimary());
+  const unsubscribe = readiness.subscribePrimary(notification);
+  expect(readiness.currentPrimary()).toBe(content);
+  element.hidden = true;
+  expect(readiness.currentPrimary()).toBeNull();
+  element.hidden = false;
+  element.setAttribute('inert', '');
+  expect(readiness.currentPrimary()).toBeNull();
+  element.removeAttribute('inert');
+  readiness.suspend();
+  expect(readiness.currentPrimary()).toBeNull();
+  readiness.resume();
+  expect(notification).toHaveBeenCalledTimes(2);
+  expect(notification).toHaveLastReturnedWith(content);
+  expect(committed).not.toHaveBeenCalled();
+  expect(pending.snapshot()).toMatchObject({ epoch, pending: true });
+  unsubscribe();
+  readiness.close();
+  expect(readiness.currentPrimary()).toBeNull();
+  expect(notification).toHaveBeenCalledTimes(2);
+});

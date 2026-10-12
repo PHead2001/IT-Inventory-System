@@ -195,6 +195,9 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ ok: false, message: 'Sign-out unavailable.' });
   vi.stubGlobal('CSS', { supports: () => true });
+  // Explicit supported-browser motion fixture, restored with the other globals.
+  // Native entry/scroll restoration is outside this privacy/controller suite.
+  vi.stubGlobal('navigation', new EventTarget());
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
     addEventListener: () => {},

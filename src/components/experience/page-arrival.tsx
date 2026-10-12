@@ -14,20 +14,21 @@ export function CanvasFreeRouteContent({
 }: {
   children: React.ReactNode;
 }) {
-  const { enabled, cancelIfInvalid, finishAfterSnapshot } = useRouteMotion();
+  const { arrivalEnabled, cancelIfInvalid, finishAfterSnapshot } =
+    useRouteMotion();
   const { source, handoff } = useRoutePresentationSource();
   return (
     <RoutePresentationSourceContext value={source}>
       <ViewTransition
         default="none"
-        enter={enabled ? 'route-content' : 'none'}
-        exit={enabled ? 'route-content' : 'none'}
+        enter={arrivalEnabled ? 'route-content' : 'none'}
+        exit={arrivalEnabled ? 'route-content' : 'none'}
         onEnter={(instance) => {
           cancelIfInvalid();
           finishAfterSnapshot(instance);
         }}
         onExit={(instance) => {
-          const finish = enabled ? handoff() : undefined;
+          const finish = arrivalEnabled ? handoff() : undefined;
           cancelIfInvalid();
           finishAfterSnapshot(instance);
           return finish;
@@ -48,7 +49,14 @@ export function PageArrival({
   pathname: string | null;
 }) {
   const livePathname = usePathname();
-  const { enabled, cancelIfInvalid, finishAfterSnapshot } = useRouteMotion();
+  const {
+    arrivalEnabled,
+    arrival,
+    listHref,
+    finishArrival,
+    cancelIfInvalid,
+    finishAfterSnapshot,
+  } = useRouteMotion();
   const [history, setHistory] = useState<{
     pathname: string | null;
     source: symbol;
@@ -81,7 +89,14 @@ export function PageArrival({
         : current,
     );
   }, [history]);
-  const animate = enabled && pathname !== '/room' && livePathname !== '/room';
+  useEffect(() => {
+    // Retire only after the accepted destination commits, after React queued its
+    // capture callbacks. A later native restore cannot reuse that approval, even
+    // if Next's history listener commits before our popstate listener runs.
+    if (pathname === livePathname) finishArrival();
+  }, [arrival, listHref, pathname, livePathname, finishArrival]);
+  const animate =
+    arrivalEnabled && pathname !== '/room' && livePathname !== '/room';
   const update =
     animate &&
     history.previous !== undefined &&

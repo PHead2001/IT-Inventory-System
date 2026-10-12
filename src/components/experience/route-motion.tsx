@@ -15,7 +15,11 @@ import {
   usePrivacyReadiness,
   usePrivacyRevocationRevision,
 } from '@/components/auth/privacy-readiness';
-import { subscribePrivacyRevocation } from '@/features/scan/assign-batch';
+import {
+  assignmentEpoch,
+  readPrivacyRevocationRevision,
+  subscribePrivacyRevocation,
+} from '@/features/scan/assign-batch';
 import {
   freshPresentationGrant,
   retainedPresentationGrantCurrent,
@@ -28,6 +32,7 @@ import { bindRouteActionResults } from './route-action-result';
 import { createRoutePendingState } from './route-pending-state';
 import { createRoutePendingOwners } from './route-pending-owners';
 import { createRouteReadiness } from './route-readiness';
+import { createNativeScrollRestoration } from './native-scroll-restoration';
 import { RouteReadyContext } from './route-ready';
 import { createPairedRouteLoading } from './paired-route-loading-state';
 import {
@@ -109,6 +114,7 @@ export function RouteMotionProvider({
   const privacyRevision = usePrivacyRevocationRevision();
   const latestPrivacy = useRef(privacy);
   const mountedActor = useRef(actorId);
+  const liveScrollActor = useRef(actorId);
   const suspended = useRef(true);
   const acceptedGrant = useRef<{ revision: number; epoch: number } | null>(
     null,
@@ -141,8 +147,22 @@ export function RouteMotionProvider({
     value.suspend();
     return value;
   });
+  const [nativeScroll] = useState(() =>
+    createNativeScrollRestoration(readiness),
+  );
   const [presentation] = useState(createRoutePresentationLifetime);
   const [owners] = useState(createRoutePendingOwners);
+  const pathname = usePathname();
+  const query = useSearchParams();
+  const listHref = pathname + (query?.size ? `?${query}` : '');
+  const committedRouteKey = routeKey(
+    pathname ?? '',
+    query ?? new URLSearchParams(),
+  );
+  const liveRouteKey = useRef(committedRouteKey);
+  useLayoutEffect(() => {
+    liveRouteKey.current = committedRouteKey;
+  }, [committedRouteKey]);
   const mountedOwners = useSyncExternalStore(
     owners.subscribe,
     owners.snapshot,
@@ -186,8 +206,8 @@ export function RouteMotionProvider({
         // source may already be leaving; use ordinary loading/crossfade instead
         // of claiming another shared-title source or blocking a server redirect.
         if (interruptedPair) cancelRouteSnapshots();
-        if (target && !interruptedPair)
-          flushSync(() => {
+        flushSync(() => {
+          if (target && !interruptedPair && state.arrivalSupportSnapshot()) {
             state.arm(target);
             const intent = state.snapshot();
             const url = new URL(href, location.origin);
@@ -205,8 +225,14 @@ export function RouteMotionProvider({
               document.documentElement.dataset.motion === 'full'
             )
               loading.arm(intent.name, href, pending.snapshot().epoch);
-          });
-        else state.retire();
+          } else state.retire();
+          state.acceptArrival(
+            href,
+            liveRouteKey.current,
+            pending.snapshot().epoch,
+            location.href,
+          );
+        });
         if (loading.snapshot())
           latestPrivacy.current.navigation?.prepare(href, providerToken);
         else latestPrivacy.current.navigation?.retire(providerToken);
@@ -238,6 +264,7 @@ export function RouteMotionProvider({
       lifecycleRef,
       providerToken,
       presentation,
+      liveRouteKey,
     ],
   );
   const pendingSnapshot = useSyncExternalStore(
@@ -245,22 +272,42 @@ export function RouteMotionProvider({
     pending.snapshot,
     pending.snapshot,
   );
-  const pathname = usePathname();
-  const query = useSearchParams();
-  const listHref = pathname + (query?.size ? `?${query}` : '');
-  const committedRouteKey = routeKey(
-    pathname ?? '',
-    query ?? new URLSearchParams(),
-  );
   const reduced = useEffectiveReducedMotion();
+  useInsertionEffect(() => {
+    // Child primary layout effects may notify readiness before this provider's
+    // layout effect. Publish only committed authority before those callbacks.
+    latestPrivacy.current = privacy;
+    liveScrollActor.current = actorId;
+  }, [privacy, actorId]);
   useInsertionEffect(() => {
     lifecycleRef.current = true;
     currentRouteProvider = providerToken;
+    nativeScroll.bindAuthority(() => {
+      const value = latestPrivacy.current;
+      if (
+        !lifecycleRef.current ||
+        currentRouteProvider !== providerToken ||
+        mountedActor.current !== liveScrollActor.current ||
+        value.revocationRevision !== readPrivacyRevocationRevision() ||
+        (value.ready && !(value.visible ?? value.ready))
+      )
+        return null;
+      return {
+        key: JSON.stringify([
+          mountedActor.current,
+          value.generation,
+          value.revocationRevision,
+          assignmentEpoch(),
+        ]),
+        ready: freshPresentationGrant(value),
+      };
+    });
     const unbindNavigation =
       latestPrivacy.current.navigation?.bind(providerToken);
     const suspendPresentation = () => {
       if (!lifecycleRef.current || currentRouteProvider !== providerToken)
         return;
+      nativeScroll.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -283,6 +330,7 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
+        nativeScroll.invalidate();
         document.documentElement.dataset.routeMotionPrivate = 'false';
         suspended.current = true;
         acceptedGrant.current = null;
@@ -323,6 +371,7 @@ export function RouteMotionProvider({
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
+      nativeScroll.dispose();
       latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
       if (ownsDocument) {
@@ -347,9 +396,9 @@ export function RouteMotionProvider({
     lifecycleRef,
     providerToken,
     presentation,
+    nativeScroll,
   ]);
   useLayoutEffect(() => {
-    latestPrivacy.current = privacy;
     if (!lifecycleRef.current || currentRouteProvider !== providerToken) return;
     if (mountedActor.current === actorId && freshPresentationGrant(privacy)) {
       if (suspended.current && state.resume()) {
@@ -383,6 +432,9 @@ export function RouteMotionProvider({
       readiness.suspend();
       cancelRouteSnapshots();
     }
+    // Temporary same-authority rechecks freeze checkpoints independently of
+    // presentation visibility. Only a fresh grant and real primary can restore.
+    nativeScroll.reconcile();
   }, [
     privacy,
     privacyRevision,
@@ -393,7 +445,63 @@ export function RouteMotionProvider({
     loading,
     providerToken,
     presentation,
+    nativeScroll,
   ]);
+  useEffect(() => {
+    nativeScroll.attach();
+    return nativeScroll.detach;
+  }, [nativeScroll]);
+  useEffect(() => {
+    let observing = true;
+    let navigation: Navigation | undefined;
+    const traverse = (event: Event) => {
+      if (
+        (event as NavigateEvent).navigationType !== 'traverse' ||
+        !observing ||
+        !lifecycleRef.current ||
+        currentRouteProvider !== providerToken ||
+        (!state.arrivalSnapshot() && !state.snapshot())
+      )
+        return;
+      // Passive observation runs before history restore. Commit the withdrawn
+      // generic/title boundary classes before Next can synchronously restore a
+      // page. Preserve the title origin for a later accepted application Back.
+      // Never intercept traversal or alter privacy or readiness owners.
+      flushSync(() => {
+        state.finishArrival();
+        state.finish();
+      });
+    };
+    try {
+      const candidate = window.navigation;
+      if (
+        typeof candidate?.addEventListener !== 'function' ||
+        typeof candidate.removeEventListener !== 'function'
+      )
+        return;
+      navigation = candidate;
+      navigation.addEventListener('navigate', traverse);
+      state.supportArrival(true);
+    } catch {
+      observing = false;
+      state.supportArrival(false);
+      try {
+        navigation?.removeEventListener('navigate', traverse);
+      } catch {
+        /* A failed observer cannot authorize generic arrival motion. */
+      }
+      return;
+    }
+    return () => {
+      observing = false;
+      state.supportArrival(false);
+      try {
+        navigation?.removeEventListener('navigate', traverse);
+      } catch {
+        /* The retired provider callback remains permanently inert. */
+      }
+    };
+  }, [state, providerToken]);
   useEffect(() => {
     let listening = true;
     const invalidate = () => {
@@ -403,6 +511,7 @@ export function RouteMotionProvider({
         currentRouteProvider !== providerToken
       )
         return;
+      nativeScroll.invalidate();
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -436,9 +545,11 @@ export function RouteMotionProvider({
       loading.cancel();
       pending.cancel();
       readiness.cancel();
+      state.finishArrival();
       state.finish();
       cancelRouteSnapshots();
       readiness.history();
+      nativeScroll.reconcile();
     };
     window.addEventListener('popstate', pop, true);
     return () => {
@@ -455,6 +566,7 @@ export function RouteMotionProvider({
     lifecycleRef,
     providerToken,
     presentation,
+    nativeScroll,
   ]);
   useEffect(() => {
     // Next may redirect through its own router, without an accepted Link event.
@@ -477,6 +589,7 @@ export function RouteMotionProvider({
       presentation.invalidate();
       latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
+      state.finishArrival();
       state.finish();
       cancelRouteSnapshots();
     }
@@ -493,6 +606,7 @@ export function RouteMotionProvider({
         lifecycleRef,
         providerToken,
         withdrawGrant: () => {
+          nativeScroll.invalidate();
           latestPrivacy.current.navigation?.retire(providerToken);
           document.documentElement.dataset.routeMotionPrivate = 'false';
           suspended.current = true;
@@ -556,8 +670,24 @@ export function useRouteMotion() {
     state?.snapshot ?? emptyIntent,
     emptyIntent,
   );
-  const enabled = support && !reduced && !!state?.valid();
+  const observerSupport = useSyncExternalStore(
+    state?.subscribe ?? emptySubscribe,
+    state?.arrivalSupportSnapshot ?? serverSupported,
+    serverSupported,
+  );
+  const enabled = support && observerSupport && !reduced && !!state?.valid();
+  const arrival = useSyncExternalStore(
+    state?.subscribe ?? emptySubscribe,
+    state?.arrivalSnapshot ?? emptyIntent,
+    emptyIntent,
+  );
   const epoch = context?.pending.snapshot().epoch;
+  const key = context?.listHref
+    ? (() => {
+        const url = new URL(context.listHref, 'https://inventory.invalid');
+        return routeKey(url.pathname, url.searchParams);
+      })()
+    : undefined;
   const current = () =>
     !!context?.lifecycleRef.current &&
     currentRouteProvider === context.providerToken &&
@@ -565,6 +695,20 @@ export function useRouteMotion() {
     (!intent || state?.snapshot()?.name === intent.name);
   return {
     enabled,
+    arrivalEnabled:
+      enabled &&
+      !!arrival &&
+      context?.pending.current(arrival.epoch) === true &&
+      (key === arrival.sourceKey || key === arrival.destinationKey),
+    arrival,
+    finishArrival: () => {
+      if (
+        current() &&
+        arrival &&
+        (key === arrival.destinationKey || key !== arrival.sourceKey)
+      )
+        state?.finishArrival(arrival);
+    },
     pathname: context?.pathname,
     listHref: context?.listHref,
     intent: enabled ? intent : null,
