@@ -233,6 +233,16 @@ revision render must reject a completed ticket before private bootstrap effects
 mount. These logical React fixtures do not establish real native snapshots or
 production LayoutRouter timing; browser CI remains required.
 
+`native-route-traverse.test.ts` and `native-route-traverse-provider.test.tsx`
+cover the observation-only native-history preparation before a simulated eager
+Next restore, held verification/readiness, matching late popstate and duplicate
+notifications, same-entry replace bookkeeping, precommit abort and rapid supersede,
+identical URLs with distinct entry keys, exact raw query/hash mismatches, logout,
+revocation, hidden-page and provider retirement, plus Reduced/unsupported fallback.
+Disabling the early navigate subscription reproduces the missing preparation;
+restoring it passes the focused regression. These event adapters prove ownership
+and ordering contracts, not real browser snapshot pairing or hosted acceptance.
+
 The native route-motion browser case now authors a real server-primary delay after
 early Flight fallback bytes, rather than holding a complete HTTP response. The
 `route-primary-delay.ts` fixture refuses hosted/nondefault endpoints and scheduling
@@ -708,10 +718,13 @@ request correction; attribution of the observed CI redirect and confirmation of
 the corrected compiled probe still require an actual compiled browser CI rerun.
 Status/content type and a 512 KiB raw-stream cap are
 checked before parsing only bounded JSON data records. A narrow recognizer finds
-the exact static BuildInfo host section and checks its literal rendered children
-and time property. It ignores import/debug rows and unrelated provenance props,
-and fails closed on references inside that section rather than implementing a
-general Flight decoder. Unsupported length-framed text/binary/typed-array records
+the exact static BuildInfo host section and checks its rendered children
+and time property. It follows only bounded JSON data and lazy host references,
+including own-property paths, within that section; import/debug rows and unrelated
+provenance props never supply proof. Missing, cyclic, unsupported or prototype
+reference paths fail closed. The recognizer allows at most 1,024 JSON records,
+64 traversal/reference-path levels and 20,000 nodes per traversal, rather than
+implementing a general Flight decoder. Unsupported length-framed text/binary/typed-array records
 fail closed before any line scanning, so their raw payload cannot manufacture
 apparent JSON data records. Privacy withholding on SSR HTML remains intact. This
 proves compiled server-rendered Flight values; the separate signed-in Settings

@@ -180,6 +180,11 @@ browser Back shares when its actual history URL is the exact departing results
 scope, either unanchored or bearing that same anchor. Ordinals locate anchors and
 do not identify holdings. Reordered holdings can pair at their new ordinal;
 deleted/replaced/ambiguous holdings fade instead. No history entry is changed for animation.
+Native Back prepares that pair before URL commit through progressive, observation-only
+Navigation API events. The exact destination entry key and raw URL/hash correlate
+the later commit/popstate; same-entry Next history bookkeeping cannot re-arm the
+ticket. Unsupported browsers retain functional popstate navigation and canonical
+privacy admission, without guaranteed shared-title pairing before an eager restore.
 Pair approval is staged and consumed within the same accepted Link event, for its
 exact href and current provider generation. Prevented/thrown handlers discard it;
 plain detail navigation or failed capture retires any older title intent/origin.

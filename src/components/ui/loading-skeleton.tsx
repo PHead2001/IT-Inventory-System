@@ -220,6 +220,38 @@ function fullMotion() {
   );
 }
 
+function feedbackTiming() {
+  const style = getComputedStyle(document.documentElement);
+  const time = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)(ms|s)$/i.exec(
+    style.getPropertyValue('--motion-feedback').trim(),
+  );
+  if (!time) return null;
+  const duration = Number(time[1]) * (time[2].toLowerCase() === 's' ? 1000 : 1);
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 250)
+    return null;
+  const easing = style.getPropertyValue('--ease-workspace').trim();
+  const number = '[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:e[+-]?\\d+)?';
+  const cubic = new RegExp(
+    `^cubic-bezier\\(\\s*(${number})\\s*,\\s*(${number})\\s*,\\s*(${number})\\s*,\\s*(${number})\\s*\\)$`,
+    'i',
+  ).exec(easing);
+  const validCubic =
+    cubic &&
+    cubic.slice(1).every((value) => Number.isFinite(Number(value))) &&
+    Number(cubic[1]) >= 0 &&
+    Number(cubic[1]) <= 1 &&
+    Number(cubic[3]) >= 0 &&
+    Number(cubic[3]) <= 1;
+  if (
+    !validCubic &&
+    !/^(linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end)$/.test(
+      easing,
+    )
+  )
+    return null;
+  return { duration, easing };
+}
+
 function RevealMotion({
   host,
   busy,
@@ -241,11 +273,19 @@ function RevealMotion({
       fullMotion() &&
       document.visibilityState === 'visible' &&
       typeof host.current?.animate === 'function'
-    )
-      animation.current = host.current.animate(
-        [{ opacity: 0.65 }, { opacity: 1 }],
-        { duration: 130, easing: 'ease-out' },
-      );
+    ) {
+      try {
+        const timing = feedbackTiming();
+        if (timing)
+          animation.current = host.current.animate(
+            [{ opacity: 0.65 }, { opacity: 1 }],
+            timing,
+          );
+      } catch {
+        // Unsupported timing/WAAPI leaves the already-resolved content static.
+        animation.current = null;
+      }
+    }
     wasBusy.current = busy;
     return () => animation.current?.cancel();
   }, [busy, reveal, host]);

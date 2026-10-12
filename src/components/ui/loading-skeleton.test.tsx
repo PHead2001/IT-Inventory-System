@@ -6,6 +6,11 @@ import { MotionPreference } from '@/components/experience/motion-preference';
 
 beforeEach(() => {
   document.documentElement.dataset.motion = 'full';
+  document.documentElement.style.setProperty('--motion-feedback', '130ms');
+  document.documentElement.style.setProperty(
+    '--ease-workspace',
+    'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  );
   localStorage.removeItem('it-inventory-reduce-motion');
   window.dispatchEvent(
     new StorageEvent('storage', { key: 'it-inventory-reduce-motion' }),
@@ -18,9 +23,103 @@ beforeEach(() => {
 });
 afterEach(() => {
   delete document.documentElement.dataset.motion;
+  document.documentElement.style.removeProperty('--motion-feedback');
+  document.documentElement.style.removeProperty('--ease-workspace');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.removeItem('it-inventory-reduce-motion');
+});
+
+it.each(['175ms', '.175s', '1.75e-1s'])(
+  'reads the live feedback timing and workspace easing at resolution (%s)',
+  (duration) => {
+    const original = HTMLElement.prototype.animate;
+    const animate = vi.fn(() => ({ cancel: vi.fn() }));
+    HTMLElement.prototype.animate = animate as unknown as typeof original;
+    try {
+      const content = (busy: boolean) => (
+        <LoadingReveal busy={busy}>
+          <input aria-label="Token draft" defaultValue="Retained" />
+        </LoadingReveal>
+      );
+      const view = render(content(true));
+      const input = screen.getByLabelText('Token draft');
+      input.focus();
+      document.documentElement.style.setProperty('--motion-feedback', duration);
+      document.documentElement.style.setProperty('--ease-workspace', 'ease-in');
+      view.rerender(content(false));
+      expect(animate).toHaveBeenCalledWith(
+        [{ opacity: 0.65 }, { opacity: 1 }],
+        { duration: 175, easing: 'ease-in' },
+      );
+      expect(screen.getByLabelText('Token draft')).toBe(input);
+      expect(input).toHaveFocus();
+      expect(input).toHaveValue('Retained');
+    } finally {
+      HTMLElement.prototype.animate = original;
+    }
+  },
+);
+
+it.each([
+  ['', 'ease-out'],
+  ['130', 'ease-out'],
+  ['130ms invalid', 'ease-out'],
+  ['0ms', 'ease-out'],
+  ['-1ms', 'ease-out'],
+  ['251ms', 'ease-out'],
+  ['1e999s', 'ease-out'],
+  ['130ms', ''],
+  ['130ms', 'invalid'],
+  ['130ms', 'cubic-bezier(2, 0, 0, 1)'],
+  ['130ms', 'cubic-bezier(0, 1e999, 0, 1)'],
+])('keeps invalid feedback timing %s / %s static', (duration, easing) => {
+  document.documentElement.style.setProperty('--motion-feedback', duration);
+  document.documentElement.style.setProperty('--ease-workspace', easing);
+  const original = HTMLElement.prototype.animate;
+  const animate = vi.fn();
+  HTMLElement.prototype.animate = animate as unknown as typeof original;
+  try {
+    const view = render(
+      <LoadingReveal busy>
+        <p>Current content</p>
+      </LoadingReveal>,
+    );
+    view.rerender(
+      <LoadingReveal busy={false}>
+        <p>Current content</p>
+      </LoadingReveal>,
+    );
+    expect(screen.getByText('Current content')).toBeVisible();
+    expect(animate).not.toHaveBeenCalled();
+  } finally {
+    HTMLElement.prototype.animate = original;
+  }
+});
+
+it('keeps resolved content usable when the browser rejects a reveal animation', () => {
+  const original = HTMLElement.prototype.animate;
+  const animate = vi.fn(() => {
+    throw new TypeError('Unsupported animation timing');
+  });
+  HTMLElement.prototype.animate = animate as unknown as typeof original;
+  try {
+    const view = render(
+      <LoadingReveal busy>
+        <p>Current content</p>
+      </LoadingReveal>,
+    );
+    expect(() =>
+      view.rerender(
+        <LoadingReveal busy={false}>
+          <p>Current content</p>
+        </LoadingReveal>,
+      ),
+    ).not.toThrow();
+    expect(screen.getByText('Current content')).toBeVisible();
+  } finally {
+    HTMLElement.prototype.animate = original;
+  }
 });
 
 it('server renders static decorative placeholders with one nonvisual polite status', () => {

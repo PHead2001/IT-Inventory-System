@@ -1,8 +1,10 @@
+import { setCacheBustingSearchParam } from 'next/dist/client/components/router-reducer/set-cache-busting-search-param.js';
+
 const quantityRecordPath =
   /^\/inventory\/quantity\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 /** Build the smallest authenticated request that asks Next for a full Flight. */
-export function buildFullQuantityFlightProbe(
+export async function buildFullQuantityFlightProbe(
   requestUrl: string,
   cookie: string,
 ) {
@@ -19,15 +21,43 @@ export function buildFullQuantityFlightProbe(
   }
   if (!cookie) throw new Error('Missing authenticated browser cookie.');
 
+  const headers = {
+    Cookie: cookie,
+    rsc: '1' as const,
+    Accept: 'text/x-component',
+  };
+  // Full Flight omits router-state/prefetch headers, but still needs their
+  // matching (empty) hash. Missing _rsc redirects before Next renders the route.
   target.searchParams.delete('_rsc');
+  await setCacheBustingSearchParam(target, headers);
   return {
     url: target.href,
-    headers: {
-      Cookie: cookie,
-      RSC: '1',
-      Accept: 'text/x-component',
-    },
+    headers,
+    redirect: 'error' as const,
   };
+}
+
+export async function fetchFullQuantityFlightProbe(
+  requestUrl: string,
+  cookie: string,
+  signal: AbortSignal,
+  transport: typeof fetch = fetch,
+) {
+  const probe = await buildFullQuantityFlightProbe(requestUrl, cookie);
+  const response = await transport(probe.url, {
+    headers: probe.headers,
+    redirect: probe.redirect,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(1500)]),
+  });
+  // Defend against a replacement transport returning a redirected response.
+  if (
+    response.redirected ||
+    (response.status >= 300 && response.status < 400)
+  ) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error('Full Flight redirects are refused.');
+  }
+  return response;
 }
 
 export async function readFallbackMarker(

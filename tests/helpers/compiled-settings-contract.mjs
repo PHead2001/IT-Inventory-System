@@ -98,7 +98,7 @@ const hostElement = (node) =>
   typeof node[3] === 'object' &&
   !Array.isArray(node[3]);
 
-/** Recognize the static BuildInfo host tree; this is not a Flight decoder. */
+/** Recognize BuildInfo host data, including the installed renderer's outlining. */
 export function assertServedBuild(flight, expected) {
   assert.ok(
     Buffer.byteLength(flight, 'utf8') <= maxFlightBytes,
@@ -127,33 +127,81 @@ export function assertServedBuild(flight, expected) {
       sections.push(value);
     for (const child of Object.values(value)) visit(child, depth + 1);
   }
-  let records = 0;
+  const models = new Map();
   for (const line of flight.split('\n')) {
-    const record = line.match(/^[0-9a-f]+:([\[{].*)$/i);
+    const record = line.match(/^([0-9a-f]+):([\[{"].*)$/i);
     if (!record) continue; // Ignore imports, debugging and all non-JSON records.
-    assert.ok(++records <= 1024, 'Flight response exceeds record limit');
+    assert.ok(models.size < 1024, 'Flight response exceeds record limit');
+    const id = record[1].toLowerCase();
+    assert.ok(!models.has(id), 'Malformed Flight JSON duplicate record');
     let value;
     try {
-      value = JSON.parse(record[1]);
+      value = JSON.parse(record[2]);
     } catch {
       throw new Error('Malformed Flight JSON data record');
     }
-    visit(value);
+    models.set(id, value);
   }
+  for (const value of models.values()) visit(value);
   assert.equal(sections.length, 1, 'requires one exact BuildInfo host section');
   const elements = [];
   let literalNodes = 0;
-  function literalText(value, depth = 0, collect = true) {
+  const references = new Set();
+  function resolveData(value, depth, consume) {
     assert.ok(
       depth <= 64 && ++literalNodes <= 20_000,
       'BuildInfo exceeds literal tree limit',
     );
+    if (typeof value === 'string') {
+      const reference = value.match(
+        /^\$(?:L([0-9a-f]+)|([0-9a-f]+)((?::[^:]+)*))$/,
+      );
+      if (reference) {
+        assert.ok(
+          !references.has(value),
+          'BuildInfo requires acyclic references',
+        );
+        const id = reference[1] ?? reference[2];
+        assert.ok(
+          models.has(id),
+          'BuildInfo requires an existing data reference',
+        );
+        let resolved = models.get(id);
+        const path = reference[3] ? reference[3].slice(1).split(':') : [];
+        assert.ok(path.length <= 64, 'BuildInfo exceeds reference path limit');
+        for (const key of path) {
+          assert.ok(
+            !['__proto__', 'prototype', 'constructor'].includes(key) &&
+              resolved !== null &&
+              typeof resolved === 'object' &&
+              Object.hasOwn(resolved, key),
+            'BuildInfo requires an own data reference path',
+          );
+          resolved = resolved[key];
+        }
+        references.add(value);
+        try {
+          return resolveData(resolved, depth + 1, consume);
+        } finally {
+          references.delete(value);
+        }
+      }
+    }
+    return consume(value, depth);
+  }
+  function literalText(value, depth = 0, collect = true) {
+    return resolveData(value, depth, (resolved, resolvedDepth) =>
+      literalChildren(resolved, resolvedDepth, collect),
+    );
+  }
+  function literalChildren(value, depth, collect) {
     if (value === null || value === undefined || typeof value === 'boolean')
       return '';
     if (typeof value === 'string') {
+      if (value.startsWith('$$')) return value.slice(1);
       assert.ok(
         !value.startsWith('$'),
-        'BuildInfo requires literal children, not Flight references',
+        'BuildInfo requires literal children or supported data references',
       );
       return value;
     }
@@ -171,6 +219,15 @@ export function assertServedBuild(flight, expected) {
       .map((child) => literalText(child, depth + 1, collect))
       .join('');
   }
+  const scalarString = (value) =>
+    resolveData(value, 0, (resolved) => {
+      assert.equal(
+        typeof resolved,
+        'string',
+        'served time must be a scalar string',
+      );
+      return resolved;
+    });
   literalText(sections[0]);
   const textOf = (element) => literalText(element[3].children, 0, false);
   // Only rendered children/properties in this section count, never opaque
@@ -196,7 +253,8 @@ export function assertServedBuild(flight, expected) {
   assert.equal(
     elements.filter(
       (node) =>
-        node[1] === 'time' && node[3].dateTime === expected.buildStarted,
+        node[1] === 'time' &&
+        scalarString(node[3].dateTime) === expected.buildStarted,
     ).length,
     1,
     'served time must match build exactly',

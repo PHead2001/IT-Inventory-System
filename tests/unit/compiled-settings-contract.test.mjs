@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { createBuildProvenance } from '../../src/features/build-info/provenance';
 import { computeCacheBustingSearchParam } from 'next/dist/shared/lib/router/utils/cache-busting-search-param.js';
 import { defaultConfig } from 'next/dist/server/config-shared.js';
@@ -133,6 +134,161 @@ it('requires exact rendered fields in the section instead of matching unrelated 
       expected,
     ),
   ).toThrow();
+});
+it('accepts outlined host children emitted by the installed production Flight renderer', () => {
+  const rendered = spawnSync(
+    process.execPath,
+    [
+      '--conditions=react-server',
+      '--import',
+      'tsx',
+      'tests/helpers/compiled-settings-render-fixture.mjs',
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: maxFlightBytes,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        NODE_OPTIONS: '--max-old-space-size=768',
+      },
+    },
+  );
+  expect(rendered.error, 'Synthetic renderer must finish').toBeUndefined();
+  expect(rendered.status, 'Synthetic renderer must succeed').toBe(0);
+  expect(
+    /"\$L?[0-9a-f]+(?::[^"\n]+)?"/.test(rendered.stdout),
+    'Synthetic renderer must exercise outlined data',
+  ).toBe(true);
+  expect(() => assertServedBuild(rendered.stdout, expected)).not.toThrow();
+});
+it('resolves only bounded data references inside the BuildInfo host tree', () => {
+  const outlined = section();
+  const children = outlined[3].children;
+  outlined[3].children = '$L1';
+  const payload = `0:${JSON.stringify(outlined)}\n1:${JSON.stringify(children)}\n`;
+  expect(() => assertServedBuild(payload, expected)).not.toThrow();
+  const pathTree = section();
+  pathTree[3].children = '$2:rendered';
+  expect(() =>
+    assertServedBuild(
+      `0:${JSON.stringify(pathTree)}\n2:${JSON.stringify({ rendered: children })}\n`,
+      expected,
+    ),
+  ).not.toThrow();
+  for (const reference of [
+    '$L9',
+    '$L1',
+    '$L1:rendered',
+    '$1:missing',
+    '$1:__proto__',
+    '$@1',
+    '$F1',
+  ]) {
+    outlined[3].children = reference;
+    expect(() =>
+      assertServedBuild(`0:${JSON.stringify(outlined)}\n1:["$L1"]\n`, expected),
+    ).toThrow();
+  }
+  outlined[3].children = '$L1';
+  expect(() =>
+    assertServedBuild(
+      `0:${JSON.stringify(outlined)}\n1:I${JSON.stringify(children)}\n`,
+      expected,
+    ),
+  ).toThrow();
+  expect(() =>
+    assertServedBuild(
+      `0:${JSON.stringify(outlined)}\n1:D${JSON.stringify(children)}\n`,
+      expected,
+    ),
+  ).toThrow();
+  outlined[3].children = '$F1';
+  expect(() =>
+    assertServedBuild(
+      `0:${JSON.stringify(outlined)}\nf1:${JSON.stringify(children)}\n`,
+      expected,
+    ),
+  ).toThrow('BuildInfo requires literal children or supported data references');
+  outlined[3].children = '$L1';
+  expect(() =>
+    assertServedBuild(
+      `0:${JSON.stringify(outlined)}\n1:${JSON.stringify(section({ ...expected, commit: 'forged' })[3].children)}\n`,
+      expected,
+    ),
+  ).toThrow('served commit must match build exactly');
+});
+it('bounds outlined reference chains, expanded trees and duplicate data records', () => {
+  const outlined = section();
+  outlined[3].children = '$1';
+  const root = `0:${JSON.stringify(outlined)}\n`;
+  const chain = Array.from(
+    { length: 70 },
+    (_, index) =>
+      `${(index + 1).toString(16)}:["$${(index + 2).toString(16)}"]\n`,
+  ).join('');
+  expect(() =>
+    assertServedBuild(
+      root + chain + `47:${JSON.stringify(section()[3].children)}\n`,
+      expected,
+    ),
+  ).toThrow('BuildInfo exceeds literal tree limit');
+  const repeated = Array.from(
+    { length: 15 },
+    (_, index) =>
+      `${(index + 1).toString(16)}:["$${(index + 2).toString(16)}","$${(index + 2).toString(16)}"]\n`,
+  ).join('');
+  expect(() =>
+    assertServedBuild(
+      root + repeated + `10:${JSON.stringify(section()[3].children)}\n`,
+      expected,
+    ),
+  ).toThrow('BuildInfo exceeds literal tree limit');
+  expect(() => assertServedBuild(flight() + '0:{}\n', expected)).toThrow(
+    'Malformed Flight JSON duplicate record',
+  );
+});
+it('requires an exact scalar dateTime attribute after bounded data reference resolution', () => {
+  const timeTree = (dateTime) => {
+    const tree = section();
+    // Retain valid rendered children while varying only the time property.
+    tree[3].children[2][3].children[3].children[1][3].children[1][3].children[3].dateTime =
+      dateTime;
+    return `0:${JSON.stringify(tree)}\n`;
+  };
+  for (const dateTime of [
+    [expected.buildStarted, ''],
+    [expected.buildStarted],
+    element('span', expected.buildStarted),
+    { value: expected.buildStarted },
+  ]) {
+    expect(() => assertServedBuild(timeTree(dateTime), expected)).toThrow(
+      'served time must be a scalar string',
+    );
+  }
+  expect(() =>
+    assertServedBuild(
+      timeTree('$a') + `a:${JSON.stringify(expected.buildStarted)}\n`,
+      expected,
+    ),
+  ).not.toThrow();
+  expect(() =>
+    assertServedBuild(
+      timeTree('$a') +
+        `a:"$b:timestamp"\nb:${JSON.stringify({ timestamp: expected.buildStarted })}\n`,
+      expected,
+    ),
+  ).not.toThrow();
+  expect(() =>
+    assertServedBuild(
+      timeTree('$a') + `a:${JSON.stringify([expected.buildStarted, ''])}\n`,
+      expected,
+    ),
+  ).toThrow('served time must be a scalar string');
+  expect(() =>
+    assertServedBuild(timeTree('$a') + 'a:"$a"\n', expected),
+  ).toThrow('BuildInfo requires acyclic references');
 });
 it('rejects malformed, missing, duplicate, oversized and unsupported referenced trees', () => {
   for (const payload of [

@@ -16,7 +16,7 @@ import {
   logoutAcknowledgementKey,
 } from '../../src/lib/auth/privacy-barrier';
 import {
-  buildFullQuantityFlightProbe,
+  fetchFullQuantityFlightProbe,
   readFallbackMarker,
 } from './quantity-flight-probe';
 
@@ -258,20 +258,19 @@ async function earlyQuantityFallback(request: Request) {
   let bytes = 0;
   try {
     const browserHeaders = await request.allHeaders();
-    const probe = buildFullQuantityFlightProbe(
+    stage = 'response-headers';
+    const response = await fetchFullQuantityFlightProbe(
       request.url(),
       browserHeaders.cookie ?? '',
+      controller.signal,
     );
-    stage = 'response-headers';
-    const response = await fetch(probe.url, {
-      headers: probe.headers,
-      signal: controller.signal,
-    });
     status = response.status;
     if (response.body) reader = response.body.getReader();
     if (
-      !response.ok ||
-      !response.headers.get('content-type')?.includes('text/x-component') ||
+      response.status !== 200 ||
+      response.redirected ||
+      response.headers.get('content-type')?.split(';')[0].trim() !==
+        'text/x-component' ||
       !reader
     ) {
       throw new Error('Invalid full Flight response.');

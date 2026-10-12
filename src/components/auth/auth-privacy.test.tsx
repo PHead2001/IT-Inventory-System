@@ -1033,6 +1033,12 @@ it('a pre-receipt privacy alert does not prove logout or authorize private recov
     screen.queryByRole('button', { name: 'Finish signing out' }),
   ).not.toBeInTheDocument();
   await act(async () => complete({ ok: true, ...receipt }));
+  const completion = screen.getByRole('button', {
+    name: 'Finish signing out',
+  }).parentElement!;
+  expect(completion.querySelector('[role="alert"]')).toHaveTextContent(
+    'This tab’s privacy cleanup state cannot be verified. Keep its saved data intact and close this tab before signing in.',
+  );
   expect(
     await screen.findByRole('button', { name: 'Finish signing out' }),
   ).toBeVisible();

@@ -4,28 +4,31 @@ import {
   Suspense,
   ViewTransition,
   startTransition,
+  useContext,
   useEffect,
   useLayoutEffect,
   useState,
 } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { PageArrival } from './page-arrival';
+import {
+  RoutePresentationLifetimeContext,
+  RoutePresentationSourceContext,
+} from './route-presentation-source';
+import { createRoutePresentationLifetime } from './route-presentation-lifetime';
 
 const route = vi.hoisted(() => ({
   pathname: '/dashboard',
   enabled: true,
-  boundaries: [] as Array<{
-    enter: string;
-    exit: string;
-    update?: string;
-    default: string;
-    name?: string;
-    share?: string;
-  }>,
+  boundaries: [] as Array<import('react').ViewTransitionProps>,
 }));
 vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 vi.mock('./route-motion', () => ({
-  useRouteMotion: () => ({ enabled: route.enabled, cancelIfInvalid: vi.fn() }),
+  useRouteMotion: () => ({
+    enabled: route.enabled,
+    cancelIfInvalid: vi.fn(),
+    finishAfterSnapshot: vi.fn(),
+  }),
 }));
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
@@ -36,6 +39,122 @@ vi.mock('react', async (importOriginal) => {
       return props.children;
     },
   };
+});
+
+it('consumes each committed pathname update before same-path refreshes can replay it', () => {
+  route.pathname = '/inventory';
+  const node = (pathname: string) => (
+    <PageArrival pathname={pathname}>
+      <PersistentForm />
+    </PageArrival>
+  );
+  const page = render(node('/inventory'));
+  const input = screen.getByRole('textbox');
+  fireEvent.change(input, { target: { value: 'one mounted draft' } });
+  route.pathname = '/history';
+  page.rerender(node('/history'));
+  expect(
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(true);
+  expect(
+    route.boundaries.findLast((boundary) => boundary.enter !== undefined)
+      ?.update,
+  ).toBe('none');
+  route.boundaries = [];
+  page.rerender(node('/history'));
+  expect(
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(false);
+  expect(screen.getByRole('textbox')).toBe(input);
+  expect(input).toHaveValue('one mounted draft');
+  expect(mounts).toBe(1);
+});
+
+it('keeps captured callbacks bound to their original source through cleanup and later pathname commits', () => {
+  const lifetime = createRoutePresentationLifetime();
+  let source: symbol | undefined;
+  function SourceWitness() {
+    const currentSource = useContext(RoutePresentationSourceContext);
+    useLayoutEffect(() => {
+      source = currentSource;
+    }, [currentSource]);
+    return <PersistentForm />;
+  }
+  const node = (pathname: string) => (
+    <RoutePresentationLifetimeContext value={lifetime}>
+      <PageArrival pathname={pathname}>
+        <SourceWitness />
+      </PageArrival>
+    </RoutePresentationLifetimeContext>
+  );
+  route.pathname = '/inventory';
+  const page = render(node('/inventory'));
+  const oldTicket = lifetime.capture(
+    source!,
+    () => true,
+    () => true,
+  )!;
+  expect(oldTicket.current()).toBe(true);
+  lifetime.navigation();
+  route.pathname = '/history';
+  page.rerender(node('/history'));
+  const oldCallback = route.boundaries.findLast(
+    (boundary) => boundary.update === 'route-content',
+  )!.onUpdate!;
+  expect(
+    route.boundaries.findLast((boundary) => boundary.enter !== undefined)
+      ?.update,
+  ).toBe('none');
+  // The original committed descriptor survives the state cleanup render.
+  const finishOld = oldCallback({ name: 'old' } as never, []);
+  expect(oldTicket.current()).toBe(true);
+  const nextTicket = lifetime.capture(
+    source!,
+    () => true,
+    () => true,
+  )!;
+  lifetime.navigation();
+  route.pathname = '/settings';
+  page.rerender(node('/settings'));
+  const nextCallback = route.boundaries.findLast(
+    (boundary) => boundary.update === 'route-content',
+  )!.onUpdate!;
+  const finishNext = nextCallback({ name: 'next' } as never, []);
+  expect(nextTicket.current()).toBe(true);
+  expect(finishOld).toEqual(expect.any(Function));
+  act(() => {
+    if (typeof finishOld === 'function') finishOld();
+  });
+  expect(nextTicket.current()).toBe(true);
+  expect(oldCallback({ name: 'late-old' } as never, [])).toBeUndefined();
+  expect(nextTicket.current()).toBe(true);
+  expect(finishNext).toEqual(expect.any(Function));
+  act(() => {
+    if (typeof finishNext === 'function') finishNext();
+  });
+  expect(nextTicket.current()).toBe(false);
+  oldTicket.release();
+  nextTicket.release();
+});
+
+it('does not resurrect a static pathname change when motion is enabled later', () => {
+  route.pathname = '/inventory';
+  route.enabled = false;
+  const node = (pathname: string) => (
+    <PageArrival pathname={pathname}>
+      <PersistentForm />
+    </PageArrival>
+  );
+  const page = render(node('/inventory'));
+  route.pathname = '/history';
+  page.rerender(node('/history'));
+  route.enabled = true;
+  route.boundaries = [];
+  page.rerender(node('/history'));
+  expect(
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(false);
+  expect(mounts).toBe(1);
 });
 
 it('isolates descendant-only and query/refresh changes while nested titles keep their own explicit opt-in', () => {
@@ -139,14 +258,14 @@ it('abandoned B cannot checkpoint source history before C commits and a later B 
     release();
     await pending;
   });
+  route.boundaries = [];
   await act(async () => {
     startTransition(() => navigate('/history'));
   });
   expect(screen.getByText('Committed /history')).toBeVisible();
   expect(
-    route.boundaries.findLast((boundary) => boundary.enter !== undefined)
-      ?.update,
-  ).toBe('route-content');
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(true);
 });
 let mounts = 0;
 function PersistentForm() {
@@ -221,21 +340,21 @@ it('accepted A to B to Back keeps the persistent router child and its cached dra
     target: { value: 'cached camera/workspace analogue' },
   });
   route.pathname = '/history';
+  route.boundaries = [];
   page.rerender(node('/history'));
   expect(
-    route.boundaries.findLast((boundary) => boundary.enter !== undefined)
-      ?.update,
-  ).toBe('route-content');
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(true);
   expect(screen.getByText('Cached history')).toBeVisible();
   route.pathname = '/inventory';
+  route.boundaries = [];
   page.rerender(node('/inventory'));
   expect(screen.getByRole('textbox', { name: 'Unsaved note' })).toBe(draft);
   expect(draft).toHaveValue('cached camera/workspace analogue');
   expect(cacheMounts).toBe(1);
   expect(
-    route.boundaries.findLast((boundary) => boundary.enter !== undefined)
-      ?.update,
-  ).toBe('route-content');
+    route.boundaries.some((boundary) => boundary.update === 'route-content'),
+  ).toBe(true);
   page.rerender(node('/inventory'));
   expect(page.container.querySelector('[data-route-path]')).toHaveAttribute(
     'data-route-path',

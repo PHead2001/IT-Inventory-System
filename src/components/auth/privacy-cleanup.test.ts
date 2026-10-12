@@ -4,7 +4,7 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/auth/actions', () => actions);
 vi.mock('@/lib/auth/logout-transport', () => actions);
-import { verifyTabPrivacy } from './privacy-cleanup';
+import { unverifiableIssue, verifyTabPrivacy } from './privacy-cleanup';
 import { logoutAcknowledgementKey } from '@/lib/auth/privacy-barrier';
 import {
   readAuthoritativeCleanupRevision,
@@ -36,7 +36,11 @@ it('recovers after the first storage read throws before any tombstone can be wri
   const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
     throw new Error('blocked');
   });
-  expect((await verifyTabPrivacy(current, () => true, true)).ready).toBe(false);
+  expect(await verifyTabPrivacy(current, () => true, true)).toEqual({
+    ready: false,
+    issue: unverifiableIssue,
+  });
+  expect(actions.acknowledgeLogoutPrivacyGeneration).not.toHaveBeenCalled();
   get.mockRestore();
   expect(sessionStorage.getItem('inventory-assign-cleanup-v1')).toBeNull();
   expect(sessionStorage.getItem(command)).toBe('exact uncertain command');

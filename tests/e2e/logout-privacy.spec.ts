@@ -113,12 +113,16 @@ test('real logout survives a first cleanup read failure and a hard reload before
     logoutGeneration: expect.any(String),
   });
   expect(isLogoutGeneration(receipt.logoutGeneration)).toBe(true);
-  await expect(
-    page.getByRole('alert').filter({
-      hasText:
-        /^Signed out, but this tab could not clear its private saved data\./,
-    }),
-  ).toBeVisible();
+  // Unlike the pre-receipt privacy alert, this control belongs to the confirmed
+  // completion owner and retries cleanup without repeating the logout mutation.
+  const finishSignOut = page.getByRole('button', {
+    name: 'Finish signing out',
+    exact: true,
+  });
+  await expect(finishSignOut).toBeVisible();
+  await expect(finishSignOut.locator('..').getByRole('alert')).toHaveText(
+    'This tab’s privacy cleanup state cannot be verified. Keep its saved data intact and close this tab before signing in.',
+  );
   await expect
     .poll(async () => {
       const cookie = await reminder(page);

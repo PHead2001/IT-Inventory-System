@@ -1,6 +1,6 @@
 'use client';
 
-import { ViewTransition, useState } from 'react';
+import { ViewTransition, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useRouteMotion } from './route-motion';
 import {
@@ -64,6 +64,23 @@ export function PageArrival({
     history.source,
     history.previous?.source,
   );
+  useEffect(() => {
+    const previous = history.previous;
+    if (!previous) return;
+    // React queues the original capture callbacks before passive effects. Clear
+    // only this committed pair; their source descriptors remain bound through
+    // native completion while later same-path updates have no outgoing source.
+    // Reduced/unsupported commits have no onUpdate callback to retire the pair.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize one-shot history with the committed native transition, after capture.
+    setHistory((current) =>
+      current.pathname === history.pathname &&
+      current.source === history.source &&
+      current.previous?.pathname === previous.pathname &&
+      current.previous.source === previous.source
+        ? { pathname: current.pathname, source: current.source }
+        : current,
+    );
+  }, [history]);
   const animate = enabled && pathname !== '/room' && livePathname !== '/room';
   const update =
     animate &&
