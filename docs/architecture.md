@@ -104,7 +104,7 @@ same-page rechecks retain draft/business ownership and existing recovery contrac
 See [interface standards](interface-standards.md) and [validation](validation.md)
 for supported fallback paths and the remaining native/product acceptance.
 
-Eligible paired navigation and supported native Back start one controller-owned privacy target check
+Eligible application Link pairs start one controller-owned privacy target check
 before Next commits the pathname. The ticket captures the exact full route key,
 provider incarnation, original server binding, generation, server revision,
 explicit revision, callback/revocation epochs and request sequence. Inventory list
@@ -121,18 +121,16 @@ authorization and real visible readiness remain required. Supersede, cancellatio
 retire and settle the old ticket. Changed logout evidence starts distinct current-
 route recovery rather than rebasing the captured target proof.
 
-Native Back progressively observes the browser's trusted same-document Navigation
-API `navigate` event before Next restores pathname context. One immutable candidate
-captures the provider, committed source, exact destination URL/hash and history
-entry key, plus the pending epoch and preparation identity. `currententrychange`
-correlates its actual commit; Next's same-entry replace bookkeeping preserves the
-candidate. The later matching popstate registers history readiness once without
-canceling or preparing another privacy ticket. Navigation success never grants
-privacy admission or primary readiness. Precommit abort, supersede, mismatch,
-hidden-page, revocation and provider retirement discard only the owned candidate.
-No navigation is intercepted and no Next/history method is patched. Browsers
-without this API use ordinary popstate navigation and the existing privacy gates;
-shared-title pairing before Next's eager restore is not guaranteed there.
+Native browser Back/Forward uses the installed Next/React eager history restore
+and is instant. The route provider observes popstate only to retire departing
+presentation, cancel a paired wait and register real authorized primary readiness.
+It creates no Navigation API preparation or target privacy ticket for traversal,
+and never intercepts navigation or patches router/history methods, lanes or events.
+URL filters, source row/anchor and scroll restore through the canonical Next/browser
+history path; current Auth and privacy verification still govern incoming content.
+The ephemeral approved origin remains available for a later application **Back to
+results** Link after native Forward. Only that accepted Link gesture may stage a
+new shared-title pair. Revocation and provider retirement still clear the origin.
 
 Inventory uses a collapsed Add item disclosure with equally styled quantity-item and individual-asset paths, examples and the existing filtered return context. The protected header exposes the verified member's full name and role through a compact native account disclosure, including at narrow widths; identity is never stored separately in browser storage.
 

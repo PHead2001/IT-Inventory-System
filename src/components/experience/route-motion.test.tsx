@@ -578,7 +578,7 @@ it.each([true, false])(
   },
 );
 
-it('first native Back names the remembered initiating ordinal on an unanchored results entry without changing history', () => {
+it('native Back clears title motion on an unanchored results entry without changing history', () => {
   const originalHref = location.href;
   window.history.replaceState(null, '', '/inventory');
   const push = vi.spyOn(window.history, 'pushState');
@@ -592,13 +592,12 @@ it('first native Back names the remembered initiating ordinal on an unanchored r
     const name = screen
       .getByRole('heading')
       .getAttribute('data-test-transition-name');
-    expect(name).toMatch(/^inventory-title-/);
+    expect(name).toBeNull();
     runtime.pathname = '/inventory';
     rerender(view(<List />));
-    expect(screen.getByRole('link', { name: 'Cable row 2' })).toHaveAttribute(
-      'data-test-transition-name',
-      name,
-    );
+    expect(
+      screen.getByRole('link', { name: 'Cable row 2' }),
+    ).not.toHaveAttribute('data-test-transition-name');
     expect(
       screen.getByRole('link', { name: 'Cable row 1' }),
     ).not.toHaveAttribute('data-test-transition-name');
@@ -680,7 +679,7 @@ it.each([
     matchedRow: null,
   },
 ])(
-  'native Back matches the initiating stable holding when $change',
+  'app Back matches the initiating stable holding when $change',
   ({ holdings, matchedRow }) => {
     const originalHref = location.href;
     window.history.replaceState(null, '', '/inventory');
@@ -689,7 +688,24 @@ it.each([
       fireEvent.click(screen.getByRole('link', { name: 'Cable row 2' }));
       runtime.pathname = detailPath;
       rerender(view(<Detail />));
-      act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+      let loading!: React.ContextType<typeof PairedRouteLoadingContext>;
+      function SettlePrimary() {
+        const current = useContext(PairedRouteLoadingContext);
+        useLayoutEffect(() => {
+          loading = current;
+        }, [current]);
+        return null;
+      }
+      rerender(
+        view(
+          <>
+            <SettlePrimary />
+            <Detail />
+          </>,
+        ),
+      );
+      act(() => loading!.store.ready(detailPath));
+      fireEvent.click(screen.getByRole('link', { name: 'Back to results' }));
       const name = screen
         .getByRole('heading')
         .getAttribute('data-test-transition-name');
@@ -773,7 +789,7 @@ it.each([
         screen
           .getByRole('link', { name: 'Cable row 2' })
           .getAttribute('data-test-transition-name'),
-      ).toMatch(/^inventory-title-/);
+      ).toBeNull();
       rerender(
         view(
           <>
@@ -853,12 +869,12 @@ it.each([false, true])(
       const oldName = screen
         .getByRole('link', { name: 'Cable row 2' })
         .getAttribute('data-test-transition-name');
-      expect(oldName).toMatch(/^inventory-title-/);
+      expect(oldName).toBeNull();
       if (canceled) {
         fireEvent.click(screen.getByRole('link', { name: 'Canceled capture' }));
         expect(
           screen.getByRole('link', { name: 'Cable row 2' }),
-        ).toHaveAttribute('data-test-transition-name', oldName);
+        ).not.toHaveAttribute('data-test-transition-name');
       }
       fireEvent.click(screen.getByRole('link', { name: 'Full details' }));
       runtime.pathname = detailPath;
@@ -1243,29 +1259,26 @@ it('unsupported browsers preserve ordinary links instantly', () => {
   );
 });
 
-it('finishes streaming intents, keeps only a valid exact Back origin, and never rearms invalidated state', () => {
+it('finishes streaming intents, keeps only a valid exact app Back origin, and never rearms invalidated state', () => {
   const state = createRouteMotionState();
   const target = titleTarget(record, returnTo, initiatingHolding)!;
   state.arm(target);
   const firstName = state.snapshot()!.name;
   state.finish();
-  state.back(detailPath, '/inventory#inventory-row-1');
-  expect(state.snapshot()).toBeNull();
-  state.back('/inventory/quantity/different-record', '/inventory');
-  expect(state.snapshot()).toBeNull();
-  state.back(detailPath, '/inventory?q=changed');
-  expect(state.snapshot()).toBeNull();
-  state.back(detailPath, '/inventory');
-  expect(state.snapshot()).toMatchObject({
-    id: record.id,
-    anchor: 'inventory-row-2',
-  });
-  state.finish();
-  state.back(detailPath, returnTo);
+  expect(state.backTarget(record, '/inventory#inventory-row-1')).toBeNull();
+  expect(
+    state.backTarget({ ...record, id: 'different-record' }, returnTo),
+  ).toBeNull();
+  expect(
+    state.backTarget(record, '/inventory?q=changed#inventory-row-2'),
+  ).toBeNull();
+  const approved = state.backTarget(record, returnTo)!;
+  expect(approved).toEqual(target);
+  state.arm(approved);
   expect(state.snapshot()!.name).not.toBe(firstName);
   state.invalidate();
   state.arm(target);
-  state.back(detailPath, returnTo);
+  expect(state.backTarget(record, returnTo)).toBeNull();
   expect(state.snapshot()).toBeNull();
   expect(
     titleTarget(
@@ -1286,7 +1299,7 @@ it('generic committed route errors retire snapshots/Back origin but preserve ver
   const target = titleTarget(record, returnTo, initiatingHolding)!;
   state.arm(target);
   state.retire();
-  state.back(detailPath, '/inventory');
+  expect(state.backTarget(record, returnTo)).toBeNull();
   expect(state.snapshot()).toBeNull();
   expect(state.valid()).toBe(true);
   const { rerender } = render(view(<List />));

@@ -846,6 +846,16 @@ for (const width of [1280, 390]) {
     const scope = `/inventory?${new URLSearchParams({ q: name, type: 'quantity' })}`;
     await page.goto(scope);
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(2);
+    if (width === 390) {
+      // A short mobile viewport makes this existing populated page scrollable.
+      // Exercise real input rather than allowing a zero-offset restoration pass.
+      await page.setViewportSize({ width, height: 480 });
+      await page.mouse.move(width / 2, 240);
+      await page.mouse.wheel(0, 400);
+      await expect
+        .poll(() => page.evaluate(() => window.scrollY))
+        .toBeGreaterThan(0);
+    }
     const row = page
       .locator('#inventory-row-2')
       .getByRole('link', { name, exact: true });
@@ -858,6 +868,8 @@ for (const width of [1280, 390]) {
     const sourceNode = await row.elementHandle();
     expect(sourceNode).not.toBeNull();
     await row.focus();
+    const sourceScroll = await page.evaluate(() => window.scrollY);
+    if (width === 390) expect(sourceScroll).toBeGreaterThan(0);
     const streaming = await withHeldQuantityPrimary(info, async (held) => {
       const requested = page.waitForRequest(
         (request) =>
@@ -946,24 +958,44 @@ for (const width of [1280, 390]) {
     ).toBe('none');
     expect(forward.cls).toBe(0);
     await resetProof(page);
-    // First use: the departing entry is genuinely unanchored. Do not visit app
-    // Back first, which would mask loss of the initiating-row native Back path.
+    // Native browser history is instant under the installed eager Next restore.
+    // Verify real results/filter/scroll restoration and Forward separately from
+    // the animated application Back link below.
     await page.goBack();
     await expect(page).toHaveURL(new URL(scope, page.url()).href);
     await expect(page.locator('#inventory-row-2')).toBeVisible();
-    await completedTitlePair(page);
+    await expect(
+      page.getByRole('textbox', { name: 'Search inventory' }),
+    ).toHaveValue(name);
+    await expect(
+      page.getByRole('combobox', { name: 'Tracking type' }),
+    ).toHaveValue('quantity');
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBe(sourceScroll);
+    await settled(page);
     const firstBrowserBack = await proof(page);
-    expect(firstBrowserBack.replacements).toHaveLength(1);
-    const firstBackPair = firstBrowserBack.transitions.find((entry) =>
-      entry.old.some((old) => old.name.startsWith('inventory-title-')),
-    )!;
-    expect(
-      firstBackPair.next.filter((next) =>
-        next.name.startsWith('inventory-title-'),
-      ),
-    ).toHaveLength(1);
+    expect(firstBrowserBack.transitions).toHaveLength(0);
+    expect(firstBrowserBack.replacements).toHaveLength(0);
     expect(firstBrowserBack.cls).toBe(0);
     expect(new URL(page.url()).hash).toBe('');
+    await resetProof(page);
+    await page.goForward();
+    await expect(
+      page.getByRole('heading', { name, exact: true }),
+    ).toBeVisible();
+    await settled(page);
+    const firstBrowserForward = await proof(page);
+    expect(firstBrowserForward.transitions).toHaveLength(0);
+    expect(firstBrowserForward.replacements).toHaveLength(0);
+    await resetProof(page);
+    await page.getByRole('link', { name: 'Back to results' }).click();
+    await expect(page).toHaveURL(
+      new URL(scope + '#inventory-row-2', page.url()).href,
+    );
+    await expect(page.locator('#inventory-row-2')).toBeVisible();
+    const appBackAfterNativeForward = await completedTitlePair(page);
+    expect(appBackAfterNativeForward.replacements).toHaveLength(1);
     await resetProof(page);
     await page
       .locator('#inventory-row-2')
@@ -1006,12 +1038,18 @@ for (const width of [1280, 390]) {
     await resetProof(page);
     await page.goBack();
     await expect(page.locator('#inventory-row-2')).toBeVisible();
-    await completedTitlePair(page);
-    expect((await proof(page)).replacements).toHaveLength(1);
+    await expect(page).toHaveURL(
+      new URL(scope + '#inventory-row-2', page.url()).href,
+    );
+    await settled(page);
+    expect((await proof(page)).transitions).toHaveLength(0);
+    expect((await proof(page)).replacements).toHaveLength(0);
     await info.attach('native-route-proof', {
       body: JSON.stringify({
         forward,
         firstBrowserBack,
+        firstBrowserForward,
+        appBackAfterNativeForward,
         back,
         browserBack: await proof(page),
       }),

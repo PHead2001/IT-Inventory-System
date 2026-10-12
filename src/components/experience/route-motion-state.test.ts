@@ -15,68 +15,34 @@ const rawAlias = routeKey(
   new URLSearchParams('type=all&status=active&q=++USB++&scopeAdjusted=true'),
 );
 
-it.each([rawAlias, '/inventory?q=USB', rawAlias + '#inventory-row-2'])(
-  'native Back accepts only the canonical scope or recorded raw source (%s)',
-  (destination) => {
-    const state = createRouteMotionState();
-    const target = titleTarget(
-      record,
-      '/inventory?q=USB#inventory-row-2',
-      holding,
-      rawAlias,
-    )!;
-    state.arm(target);
-    state.finish();
-    state.back(target.detailPath, destination);
-    expect(state.snapshot()).toMatchObject(target);
-    expect(matchesTitleListRoute(target, rawAlias)).toBe(true);
-    expect(matchesTitleListRoute(target, '/inventory?q=USB')).toBe(true);
-  },
-);
-
-it.each([
-  '/inventory?q=USB&status=active', // Equivalent rendered filters, never recorded.
-  rawAlias + '&unrelated=true',
-  '/inventory?q=Different',
-  rawAlias + '#inventory-row-1',
-  'https://other.invalid' + rawAlias,
-])(
-  'native Back does not infer or approve a later alias (%s)',
-  (destination) => {
-    const state = createRouteMotionState();
-    const target = titleTarget(
-      record,
-      '/inventory?q=USB#inventory-row-2',
-      holding,
-      rawAlias,
-    )!;
-    state.arm(target);
-    state.finish();
-    state.back(target.detailPath, destination);
-    expect(state.snapshot()).toBeNull();
-  },
-);
-
-it('keeps repeated source query values exact and still rejects another record', () => {
-  const raw = routeKey('/inventory', { q: ['  USB  ', 'opaque'] });
+it('matches only the canonical or recorded raw results scope for an app pair', () => {
   const target = titleTarget(
+    record,
+    '/inventory?q=USB#inventory-row-2',
+    holding,
+    rawAlias,
+  )!;
+  expect(matchesTitleListRoute(target, rawAlias)).toBe(true);
+  expect(matchesTitleListRoute(target, '/inventory?q=USB')).toBe(true);
+  expect(matchesTitleListRoute(target, '/inventory?q=USB&status=active')).toBe(
+    false,
+  );
+  expect(matchesTitleListRoute(target, rawAlias + '&unrelated=true')).toBe(
+    false,
+  );
+  const raw = routeKey('/inventory', { q: ['  USB  ', 'opaque'] });
+  const repeated = titleTarget(
     record,
     '/inventory?q=USB#inventory-row-2',
     holding,
     raw,
   )!;
-  const state = createRouteMotionState();
-  state.arm(target);
-  state.finish();
-  state.back(
-    target.detailPath,
-    routeKey('/inventory', { q: ['  USB  ', 'different'] }),
-  );
-  expect(state.snapshot()).toBeNull();
-  state.back('/inventory/quantity/other', raw);
-  expect(state.snapshot()).toBeNull();
-  state.back(target.detailPath, raw);
-  expect(state.snapshot()).toMatchObject(target);
+  expect(
+    matchesTitleListRoute(
+      repeated,
+      routeKey('/inventory', { q: ['  USB  ', 'different'] }),
+    ),
+  ).toBe(false);
 });
 
 it.each([
@@ -93,17 +59,13 @@ it.each([
   '/inventory?category=a&category=b&q=USB+Cable&type=quantity',
   '/inventory?category=a&category=b&q=USB%20Cable&type=quantity#inventory-row-2',
 ])(
-  'browser Back preserves semantic query identity and the separately validated anchor (%s)',
+  'app Back preserves semantic query identity and the separately validated anchor (%s)',
   (destination) => {
     const state = createRouteMotionState();
     const target = titleTarget(record, original, holding)!;
     state.arm(target);
     state.finish();
-    state.back(target.detailPath, destination);
-    expect(state.snapshot()).toMatchObject({
-      ...target,
-      anchor: 'inventory-row-2',
-    });
+    expect(state.snapshot()).toBeNull();
     expect(
       state.backTarget(
         record,
@@ -121,13 +83,12 @@ it.each([
   '/inventory?category=a&category=b&q=USB+Cable&type=quantity#arbitrary',
   'https://other.invalid/inventory?category=a&category=b&q=USB+Cable&type=quantity',
 ])(
-  'browser Back rejects changed filter/repeated-value semantics or an unrelated anchor/origin (%s)',
+  'app Back rejects changed filter/repeated-value semantics or an unrelated anchor/origin (%s)',
   (destination) => {
     const state = createRouteMotionState();
     const target = titleTarget(record, original, holding)!;
     state.arm(target);
     state.finish();
-    state.back(target.detailPath, destination);
-    expect(state.snapshot()).toBeNull();
+    expect(state.backTarget(record, destination)).toBeNull();
   },
 );

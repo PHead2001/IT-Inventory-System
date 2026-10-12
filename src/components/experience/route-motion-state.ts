@@ -182,34 +182,6 @@ export function createRouteMotionState() {
         ? origin
         : null;
     },
-    back(from: string, to: string) {
-      if (!valid || suspended) return;
-      // History can reuse an origin, but never authorize a future Link gesture.
-      navigation = null;
-      if (!origin || from !== origin.detailPath) return;
-      let destination: URL;
-      try {
-        destination = new URL(to, 'https://inventory.invalid');
-      } catch {
-        return;
-      }
-      const list = new URL(origin.listHref, 'https://inventory.invalid');
-      if (
-        destination.origin !== list.origin ||
-        !matchesTitleListRoute(
-          origin,
-          routeKey(destination.pathname, destination.searchParams),
-        ) ||
-        (destination.hash !== '' && destination.hash !== `#${origin.anchor}`)
-      )
-        return;
-      // The first native Back returns to the departing list URL, which usually
-      // has no hash. Recover the approved initiating ordinal from metadata;
-      // never change history just to introduce an animation anchor. The row
-      // still has to match this exact results scope, record AND stable holding.
-      // The ordinal is an anchor locator, not the holding's identity.
-      this.arm(origin);
-    },
     invalidate(notifyListeners = true) {
       navigation = null;
       valid = false;

@@ -132,7 +132,8 @@ adapter while focused tests inspect boundary intent and captured geometry.
 This proves permission/identity/cancellation and transform-only replacement
 contracts, not native animation. `route-motion.spec.ts` observes actual native
 old/new capture and WAAPI replacement under the production Next runtime, including
-duplicate holdings, app Back, fresh unanchored and anchored browser Back, desktop/390 px/long/scrolled
+duplicate holdings and animated app Back, instant unanchored/anchored native Back
+and Forward with filter/row/scroll restoration, desktop/390 px/long/scrolled
 titles, live-search query updates, canvas/ancestor exclusion, immediate reduced
 and unsupported paths. It attaches before/after captures and native proof; actual
 recordings/visual inspection must also rule out clipping and end snaps. Full build,
@@ -145,9 +146,9 @@ Inventory title pairing uses the server's canonical row-return scope separately
 from the full raw query key used by readiness and privacy admission. Default
 type/status, trimmed search text, recovery flags and normalized page numbers do
 not disable pairing for those rendered results. A row gesture records both the
-canonical scope and that exact raw primary key. Native Back may reuse either
-recorded identity with the existing record, holding and anchor checks; it never
-normalizes or approves a different query afterward. Focused RouteReady, inventory
+canonical scope and that exact raw primary key. App Back reuses only the approved
+origin with the existing record, holding and anchor checks. Native Back/Forward
+restores the actual history scope without pairing or approving a different query. Focused RouteReady, inventory
 page, pairing-component and motion-state regressions cover these contracts and
 reject unrecorded aliases. They do not replace real browser/native capture proof.
 
@@ -223,8 +224,8 @@ These are React/isolated-boundary checks, not a complete Next LayoutRouter or
 streamed Flight test. None of these jsdom tests establishes native snapshot pairing.
 
 The precommit privacy regressions model a stable opaque router slot whose incoming
-server primary finishes before privacy verification, plus native Back preparation
-before pathname commit. Controller/ticket tests cover exact repeated raw query
+server primary finishes before privacy verification, plus native Back/Forward
+restoration through the canonical post-commit privacy check. Controller/ticket tests cover exact repeated raw query
 values, unrelated targets, original-binding verification, stale actor/backend/
 role/configuration/server-generation/revision/epoch rejection, hidden-page and
 provider retirement, supersede/cancel/redirect settlement, denied/unavailable
@@ -233,15 +234,19 @@ revision render must reject a completed ticket before private bootstrap effects
 mount. These logical React fixtures do not establish real native snapshots or
 production LayoutRouter timing; browser CI remains required.
 
-`native-route-traverse.test.ts` and `native-route-traverse-provider.test.tsx`
-cover the observation-only native-history preparation before a simulated eager
-Next restore, held verification/readiness, matching late popstate and duplicate
-notifications, same-entry replace bookkeeping, precommit abort and rapid supersede,
-identical URLs with distinct entry keys, exact raw query/hash mismatches, logout,
-revocation, hidden-page and provider retirement, plus Reduced/unsupported fallback.
-Disabling the early navigate subscription reproduces the missing preparation;
-restoring it passes the focused regression. These event adapters prove ownership
-and ordering contracts, not real browser snapshot pairing or hosted acceptance.
+Native browser Back/Forward is intentionally instant under the installed eager
+Next/React restore. The removed Navigation API preparation no longer claims a
+native shared-title animation. Native provider regressions in
+`native-route-traverse-provider.test.tsx` verify
+no precommit preparation/interception/history writes, cancellation of departing
+snapshots and paired work, real actor/route readiness, Reduced/unsupported behavior,
+revocation/retirement fencing and animated app Back after native Forward.
+The paired-route-loading suite retains real privacy-controller and cached Activity
+restoration with both router-listener orders and explicit verification delays.
+App Link forward/Back still requires positive shared-title capture and transform
+replacement in the browser suite; native Back/Forward requires zero captures and
+correct filters, source row/anchor, scroll and authorized primary restoration.
+Component fixtures do not establish actual browser history, scroll or hosted Auth.
 
 The native route-motion browser case now authors a real server-primary delay after
 early Flight fallback bytes, rather than holding a complete HTTP response. The
@@ -255,7 +260,8 @@ rolls back and closes both connections. This changes no data or schema. A separa
 authenticated bounded Flight reader observes fallback bytes while the actual browser
 request streams normally; neither headers nor body are attached. The held source
 must remain the same visible node, with live progress and no fallback/native capture,
-before release and the existing exact native title/Back assertions. Fixture/scheduling
+before release and the exact forward/app Back title assertions, followed by
+functional instant native-history assertions. Fixture/scheduling
 guards have unit coverage. These authored cases have not been executed in this
 bounded integration cycle. They require the canonical disposable stack/production
 Next build and cannot run against a hosted preview. Hosted proof uses ordinary slow

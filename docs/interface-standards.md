@@ -175,16 +175,19 @@ Inventory shared titles use an opaque per-navigation name only after Next's
 requires record kind/identity, normalized results scope and stable holding identity
 (storage location UUID, site UUID or explicit unplaced);
 other holdings of the same record stay unnamed. The detail H1 is emitted only
-after server authorization. App Back reuses only the approved initiating origin;
-browser Back shares when its actual history URL is the exact departing results
-scope, either unanchored or bearing that same anchor. Ordinals locate anchors and
-do not identify holdings. Reordered holdings can pair at their new ordinal;
-deleted/replaced/ambiguous holdings fade instead. No history entry is changed for animation.
-Native Back prepares that pair before URL commit through progressive, observation-only
-Navigation API events. The exact destination entry key and raw URL/hash correlate
-the later commit/popstate; same-entry Next history bookkeeping cannot re-arm the
-ticket. Unsupported browsers retain functional popstate navigation and canonical
-privacy admission, without guaranteed shared-title pairing before an eager restore.
+after server authorization. The application's **Back to results** link reuses only
+that approved initiating origin and animates its shared title in supported Full
+motion. Native browser Back/Forward is instant under the installed Next/React
+history restore. It restores the actual history URL, filters, row/anchor and scroll
+through Next/browser history and the ordinary authorization/privacy gates. Native
+traversal cancels a departing animation or paired wait and tracks real destination
+readiness; it never arms a shared title or a precommit privacy animation ticket.
+The approved origin can survive traversal for a later application Back link, but
+cannot authorize another Link gesture. No history entry is changed for animation.
+Ordinals locate anchors and do not identify holdings. Reordered holdings can pair
+at their new ordinal on app Back; deleted/replaced/ambiguous holdings use ordinary
+navigation. Do not patch router history methods, lanes or browser events to force
+native animation.
 Pair approval is staged and consumed within the same accepted Link event, for its
 exact href and current provider generation. Prevented/thrown handlers discard it;
 plain detail navigation or failed capture retires any older title intent/origin.
@@ -205,7 +208,7 @@ animates only translation/scale at 200 ms. Snapshot image fitting and dimensions
 are static. Unsupported/nonpositive/nonfinite/transformed geometry or unsupported
 pseudo-element WAAPI skips the **whole** transition instantly after capture;
 recapturing private DOM to rebuild a crossfade is prohibited. Browser proof of
-ordinary forward/Back morphing, scrolled/mobile/long titles, no clipping/end snap,
+ordinary forward/app Back morphing, scrolled/mobile/long titles, no clipping/end snap,
 allowed keyframes and CLS remains mandatory; the Vitest adapter is not that proof.
 
 Effective motion reduction suppresses/cancels native snapshots synchronously.

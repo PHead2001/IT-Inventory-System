@@ -36,7 +36,6 @@ import {
 } from './paired-route-loading';
 import { routeKey } from './route-key';
 import { createRoutePresentationLifetime } from './route-presentation-lifetime';
-import { createNativeRouteTraverse } from './native-route-traverse';
 import { RoutePresentationLifetimeContext } from './route-presentation-source';
 import {
   RoutePendingContext,
@@ -126,9 +125,6 @@ export function RouteMotionProvider({
   });
   const lifecycleRef = useRef(true);
   const [providerToken] = useState(() => Symbol());
-  const nativeTraverse = useRef<ReturnType<
-    typeof createNativeRouteTraverse
-  > | null>(null);
   const [loading] = useState(() => createPairedRouteLoading(pending));
   const [readiness] = useState(() => {
     const value = createRouteReadiness(actorId, pending, (key) => {
@@ -179,7 +175,6 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
-        nativeTraverse.current?.clear(false);
         presentation.navigation();
         const interruptedPair = loading.snapshot() !== null;
         loading.cancel();
@@ -223,7 +218,6 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
-        nativeTraverse.current?.clear(false);
         presentation.invalidate();
         latestPrivacy.current.navigation?.retire(providerToken);
         // Generic route failure retires presentation, not verified actor eligibility.
@@ -252,22 +246,12 @@ export function RouteMotionProvider({
     pending.snapshot,
   );
   const pathname = usePathname();
-  // Route commits update the departing identity without tearing down the
-  // native history observer while a browser event may already be dispatching.
-  const committedPathname = useRef(pathname);
-  useLayoutEffect(() => {
-    committedPathname.current = pathname;
-  }, [pathname]);
   const query = useSearchParams();
   const listHref = pathname + (query?.size ? `?${query}` : '');
   const committedRouteKey = routeKey(
     pathname ?? '',
     query ?? new URLSearchParams(),
   );
-  const committedSourceKey = useRef(committedRouteKey);
-  useLayoutEffect(() => {
-    committedSourceKey.current = committedRouteKey;
-  }, [committedRouteKey]);
   const reduced = useEffectiveReducedMotion();
   useInsertionEffect(() => {
     lifecycleRef.current = true;
@@ -277,7 +261,6 @@ export function RouteMotionProvider({
     const suspendPresentation = () => {
       if (!lifecycleRef.current || currentRouteProvider !== providerToken)
         return;
-      nativeTraverse.current?.clear(false);
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -300,7 +283,6 @@ export function RouteMotionProvider({
           !state.valid()
         )
           return;
-        nativeTraverse.current?.clear(false);
         document.documentElement.dataset.routeMotionPrivate = 'false';
         suspended.current = true;
         acceptedGrant.current = null;
@@ -341,7 +323,6 @@ export function RouteMotionProvider({
       unbind();
       const ownsDocument = currentRouteProvider === providerToken;
       lifecycleRef.current = false;
-      nativeTraverse.current?.clear(false);
       latestPrivacy.current.navigation?.retire(providerToken);
       presentation.invalidate();
       if (ownsDocument) {
@@ -391,7 +372,6 @@ export function RouteMotionProvider({
       state.valid() &&
       retainedPresentationGrantCurrent(privacy, acceptedGrant.current)
     )) {
-      nativeTraverse.current?.clear(false);
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -423,7 +403,6 @@ export function RouteMotionProvider({
         currentRouteProvider !== providerToken
       )
         return;
-      nativeTraverse.current?.clear(false);
       document.documentElement.dataset.routeMotionPrivate = 'false';
       suspended.current = true;
       acceptedGrant.current = null;
@@ -441,85 +420,6 @@ export function RouteMotionProvider({
         if (!session || session.user.id !== actorId) invalidate();
       },
     );
-    const observer = createNativeRouteTraverse({
-      provider: providerToken,
-      source: () => committedPathname.current ?? '',
-      sourceRouteKey: () => committedSourceKey.current,
-      origin: location.origin,
-      href: () => location.href,
-      entryKey: () => window.navigation?.currentEntry?.key,
-      prepare: (capture) => {
-        if (
-          !listening ||
-          !lifecycleRef.current ||
-          currentRouteProvider !== providerToken ||
-          !state.valid() ||
-          !freshPresentationGrant(latestPrivacy.current) ||
-          suspended.current ||
-          document.visibilityState === 'hidden' ||
-          !supportsPairedRouteLoading() ||
-          document.documentElement.dataset.motion !== 'full' ||
-          !latestPrivacy.current.navigation
-        )
-          return;
-        presentation.navigation();
-        loading.cancel();
-        pending.cancel();
-        readiness.cancel();
-        flushSync(() => {
-          state.finish();
-          // state.back validates relative inventory URLs against its existing
-          // inventory.invalid origin. The observer already verified same-origin.
-          state.back(capture.source, capture.destinationRelativeHref);
-          const intent = state.snapshot();
-          if (intent)
-            loading.arm(
-              intent.name,
-              capture.destinationHref,
-              pending.snapshot().epoch,
-            );
-        });
-        const owner = loading.snapshot();
-        if (!owner) {
-          latestPrivacy.current.navigation.retire(providerToken);
-          return;
-        }
-        const epoch = pending.snapshot().epoch;
-        latestPrivacy.current.navigation.prepare(
-          capture.destinationHref,
-          providerToken,
-        );
-        return {
-          epoch,
-          identity: Symbol(),
-          current: () =>
-            listening &&
-            lifecycleRef.current &&
-            currentRouteProvider === providerToken &&
-            pending.current(epoch) &&
-            loading.snapshot() === owner &&
-            state.snapshot()?.name === owner.name,
-          cancel: () => {
-            latestPrivacy.current.navigation?.retire(providerToken);
-            loading.cancel();
-            state.finish(owner.name);
-            readiness.cancel();
-            cancelRouteSnapshots();
-          },
-          history: () => readiness.history(),
-        };
-      },
-    });
-    nativeTraverse.current = observer;
-    const navigate = (event: NavigateEvent) => observer.navigate(event);
-    const entryChange = () => observer.committed();
-    const visibility = () => {
-      if (document.visibilityState === 'hidden') observer.clear();
-    };
-    const navigation = window.navigation;
-    navigation?.addEventListener('navigate', navigate);
-    navigation?.addEventListener('currententrychange', entryChange);
-    document.addEventListener('visibilitychange', visibility);
     const pop = () => {
       if (
         !listening ||
@@ -527,45 +427,23 @@ export function RouteMotionProvider({
         currentRouteProvider !== providerToken
       )
         return;
-      if (observer.pop()) return;
+      // Next restores native Back/Forward eagerly. Retire the departing motion
+      // and wait for ordinary authorized readiness without preparing a pair or
+      // delaying/intercepting the browser's restore. Keep the approved origin
+      // so app Back after native Forward can still use its accepted Link event.
       presentation.navigation();
+      latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
       pending.cancel();
       readiness.cancel();
-      flushSync(() => {
-        state.finish();
-        state.back(
-          committedPathname.current ?? '',
-          location.pathname + location.search + location.hash,
-        );
-        const intent = state.snapshot();
-        if (
-          intent &&
-          freshPresentationGrant(latestPrivacy.current) &&
-          !suspended.current &&
-          document.visibilityState !== 'hidden' &&
-          supportsPairedRouteLoading() &&
-          document.documentElement.dataset.motion === 'full'
-        )
-          loading.arm(intent.name, location.href, pending.snapshot().epoch);
-      });
+      state.finish();
+      cancelRouteSnapshots();
       readiness.history();
-      if (loading.snapshot())
-        latestPrivacy.current.navigation?.prepare(location.href, providerToken);
-      else latestPrivacy.current.navigation?.retire(providerToken);
     };
-    // Without Navigation API observation this remains the canonical fallback.
-    // A window AT_TARGET popstate can reach Next first even with capture=true;
-    // only the progressive navigate event guarantees preparation before commit.
     window.addEventListener('popstate', pop, true);
     return () => {
       listening = false;
       subscription.unsubscribe();
-      observer.clear(false);
-      if (nativeTraverse.current === observer) nativeTraverse.current = null;
-      navigation?.removeEventListener('navigate', navigate);
-      navigation?.removeEventListener('currententrychange', entryChange);
-      document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('popstate', pop, true);
     };
   }, [
@@ -586,7 +464,6 @@ export function RouteMotionProvider({
     // has committed A's pathname/query context.
     const owner = loading.snapshot();
     if (owner && owner.destination !== committedRouteKey) {
-      nativeTraverse.current?.clear(false);
       loading.cancel();
       state.finish(owner.name);
     }
@@ -597,7 +474,6 @@ export function RouteMotionProvider({
       lifecycleRef.current &&
       currentRouteProvider === providerToken
     ) {
-      nativeTraverse.current?.clear(false);
       presentation.invalidate();
       latestPrivacy.current.navigation?.retire(providerToken);
       loading.cancel();
@@ -617,7 +493,6 @@ export function RouteMotionProvider({
         lifecycleRef,
         providerToken,
         withdrawGrant: () => {
-          nativeTraverse.current?.clear(false);
           latestPrivacy.current.navigation?.retire(providerToken);
           document.documentElement.dataset.routeMotionPrivate = 'false';
           suspended.current = true;

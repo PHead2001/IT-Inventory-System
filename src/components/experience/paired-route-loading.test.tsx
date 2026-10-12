@@ -1130,7 +1130,7 @@ it('keeps standalone gate ownership exact through cancellation and repeated dest
   expect(store.snapshot()).toBeNull();
 });
 
-it('native Back starts original-binding preparation before a stable opaque list primary commits', async () => {
+it('native Back uses canonical privacy admission without a paired preparation', async () => {
   const work = deferred();
   render(
     <StrictMode>
@@ -1143,7 +1143,7 @@ it('native Back starts original-binding preparation before a stable opaque list 
   await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
   fireEvent.click(source);
   await act(work.resolve);
-  const title = await screen.findByRole('heading', {
+  await screen.findByRole('heading', {
     name: 'Authorized detail title',
   });
   await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
@@ -1156,10 +1156,13 @@ it('native Back starts original-binding preparation before a stable opaque list 
   act(() => {
     history.replaceState(null, '', list);
     window.dispatchEvent(new PopStateEvent('popstate'));
-    expect(runtime.read.mock.calls.length).toBeGreaterThan(checks);
+    expect(gate.store.snapshot()).toBeNull();
     runtime.navigate(list);
   });
-  expect(title.isConnected).toBe(true);
+  await waitFor(() =>
+    expect(runtime.read.mock.calls.length).toBeGreaterThan(checks),
+  );
+  expect(gate.store.snapshot()).toBeNull();
   expect(screen.queryByRole('link', { name: 'Source cable title' })).toBeNull();
   await act(async () => {
     settle({ status: 'absent' });
@@ -1216,10 +1219,22 @@ it.each([false, true])(
     await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
     expect(gate.store.snapshot()).toBeNull();
     expect(pending.state.snapshot().pending).toBe(false);
+    expect(runtime.titleNames[list + '#inventory-row-1']).toBeUndefined();
+    act(() => {
+      history.replaceState(null, '', detail);
+      if (routerFirst) runtime.navigate(detail);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      if (!routerFirst) runtime.navigate(detail);
+    });
+    await screen.findByRole('heading', { name: 'Authorized detail title' });
+    await waitFor(() => expect(mountedPrivacy.ready).toBe(true));
+    expect(gate.store.snapshot()).toBeNull();
+    expect(pending.state.snapshot().pending).toBe(false);
+    expect(runtime.detailName).toBeUndefined();
   },
 );
 
-it('native Back prepares before an earlier router listener commits and replaces pathname effects', async () => {
+it('native Back restores with canonical privacy when an earlier router listener eagerly commits', async () => {
   const work = deferred();
   const restore = () => flushSync(() => runtime.restoreSync(location.href));
   // Model a real event's inter-listener React commit, not a synthetic event
@@ -1248,10 +1263,10 @@ it('native Back prepares before an earlier router listener commits and replaces 
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     expect(pending.state.snapshot().epoch).toBeGreaterThan(before);
-    expect(mountedPrivacy.navigation!.admission(list)).toMatchObject({
+    expect(mountedPrivacy.navigation!.admission(list)).toEqual({
       ready: false,
-      wait: expect.any(Promise),
     });
+    expect(gate.store.snapshot()).toBeNull();
     await act(async () => {
       settle({ status: 'absent' });
       await verification;

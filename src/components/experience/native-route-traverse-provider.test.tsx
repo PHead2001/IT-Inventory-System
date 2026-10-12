@@ -183,99 +183,109 @@ function traverse(key = 'list-entry', href = `${location.origin}/inventory`) {
   return { abort, event, key, href };
 }
 
-it('prepares before eager Next restore, preserves the exact ticket after late pop, and waits for visible destination readiness', () => {
-  const { page, source } = detailFixture();
-  const back = traverse();
-  const owner = controls.loading.store.snapshot();
-  expect(owner).not.toBeNull();
-  const name = owner!.name;
-  expect(controls.motion.intent?.name).toBe(name);
-  expect(location.pathname).toBe(target.detailPath);
-  expect(privacyNavigation.prepare).toHaveBeenCalledOnce();
-  expect(controls.scope.state.snapshot().pending).toBe(true);
-  // Neither old source readiness nor navigation success acknowledges the target.
-  act(() => navigation.emit('navigatesuccess'));
-  expect(controls.loading.store.snapshot()).toBe(owner);
-  window.history.replaceState(null, '', '/inventory');
-  navigation.currentEntry = { key: back.key };
-  act(() => navigation.emit('currententrychange'));
-  // Next's older window listener eagerly commits pathname/privacy before ours.
-  runtime.pathname = '/inventory';
-  page.rerender(view({ ready: false }));
-  const replacement = {
-    ...back.event,
-    navigationType: 'replace',
-    destination: { ...back.event.destination, key: 'next-replace-key' },
-  } as NavigateEvent;
-  act(() => {
-    navigation.emit('navigate', replacement);
-    navigation.emit('currententrychange');
-    back.abort.abort();
-    window.dispatchEvent(new PopStateEvent('popstate'));
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  });
-  expect(controls.loading.store.snapshot()).toBe(owner);
-  expect(controls.motion.intent?.name).toBe(name);
-  expect(privacyNavigation.prepare).toHaveBeenCalledOnce();
-  expect(privacyNavigation.retire).not.toHaveBeenCalled();
-  expect(back.event.intercept).not.toHaveBeenCalled();
-  expect(back.event.preventDefault).not.toHaveBeenCalled();
-  page.rerender(view());
-  expect(controls.loading.store.snapshot()).toBe(owner);
-  const destination = document.createElement('div');
-  const child = document.createElement('p');
-  child.getClientRects = () => [{ width: 100 }] as unknown as DOMRectList;
-  destination.append(child);
-  document.body.append(destination);
-  act(() => {
-    controls.readiness.register({
-      actorId: 'staff',
-      routeKey: '/inventory',
-      contentIdentity: 'authorized-list',
-      root: destination,
+it.each([false, true])(
+  'native Back/Forward stays unpaired and settles authorized readiness (eager router first=%s)',
+  (routerFirst) => {
+    const { page, source } = detailFixture();
+    const skipTransition = vi.fn();
+    Object.defineProperty(document, 'activeViewTransition', {
+      configurable: true,
+      value: { skipTransition },
     });
-  });
-  expect(controls.loading.store.snapshot()).toBeNull();
-  expect(controls.scope.state.snapshot().pending).toBe(false);
-  source.remove();
-  destination.remove();
-});
+    const push = vi.spyOn(window.history, 'pushState');
+    const replace = vi.spyOn(window.history, 'replaceState');
+    const destination = document.createElement('div');
+    const child = document.createElement('p');
+    child.getClientRects = () => [{ width: 100 }] as unknown as DOMRectList;
+    destination.append(child);
+    document.body.append(destination);
+    const restore = (href: string, route: string) => {
+      const observed = traverse('entry-' + route, location.origin + href);
+      expect(controls.loading.store.snapshot()).toBeNull();
+      expect(privacyNavigation.prepare).not.toHaveBeenCalled();
+      window.history.replaceState(null, '', href);
+      replace.mockClear();
+      push.mockClear();
+      runtime.pathname = route;
+      const commit = () => page.rerender(view({ ready: false }));
+      if (routerFirst) commit();
+      act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+      if (!routerFirst) commit();
+      expect(push).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalled();
+      expect(controls.motion.intent).toBeNull();
+      expect(controls.loading.store.snapshot()).toBeNull();
+      expect(privacyNavigation.prepare).not.toHaveBeenCalled();
+      expect(observed.event.intercept).not.toHaveBeenCalled();
+      expect(observed.event.preventDefault).not.toHaveBeenCalled();
+      page.rerender(view());
+      act(() =>
+        controls.readiness.register({
+          actorId: 'staff',
+          routeKey: route,
+          contentIdentity: 'authorized-' + route,
+          root: destination,
+        }),
+      );
+      expect(controls.scope.state.snapshot().pending).toBe(false);
+    };
+    try {
+      restore('/inventory#inventory-row-2', '/inventory');
+      expect(location.hash).toBe('#inventory-row-2');
+      restore(target.detailPath, target.detailPath);
+      expect(skipTransition).toHaveBeenCalledTimes(2);
+      // Native traversal retains only the approved origin; a later app Back
+      // must still stage and consume a fresh pair through its accepted gesture.
+      act(() => {
+        const gesture = controls.scope.beginNavigation!(
+          '/inventory#inventory-row-2',
+        );
+        controls.motion.armBack(target, '/inventory#inventory-row-2');
+        controls.scope.navigation!('/inventory#inventory-row-2');
+        gesture?.close();
+      });
+      expect(controls.loading.store.snapshot()).not.toBeNull();
+      expect(privacyNavigation.prepare).toHaveBeenCalledOnce();
+    } finally {
+      push.mockRestore();
+      replace.mockRestore();
+      Reflect.deleteProperty(document, 'activeViewTransition');
+      source.remove();
+      destination.remove();
+    }
+  },
+);
 
-it.each(['logout', 'revocation', 'hidden', 'provider retirement'])(
-  '%s clears the preparation and stale abort cannot cancel its replacement',
+it.each(['logout', 'revocation', 'provider retirement'])(
+  'native traversal cannot revive presentation after %s',
   (reason) => {
     const { page, source } = detailFixture();
-    const back = traverse();
-    expect(controls.loading.store.snapshot()).not.toBeNull();
     act(() => {
       if (reason === 'logout') controls.logout();
       if (reason === 'revocation') revokePrivatePresentation();
-      if (reason === 'hidden') {
-        Object.defineProperty(document, 'visibilityState', {
-          configurable: true,
-          value: 'hidden',
-        });
-        document.dispatchEvent(new Event('visibilitychange'));
-      }
     });
     if (reason === 'provider retirement') page.rerender(view({ actor: 'new' }));
+    const back = traverse();
+    window.history.replaceState(null, '', '/inventory');
+    act(() => {
+      navigation.emit('currententrychange');
+      back.abort.abort();
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(controls.motion.intent).toBeNull();
     expect(controls.loading.store.snapshot()).toBeNull();
-    const retireCount = privacyNavigation.retire.mock.calls.length;
-    act(() => back.abort.abort());
-    expect(privacyNavigation.retire).toHaveBeenCalledTimes(retireCount);
+    expect(privacyNavigation.prepare).not.toHaveBeenCalled();
     source.remove();
   },
 );
 
 it.each(['reduced', 'unsupported API', 'unsupported snapshots'])(
-  '%s retains ordinary popstate fallback without early preparation',
+  '%s retains ordinary native navigation without animation preparation',
   (mode) => {
     const { page, source } = detailFixture();
-    if (mode === 'unsupported API') {
-      page.unmount();
+    if (mode === 'unsupported API')
       Reflect.deleteProperty(window, 'navigation');
-      render(view());
-    } else if (mode === 'unsupported snapshots')
+    else if (mode === 'unsupported snapshots')
       Reflect.deleteProperty(document, 'startViewTransition');
     else
       act(() => {
@@ -286,12 +296,13 @@ it.each(['reduced', 'unsupported API', 'unsupported snapshots'])(
           }),
         );
       });
-    traverse();
-    expect(privacyNavigation.prepare).not.toHaveBeenCalled();
-    expect(controls.loading.store.snapshot()).toBeNull();
     window.history.replaceState(null, '', '/inventory');
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    runtime.pathname = '/inventory';
+    page.rerender(view());
     expect(location.pathname).toBe('/inventory');
+    expect(controls.motion.intent).toBeNull();
+    expect(privacyNavigation.prepare).not.toHaveBeenCalled();
     expect(controls.loading.store.snapshot()).toBeNull();
     source.remove();
   },
