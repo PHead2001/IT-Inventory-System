@@ -1998,6 +1998,70 @@ test('search focuses the room and aggregate selection survives reload and browse
   await expect(viewer).toHaveAttribute('data-focused-code', 'ITC-D01');
 });
 
+test('native Back restores the exact room selection and settles contents after changing motion in Settings', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await login(page);
+  await page.goto('/room?space=it-closet&location=ITC-RACK');
+  for (const [code, reduced] of [
+    ['ITC-RACK', true],
+    ['ITC-RED', false],
+  ] as const) {
+    if (code === 'ITC-RED') {
+      // Preserve the initially server-rendered Rack entry, then change the
+      // client-owned selection before visiting a fully settled other route.
+      await page.reload();
+      await selected(page, 'ITC-RACK');
+      await ready(page);
+      await chooseRoomLocation(page, code);
+    }
+    await selected(page, code);
+    await ready(page);
+    const inventory = page.getByRole('region', {
+      name: 'Location inventory',
+      exact: true,
+    });
+    await expect(inventory).toHaveAttribute('aria-busy', 'false');
+    const roomUrl = page.url();
+    await page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Settings', exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/settings$/);
+    const toggle = page.getByRole('switch', {
+      name: 'Reduce motion in this browser',
+    });
+    await expect(toggle).toBeEnabled();
+    if ((await toggle.getAttribute('aria-checked')) !== String(reduced))
+      await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', String(reduced));
+    const progress = page.locator('.experience-route-progress');
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.locator('[role="status"]')).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(roomUrl);
+    await selected(page, code);
+    const viewer = await ready(page);
+    await expect(viewer).toHaveAttribute('data-selected-code', code);
+    if (code === 'ITC-RED')
+      await expect(viewer).toHaveAttribute('data-focused-code', code);
+    await expect(inventory).toHaveAttribute('aria-busy', 'false');
+    await expect(progress).toHaveAttribute('data-visible', 'false');
+    await expect(progress).toHaveAttribute('aria-hidden', 'true');
+    await expect(progress.locator('[role="status"]')).toHaveCount(0);
+    await expect(
+      page.getByText('Inventory could not be loaded.', { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-motion',
+      reduced ? 'reduced' : 'full',
+    );
+  }
+});
+
 test('room location browser refreshes filtered selections and results', async ({
   page,
 }) => {

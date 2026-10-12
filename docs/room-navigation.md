@@ -46,6 +46,15 @@ SpacesWorkspace enables one uncached /api/room/occupancy request with space and 
 
 Navigation, page return, window focus and visibility restoration refresh enabled counts and selected contents; returning from an inventory operation reloads both. Refresh inventory provides an explicit retry. These are snapshots, not realtime occupancy: another session's changes appear on refresh/return. The contents row total remains active holding/asset entries, whereas the badge distinguishes products, units and assets; the reads may observe separate concurrent commits.
 
+The Spaces workspace reconciles the current `/room` URL when its history listener
+attaches, including remounts and React Activity reactivation. Native Back/Forward
+may restore the URL before that listener exists; cached initial props cannot
+override the restored space, location, page or route-readiness key. Reconciliation
+does not rewrite history. Changed locations receive a fresh focus request;
+unchanged locations and page-only restores preserve camera intent. Existing
+uncached contents requests and identity/generation checks retire interrupted reads.
+Another route's history event never becomes room selection.
+
 Use simple reusable geometry and restrained lighting, a capped device pixel ratio and demand rendering. Physical material colors are retained; accent edges/emissive feedback mark selection and other geometry dims slightly until clearing it. Full motion permits one bounded selection pulse; Reduced motion uses a static highlight. A reusable baked contact-alpha footprint and clipped floor grid add depth without dynamic shadow passes. Only controls, relevant hover changes, bounded visibility continuations, bounded focus transitions and the brief Full-motion pulse request extra frames. Nonessential pulses stop offscreen or in a hidden document. No heavy postprocessing or idle camera animation is needed. The canvas exposes passive camera telemetry for real-interaction browser assertions; it cannot set camera state.
 
 ## Validation
